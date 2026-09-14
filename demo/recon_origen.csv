@@ -1,0 +1,11 @@
+pedido_id,valor,canal
+PAY-001,125000.00,Web
+PAY-002,89000.00,Tienda
+PAY-003,54000.00,Web
+PAY-004,71000.00,Web
+PAY-005,15000.00,Tienda
+PAY-006,22000.00,Web
+PAY-006,22000.00,Web
+PAY-008,no disponible,Tienda
+,4200.00,Web
+PAY-009,999.99,Web

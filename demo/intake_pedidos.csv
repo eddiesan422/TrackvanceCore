@@ -1,0 +1,13 @@
+pedido_id,cliente,valor,fecha
+PED-1001,Comercial Andina,125000.00,2026-09-10
+PED-1002,Distribuciones Norte,89000.00,2026-09-10
+PED-1003,Almacén Central,54000.00,2026-09-10
+PED-1004,Servicios Pacífico,71000.00,2026-09-10
+PED-1005,Comercial Andina,15000.00,2026-09-10
+PED-1005,Comercial Andina,15000.00,2026-09-10
+,Distribuciones Norte,22000.00,2026-09-10
+PED-1007,Almacén Central,no disponible,2026-09-10
+PED-1008,Servicios Pacífico,-5000.00,2026-09-10
+PED-1009,Almacén Central,62000.00,2026-09-10
+PED-1010,Comercial Andina,45000.00,2026-09-10
+PED-1011,Distribuciones Norte,18000.00,2026-09-10

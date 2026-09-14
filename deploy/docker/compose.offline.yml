@@ -1,0 +1,17 @@
+# Optional runtime isolation after images have been built/downloaded.
+# Run with: docker compose -f compose.yml -f deploy/docker/compose.offline.yml up -d --wait --pull never
+# An existing project must first be stopped with `down` (never `down -v`) so
+# Compose can recreate its network; named database/artifact volumes are retained.
+networks:
+  default:
+    internal: true
+  browser:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+# Docker Desktop does not publish a port on a solely internal network. Only the
+# static web gateway has this second bridge; no NAT is provided for Internet.
+services:
+  web:
+    networks: [default, browser]

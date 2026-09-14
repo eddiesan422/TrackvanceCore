@@ -1,0 +1,40 @@
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
+.codex-local/
+.local/
+.sites-runtime/
+data/
+backend/storage/
+backups/
+restored/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Frontend
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Editors / operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,4 @@
+Copyright (c) 2026 Trackvance Colombia SAS. Todos los derechos reservados.
+
+Software propietario. No se concede una licencia de uso, distribución o
+modificación a terceros mediante la publicación de este código.

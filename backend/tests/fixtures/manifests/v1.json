@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "run_id": "run-123",
+  "module": "recon",
+  "initiated_by": "Equipo Trackvance",
+  "configuration": {"id": "control-123", "version": 1, "config": {"amount_column": "amount", "tolerance": "0.01"}},
+  "metrics": {"matched": 110, "total_rows": 120},
+  "result_artifacts": [{"name": "results.parquet", "sha256": "abc123"}]
+}
