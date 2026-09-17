@@ -80,7 +80,7 @@ def test_openapi_exposes_xlsx_cookie_and_csrf_contract():
     from trackvance.api import app
 
     schema = app.openapi()
-    assert schema["info"]["version"] == "0.2.0"
+    assert schema["info"]["version"] == "0.3.0"
     export = schema["paths"]["/api/v1/runs/{run_id}/export.xlsx"]["get"]
     assert set(export["responses"]["200"]["content"]) == {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
     assert export["security"] == [{"LocalSession": []}]

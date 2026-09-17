@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
@@ -8,10 +8,26 @@ import { ConfigDialog } from './ConfigDialog'
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn() }))
 
 const datasets = { items: [{ id: 'source', name: 'Origen' }, { id: 'target', name: 'Destino' }], total: 2 }
+const sourceSchema = {
+  dataset_id: 'source', dataset_name: 'Origen', version_id: 'version-1', version: 1,
+  schema_hash: 'schema-hash', scan_mode: 'PERSISTED_PROFILE', scanned_rows: 0,
+  columns: [
+    { name: 'transaction_id', logical_type: 'STRING', semantic_tag: 'IDENTIFIER', numeric: false },
+    { name: 'transaction_date', logical_type: 'DATE', numeric: false },
+    { name: 'amount', logical_type: 'DECIMAL', numeric: true },
+    { name: 'quantity', logical_type: 'INT64', numeric: true },
+    { name: 'note', logical_type: 'STRING', numeric: false },
+  ],
+}
+
+async function openColumns(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(await screen.findByRole('button', { name: `${label}: abrir selector` }))
+  return screen.getByRole('group', { name: `Opciones de ${label}` })
+}
 
 describe('Configuration publication', () => {
   beforeEach(() => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets' ? datasets : { versions: [{ schema: [{ name: 'transaction_id' }, { name: 'transaction_date' }, { name: 'amount' }] }] })
+    vi.mocked(api).mockImplementation(async path => path === '/datasets' ? datasets : path.includes('/schema') ? sourceSchema : { versions: [{ schema: sourceSchema.columns }] })
     vi.mocked(post).mockResolvedValue({ id: 'new-config' })
   })
 
@@ -20,12 +36,91 @@ describe('Configuration publication', () => {
     renderApp(<ConfigDialog module="intake" open close={close}/>)
     await user.type(await screen.findByLabelText('Nombre del contrato'), 'Fechas de ventas')
     await user.selectOptions(screen.getByLabelText('Dataset'), 'source')
-    await user.type(screen.getByLabelText('Columnas obligatorias'), 'transaction_id, transaction_date')
+    const required = await openColumns(user, 'Columnas obligatorias')
+    await user.click(within(required).getByRole('checkbox', { name: /^transaction_id / }))
+    await user.click(within(required).getByRole('checkbox', { name: /^transaction_date / }))
     await user.click(screen.getByRole('button', { name: 'Agregar regla' }))
     await user.type(screen.getByLabelText('Columna de la regla'), 'transaction_date')
     await user.click(screen.getByRole('button', { name: 'Crear contrato' }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/intake/contracts', expect.objectContaining({ name: 'Fechas de ventas', dataset_id: 'source', config: expect.objectContaining({ schema_version: 2, required_columns: ['transaction_id', 'transaction_date'], rules: [{ type: 'date_rule', column: 'transaction_date', severity: 'ERROR', parameters: { not_future: true, timezone: 'UTC', null_policy: 'ALLOW' } }] }) })))
     expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('uses detected columns in multi-selectors and restricts positive values to numeric types', async () => {
+    const user = userEvent.setup()
+    renderApp(<ConfigDialog module="intake" open close={vi.fn()}/>)
+    await user.type(await screen.findByLabelText('Nombre del contrato'), 'Esquema guiado')
+    await user.selectOptions(screen.getByLabelText('Dataset'), 'source')
+    expect(await screen.findByText('Versión 1 · 5 columnas')).toBeInTheDocument()
+
+    const required = await openColumns(user, 'Columnas obligatorias')
+    await user.click(within(required).getByRole('checkbox', { name: /^transaction_id / }))
+    const unique = await openColumns(user, 'Columnas sin duplicados')
+    await user.click(within(unique).getByRole('checkbox', { name: /^transaction_id / }))
+    const numeric = await openColumns(user, 'Columnas numéricas')
+    expect(within(numeric).getAllByRole('checkbox').slice(1, 3).map(option => option.getAttribute('aria-label'))).toEqual(['amount (DECIMAL)', 'quantity (INT64)'])
+    await user.click(within(numeric).getByRole('checkbox', { name: /^amount / }))
+    await user.click(within(numeric).getByRole('checkbox', { name: /^note / }))
+    const positive = await openColumns(user, 'Columnas con valores positivos')
+    expect(within(positive).getAllByRole('checkbox').slice(1).map(option => option.getAttribute('aria-label'))).toEqual(['amount (DECIMAL)', 'quantity (INT64)'])
+    await user.click(within(positive).getByRole('checkbox', { name: /^amount / }))
+
+    await user.click(screen.getByRole('button', { name: 'Crear contrato' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/intake/contracts', expect.objectContaining({ config: expect.objectContaining({ required_columns: ['transaction_id'], unique_columns: ['transaction_id'], numeric_columns: ['amount', 'note'], positive_columns: ['amount'] }) })))
+  })
+
+  it('selects and clears every eligible Intake column with Todos', async () => {
+    const user = userEvent.setup()
+    renderApp(<ConfigDialog module="intake" open close={vi.fn()}/>)
+    await user.type(await screen.findByLabelText('Nombre del contrato'), 'Todas las columnas')
+    await user.selectOptions(screen.getByLabelText('Dataset'), 'source')
+
+    const required = await openColumns(user, 'Columnas obligatorias')
+    const allRequired = within(required).getByRole('checkbox', { name: 'Todos (5 columnas)' }) as HTMLInputElement
+    await user.click(allRequired)
+    expect(allRequired).toBeChecked()
+    expect(within(required).getAllByRole('checkbox').slice(1)).toHaveLength(5)
+    expect(within(required).getAllByRole('checkbox').slice(1).every(option => (option as HTMLInputElement).checked)).toBe(true)
+    await user.click(within(required).getByRole('checkbox', { name: /^transaction_id / }))
+    expect(allRequired.indeterminate).toBe(true)
+    await user.click(allRequired)
+    expect(allRequired).toBeChecked()
+    await user.click(allRequired)
+    expect(allRequired).not.toBeChecked()
+    expect(within(required).getAllByRole('checkbox').slice(1).every(option => !(option as HTMLInputElement).checked)).toBe(true)
+    await user.click(allRequired)
+
+    const unique = await openColumns(user, 'Columnas sin duplicados')
+    await user.click(within(unique).getByRole('checkbox', { name: 'Todos (5 columnas)' }))
+    const numeric = await openColumns(user, 'Columnas numéricas')
+    await user.click(within(numeric).getByRole('checkbox', { name: 'Todos (5 columnas)' }))
+    const positive = await openColumns(user, 'Columnas con valores positivos')
+    const allPositive = within(positive).getByRole('checkbox', { name: 'Todos (2 columnas)' })
+    await user.click(allPositive)
+    expect(within(positive).getAllByRole('checkbox').slice(1).map(option => option.getAttribute('aria-label'))).toEqual(['amount (DECIMAL)', 'quantity (INT64)'])
+
+    await user.click(screen.getByRole('button', { name: 'Crear contrato' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/intake/contracts', expect.objectContaining({ config: expect.objectContaining({
+      required_columns: ['transaction_id', 'transaction_date', 'amount', 'quantity', 'note'],
+      unique_columns: ['transaction_id', 'transaction_date', 'amount', 'quantity', 'note'],
+      numeric_columns: ['transaction_id', 'transaction_date', 'amount', 'quantity', 'note'],
+      positive_columns: ['amount', 'quantity'],
+    }) })))
+  })
+
+  it('refreshes the schema metadata on demand', async () => {
+    const refreshed = { ...sourceSchema, version_id: 'version-2', version: 2, scan_mode: 'CANONICAL_PARQUET_METADATA', columns: [...sourceSchema.columns, { name: 'currency', logical_type: 'STRING', numeric: false }] }
+    vi.mocked(api).mockImplementation(async path => path === '/datasets' ? datasets : path.includes('refresh=true') ? refreshed : path.includes('/schema') ? sourceSchema : { versions: [{ schema: sourceSchema.columns }] })
+    const user = userEvent.setup()
+    renderApp(<ConfigDialog module="intake" open close={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Dataset'), 'source')
+
+    await user.click(await screen.findByRole('button', { name: 'Actualizar esquema' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/datasets/source/schema?refresh=true'))
+    expect(await screen.findByText('Versión 2 · 6 columnas')).toBeInTheDocument()
+    expect(screen.getByText('currency')).toBeInTheDocument()
+    expect(screen.getByText('Metadata de la última versión verificada sin leer filas del dataset.')).toBeInTheDocument()
   })
 
   it('publishes explicit Recon normalization, tolerance and 1:N aggregation', async () => {

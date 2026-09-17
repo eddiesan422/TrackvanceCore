@@ -1,5 +1,7 @@
 .git
 .env
+.env.*
+!.env.example
 .local
 .codex-local
 **/node_modules
@@ -15,4 +17,9 @@ backend/storage
 backups
 restored
 outputs
+data
+tmp
+**/*.sqlite
+**/*.sqlite3
+**/*.db
 **/*.log

@@ -1,4 +1,4 @@
-# Catálogo de reglas y reason codes — 0.2.0
+# Catálogo de reglas y reason codes — 0.3.0
 
 Semántica detallada en [ADR 0003](adr/0003-rule-semantics.md). Toda publicación
 es un snapshot inmutable schema 2; un cambio crea nueva Configuration version.

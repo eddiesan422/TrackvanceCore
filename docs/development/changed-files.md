@@ -1,5 +1,10 @@
 # Archivos del ciclo de correcciones
 
+Este inventario conserva el ciclo inicial de evidencia. La revisión de
+arquitectura del 16 de septiembre está detallada en
+[architecture-changes.md](architecture-changes.md); las migraciones posteriores
+son `0003_dataset_ingestion_metadata` y `0004_exception_validation`.
+
 Comparación contra el respaldo de fuentes tomado antes del ciclo, no contra Git: el prototipo ya contenía archivos sin commit.
 
 88 archivos de código/configuración/documentación nuevos o modificados. `0001_initial.py` conserva SHA-256. La única migración nueva es `0002_evidence_v2.py`.

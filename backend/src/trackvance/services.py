@@ -14,12 +14,14 @@ from .artifactstore import (
     ArtifactIntegrityError,
     artifact_dto,
     artifact_store,
-    file_hash,
     link_artifact,
+    storage_provider,
 )
 from .audit_context import Actor, actor_context, legacy_actor, request_id_context, sanitize_metadata
-from .config import ORG_ID, STORAGE_DIR
+from .config import ORG_ID
+from .dataset_readers import delimited_record_lines, read_dataset
 from .db import iso, require_record, utcnow
+from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
 from .models import (
     Artifact,
@@ -41,7 +43,6 @@ from .processing import (
     csv_record_lines,
     intake,
     profile_frame,
-    read_csv,
     reconcile,
     sentinel,
 )
@@ -93,20 +94,46 @@ def version_dto(v: DatasetVersion, db: Session | None = None) -> dict:
             "source_type": v.source_type, "sha256": v.sha256, "schema_hash": v.schema_hash,
             "size_bytes": v.size_bytes, "row_count": v.row_count, "column_count": v.column_count,
             "profile_status": v.profile_status, "created_at": iso(v.created_at), "schema": v.schema_json,
-            "profile": v.profile, "parent_version_id": v.parent_version_id,
+            "profile": v.profile, "ingestion_metadata": v.ingestion_metadata or {},
+            "parent_version_id": v.parent_version_id,
             "original_artifact_id": v.original_artifact_id, "canonical_artifact_id": v.canonical_artifact_id,
             "source_run_id": v.source_run_id, "artifacts": artifacts, "lineage": lineage,
             "is_derived": v.source_type == "INTAKE_OUTPUT", "has_original_upload": bool(v.original_artifact_id)}
 
 
+DATASET_ORIGINS = {
+    "UPLOAD": ("MANUAL", "Manual"),
+    "INTAKE_OUTPUT": ("DATA_INTAKE", "Data Intake"),
+    "DEMO": ("DEMO", "Demo"),
+    "GENERATED_DEMO": ("DEMO", "Demo"),
+}
+
+
+def dataset_origin(source_type: str | None) -> tuple[str, str]:
+    """Return the stable origin code and its business-facing label.
+
+    Dataset origin belongs to its latest immutable version rather than to the
+    dataset container. Unknown future connector types remain visible through a
+    readable fallback instead of being mislabeled as manual uploads.
+    """
+    normalized = (source_type or "").strip().upper()
+    if not normalized:
+        return "UNKNOWN", "Sin versiones"
+    return DATASET_ORIGINS.get(normalized, (normalized, normalized.replace("_", " ").title()))
+
+
 def dataset_dto(db: Session, d: Dataset) -> dict:
     versions = db.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == d.id).order_by(DatasetVersion.version.desc())).all()
     latest = versions[0] if versions else None
+    origin, origin_label = dataset_origin(latest.source_type if latest else None)
     return {"id": d.id, "name": d.name, "description": d.description, "domain": d.domain,
             "owner": d.owner, "criticality": d.criticality, "status": d.status,
             "created_at": iso(d.created_at), "version_count": len(versions),
             "row_count": latest.row_count if latest else 0, "column_count": latest.column_count if latest else 0,
-            "latest_version_id": latest.id if latest else None, "updated_at": iso(latest.created_at if latest else d.created_at)}
+            "latest_version_id": latest.id if latest else None,
+            "origin": origin, "origin_label": origin_label,
+            "origin_source_type": latest.source_type if latest else None,
+            "updated_at": iso(latest.created_at if latest else d.created_at)}
 
 
 def run_dto(db: Session, run: Run) -> dict:
@@ -134,11 +161,222 @@ def config_dto(db: Session, c: Configuration) -> dict:
             "created_at": iso(c.created_at), "latest_run": run_dto(db, latest) if latest else None}
 
 
-def exception_dto(c: ExceptionCase) -> dict:
-    return {"id": c.id, "display_id": c.display_id, "finding_id": c.finding_id, "run_id": c.run_id,
+ADMINISTRATIVE_EXCEPTION_STATES = frozenset({"DISCARDED", "ACCEPTED", "NOT_APPLICABLE"})
+
+
+def _validation_run_summary(run: Run | None) -> dict | None:
+    if run is None:
+        return None
+    return {
+        "id": run.id,
+        "status": run.status,
+        "decision": run.decision,
+        "created_at": iso(run.created_at),
+        "finished_at": iso(run.finished_at),
+    }
+
+
+def _latest_validation_candidate(db: Session, case: ExceptionCase) -> Run | None:
+    origin = db.get(Run, case.run_id)
+    if origin is None:
+        return None
+    return db.scalar(
+        select(Run)
+        .where(
+            Run.organization_id == case.organization_id,
+            Run.config_id == case.configuration_id,
+            Run.status == "SUCCESS",
+            Run.id != origin.id,
+            Run.created_at > origin.created_at,
+        )
+        .order_by(Run.created_at.desc(), Run.id.desc())
+    )
+
+
+def assess_exception_validation(
+    db: Session,
+    case: ExceptionCase,
+    requested_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate the newest successful later run without mutating history.
+
+    The exact immutable configuration id is used deliberately. A newer version
+    with relaxed rules is a different configuration and cannot prove that the
+    original control now passes.
+    """
+    if case.state == "RESOLVED":
+        if case.validation_run_id and (case.validation_evidence or {}).get("status") == "VALIDATED":
+            evidence = case.validation_evidence or {}
+            return {
+                "status": "VALIDATED",
+                "eligible": True,
+                "validated": True,
+                "can_resolve": False,
+                "reason": evidence.get("reason", "La corrección fue validada técnicamente."),
+                "candidate_run_id": case.validation_run_id,
+                "validation_run_id": case.validation_run_id,
+                "validated_at": iso(case.validated_at),
+                "evidence": evidence,
+            }
+        return {
+            "status": "LEGACY_UNVERIFIED",
+            "eligible": False,
+            "validated": False,
+            "can_resolve": False,
+            "reason": "Cierre histórico anterior a la validación técnica estructurada.",
+            "candidate_run_id": None,
+            "validation_run_id": None,
+            "validated_at": None,
+            "evidence": case.validation_evidence or {},
+        }
+    if case.state in ADMINISTRATIVE_EXCEPTION_STATES or case.state == "FALSE_POSITIVE":
+        return {
+            "status": "NOT_REQUESTED",
+            "eligible": False,
+            "validated": False,
+            "can_resolve": False,
+            "reason": "La excepción se cerró mediante una decisión administrativa.",
+            "candidate_run_id": None,
+            "validation_run_id": None,
+            "validated_at": None,
+            "evidence": case.validation_evidence or {},
+        }
+
+    candidate = _latest_validation_candidate(db, case)
+    if candidate is None:
+        return {
+            "status": "NO_LATER_RUN",
+            "eligible": False,
+            "validated": False,
+            "can_resolve": False,
+            "reason": "Aún no existe una ejecución posterior exitosa del mismo control o configuración.",
+            "candidate_run_id": None,
+            "validation_run_id": None,
+            "validated_at": None,
+            "evidence": case.validation_evidence or {},
+        }
+    if requested_run_id and requested_run_id != candidate.id:
+        return {
+            "status": "INVALID_RUN",
+            "eligible": False,
+            "validated": False,
+            "can_resolve": False,
+            "reason": "La ejecución indicada no es la ejecución posterior exitosa más reciente del mismo control.",
+            "candidate_run_id": candidate.id,
+            "validation_run_id": None,
+            "validated_at": None,
+            "evidence": {},
+        }
+
+    origin_finding = db.get(Finding, case.finding_id) if case.finding_id else None
+    validated = False
+    criterion = ""
+    if origin_finding is None:
+        reason = "La excepción histórica no conserva un hallazgo técnico que pueda volver a evaluarse."
+        criterion = "ORIGIN_FINDING_REQUIRED"
+    elif case.module == "intake":
+        repeated = db.scalar(
+            select(Finding).where(
+                Finding.run_id == candidate.id,
+                Finding.fingerprint == origin_finding.fingerprint,
+            )
+        )
+        validated = repeated is None
+        criterion = "INTAKE_RULE_NO_LONGER_FAILS"
+        reason = (
+            "La regla que originó la excepción pasó en la ejecución posterior."
+            if validated
+            else "La misma regla continúa generando incumplimientos en la ejecución posterior."
+        )
+    elif case.module == "recon":
+        repeated = db.scalar(
+            select(Finding).where(
+                Finding.run_id == candidate.id,
+                Finding.fingerprint == origin_finding.fingerprint,
+            )
+        )
+        validated = candidate.decision == "CONFORME" or repeated is None
+        criterion = "RECON_FINDING_NO_LONGER_PRESENT"
+        reason = (
+            "La conciliación quedó conforme o el hallazgo asociado desapareció."
+            if validated
+            else "El hallazgo de conciliación continúa presente en la ejecución posterior."
+        )
+    elif case.module == "sentinel":
+        validated = candidate.decision == "HEALTHY"
+        criterion = "SENTINEL_MONITOR_HEALTHY"
+        reason = (
+            "El monitor volvió a un estado saludable."
+            if validated
+            else "El monitor todavía presenta alertas en la ejecución posterior."
+        )
+    else:
+        reason = "El módulo de la excepción no tiene una política de validación técnica compatible."
+        criterion = "UNSUPPORTED_MODULE"
+
+    validation_status = "VALIDATED" if validated else "FAILED"
+    stored_evidence = case.validation_evidence or {}
+    same_persisted_check = (
+        stored_evidence.get("status") == validation_status
+        and stored_evidence.get("validation_run_id") == candidate.id
+        and stored_evidence.get("criterion") == criterion
+    )
+    checked_at = (
+        stored_evidence.get("checked_at")
+        if same_persisted_check and stored_evidence.get("checked_at")
+        else iso(utcnow())
+    )
+    evidence = {
+        "schema_version": 1,
+        "status": validation_status,
+        "module": case.module,
+        "criterion": criterion,
+        "reason": reason,
+        "configuration_id": case.configuration_id,
+        "origin_run_id": case.run_id,
+        "origin_finding_id": case.finding_id,
+        "origin_finding_code": origin_finding.code if origin_finding else None,
+        "origin_finding_fingerprint": origin_finding.fingerprint if origin_finding else None,
+        "validation_run_id": candidate.id,
+        "validation_run_decision": candidate.decision,
+        "checked_at": checked_at,
+    }
+    return {
+        "status": evidence["status"],
+        "eligible": True,
+        "validated": validated,
+        "can_resolve": case.state == "PENDING_VALIDATION" and validated,
+        "reason": reason,
+        "candidate_run_id": candidate.id,
+        "validation_run_id": candidate.id if validated else None,
+        "validated_at": (
+            iso(case.validated_at)
+            if validated and same_persisted_check and case.validated_at
+            else evidence["checked_at"] if validated else None
+        ),
+        "evidence": evidence,
+    }
+
+
+def exception_dto(db: Session, c: ExceptionCase) -> dict:
+    config = db.get(Configuration, c.configuration_id)
+    origin_run = db.get(Run, c.run_id)
+    validation_run = db.get(Run, c.validation_run_id) if c.validation_run_id else None
+    return {"id": c.id, "display_id": c.display_id, "finding_id": c.finding_id,
+            "run_id": c.run_id, "origin_run_id": c.run_id,
+            "configuration_id": c.configuration_id,
+            "configuration_name": config.name if config else None,
+            "configuration_version": config.version if config else None,
             "title": c.title, "module": c.module, "severity": c.severity, "state": c.state,
             "owner": c.owner, "root_cause": c.root_cause, "resolution": c.resolution,
-            "version": c.version, "created_at": iso(c.created_at), "updated_at": iso(c.updated_at), "events": c.events}
+            "administrative_reason": c.administrative_reason,
+            "validation_run_id": c.validation_run_id, "validated_at": iso(c.validated_at),
+            "validation_evidence": c.validation_evidence or {},
+            "technical_validation": assess_exception_validation(db, c),
+            "origin_run": _validation_run_summary(origin_run),
+            "validation_run": _validation_run_summary(validation_run),
+            "version": c.version, "created_at": iso(c.created_at),
+            "updated_at": iso(c.updated_at), "events": c.events}
 
 
 def finding_dto(db: Session, f: Finding) -> dict:
@@ -156,21 +394,57 @@ def audit_dto(a: AuditEvent) -> dict:
 
 def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
                    actor="Sistema", source_type="UPLOAD", created_at=None, parent_version_id=None,
-                   column_overrides: dict | None = None, source_run_id: str | None = None) -> DatasetVersion:
-    frame = pl.read_parquet(source) if source.suffix.lower() == ".parquet" else read_csv(source)
-    schema, profile, schema_hash = profile_frame(frame, overrides=column_overrides)
-    profile["row_numbering"] = "RECORD_NUMBER" if source.suffix.lower() == ".parquet" else "PHYSICAL_LINE"
+                   column_overrides: dict | None = None, source_run_id: str | None = None,
+                   reader_options: dict | None = None) -> DatasetVersion:
+    read_result = read_dataset(source, filename, reader_options)
+    frame = read_result.frame
+    schema, profile, schema_hash = profile_frame(
+        frame,
+        overrides=column_overrides,
+        native_types=read_result.native_schema,
+    )
+    profile["row_numbering"] = read_result.row_numbering
+    ingestion_metadata = {
+        "reader": {"key": read_result.source_format, "version": 1},
+        "source_format": read_result.source_format,
+        "format_label": read_result.format_label,
+        "reader_options": {
+            key: value
+            for key, value in {
+                "sheet_name": read_result.selected_sheet,
+                "delimiter": read_result.detected_delimiter,
+            }.items()
+            if value is not None
+        },
+        "row_numbering": read_result.row_numbering,
+        "native_schema": read_result.native_schema,
+        **read_result.metadata,
+    }
     version_id = uid()
-    folder = STORAGE_DIR / "artifacts" / version_id
-    folder.mkdir(parents=True, exist_ok=False)
     original_artifact = None
     if source_type in {"UPLOAD", "GENERATED_DEMO"}:
         kind = "ORIGINAL_UPLOAD" if source_type == "UPLOAD" else "GENERATED_DEMO"
-        original_artifact = artifact_store.put_file(db, source, kind, dataset.organization_id, filename)
-    canonical = folder / "canonical.parquet"
-    frame.write_parquet(canonical)
-    canonical_artifact = artifact_store.register_existing(db, canonical, "INTAKE_ACCEPTED" if source_type == "INTAKE_OUTPUT" else "CANONICAL_PARQUET", dataset.organization_id,
-                                                         "accepted.parquet" if source_type == "INTAKE_OUTPUT" else "canonical.parquet")
+        original_artifact = storage_provider.put_file(
+            db,
+            source,
+            kind,
+            dataset.organization_id,
+            filename,
+            media_type=read_result.media_type,
+        )
+    canonical = storage_provider.temporary_path(".parquet")
+    try:
+        frame.write_parquet(canonical)
+        canonical_artifact = storage_provider.put_file(
+            db,
+            canonical,
+            "INTAKE_ACCEPTED" if source_type == "INTAKE_OUTPUT" else "CANONICAL_PARQUET",
+            dataset.organization_id,
+            "accepted.parquet" if source_type == "INTAKE_OUTPUT" else "canonical.parquet",
+            media_type="application/vnd.apache.parquet",
+        )
+    finally:
+        canonical.unlink(missing_ok=True)
     if original_artifact:
         link_artifact(db, dataset.organization_id, "DERIVED_FROM", "ARTIFACT", canonical_artifact.id, "ARTIFACT", original_artifact.id)
     source_artifact = original_artifact or canonical_artifact
@@ -179,7 +453,9 @@ def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
                        version=version_number, filename=filename, source_type=source_type,
                        sha256=source_artifact.sha256, schema_hash=schema_hash,
                        size_bytes=source_artifact.size_bytes, row_count=frame.height, column_count=frame.width,
-                       original_path=original_artifact.path if original_artifact else "", canonical_path=str(canonical), schema_json=schema, profile=profile,
+                       original_path=original_artifact.path if original_artifact else "",
+                       canonical_path=canonical_artifact.path, schema_json=schema, profile=profile,
+                       ingestion_metadata=ingestion_metadata,
                        original_artifact_id=original_artifact.id if original_artifact and source_type == "UPLOAD" else None,
                        canonical_artifact_id=canonical_artifact.id, source_run_id=source_run_id,
                        created_at=created_at or utcnow(), parent_version_id=parent_version_id)
@@ -194,11 +470,24 @@ def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
     event = "DATASET_DERIVED" if source_type == "INTAKE_OUTPUT" else "DATASET_UPLOADED"
     audit(db, event, "dataset_version", v.id, f"{filename}: {frame.height:,} registros", actor,
           dataset.organization_id, {"dataset_id": dataset.id, "sha256": v.sha256, "row_count": v.row_count,
-                                    "source_type": source_type, "source_run_id": source_run_id}, run_id=source_run_id)
+                                    "source_type": source_type, "source_run_id": source_run_id,
+                                    "format": read_result.source_format,
+                                    "reader_key": read_result.source_format,
+                                    "reader_version": 1,
+                                    "sheet_name": read_result.selected_sheet,
+                                    "delimiter": read_result.detected_delimiter}, run_id=source_run_id)
     return v
 
 
-def enqueue(db: Session, config: Configuration, source: DatasetVersion, target: DatasetVersion | None, actor: str) -> Run:
+def enqueue(
+    db: Session,
+    config: Configuration,
+    source: DatasetVersion,
+    target: DatasetVersion | None,
+    actor: str,
+    *,
+    queue: JobQueue | None = None,
+) -> Run:
     if source.dataset_id != config.dataset_id:
         raise ProcessingError("La versión de origen no pertenece al dataset del contrato/control.")
     if config.module == "recon" and (target is None or target.dataset_id != config.target_dataset_id):
@@ -220,7 +509,7 @@ def enqueue(db: Session, config: Configuration, source: DatasetVersion, target: 
         run.error, run.finished_at = plan["rejection_code"], utcnow()
     db.add(run)
     db.flush()
-    db.add(Job(organization_id=run.organization_id, run_id=run.id, status="QUEUED" if plan["allowed"] else "FAILED"))
+    (queue or job_queue).submit(db, run, executable=plan["allowed"])
     for version in [source, target]:
         if version:
             link_artifact(db, run.organization_id, "RUN_INPUT", "RUN", run.id, "DATASET_VERSION", version.id)
@@ -233,33 +522,56 @@ def enqueue(db: Session, config: Configuration, source: DatasetVersion, target: 
 
 def ensure_input(v: DatasetVersion, db: Session | None = None) -> pl.DataFrame:
     try:
+        original_path = None
         if v.original_path:
-            path = artifact_store.checked_path(v.original_path)
-            if file_hash(path) != v.sha256:
-                raise ArtifactIntegrityError("La integridad del archivo de entrada no coincide con su SHA-256.")
+            original_path = storage_provider.materialize_reference(
+                v.original_path,
+                expected_sha256=v.sha256,
+                expected_size=v.size_bytes,
+            )
         if db is not None and v.canonical_artifact_id:
             canonical = db.get(Artifact, v.canonical_artifact_id)
             if not canonical or canonical.organization_id != v.organization_id:
                 raise ArtifactIntegrityError("No existe el artefacto canónico de esta versión.")
-            return pl.read_parquet(artifact_store.verify(canonical))
+            return pl.read_parquet(storage_provider.materialize(canonical))
         if not v.original_path:
-            path = artifact_store.checked_path(v.canonical_path)
-            if file_hash(path) != v.sha256:
-                raise ArtifactIntegrityError("La integridad del artefacto derivado no coincide con su SHA-256.")
-            return pl.read_parquet(path)
-        return read_csv(Path(v.original_path))
+            canonical_path = storage_provider.materialize_reference(
+                v.canonical_path,
+                expected_sha256=v.sha256,
+                expected_size=v.size_bytes,
+            )
+            return pl.read_parquet(canonical_path)
+        reader_options = (v.ingestion_metadata or {}).get("reader_options", {})
+        assert original_path is not None
+        return read_dataset(original_path, v.filename, reader_options).frame
     except (OSError, ArtifactIntegrityError) as exc:
         raise ProcessingError(str(exc)) from exc
 
 
 def input_record_numbers(version: DatasetVersion) -> tuple[list[int], str]:
     """Use only after ensure_input has verified the original bytes and canonical artifact."""
-    if version.original_path:
-        numbers = csv_record_lines(Path(version.original_path))
+    metadata = version.ingestion_metadata or {}
+    source_format = metadata.get("source_format")
+    row_numbering = metadata.get("row_numbering")
+    if version.original_path and source_format in {None, "CSV", "TXT"}:
+        original_path = storage_provider.materialize_reference(
+            version.original_path,
+            expected_sha256=version.sha256,
+            expected_size=version.size_bytes,
+        )
+        delimiter = metadata.get("reader_options", {}).get("delimiter")
+        numbers = (
+            delimited_record_lines(original_path, delimiter)
+            if delimiter
+            else csv_record_lines(original_path)
+        )
         if len(numbers) != version.row_count:
-            raise ProcessingError("No coincide el mapa de líneas del CSV con el Parquet canónico.")
+            raise ProcessingError(
+                "No coincide el mapa de líneas del archivo delimitado con el Parquet canónico."
+            )
         return numbers, "PHYSICAL_LINE"
-    return list(range(1, version.row_count + 1)), "RECORD_NUMBER"
+    numbering = row_numbering if row_numbering in {"PHYSICAL_LINE", "RECORD_NUMBER"} else "RECORD_NUMBER"
+    return list(range(1, version.row_count + 1)), numbering
 
 
 def create_exception(db: Session, finding: Finding, actor: str) -> ExceptionCase:
@@ -270,6 +582,7 @@ def create_exception(db: Session, finding: Finding, actor: str) -> ExceptionCase
     identity, legacy = resolve_actor(db, actor, finding.organization_id)
     case = ExceptionCase(id=uid(), organization_id=finding.organization_id,
                          display_id="EXC-" + uid()[:8].upper(), finding_id=finding.id, run_id=run.id,
+                         configuration_id=run.config_id,
                          title=finding.title, module=run.module, severity=finding.severity,
                          events=[{"timestamp": iso(utcnow()), "actor": identity.display_name,
                                   "actor_type": identity.type, "actor_id": identity.id, "actor_legacy": legacy, "from_state": None,
@@ -278,6 +591,85 @@ def create_exception(db: Session, finding: Finding, actor: str) -> ExceptionCase
     db.flush()
     audit(db, "EXCEPTION_CREATED", "exception", case.id, case.title, actor, finding.organization_id, run_id=run.id)
     return case
+
+
+def record_exception_validation(
+    db: Session,
+    case: ExceptionCase,
+    assessment: dict[str, Any],
+    actor: Actor | str,
+    comment: str | None = None,
+) -> None:
+    """Persist one validation check while retaining earlier checks in the event timeline."""
+    if assessment["status"] not in {"VALIDATED", "FAILED"}:
+        raise ValueError("La evaluación no contiene una ejecución técnica válida.")
+    current_evidence = case.validation_evidence or {}
+    incoming_evidence = assessment["evidence"]
+    if (
+        current_evidence.get("status") == assessment["status"]
+        and current_evidence.get("validation_run_id") == incoming_evidence.get("validation_run_id")
+        and current_evidence.get("criterion") == incoming_evidence.get("criterion")
+    ):
+        return
+    identity, legacy = resolve_actor(db, actor, case.organization_id)
+    now = utcnow()
+    evidence = dict(incoming_evidence)
+    event = {
+        "timestamp": iso(now),
+        "actor": identity.display_name,
+        "actor_type": identity.type,
+        "actor_id": identity.id,
+        "actor_legacy": legacy,
+        "from_state": case.state,
+        "to_state": case.state,
+        "event_type": "TECHNICAL_VALIDATION",
+        "validation_status": assessment["status"],
+        "validation_run_id": evidence.get("validation_run_id"),
+        "comment": comment or assessment["reason"],
+        "evidence": evidence,
+    }
+    case.validation_evidence = evidence
+    case.validation_run_id = evidence["validation_run_id"] if assessment["validated"] else None
+    case.validated_at = now if assessment["validated"] else None
+    case.updated_at = now
+    case.version += 1
+    case.events = [*(case.events or []), event]
+    audit(
+        db,
+        "EXCEPTION_VALIDATION_CHECKED",
+        "exception",
+        case.id,
+        f"{case.display_id}: {assessment['status']}",
+        identity,
+        case.organization_id,
+        {
+            "status": assessment["status"],
+            "configuration_id": case.configuration_id,
+            "origin_run_id": case.run_id,
+            "validation_run_id": evidence.get("validation_run_id"),
+            "criterion": evidence.get("criterion"),
+        },
+        run_id=evidence.get("validation_run_id"),
+    )
+
+
+def refresh_pending_exception_validations(db: Session, run: Run, actor: Actor | str) -> None:
+    """Attach current evidence after a run, without administratively resolving cases.
+
+    This is the seam for a future auto-resolution policy. Today it only updates
+    technical validation and deliberately leaves PENDING_VALIDATION unchanged.
+    """
+    cases = db.scalars(
+        select(ExceptionCase).where(
+            ExceptionCase.organization_id == run.organization_id,
+            ExceptionCase.configuration_id == run.config_id,
+            ExceptionCase.state == "PENDING_VALIDATION",
+        )
+    ).all()
+    for case in cases:
+        assessment = assess_exception_validation(db, case, run.id)
+        if assessment["status"] in {"VALIDATED", "FAILED"}:
+            record_exception_validation(db, case, assessment, actor)
 
 
 def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_at=None):
@@ -336,16 +728,23 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
         run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
         return
     _verify_lease(db, run, lease_owner)
-    # Attempt-specific paths leave any interrupted attempt unreferenced. No historical bytes are replaced.
-    folder = STORAGE_DIR / "runs" / run.id / ("attempt-" + uid())
-    folder.mkdir(parents=True, exist_ok=False)
-    results = folder / "results.parquet"
-    pl.DataFrame({"classification": [r.get("classification", "") for r in rows],
-                  "payload": [json.dumps(r, ensure_ascii=False) for r in rows]},
-                 schema={"classification": pl.String, "payload": pl.String}).write_parquet(folder / "results.tmp.parquet")
-    artifact_store.promote(folder / "results.tmp.parquet", results)
-    result_artifact = artifact_store.register_existing(db, results,
-        {"intake": "INTAKE_ERRORS", "recon": "RECON_RESULTS", "sentinel": "SENTINEL_PROFILE"}[run.module], run.organization_id)
+    # Provider-generated artifact identities keep retries immutable without
+    # exposing a local directory layout to the application service.
+    results = storage_provider.temporary_path(".parquet")
+    try:
+        pl.DataFrame({"classification": [r.get("classification", "") for r in rows],
+                      "payload": [json.dumps(r, ensure_ascii=False) for r in rows]},
+                     schema={"classification": pl.String, "payload": pl.String}).write_parquet(results)
+        result_artifact = storage_provider.put_file(
+            db,
+            results,
+            {"intake": "INTAKE_ERRORS", "recon": "RECON_RESULTS", "sentinel": "SENTINEL_PROFILE"}[run.module],
+            run.organization_id,
+            "results.parquet",
+            media_type="application/vnd.apache.parquet",
+        )
+    finally:
+        results.unlink(missing_ok=True)
     link_artifact(db, run.organization_id, "RUN_OUTPUT", "RUN", run.id, "ARTIFACT", result_artifact.id)
     if accepted is not None and not run.output_version_id:
         output_dataset = db.scalar(select(Dataset).where(Dataset.organization_id == run.organization_id,
@@ -357,11 +756,14 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                                      owner=original_dataset.owner, criticality=original_dataset.criticality)
             db.add(output_dataset)
             db.flush()
-        accepted_path = folder / "accepted.parquet"
-        accepted.write_parquet(accepted_path)
-        output = create_version(db, output_dataset, accepted_path, "accepted.parquet",
-                                Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), "INTAKE_OUTPUT",
-                                parent_version_id=source.id, source_run_id=run.id)
+        accepted_path = storage_provider.temporary_path(".parquet")
+        try:
+            accepted.write_parquet(accepted_path)
+            output = create_version(db, output_dataset, accepted_path, "accepted.parquet",
+                                    Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), "INTAKE_OUTPUT",
+                                    parent_version_id=source.id, source_run_id=run.id)
+        finally:
+            accepted_path.unlink(missing_ok=True)
         run.output_version_id = output.id
     if run.module == "intake":
         for rule in metrics["rules"]:
@@ -380,10 +782,16 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
             fingerprint = hashlib.sha256(f["code"].encode()).hexdigest()
             if not db.scalar(select(Finding).where(Finding.run_id == run.id, Finding.fingerprint == fingerprint)):
                 db.add(Finding(organization_id=run.organization_id, run_id=run.id, fingerprint=fingerprint, **f))
-    run.metrics, run.decision, run.result_path = metrics, decision, str(results)
+    run.metrics, run.decision, run.result_path = metrics, decision, result_artifact.path
     run.status, run.progress_percent, run.progress_stage, run.finished_at = "SUCCESS", 100, "Completado", observed_at or utcnow()
     if run.module == "sentinel":
         _record_metric_history(db, run, metrics)
+    db.flush()
+    refresh_pending_exception_validations(
+        db,
+        run,
+        Actor("WORKER", lease_owner or "trackvance:worker", "Worker"),
+    )
     result_artifacts = [artifact_dto(result_artifact)]
     if run.output_version_id:
         output = require_record(db, DatasetVersion, run.output_version_id)
@@ -396,6 +804,7 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                 "inputs": [{"dataset_version_id": v.id, "artifact_sha256": v.sha256, "schema_hash": v.schema_hash,
                             "dataset_id": v.dataset_id, "dataset_name": require_record(db, Dataset, v.dataset_id).name,
                             "version": v.version, "source_type": v.source_type, "original_artifact_id": v.original_artifact_id,
+                            "ingestion_metadata": v.ingestion_metadata or {},
                             "row_numbering": source_numbering if v.id == source.id else metrics.get("target_row_numbering"),
                             "canonical_artifact_id": v.canonical_artifact_id,
                             "canonical_sha256": require_record(db, Artifact, v.canonical_artifact_id).sha256 if v.canonical_artifact_id else None}
@@ -404,22 +813,51 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                 "config_hash": configuration_hash(effective), "stored_config_hash": configuration_hash(config.config)},
                 "metrics": metrics, "output_version_id": run.output_version_id,
                 "result_artifacts": result_artifacts}
-    temp_evidence = folder / "evidence.tmp.json"
-    temp_evidence.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    _verify_lease(db, run, lease_owner)
-    artifact_store.promote(temp_evidence, folder / "evidence.json")
-    run.evidence_path = str(folder / "evidence.json")
-    evidence = artifact_store.register_existing(db, Path(run.evidence_path), "RUN_MANIFEST", run.organization_id)
+    temp_evidence = storage_provider.temporary_path(".json")
+    try:
+        temp_evidence.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        _verify_lease(db, run, lease_owner)
+        evidence = storage_provider.put_file(
+            db,
+            temp_evidence,
+            "RUN_MANIFEST",
+            run.organization_id,
+            "evidence.json",
+            media_type="application/json",
+        )
+    finally:
+        temp_evidence.unlink(missing_ok=True)
+    run.evidence_path = evidence.path
     link_artifact(db, run.organization_id, "RUN_OUTPUT", "RUN", run.id, "ARTIFACT", evidence.id)
     audit(db, "RUN_COMPLETED", "run", run.id, f"{run.name}: {decision}",
           Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), run.organization_id,
           {"module": run.module, "status": run.status, "decision": decision})
 
 
-def result_rows(run: Run, classification: str | None = None, offset=0, limit=50) -> dict:
+def result_rows(
+    run: Run,
+    classification: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+    *,
+    db: Session | None = None,
+) -> dict:
     if not run.result_path:
         return {"items": [], "total": 0}
-    frame = pl.scan_parquet(run.result_path)
+    if db is not None:
+        artifact = db.scalar(
+            select(Artifact).where(
+                Artifact.organization_id == run.organization_id,
+                Artifact.path == run.result_path,
+            )
+        )
+        if not artifact:
+            raise ArtifactIntegrityError("No existe un artefacto registrado para el resultado.")
+        result_path = storage_provider.materialize(artifact)
+    else:
+        # Compatibility for internal callers operating on historical local rows.
+        result_path = storage_provider.materialize_reference(run.result_path)
+    frame = pl.scan_parquet(result_path)
     if classification:
         frame = frame.filter(pl.col("classification") == classification)
     total = frame.select(pl.len()).collect().item()
@@ -457,7 +895,7 @@ def _record_metric_history(db: Session, run: Run, metrics: dict) -> None:
 
 def register_export(db: Session, run: Run, path: Path) -> Artifact:
     """Register a new export without altering a run or its original manifest."""
-    artifact = artifact_store.put_file(db, path, "EXPORT_XLSX", run.organization_id, path.name)
+    artifact = storage_provider.put_file(db, path, "EXPORT_XLSX", run.organization_id, path.name)
     link_artifact(db, run.organization_id, "EXPORT_OF", "ARTIFACT", artifact.id, "RUN", run.id)
     return artifact
 

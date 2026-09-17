@@ -19,6 +19,7 @@ TABLES = (
 
 def snapshot() -> dict:
     from sqlalchemy import select, text
+
     from trackvance.artifactstore import artifact_store
     from trackvance.db import Base, SessionLocal
     from trackvance.models import Artifact, Run

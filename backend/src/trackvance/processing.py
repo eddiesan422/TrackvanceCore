@@ -29,6 +29,67 @@ class ProcessingError(ValueError):
     pass
 
 
+LOGICAL_SCHEMA_TYPES = frozenset(
+    {"STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN"}
+)
+COLUMN_OVERRIDE_FIELDS = frozenset({"logical_type", "semantic_tag"})
+
+
+def validate_column_overrides(overrides: dict, columns: list[str]) -> dict[str, dict]:
+    """Validate and normalize the public upload override contract.
+
+    The API accepts the historical short form ``{"amount": "DECIMAL"}`` and
+    the structured form emitted by the upload UI.  Keeping validation here
+    also protects service callers that bypass the HTTP boundary.
+    """
+    if not isinstance(overrides, dict):
+        raise ProcessingError("Los overrides de columnas deben ser un objeto.")
+    if len(overrides) > len(columns):
+        raise ProcessingError("Hay más overrides que columnas disponibles.")
+    if any(not isinstance(name, str) for name in overrides):
+        raise ProcessingError("Los nombres de columna de los overrides deben ser texto.")
+    unknown_columns = set(overrides) - set(columns)
+    if unknown_columns:
+        raise ProcessingError(
+            f"Override sobre columnas ausentes: {', '.join(sorted(unknown_columns))}"
+        )
+
+    normalized: dict[str, dict] = {}
+    for column, raw_override in overrides.items():
+        if isinstance(raw_override, str):
+            override = {"logical_type": raw_override}
+        elif isinstance(raw_override, dict):
+            override = dict(raw_override)
+        else:
+            raise ProcessingError(
+                f"El override de {column} debe ser un objeto con logical_type y/o semantic_tag."
+            )
+
+        if any(not isinstance(name, str) for name in override):
+            raise ProcessingError(f"Las opciones del override de {column} deben ser texto.")
+        unknown_fields = set(override) - COLUMN_OVERRIDE_FIELDS
+        if unknown_fields:
+            raise ProcessingError(
+                f"Opciones de override no soportadas para {column}: "
+                f"{', '.join(sorted(unknown_fields))}."
+            )
+
+        logical_type = override.get("logical_type")
+        if logical_type is not None and (
+            not isinstance(logical_type, str) or logical_type not in LOGICAL_SCHEMA_TYPES
+        ):
+            raise ProcessingError(f"Tipo de override no soportado para {column}.")
+        semantic_tag = override.get("semantic_tag")
+        if semantic_tag is not None and semantic_tag != "IDENTIFIER":
+            raise ProcessingError(f"Etiqueta semántica no soportada para {column}.")
+        if semantic_tag == "IDENTIFIER" and logical_type not in {None, "STRING"}:
+            raise ProcessingError(
+                f"La columna identificadora {column} debe usar el tipo lógico STRING."
+            )
+        normalized[column] = override
+    return normalized
+
+
 def money(value) -> Decimal | None:
     if value is None or not re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?", str(value)):
         return None
@@ -128,8 +189,40 @@ def iso_timestamp(value) -> datetime | None:
         return None
 
 
+def logical_type_from_native(value: str | None) -> str | None:
+    """Map connector-native schema names to the portable logical type catalog."""
+    normalized = (value or "").upper().replace(" ", "")
+    base = normalized.split("(", 1)[0]
+    if base.startswith(("INT", "UINT")) or base in {
+        "BYTE",
+        "SHORT",
+        "LONG",
+        "BIGINT",
+        "SMALLINT",
+    }:
+        return "INT64"
+    if base.startswith(("FLOAT", "DECIMAL")) or base in {
+        "DOUBLE",
+        "REAL",
+        "NUMERIC",
+        "NUMBER",
+    }:
+        return "DECIMAL"
+    if base in {"BOOL", "BOOLEAN"}:
+        return "BOOLEAN"
+    if base == "DATE":
+        return "DATE"
+    if base.startswith(("DATETIME", "TIMESTAMP")):
+        return "TIMESTAMP"
+    return None
+
+
 def profile_frame(
-    frame: pl.DataFrame, column_overrides: dict | None = None, *, overrides: dict | None = None
+    frame: pl.DataFrame,
+    column_overrides: dict | None = None,
+    *,
+    overrides: dict | None = None,
+    native_types: dict[str, str] | None = None,
 ) -> tuple[list, dict, str]:
     """Observe exact values. CSV unquoted empty is null; quoted empty remains empty text.
 
@@ -137,21 +230,21 @@ def profile_frame(
     inference is metadata: canonical values remain unchanged even under an override.
     """
     overrides = overrides if overrides is not None else column_overrides or {}
-    unknown = set(overrides) - set(frame.columns)
-    if unknown:
-        raise ProcessingError(f"Override sobre columnas ausentes: {', '.join(sorted(unknown))}")
+    native_types = native_types or {}
+    overrides = validate_column_overrides(overrides, frame.columns)
     columns, schema = [], []
     for c in frame.columns:
         series = frame[c]
         values = series.drop_nulls().to_list()
         override = overrides.get(c, {})
-        if isinstance(override, str):
-            override = {"logical_type": override}
         identifier = override.get(
             "semantic_tag", "IDENTIFIER" if c.lower() == "id" or c.lower().endswith("_id") else None
         )
         logical = "STRING"
-        if values and identifier != "IDENTIFIER":
+        native_logical = logical_type_from_native(native_types.get(c))
+        if identifier != "IDENTIFIER" and native_logical:
+            logical = native_logical
+        elif values and identifier != "IDENTIFIER":
             if all(iso_date(v) is not None for v in values):
                 logical = "DATE"
             elif all(iso_timestamp(v) is not None for v in values):
@@ -160,8 +253,6 @@ def profile_frame(
                 logical = "DECIMAL"
         if override.get("logical_type"):
             logical = override["logical_type"]
-            if logical not in {"STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN"}:
-                raise ProcessingError("Tipo de override no soportado.")
             if logical != "STRING":
                 expression = compile_rule(
                     {"type": "type", "column": c, "parameters": {"logical_type": logical}},
@@ -181,16 +272,24 @@ def profile_frame(
             "distinct_rate": distinct / len(values) if values else 0,
             "uniqueness_ratio": unique_rows / len(values) if values else 0,
             "semantic_tag": identifier,
-            "inference_method": "EXPLICIT_OVERRIDE" if override else "OBSERVED_V2",
+            "inference_method": (
+                "EXPLICIT_OVERRIDE"
+                if override
+                else "SOURCE_SCHEMA_V1"
+                if native_logical and identifier != "IDENTIFIER"
+                else "OBSERVED_V2"
+            ),
         }
         if logical in {"DECIMAL", "INT64"} and values:
             decimals = [number for v in values if (number := money(v)) is not None]
-            with exact_decimal_context(*decimals):
-                item.update(
-                    min=str(min(decimals)),
-                    max=str(max(decimals)),
-                    mean=str(sum(decimals) / len(decimals)),
-                )
+            item["parse_error_count"] = len(values) - len(decimals)
+            if decimals:
+                with exact_decimal_context(*decimals):
+                    item.update(
+                        min=str(min(decimals)),
+                        max=str(max(decimals)),
+                        mean=str(sum(decimals) / len(decimals)),
+                    )
         elif logical in {"DATE", "TIMESTAMP"} and values:
             parsed = [
                 observed_date
@@ -198,9 +297,9 @@ def profile_frame(
                 if (observed_date := iso_date(v) if logical == "DATE" else iso_timestamp(v))
                 is not None
             ]
-            item.update(
-                min=min(parsed).isoformat(), max=max(parsed).isoformat(), parse_error_count=0
-            )
+            item["parse_error_count"] = len(values) - len(parsed)
+            if parsed:
+                item.update(min=min(parsed).isoformat(), max=max(parsed).isoformat())
         elif values:
             item.update(
                 min_length=min(len(str(v)) for v in values),
@@ -208,14 +307,15 @@ def profile_frame(
             )
         columns.append(item)
         # Null spikes change observed metadata, not the structural schema identity.
-        schema.append(
-            {
-                "name": c,
-                "logical_type": logical,
-                "nullable": null_count > 0,
-                "semantic_tag": identifier,
-            }
-        )
+        schema_item = {
+            "name": c,
+            "logical_type": logical,
+            "nullable": null_count > 0,
+            "semantic_tag": identifier,
+        }
+        if native_types.get(c) and native_types[c] not in {"String", "JSON scalar"}:
+            schema_item["native_type"] = native_types[c]
+        schema.append(schema_item)
     signature = [{"name": s["name"], "logical_type": s["logical_type"]} for s in schema]
     schema_hash = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
     return (

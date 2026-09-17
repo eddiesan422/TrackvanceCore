@@ -1,0 +1,12 @@
+{
+  "pytest backend + operaciones": "233 aprobadas: 222 backend y 11 scripts; 2 avisos de deprecación de dependencias.",
+  "Ruff / Mypy": "Aprobados; Mypy revisó 22 archivos fuente.",
+  "ESLint / TypeScript / build": "Aprobados; build Vite generado correctamente.",
+  "Vitest": "67 pruebas aprobadas en 8 archivos.",
+  "Playwright": "13 flujos aprobados en Docker/PostgreSQL, 40,4 segundos.",
+  "Smoke API / doctor": "84 comprobaciones aprobadas; doctor 7/7.",
+  "Migraciones PostgreSQL": "Upgrade histórico, paridad ORM y downgrade/upgrade en base temporal: aprobados.",
+  "Restart aislado": "Registros y hashes idénticos: 45 datasets, 59 versiones, 37 runs y 173 artifacts verificados.",
+  "Instancia principal": "Rebuild sin pérdida: huellas PostgreSQL/artifacts idénticas antes/después. Cuatro servicios healthy en localhost:3100; restart=no.",
+  "Limpieza de pruebas": "Proyectos E2E y volúmenes temporales eliminados. Datos de usuario preservados."
+}

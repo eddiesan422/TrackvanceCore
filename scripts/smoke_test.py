@@ -8,6 +8,7 @@ Run: python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import hashlib
 import http.cookiejar
@@ -21,6 +22,7 @@ import uuid
 import zipfile
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
@@ -104,6 +106,7 @@ class Api:
         *,
         fields: dict[str, str] | None = None,
         file_field: str = "file",
+        content_type: str = "text/csv",
     ) -> Any:
         boundary = "trackvance-smoke-" + uuid.uuid4().hex
         parts = []
@@ -116,7 +119,7 @@ class Api:
             [
                 (
                     f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; '
-                    f'filename="{filename}"\r\nContent-Type: text/csv\r\n\r\n'
+                    f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'
                 ).encode(),
                 contents,
                 f"\r\n--{boundary}--\r\n".encode("ascii"),
@@ -148,6 +151,11 @@ def csv_bytes(columns: list[str], rows: list[list[Any]]) -> bytes:
     writer.writerow(columns)
     writer.writerows(rows)
     return output.getvalue().encode("utf-8")
+
+
+def binary_fixture(name: str) -> bytes:
+    fixture_path = Path(__file__).parent / "tests" / "fixtures" / f"{name}.base64"
+    return base64.b64decode(fixture_path.read_text(encoding="ascii"))
 
 
 def wait_until(description: str, fetch, ready, *, timeout: float, interval: float):
@@ -273,18 +281,11 @@ def exercise(args, checks: Checks) -> dict[str, str]:
 
     dashboard = api.get("/api/v1/dashboard")
     checks.verify(
-        dashboard["stats"]["datasets"] >= 3
-        and bool(dashboard.get("recent_runs"))
-        and bool(dashboard.get("module_status")),
-        "Dashboard contiene datasets, actividad y modulos demo",
+        isinstance(dashboard.get("stats"), dict)
+        and isinstance(dashboard.get("recent_runs"), list)
+        and isinstance(dashboard.get("module_status"), list),
+        "Dashboard responde con el contrato operativo aun en una instalación limpia",
     )
-    demo_controls = items(api.get("/api/v1/recon/controls"))
-    demo_control = next(
-        (item for item in demo_controls if item["id"] == "demo-control-payments"),
-        None,
-    )
-    checks.verify(demo_control is not None, "Hay un control Recon demo reutilizable")
-    assert demo_control is not None
 
     dataset = api.post(
         "/api/v1/datasets",
@@ -319,6 +320,105 @@ def exercise(args, checks: Checks) -> dict[str, str]:
     checks.verify(
         profile["sha256"] == hashlib.sha256(contents).hexdigest(),
         "La huella de la version coincide con el archivo original",
+    )
+
+    reader_sources = [
+        (
+            "CSV",
+            "reader.csv",
+            b"record_key,amount\nA,10\nB,-2\n",
+            "text/csv",
+            {},
+        ),
+        (
+            "XLSX",
+            "reader.xlsx",
+            binary_fixture("multiformat.xlsx"),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            {"sheet_name": "Detalle"},
+        ),
+        (
+            "JSON",
+            "reader.json",
+            b'[{"record_key":"A","amount":10},{"record_key":"B","amount":-2}]',
+            "application/json",
+            {},
+        ),
+        (
+            "PARQUET",
+            "reader.parquet",
+            binary_fixture("multiformat.parquet"),
+            "application/vnd.apache.parquet",
+            {},
+        ),
+        (
+            "TXT",
+            "reader.txt",
+            b"record_key|amount\nA|10\nB|-2\n",
+            "text/plain",
+            {"delimiter": "|"},
+        ),
+    ]
+    reader_results = []
+    for reader_format, filename, payload, content_type, options in reader_sources:
+        reader_dataset = api.post(
+            "/api/v1/datasets",
+            {"name": f"{name} - Lector {reader_format}", "domain": "Verificación"},
+        )
+        reader_version = api.upload(
+            f"/api/v1/datasets/{reader_dataset['id']}/versions/upload",
+            filename,
+            payload,
+            fields={"reader_options": json.dumps(options)},
+            content_type=content_type,
+        )
+        created_ids[f"{reader_format.lower()}_version"] = reader_version["id"]
+        reader_profile = api.get(
+            f"/api/v1/dataset-versions/{reader_version['id']}/profile"
+        )
+        checks.verify(
+            reader_version["ingestion_metadata"]["source_format"] == reader_format
+            and reader_profile["row_count"] == 2
+            and [column["name"] for column in reader_profile["schema"]]
+            == ["record_key", "amount"],
+            f"{reader_format}: carga, persistencia y esquema normalizado son verificables",
+        )
+        reader_contract = api.post(
+            "/api/v1/intake/contracts",
+            {
+                "name": f"{name} - Contrato {reader_format}",
+                "dataset_id": reader_dataset["id"],
+                "config": {"positive_columns": ["amount"], "max_error_rate": 0},
+            },
+        )
+        reader_run = run_to_completion(
+            api,
+            checks,
+            api.post(
+                "/api/v1/intake/runs",
+                {
+                    "contract_id": reader_contract["id"],
+                    "dataset_version_id": reader_version["id"],
+                },
+                expected=(202,),
+            ),
+            args,
+        )
+        reader_results.append(
+            {
+                "total_rows": reader_run["metrics"]["total_rows"],
+                "valid_rows": reader_run["metrics"]["valid_rows"],
+                "error_rows": reader_run["metrics"]["error_rows"],
+                "decision": reader_run["decision"],
+            }
+        )
+    checks.verify(
+        reader_results
+        == [
+            {"total_rows": 2, "valid_rows": 1, "error_rows": 1, "decision": "REJECTED"}
+        ]
+        * len(reader_sources),
+        "CSV, XLSX, JSON, Parquet y TXT producen la misma semántica en Data Intake",
     )
 
     contract = api.post(
@@ -379,15 +479,52 @@ def exercise(args, checks: Checks) -> dict[str, str]:
     )
     check_export(api, checks, intake)
 
-    source = api.get("/api/v1/datasets/" + demo_control["dataset_id"])
-    target = api.get("/api/v1/datasets/" + demo_control["target_dataset_id"])
+    source = api.post(
+        "/api/v1/datasets",
+        {"name": name + " - Recon origen", "domain": "Verificación"},
+    )
+    target = api.post(
+        "/api/v1/datasets",
+        {"name": name + " - Recon destino", "domain": "Verificación"},
+    )
+    source_version = api.upload(
+        f"/api/v1/datasets/{source['id']}/versions/upload",
+        "recon-source.csv",
+        csv_bytes(
+            ["record_key", "amount"],
+            [["M", 10], ["V", 20], ["S", 30], ["DS", 40], ["DS", 41]],
+        ),
+    )
+    target_version = api.upload(
+        f"/api/v1/datasets/{target['id']}/versions/upload",
+        "recon-target.csv",
+        csv_bytes(
+            ["record_key", "amount"],
+            [["M", 10], ["V", 21], ["T", 50], ["DT", 60], ["DT", 61]],
+        ),
+    )
     control = api.post(
         "/api/v1/recon/controls",
         {
             "name": name + " - Recon",
             "dataset_id": source["id"],
             "target_dataset_id": target["id"],
-            "config": demo_control["config"],
+            "config": {
+                "key_columns": ["record_key"],
+                "key_normalization": {
+                    "trim": False,
+                    "case": "NONE",
+                    "unicode_normalization": "NONE",
+                },
+                "comparison_rules": [
+                    {
+                        "type": "numeric_tolerance",
+                        "source_column": "amount",
+                        "target_column": "amount",
+                        "parameters": {"abs": "0"},
+                    }
+                ],
+            },
         },
     )
     recon = run_to_completion(
@@ -397,8 +534,8 @@ def exercise(args, checks: Checks) -> dict[str, str]:
             "/api/v1/recon/runs",
             {
                 "control_id": control["id"],
-                "source_version_id": source["latest_version_id"],
-                "target_version_id": target["latest_version_id"],
+                "source_version_id": source_version["id"],
+                "target_version_id": target_version["id"],
             },
             expected=(202,),
         ),
@@ -451,13 +588,20 @@ def exercise(args, checks: Checks) -> dict[str, str]:
         all(not finding.get("exception_id") for finding in findings),
         "Los hallazgos nuevos no crean excepciones automaticamente",
     )
-    exception = api.post(f"/api/v1/findings/{findings[0]['id']}/exceptions", {})
+    mismatch_finding = next(
+        finding for finding in findings if finding["code"] == "VALUE_MISMATCH"
+    )
+    exception = api.post(
+        f"/api/v1/findings/{mismatch_finding['id']}/exceptions", {}
+    )
     created_ids["exception"] = exception["id"]
     checks.verify(
         exception["run_id"] == recon["id"] and exception["state"] == "OPEN",
         "La conversion explicita conserva el enlace de excepcion a su ejecucion",
     )
-    repeated_exception = api.post(f"/api/v1/findings/{findings[0]['id']}/exceptions", {})
+    repeated_exception = api.post(
+        f"/api/v1/findings/{mismatch_finding['id']}/exceptions", {}
+    )
     checks.verify(
         repeated_exception["id"] == exception["id"]
         and repeated_exception["version"] == exception["version"],
@@ -489,7 +633,11 @@ def exercise(args, checks: Checks) -> dict[str, str]:
     stale_error = api.request(
         "PATCH",
         f"/api/v1/exceptions/{exception['id']}",
-        {"version": old_version, "state": "WAITING_EXTERNAL", "owner": "Verificación obsoleta"},
+        {
+            "version": old_version,
+            "state": "PENDING_VALIDATION",
+            "owner": "Verificación obsoleta",
+        },
         expected=(409,),
     )
     check_error(checks, stale_error, "El conflicto 409 incluye codigo y referencia de solicitud")
@@ -500,26 +648,76 @@ def exercise(args, checks: Checks) -> dict[str, str]:
         and after_conflict["owner"] == "Verificación automatica",
         "Una version obsoleta devuelve 409 y conserva el cambio vigente",
     )
-    api.request(
+    pending = api.request(
         "PATCH",
         f"/api/v1/exceptions/{exception['id']}",
-        {"version": updated["version"], "state": "RESOLVED"},
+        {
+            "version": updated["version"],
+            "state": "PENDING_VALIDATION",
+            "root_cause": "El destino contenía un importe distinto al origen.",
+            "resolution": "Se corrigió el importe y se solicitó una nueva conciliación.",
+        },
+    ).json()
+    blocked = api.request(
+        "PATCH",
+        f"/api/v1/exceptions/{exception['id']}",
+        {
+            "version": pending["version"],
+            "state": "RESOLVED",
+            "root_cause": pending["root_cause"],
+            "resolution": pending["resolution"],
+        },
         expected=(422,),
+    )
+    check_error(
+        checks,
+        blocked,
+        "Resolver queda bloqueado mientras no exista una ejecución posterior válida",
+    )
+    before_validation = api.get(f"/api/v1/exceptions/{exception['id']}")
+    checks.verify(
+        before_validation["state"] == "PENDING_VALIDATION"
+        and before_validation["technical_validation"]["validated"] is False,
+        "La excepción conserva el estado pendiente y explica la falta de evidencia",
+    )
+    corrected_target = api.upload(
+        f"/api/v1/datasets/{target['id']}/versions/upload",
+        "recon-target-corrected.csv",
+        csv_bytes(
+            ["record_key", "amount"],
+            [["M", 10], ["V", 20], ["T", 50], ["DT", 60], ["DT", 61]],
+        ),
+    )
+    validation_run = run_to_completion(
+        api,
+        checks,
+        api.post(
+            "/api/v1/recon/runs",
+            {
+                "control_id": control["id"],
+                "source_version_id": source_version["id"],
+                "target_version_id": corrected_target["id"],
+            },
+            expected=(202,),
+        ),
+        args,
     )
     after_validation = api.get(f"/api/v1/exceptions/{exception['id']}")
     checks.verify(
-        after_validation["state"] == "INVESTIGATING"
-        and after_validation["version"] == updated["version"],
-        "La excepcion no puede resolverse sin causa raiz y resolucion",
+        after_validation["state"] == "PENDING_VALIDATION"
+        and after_validation["technical_validation"]["validated"] is True
+        and after_validation["validation_run_id"] == validation_run["id"]
+        and after_validation["origin_run_id"] == recon["id"],
+        "Una conciliación posterior sin el hallazgo aporta evidencia técnica trazable",
     )
     resolved = api.request(
         "PATCH",
         f"/api/v1/exceptions/{exception['id']}",
         {
-            "version": updated["version"],
+            "version": after_validation["version"],
             "state": "RESOLVED",
-            "root_cause": "Diferencia ficticia introducida por el conjunto de demostracion.",
-            "resolution": "Evidencia contrastada durante la verificacion automatica.",
+            "root_cause": after_validation["root_cause"],
+            "resolution": after_validation["resolution"],
             "comment": "Cierre de la excepcion de prueba con explicacion conservada.",
         },
     ).json()
@@ -527,8 +725,9 @@ def exercise(args, checks: Checks) -> dict[str, str]:
         resolved["state"] == "RESOLVED"
         and resolved["root_cause"]
         and resolved["resolution"]
-        and len(resolved["events"]) == len(updated["events"]) + 1,
-        "La excepcion se resuelve con causa, resolucion e historia completa",
+        and resolved["validation_run_id"] == validation_run["id"]
+        and len(resolved["events"]) == len(after_validation["events"]) + 1,
+        "La excepción solo se resuelve con evidencia posterior, causa e historia completa",
     )
 
     monitor = api.post(

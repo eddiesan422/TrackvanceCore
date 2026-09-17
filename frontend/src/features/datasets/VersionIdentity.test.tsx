@@ -25,10 +25,18 @@ describe('Observed values and DatasetVersion identity', () => {
   })
 
   it('retains original upload identity and enforces download permission', () => {
-    renderApp(<VersionIdentity version={{ source_type: 'ORIGINAL_UPLOAD', has_original_upload: true, filename: 'input.csv', artifacts: [{ artifact_id: 'upload-id', kind: 'ORIGINAL_UPLOAD', name: 'input.csv', size_bytes: 20 }] }}/>, { permissions: [] })
+    renderApp(<VersionIdentity version={{ source_type: 'ORIGINAL_UPLOAD', has_original_upload: true, filename: 'input.csv', ingestion_metadata: { source_format: 'CSV', format_label: 'CSV', reader_options: { delimiter: ';' } }, artifacts: [{ artifact_id: 'upload-id', kind: 'ORIGINAL_UPLOAD', name: 'input.csv', size_bytes: 20 }] }}/>, { permissions: [] })
     expect(screen.getByLabelText('Archivo original')).toHaveValue('input.csv')
+    expect(screen.getByLabelText('Formato de origen')).toHaveValue('CSV')
+    expect(screen.getByLabelText('Delimitador')).toHaveValue('Punto y coma (;)')
     expect(screen.queryByLabelText('Artefacto derivado')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Descargar original' })).toBeDisabled()
+  })
+
+  it('shows the selected Excel sheet as immutable ingestion evidence', () => {
+    renderApp(<VersionIdentity version={{ source_type: 'ORIGINAL_UPLOAD', filename: 'ventas.xlsx', ingestion_metadata: { source_format: 'XLSX', format_label: 'Excel XLSX', reader_options: { sheet_name: 'Ventas 2026' } } }}/>)
+    expect(screen.getByLabelText('Formato de origen')).toHaveValue('Excel XLSX')
+    expect(screen.getByLabelText('Hoja de Excel')).toHaveValue('Ventas 2026')
   })
 
   it('does not label a non-Parquet derived artifact as an original upload', () => {

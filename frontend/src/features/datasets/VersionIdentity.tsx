@@ -16,13 +16,26 @@ export function ProfilingPolicy({ profile }: { profile: RecordData }) {
     : 'Perfil histórico: conserva el cálculo de la versión anterior del sistema, que podía normalizar espacios y texto vacío. Una nueva carga aplica la política de valores observados sin modificar este historial.'}</div>
 }
 
+function visibleDelimiter(value: unknown) {
+  if (value === '\t') return 'Tabulación (\\t)'
+  if (value === ',') return 'Coma (,)'
+  if (value === ';') return 'Punto y coma (;)'
+  if (value === '|') return 'Barra vertical (|)'
+  return String(value || '')
+}
+
 export function VersionIdentity({ version }: { version: RecordData }) {
   const derived = version.is_derived || version.source_type === 'INTAKE_OUTPUT'
+  const ingestion = version.ingestion_metadata || {}
+  const readerOptions = ingestion.reader_options || {}
   const canDownload = usePermission('artifacts:download')
   const request = useMutation({ mutationFn: (artifact: RecordData) => download(`/artifacts/${artifact.artifact_id}/download`, artifact.name) })
   return <div className="evidence-fields"><Field label="Fuente de la versión"><input readOnly value={derived ? 'Versión derivada de Intake' : label(version.source_type)}/></Field>
     {(version.has_original_upload || (!derived && !version.artifacts?.length)) && <Field label="Archivo original"><input readOnly value={version.filename || ''}/></Field>}
     {derived && <Field label="Artefacto derivado"><input readOnly value={version.filename || 'accepted.parquet'}/></Field>}
+    {ingestion.source_format && <Field label="Formato de origen"><input readOnly value={ingestion.format_label || label(ingestion.source_format)}/></Field>}
+    {readerOptions.sheet_name && <Field label="Hoja de Excel"><input readOnly value={readerOptions.sheet_name}/></Field>}
+    {readerOptions.delimiter && <Field label="Delimitador"><input readOnly value={visibleDelimiter(readerOptions.delimiter)}/></Field>}
     <Field label={derived ? 'SHA-256 del artefacto derivado' : 'SHA-256 del archivo original'}><input className="mono" readOnly value={version.sha256 || ''}/></Field><Field label="Identificador de esquema"><input className="mono" readOnly value={version.schema_hash || ''}/></Field>
     {version.parent_version_id && <Field label="DatasetVersion de entrada"><input readOnly className="mono" value={version.parent_version_id}/></Field>}
     {version.source_run_id && <Link className="button secondary" to={`/runs/${version.source_run_id}`}>Ver ejecución de Intake de origen</Link>}

@@ -40,6 +40,7 @@ _AUDIT_KEYS = frozenset({
     "filename", "format", "source_type", "source_run_id", "parent_version_id", "user_id", "role",
     "reason_code", "error_code", "legacy_identity", "actor_identity_resolution", "fields",
     "attempt", "attempts", "schema_version", "permission", "result_artifact_id", "sensitivity",
+    "reader_key", "reader_version", "sheet_name", "delimiter",
 })
 
 

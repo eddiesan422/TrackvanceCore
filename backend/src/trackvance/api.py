@@ -5,8 +5,6 @@ import hashlib
 import io
 import json
 import secrets
-import tempfile
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -27,7 +25,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import __version__
-from .artifactstore import ArtifactIntegrityError, FileArtifactStore
+from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
 from .config import (
     DEMO_ENABLED,
@@ -35,10 +33,15 @@ from .config import (
     MAX_ROWS,
     MAX_UPLOAD_BYTES,
     SESSION_HOURS,
-    STORAGE_DIR,
     WEB_ORIGIN,
 )
 from .config_semantics import RuleDefinition, effective_config, validate_config
+from .dashboard import DashboardFilters, build_dashboard
+from .dataset_readers import (
+    UnsupportedDatasetFormat,
+    dataset_reader_registry,
+    inspect_dataset,
+)
 from .db import SessionLocal, get_db, iso, utcnow
 from .migrate import migrate, migration_ready
 from .models import (
@@ -57,8 +60,9 @@ from .models import (
     uid,
 )
 from .permissions import permissions_for, required_permission
-from .processing import ProcessingError, money
+from .processing import ProcessingError, money, profile_frame
 from .services import (
+    assess_exception_validation,
     audit,
     audit_dto,
     backfill_artifacts,
@@ -69,6 +73,7 @@ from .services import (
     enqueue,
     exception_dto,
     finding_dto,
+    record_exception_validation,
     register_export,
     result_rows,
     run_actor,
@@ -148,6 +153,11 @@ async def processing_error(request, exc):
     return error_response(request, 422, "INVALID_DATA", str(exc))
 
 
+@app.exception_handler(UnsupportedDatasetFormat)
+async def unsupported_dataset_format(request, exc):
+    return error_response(request, 422, "UNSUPPORTED_FORMAT", str(exc))
+
+
 @app.exception_handler(ArtifactIntegrityError)
 async def artifact_error(request, exc):
     return error_response(request, 409, "ARTIFACT_INTEGRITY_ERROR", str(exc))
@@ -210,14 +220,18 @@ def health():
 @app.get("/health/ready")
 @router.get("/health/ready")
 def ready(db: Session = Depends(get_db)):
+    probe_path = None
     try:
         db.execute(text("SELECT 1"))
         if not migration_ready():
             raise RuntimeError("MIGRATION_REQUIRED")
-        with tempfile.TemporaryFile(dir=STORAGE_DIR) as probe:
-            probe.write(b"ready")
+        probe_path = storage_provider.temporary_path(".ready")
+        probe_path.write_bytes(b"ready")
     except (SQLAlchemyError, OSError, RuntimeError):
         return JSONResponse(status_code=503, content={"status": "not_ready", "code": "DEPENDENCY_UNAVAILABLE"})
+    finally:
+        if probe_path is not None:
+            probe_path.unlink(missing_ok=True)
     return {"status": "ready", "version": __version__, "database": "ready", "storage": "ready", "migrations": "head"}
 
 
@@ -288,6 +302,174 @@ class DatasetBody(InputModel):
     criticality: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
 
 
+class DatasetSchemaColumn(BaseModel):
+    name: str
+    logical_type: str
+    native_type: str | None = None
+    nullable: bool = False
+    semantic_tag: str | None = None
+    numeric: bool = False
+
+
+class DatasetSchemaResponse(BaseModel):
+    dataset_id: str
+    dataset_name: str
+    version_id: str | None = None
+    version: int | None = None
+    schema_hash: str | None = None
+    version_created_at: str | None = None
+    scan_mode: Literal["NO_VERSION", "PERSISTED_PROFILE", "CANONICAL_PARQUET_METADATA"]
+    scanned_rows: int = 0
+    scanned_at: str
+    columns: list[DatasetSchemaColumn] = Field(default_factory=list)
+
+
+class DatasetFileInspection(BaseModel):
+    format: str
+    format_label: str
+    filename: str
+    sheets: list[str] = Field(default_factory=list)
+    selected_sheet: str | None = None
+    detected_delimiter: str | None = None
+    reader_options: dict[str, str] = Field(default_factory=dict)
+    columns: list[DatasetSchemaColumn] = Field(default_factory=list)
+    row_count: int | None = None
+    sampled_rows: int = 0
+    supported_formats: list[dict] = Field(default_factory=list)
+
+
+NUMERIC_SCHEMA_TYPES = frozenset({
+    "BYTE", "SHORT", "INTEGER", "INT", "INT8", "INT16", "INT32", "INT64",
+    "UINT8", "UINT16", "UINT32", "UINT64", "LONG", "BIGINT", "SMALLINT",
+    "FLOAT", "FLOAT16", "FLOAT32", "FLOAT64", "DOUBLE", "REAL", "DECIMAL",
+    "NUMERIC", "NUMBER",
+})
+
+
+def schema_type_is_numeric(value: str | None) -> bool:
+    normalized = (value or "").upper().replace(" ", "").split("(", 1)[0]
+    return normalized in NUMERIC_SCHEMA_TYPES
+
+
+def logical_type_from_native(value: str) -> str:
+    normalized = value.upper().replace(" ", "").split("(", 1)[0]
+    if normalized.startswith(("INT", "UINT")):
+        return "INT64"
+    if schema_type_is_numeric(normalized):
+        return "DECIMAL"
+    if normalized == "BOOLEAN":
+        return "BOOLEAN"
+    if normalized == "DATE":
+        return "DATE"
+    if normalized.startswith("DATETIME"):
+        return "TIMESTAMP"
+    return "STRING"
+
+
+def dataset_schema_response(
+    dataset: Dataset,
+    version: DatasetVersion | None,
+    *,
+    native_types: dict[str, str] | None = None,
+) -> DatasetSchemaResponse:
+    if version is None:
+        return DatasetSchemaResponse(
+            dataset_id=dataset.id,
+            dataset_name=dataset.name,
+            scan_mode="NO_VERSION",
+            scanned_at=utcnow().isoformat(),
+        )
+    persisted = {item["name"]: item for item in version.schema_json}
+    names = list(native_types) if native_types is not None else list(persisted)
+    if native_types is not None and persisted and set(names) != set(persisted):
+        raise APIError(
+            409,
+            "SCHEMA_METADATA_MISMATCH",
+            "El esquema físico no coincide con la identidad de esta versión. Carga una versión nueva.",
+        )
+    columns = []
+    for name in names:
+        stored = persisted.get(name, {})
+        native_type = (
+            native_types.get(name)
+            if native_types is not None
+            else stored.get("native_type")
+        )
+        logical_type = stored.get("logical_type") or logical_type_from_native(native_type or "")
+        semantic_tag = stored.get("semantic_tag")
+        columns.append(DatasetSchemaColumn(
+            name=name,
+            logical_type=logical_type,
+            native_type=native_type,
+            nullable=bool(stored.get("nullable", False)),
+            semantic_tag=semantic_tag,
+            numeric=semantic_tag != "IDENTIFIER" and schema_type_is_numeric(logical_type),
+        ))
+    return DatasetSchemaResponse(
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
+        version_id=version.id,
+        version=version.version,
+        schema_hash=version.schema_hash,
+        version_created_at=iso(version.created_at),
+        scan_mode="CANONICAL_PARQUET_METADATA" if native_types is not None else "PERSISTED_PROFILE",
+        scanned_rows=0,
+        scanned_at=utcnow().isoformat(),
+        columns=columns,
+    )
+
+
+def dataset_name_exists(dataset: Dataset) -> APIError:
+    return APIError(
+        409,
+        "DATASET_NAME_EXISTS",
+        "Ya existe un dataset con ese nombre. Carga el archivo como una nueva versión.",
+        {"dataset_id": dataset.id, "dataset_name": dataset.name},
+    )
+
+
+def parse_json_object(value: str, code: str, label: str) -> dict:
+    try:
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise TypeError()
+        return parsed
+    except (ValueError, TypeError):
+        raise APIError(422, code, f"{label} debe ser un objeto JSON válido.") from None
+
+
+def upload_filename(file: UploadFile) -> str:
+    raw = Path((file.filename or "dataset.csv").replace("\\", "/")).name
+    if len(raw) <= 240:
+        return raw
+    suffix = Path(raw).suffix.lower()
+    if not (1 <= len(suffix) <= 11 and suffix[1:].isalnum()):
+        suffix = ""
+    return f"{Path(raw).stem[: 240 - len(suffix)]}{suffix}"
+
+
+def stage_upload(file: UploadFile, filename: str) -> Path:
+    extension = Path(filename).suffix.lower()
+    suffix = extension if 1 <= len(extension) <= 11 and extension[1:].isalnum() else ".bin"
+    temp_path = storage_provider.temporary_path(suffix)
+    try:
+        with temp_path.open("xb") as temp:
+            size = 0
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise APIError(
+                        422,
+                        "UPLOAD_TOO_LARGE",
+                        f"El límite por archivo es {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                temp.write(chunk)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return temp_path
+
+
 @router.get("/datasets")
 def datasets(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return listing([dataset_dto(db, d) for d in scoped(db, Dataset, user)])
@@ -295,12 +477,86 @@ def datasets(db: Session = Depends(get_db), user: User = Depends(current_user)):
 
 @router.post("/datasets", status_code=201)
 def new_dataset(body: DatasetBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    existing = db.scalar(select(Dataset).where(
+        Dataset.organization_id == user.organization_id,
+        Dataset.name == body.name,
+    ))
+    if existing:
+        raise dataset_name_exists(existing)
     dataset = Dataset(organization_id=user.organization_id, **body.model_dump())
     db.add(dataset)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(select(Dataset).where(
+            Dataset.organization_id == user.organization_id,
+            Dataset.name == body.name,
+        ))
+        if existing:
+            raise dataset_name_exists(existing) from None
+        raise
     audit(db, "DATASET_CREATED", "dataset", dataset.id, f"Dataset creado: {dataset.name}", user.name, user.organization_id)
     db.commit()
     return dataset_dto(db, dataset)
+
+
+@router.post("/datasets/uploads/inspect", response_model=DatasetFileInspection)
+def inspect_dataset_upload(
+    file: UploadFile = File(...),
+    reader_options: str = Form("{}"),
+    user: User = Depends(current_user),
+):
+    """Inspect a bounded sample/embedded schema before creating an immutable version."""
+    del user
+    filename = upload_filename(file)
+    options = parse_json_object(
+        reader_options,
+        "INVALID_READER_OPTIONS",
+        "Las opciones de lectura",
+    )
+    temp_path = None
+    try:
+        temp_path = stage_upload(file, filename)
+        result = inspect_dataset(temp_path, filename, options)
+        schema, _, _ = profile_frame(result.frame, native_types=result.native_schema)
+        columns = [
+            DatasetSchemaColumn(
+                name=item["name"],
+                logical_type=item["logical_type"],
+                native_type=result.native_schema.get(item["name"]),
+                nullable=bool(item.get("nullable", False)),
+                semantic_tag=item.get("semantic_tag"),
+                numeric=item.get("semantic_tag") != "IDENTIFIER"
+                and schema_type_is_numeric(item["logical_type"]),
+            )
+            for item in schema
+        ]
+        effective_options = {
+            key: value
+            for key, value in {
+                "sheet_name": result.selected_sheet,
+                "delimiter": result.detected_delimiter,
+            }.items()
+            if value is not None
+        }
+        return DatasetFileInspection(
+            format=result.source_format,
+            format_label=result.format_label,
+            filename=filename,
+            sheets=result.sheets,
+            selected_sheet=result.selected_sheet,
+            detected_delimiter=result.detected_delimiter,
+            reader_options=effective_options,
+            columns=columns,
+            row_count=result.row_count,
+            sampled_rows=result.frame.height,
+            supported_formats=dataset_reader_registry.formats,
+        )
+    finally:
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
+        file.file.close()
 
 
 @router.get("/datasets/{dataset_id}")
@@ -310,29 +566,80 @@ def dataset_detail(dataset_id: str, db: Session = Depends(get_db), user: User = 
     return {**dataset_dto(db, dataset), "versions": [version_dto(v, db) for v in versions]}
 
 
-@router.post("/datasets/{dataset_id}/versions/upload", status_code=201)
-def upload_version(dataset_id: str, file: UploadFile = File(...), column_overrides: str = Form("{}"), db: Session = Depends(get_db), user: User = Depends(current_user)):
+@router.get("/datasets/{dataset_id}/schema", response_model=DatasetSchemaResponse)
+def dataset_schema(
+    dataset_id: str,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Return the latest immutable version schema without scanning business rows.
+
+    The default response uses the profile captured when the version was created.
+    An explicit refresh reads only the canonical Parquet footer and combines its
+    physical types with the persisted logical inference.
+    """
     dataset = owned(db, Dataset, dataset_id, user)
-    filename = Path((file.filename or "dataset.csv").replace("\\", "/")).name[:240]
-    if not filename.lower().endswith(".csv"):
-        raise APIError(422, "UNSUPPORTED_FORMAT", "El prototipo admite archivos CSV UTF-8.")
+    version = db.scalar(
+        select(DatasetVersion)
+        .where(DatasetVersion.dataset_id == dataset.id)
+        .order_by(DatasetVersion.version.desc())
+    )
+    if not version or not refresh:
+        return dataset_schema_response(dataset, version)
     try:
-        overrides = json.loads(column_overrides)
-        if not isinstance(overrides, dict):
-            raise TypeError()
-    except (ValueError, TypeError):
-        raise APIError(422, "INVALID_SCHEMA_OVERRIDE", "Las opciones de columnas deben ser un objeto JSON válido.") from None
+        if version.canonical_artifact_id:
+            canonical_artifact = owned(db, Artifact, version.canonical_artifact_id, user)
+            canonical_path = storage_provider.materialize(canonical_artifact)
+        else:
+            canonical_path = storage_provider.materialize_reference(
+                version.canonical_path,
+                expected_sha256=version.sha256 if version.source_type == "INTAKE_OUTPUT" else None,
+            )
+        physical_schema = pl.scan_parquet(canonical_path).collect_schema()
+    except (OSError, pl.exceptions.PolarsError) as exc:
+        raise APIError(
+            409,
+            "SCHEMA_SCAN_FAILED",
+            "No fue posible leer la metadata de la última versión del dataset.",
+        ) from exc
+    native_types = {name: str(data_type) for name, data_type in physical_schema.items()}
+    return dataset_schema_response(dataset, version, native_types=native_types)
+
+
+@router.post("/datasets/{dataset_id}/versions/upload", status_code=201)
+def upload_version(
+    dataset_id: str,
+    file: UploadFile = File(...),
+    column_overrides: str = Form("{}"),
+    reader_options: str = Form("{}"),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    dataset = owned(db, Dataset, dataset_id, user)
+    filename = upload_filename(file)
+    overrides = parse_json_object(
+        column_overrides,
+        "INVALID_SCHEMA_OVERRIDE",
+        "Las opciones de columnas",
+    )
+    options = parse_json_object(
+        reader_options,
+        "INVALID_READER_OPTIONS",
+        "Las opciones de lectura",
+    )
     temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, dir=STORAGE_DIR) as temp:
-            temp_path = Path(temp.name)
-            size = 0
-            while chunk := file.file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    raise APIError(422, "UPLOAD_TOO_LARGE", f"El límite por archivo es {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-                temp.write(chunk)
-        version = create_version(db, dataset, temp_path, filename, user.name, column_overrides=overrides)
+        temp_path = stage_upload(file, filename)
+        version = create_version(
+            db,
+            dataset,
+            temp_path,
+            filename,
+            user.name,
+            column_overrides=overrides,
+            reader_options=options,
+        )
         db.commit()
         return version_dto(version, db)
     finally:
@@ -344,8 +651,9 @@ def upload_version(dataset_id: str, file: UploadFile = File(...), column_overrid
 @router.get("/dataset-versions/{version_id}/profile")
 def profile(version_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     version = owned(db, DatasetVersion, version_id, user)
-    verify_registered_file(db, version.canonical_path, user.organization_id)
-    return {**version_dto(version, db), "sample": pl.read_parquet(version.canonical_path, n_rows=20).to_dicts()}
+    artifact = verify_registered_file(db, version.canonical_path, user.organization_id)
+    path = storage_provider.materialize(artifact)
+    return {**version_dto(version, db), "sample": pl.read_parquet(path, n_rows=20).to_dicts()}
 
 
 class ColumnRules(InputModel):
@@ -583,12 +891,11 @@ def results(run_id: str, classification: str | None = None, offset: int = 0, lim
     run = owned(db, Run, run_id, user)
     if run.result_path:
         verify_registered_file(db, run.result_path, user.organization_id)
-    return result_rows(run, classification or None, offset, limit)
+    return result_rows(run, classification or None, offset, limit, db=db)
 
 
 def authorize_artifact_file(artifact):
-    FileArtifactStore().verify(artifact)
-    return artifact.path
+    return storage_provider.materialize(artifact)
 
 
 def verify_registered_file(db: Session, path: str | None, organization_id: str) -> Artifact:
@@ -599,15 +906,40 @@ def verify_registered_file(db: Session, path: str | None, organization_id: str) 
     return artifact
 
 
+ARTIFACT_MEDIA_SUFFIXES = {
+    "application/vnd.apache.parquet": ({".parquet", ".pq"}, ".parquet"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ({".xlsx"}, ".xlsx"),
+    "application/json": ({".json", ".jsonl", ".ndjson"}, ".json"),
+    "application/x-ndjson": ({".jsonl", ".ndjson"}, ".jsonl"),
+    "text/csv": ({".csv"}, ".csv"),
+    "text/plain": ({".txt", ".tsv"}, ".txt"),
+    "text/tab-separated-values": ({".tsv", ".txt"}, ".tsv"),
+}
+KNOWN_ARTIFACT_SUFFIXES = {
+    suffix for allowed, _default in ARTIFACT_MEDIA_SUFFIXES.values() for suffix in allowed
+}
+
+
+def artifact_download_suffix(artifact: Artifact) -> str:
+    suffix = Path(artifact.name).suffix.lower()
+    media_type = (artifact.media_type or "").partition(";")[0].lower()
+    policy = ARTIFACT_MEDIA_SUFFIXES.get(media_type)
+    if policy:
+        allowed, default = policy
+        return suffix if suffix in allowed else default
+    return suffix if suffix in KNOWN_ARTIFACT_SUFFIXES else ".bin"
+
+
 @router.get("/runs/{run_id}/evidence")
 def evidence(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     run = owned(db, Run, run_id, user)
-    if not run.evidence_path or not Path(run.evidence_path).is_file():
+    if not run.evidence_path:
         raise APIError(409, "EVIDENCE_NOT_READY", "La evidencia estará disponible al completar la ejecución.")
     artifact = verify_registered_file(db, run.evidence_path, user.organization_id)
+    path = authorize_artifact_file(artifact)
     audit(db, "EVIDENCE_DOWNLOADED", "run", run.id, "Evidencia descargada", user.name, user.organization_id, {"artifact_id": artifact.id if artifact else None}, run_id=run.id)
     db.commit()
-    return FileResponse(run.evidence_path, media_type="application/json", filename=f"trackvance_{run.id}_evidence.json")
+    return FileResponse(path, media_type="application/json", filename=f"trackvance_{run.id}_evidence.json")
 
 
 @router.get("/artifacts/{artifact_id}/download")
@@ -617,9 +949,8 @@ def artifact_download(artifact_id: str, db: Session = Depends(get_db), user: Use
     path = authorize_artifact_file(artifact)
     audit(db, "ARTIFACT_DOWNLOADED", "artifact", artifact.id, "Artefacto descargado", user.name, user.organization_id, {"kind": artifact.kind, "sha256": artifact.sha256})
     db.commit()
-    media = XLSX_MIME_TYPE if artifact.kind == "EXPORT_XLSX" else "application/octet-stream"
-    suffix = Path(artifact.name).suffix.lower()
-    suffix = suffix if suffix in {".csv", ".parquet", ".json", ".xlsx"} else ".bin"
+    media = XLSX_MIME_TYPE if artifact.kind == "EXPORT_XLSX" else artifact.media_type
+    suffix = artifact_download_suffix(artifact)
     filename = export_filename("artifact", artifact.id) if artifact.kind == "EXPORT_XLSX" else f"trackvance_{artifact.id}{suffix}"
     return FileResponse(path, media_type=media, filename=filename)
 
@@ -639,17 +970,20 @@ def export_excel(run_id: str, db: Session = Depends(get_db), user: User = Depend
             dataset = owned(db, Dataset, version.dataset_id, user)
             inputs.append({**version_dto(version, db), "dataset_name": dataset.name})
     artifacts = db.scalars(select(Artifact).where(Artifact.organization_id == user.organization_id)).all()
-    verify_registered_file(db, run.evidence_path, user.organization_id)
+    evidence_artifact = verify_registered_file(db, run.evidence_path, user.organization_id)
     verify_registered_file(db, run.result_path, user.organization_id)
-    manifest = read_manifest(run.evidence_path, actor=run_actor(run), artifacts=artifacts)
-    rows = result_rows(run, limit=MAX_ROWS * 100)["items"]
+    manifest = read_manifest(
+        storage_provider.materialize(evidence_artifact),
+        actor=run_actor(run),
+        artifacts=artifacts,
+    )
+    rows = result_rows(run, limit=MAX_ROWS * 100, db=db)["items"]
     try:
         content = build_run_workbook(run_dto(db, run), config_dto(db, config), inputs, manifest, rows)
     except ValueError as exc:
         raise APIError(422, "EXPORT_LIMIT_EXCEEDED", str(exc)) from exc
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", dir=STORAGE_DIR, delete=False) as output:
-        output.write(content)
-        path = Path(output.name)
+    path = storage_provider.temporary_path(".xlsx")
+    path.write_bytes(content)
     try:
         artifact = register_export(db, run, path)
         audit(db, "EXPORT_DOWNLOADED", "run", run.id, "Informe Excel descargado", user.name, user.organization_id, {"artifact_id": artifact.id, "kind": artifact.kind, "sha256": artifact.sha256}, run_id=run.id)
@@ -672,7 +1006,7 @@ def export_csv(run_id: str, db: Session = Depends(get_db), user: User = Depends(
     if run.status != "SUCCESS":
         raise APIError(409, "RESULTS_NOT_READY", "Los resultados estarán disponibles al completar la ejecución.")
     verify_registered_file(db, run.result_path, user.organization_id)
-    rows = result_rows(run, limit=MAX_ROWS * 100)["items"]
+    rows = result_rows(run, limit=MAX_ROWS * 100, db=db)["items"]
     out = io.StringIO(newline="")
     fields = list(rows[0]) if rows else ["classification", "message"]
     writer = csv.DictWriter(out, fieldnames=fields)
@@ -699,28 +1033,53 @@ def findings(db: Session = Depends(get_db), user: User = Depends(current_user)):
 def finding_exception(finding_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     case = create_exception(db, owned(db, Finding, finding_id, user), user.name)
     db.commit()
-    return exception_dto(case)
+    return exception_dto(db, case)
 
 
 @router.get("/exceptions")
 def exceptions(state: str | None = None, module: str | None = None, severity: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([exception_dto(c) for c in scoped(db, ExceptionCase, user) if (not state or c.state == state) and (not module or c.module == module) and (not severity or c.severity == severity)])
+    return listing([exception_dto(db, c) for c in scoped(db, ExceptionCase, user) if (not state or c.state == state) and (not module or c.module == module) and (not severity or c.severity == severity)])
 
 
 @router.get("/exceptions/{case_id}")
 def exception_detail(case_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     case = owned(db, ExceptionCase, case_id, user)
     finding = db.get(Finding, case.finding_id) if case.finding_id else None
-    return {**exception_dto(case), "finding": finding_dto(db, finding) if finding else None}
+    return {**exception_dto(db, case), "finding": finding_dto(db, finding) if finding else None}
 
 
 class ExceptionBody(InputModel):
     version: int = Field(ge=1)
-    state: Literal["OPEN", "INVESTIGATING", "WAITING_EXTERNAL", "RESOLVED", "ACCEPTED", "FALSE_POSITIVE"] | None = None
+    state: Literal["OPEN", "INVESTIGATING", "PENDING_VALIDATION", "RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE"] | None = None
     owner: str | None = Field(default=None, min_length=1, max_length=120)
     root_cause: str | None = Field(default=None, max_length=10000)
     resolution: str | None = Field(default=None, max_length=10000)
+    administrative_reason: str | None = Field(default=None, max_length=10000)
     comment: str | None = Field(default=None, max_length=10000)
+
+
+class ExceptionValidationBody(InputModel):
+    version: int = Field(ge=1)
+    validation_run_id: str | None = Field(default=None, min_length=1, max_length=64)
+    comment: str | None = Field(default=None, max_length=10000)
+
+
+@router.post("/exceptions/{case_id}/validate")
+def validate_exception(case_id: str, body: ExceptionValidationBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    case = owned(db, ExceptionCase, case_id, user)
+    if case.version != body.version:
+        raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
+    if case.state != "PENDING_VALIDATION":
+        raise APIError(422, "VALIDATION_STATE_REQUIRED", "Pasa la excepción a Pendiente de validación antes de verificar la corrección.")
+    assessment = assess_exception_validation(db, case, body.validation_run_id)
+    if assessment["status"] == "INVALID_RUN":
+        raise APIError(409, "VALIDATION_RUN_OUTDATED", assessment["reason"], {"latest_run_id": assessment["candidate_run_id"]})
+    if assessment["status"] == "NO_LATER_RUN":
+        raise APIError(409, "VALIDATION_RUN_REQUIRED", assessment["reason"])
+    record_exception_validation(db, case, assessment, user.name, body.comment)
+    db.commit()
+    db.refresh(case)
+    return exception_dto(db, case)
 
 
 @router.patch("/exceptions/{case_id}")
@@ -730,21 +1089,57 @@ def update_exception(case_id: str, body: ExceptionBody, db: Session = Depends(ge
         raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
     changes = {key: value for key, value in body.model_dump(exclude={"version", "comment"}, exclude_unset=True).items() if value is not None}
     state = changes.get("state", case.state)
-    transitions = {"OPEN": {"INVESTIGATING", "WAITING_EXTERNAL", "RESOLVED", "ACCEPTED", "FALSE_POSITIVE"}, "INVESTIGATING": {"WAITING_EXTERNAL", "RESOLVED", "ACCEPTED", "FALSE_POSITIVE"}, "WAITING_EXTERNAL": {"INVESTIGATING", "RESOLVED", "ACCEPTED"}, "RESOLVED": {"OPEN"}, "ACCEPTED": {"OPEN"}, "FALSE_POSITIVE": {"OPEN"}}
+    administrative_states = {"DISCARDED", "ACCEPTED", "NOT_APPLICABLE"}
+    transitions = {
+        "OPEN": {"INVESTIGATING", *administrative_states},
+        "INVESTIGATING": {"PENDING_VALIDATION", *administrative_states},
+        "PENDING_VALIDATION": {"INVESTIGATING", "RESOLVED", *administrative_states},
+        "RESOLVED": {"OPEN"},
+        "DISCARDED": {"OPEN"},
+        "ACCEPTED": {"OPEN"},
+        "NOT_APPLICABLE": {"OPEN"},
+        # Historical states remain operable without creating new records in them.
+        "WAITING_EXTERNAL": {"INVESTIGATING", "PENDING_VALIDATION", *administrative_states},
+        "FALSE_POSITIVE": {"OPEN"},
+    }
     if state != case.state and state not in transitions[case.state]:
         raise APIError(422, "INVALID_TRANSITION", "La transición de estado no está permitida.")
-    if state == "RESOLVED" and (not changes.get("root_cause", case.root_cause).strip() or not changes.get("resolution", case.resolution).strip()):
+    if state == "RESOLVED" and state != case.state and (not changes.get("root_cause", case.root_cause).strip() or not changes.get("resolution", case.resolution).strip()):
         raise APIError(422, "RESOLUTION_REQUIRED", "Para resolver, registra causa raíz y resolución.")
-    if state in {"ACCEPTED", "FALSE_POSITIVE"} and not changes.get("resolution", case.resolution).strip():
-        raise APIError(422, "RESOLUTION_REQUIRED", "Registra la justificación de esta decisión.")
-    changes.update(version=case.version + 1, updated_at=utcnow(), events=[*case.events, {"timestamp": iso(utcnow()), "actor": user.name, "actor_type": "USER", "actor_id": user.id, "from_state": case.state, "to_state": state, "comment": body.comment or "Excepción actualizada"}])
+    assessment = None
+    if state == "RESOLVED" and state != case.state:
+        assessment = assess_exception_validation(db, case)
+        if not assessment["can_resolve"]:
+            raise APIError(422, "TECHNICAL_VALIDATION_REQUIRED", assessment["reason"], assessment)
+        changes["validation_run_id"] = assessment["validation_run_id"]
+        changes["validated_at"] = utcnow()
+        changes["validation_evidence"] = assessment["evidence"]
+    if state in administrative_states and state != case.state:
+        reason = changes.get("administrative_reason", case.administrative_reason).strip()
+        if not reason:
+            raise APIError(422, "ADMINISTRATIVE_REASON_REQUIRED", "Registra el motivo del cierre administrativo.")
+    if state != case.state and state in {"OPEN", "INVESTIGATING", "PENDING_VALIDATION"}:
+        changes.update(validation_run_id=None, validated_at=None, validation_evidence={})
+    now = utcnow()
+    changes.update(version=case.version + 1, updated_at=now, events=[*(case.events or []), {
+        "timestamp": iso(now), "actor": user.name, "actor_type": "USER", "actor_id": user.id,
+        "from_state": case.state, "to_state": state, "event_type": "STATE_CHANGE" if state != case.state else "CASE_UPDATED",
+        "comment": body.comment or "Excepción actualizada",
+        "validation_run_id": assessment["validation_run_id"] if assessment else None,
+        "administrative_reason": changes.get("administrative_reason") if state in administrative_states else None,
+    }])
     result = db.execute(update(ExceptionCase).where(ExceptionCase.id == case.id, ExceptionCase.version == body.version).values(**changes).execution_options(synchronize_session=False))
     if cast(CursorResult, result).rowcount != 1:
         raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
-    audit(db, "EXCEPTION_UPDATED", "exception", case.id, f"{case.display_id}: {state}", user.name, user.organization_id, {"from_state": case.state, "to_state": state})
+    audit(db, "EXCEPTION_UPDATED", "exception", case.id, f"{case.display_id}: {state}", user.name, user.organization_id, {
+        "from_state": case.state, "to_state": state, "configuration_id": case.configuration_id,
+        "origin_run_id": case.run_id,
+        "validation_run_id": assessment["validation_run_id"] if assessment else None,
+        "closure_type": "TECHNICAL" if state == "RESOLVED" else "ADMINISTRATIVE" if state in administrative_states else None,
+    })
     db.commit()
     db.refresh(case)
-    return exception_dto(case)
+    return exception_dto(db, case)
 
 
 @router.get("/audit-events")
@@ -794,33 +1189,24 @@ def engines():
 
 
 @router.get("/dashboard")
-def dashboard(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    dataset_rows = scoped(db, Dataset, user)
-    run_rows = scoped(db, Run, user)
-    cases = scoped(db, ExceptionCase, user)
-    version_rows = scoped(db, DatasetVersion, user)
-    latest_by_config: dict[str, Run] = {}
-    for run in run_rows:
-        if run.status == "SUCCESS":
-            latest_by_config.setdefault(run.config_id, run)
-    checks, passing = 0, 0
-    for run in latest_by_config.values():
-        if run.module == "sentinel":
-            checks += run.metrics.get("total_checks", 0)
-            passing += run.metrics.get("total_checks", 0) - run.metrics.get("failed_checks", 0)
-        else:
-            checks += run.metrics.get("total_rows", 0)
-            passing += run.metrics.get("valid_rows", 0) if run.module == "intake" else run.metrics.get("matched", 0)
-    volumes: dict[str, int] = defaultdict(int)
-    for version in version_rows:
-        if version.source_type != "INTAKE_OUTPUT":
-            volumes[(iso(version.created_at) or "")[:10]] += version.row_count
-    modules = []
-    for module, name in [("intake", "Data Intake Gateway"), ("recon", "Reconciliation Hub"), ("sentinel", "Dataset Sentinel")]:
-        relevant = [run for run in latest_by_config.values() if run.module == module]
-        issues = sum(run.decision not in {"APPROVED", "CONFORME", "HEALTHY"} for run in relevant)
-        modules.append({"module": module, "name": name, "status": "ATTENTION" if issues else "HEALTHY" if relevant else "NO_DATA", "runs": sum(run.module == module for run in run_rows), "issues": issues})
-    return {"stats": {"datasets": len(dataset_rows), "total_rows": sum(dataset_dto(db, d)["row_count"] for d in dataset_rows), "runs": len(run_rows), "open_exceptions": sum(c.state in {"OPEN", "INVESTIGATING", "WAITING_EXTERNAL"} for c in cases), "health_score": round(100 * passing / checks, 1) if checks else 100}, "recent_runs": [run_dto(db, r) for r in run_rows[:8]], "activity": [audit_dto(a) for a in scoped(db, AuditEvent, user)[:8]], "module_status": modules, "volume_history": [{"date": date, "rows": count} for date, count in sorted(volumes.items())[-14:]], "organization_name": "Trackvance Demo", "prototype": True}
+def dashboard(
+    period: Literal["7d", "30d", "90d", "all"] = "30d",
+    dataset_id: str | None = None,
+    module: Literal["intake", "recon", "sentinel"] | None = None,
+    status: Literal["ATTENTION", "HEALTHY", "IN_PROGRESS", "TECHNICAL_FAILURE"] | None = None,
+    criticality: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"] | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    if dataset_id:
+        owned(db, Dataset, dataset_id, user)
+    return build_dashboard(db, user.organization_id, DashboardFilters(
+        period=period,
+        dataset_id=dataset_id,
+        module=module,
+        status=status,
+        criticality=criticality,
+    ))
 
 
 class ConfigurationVersionBody(InputModel):

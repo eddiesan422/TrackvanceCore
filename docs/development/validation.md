@@ -1,6 +1,6 @@
-# Validación del ciclo de correcciones 0.2.0
+# Validación del ciclo de correcciones 0.3.0
 
-Fecha de cierre: 14 de septiembre de 2026. Aplicación disponible en
+Última verificación: 16 de septiembre de 2026. Aplicación disponible en
 **http://localhost:3100**, proyecto Docker `trackvance-certification`.
 
 Se leyeron completos los tres PDF obligatorios: especificación v1.1 (52 páginas),
@@ -10,17 +10,18 @@ informe integral (10) y pruebas pendientes (5). Se conserva el monolito modular.
 
 | Verificación | Resultado |
 | --- | --- |
-| Backend pytest | 140 pruebas aprobadas |
-| Operaciones pytest | 5 pruebas aprobadas |
+| Backend pytest | 222 pruebas aprobadas |
+| Operaciones pytest | 11 pruebas aprobadas; total pytest 233 |
 | Ruff backend/tests/scripts | Aprobado |
-| Mypy backend | Aprobado, 18 módulos |
+| Mypy backend | Aprobado, 22 módulos |
 | Frontend ESLint / TypeScript / build | Aprobados |
-| Frontend Vitest | 42 pruebas, 7 archivos, aprobadas |
-| Playwright en Docker/PostgreSQL | 5 flujos aprobados |
-| Smoke API en Docker | 65 comprobaciones aprobadas |
+| Frontend Vitest | 67 pruebas, 8 archivos, aprobadas |
+| Playwright en Docker/PostgreSQL | 13 flujos aprobados (40,4 s) |
+| Smoke API en Docker | 84 comprobaciones aprobadas |
 | Doctor | 7/7 correcto |
 | Alembic | Upgrade, downgrade y paridad SQLite/PostgreSQL aprobados |
-| Reinicio Docker | Registros y hashes idénticos; 81 artifacts verificados |
+| Reinicio Docker aislado | 45 datasets, 59 versiones, 37 runs y 173 artifacts idénticos |
+| Rebuild de instalación principal | 7 datasets, 12 versiones, 10 runs, 1 excepción y 39 artifacts preservados; cuatro servicios healthy, restart=no |
 | XLSX | Tres informes reales; 12 hojas inspeccionadas, formatos/filtros/inyección verificados |
 
 Los tests emiten dos avisos de deprecación de Starlette/AnyIO; no son fallos de
@@ -36,7 +37,7 @@ aplicación. GitHub Actions quedó preparado, pero no se ejecutó remotamente.
 | Sentinel baseline | 110 filas, 9 checks, 0 fallos, 100 % |
 | Sentinel v2 | 90 filas, volumen -18,18 %, 4 fallos, 55,56 % |
 | Sentinel v3 | 90 filas, source_system ausente, 1 fallo, 88,89 % |
-| Excepciones | OPEN → INVESTIGATING → RESOLVED, versiones/timeline/origen conservados |
+| Excepciones | OPEN → INVESTIGATING → PENDING_VALIDATION → RESOLVED solo después de un run posterior conforme; configuración, runs y timeline conservados. Cierre administrativo separado con motivo obligatorio |
 | Auditoría | Eventos originales más export/download con actor estable y request/run |
 
 La discrepancia 44/43 se debía al trim del lector anterior; nuevas cargas
@@ -57,16 +58,32 @@ cuentan 44 observaciones. Los perfiles históricos se preservan como legacy.
   corrupción, líneas CSV físicas y reutilización de configuración Recon.
 - `test_planner.py`, `test_migrations.py`, `test_api_worker.py`: preflight,
   migrations, sesiones/CSRF, recuperación de lease, cancelación y concurrencia.
+- `test_exception_validation.py`: matriz de validación para Intake, ReconOps y
+  Sentinel, protección frente a runs obsoletos, trazabilidad, cierre
+  administrativo y lectura de históricos.
 - `scripts/tests/test_operations.py`: backup/restore, WAL, hashes y destinos.
+- `test_architecture_ports.py`: contratos de storage/fuente/ejecución/cola y
+  sustitución de adaptadores. Un provider de prueba con locators opacos
+  `test-object://` recorre carga, perfil, esquema, worker, output derivado,
+  resultados, manifiesto y XLSX; detectó y corrigió una lectura directa del
+  path canónico en el endpoint de perfil.
+- `scripts/tests/test_docker_e2e_cycle.py`: protege instalaciones existentes,
+  rechaza el nombre del proyecto principal y limita la limpieza a recursos
+  nuevos del proyecto aislado, incluso si falla el arranque.
 - Componentes y E2E detallados en [validación frontend](frontend-validation.md).
 
-Playwright cubre upload, Intake not_future, VALUE_MISMATCH, excepción/resolución,
+Playwright cubre upload, Intake not_future, VALUE_MISMATCH, excepción con bloqueo,
+validación técnica por una ejecución Recon posterior, trazabilidad entre ambos
+runs, resolución verificada y cierre administrativo separado,
 schema drift Sentinel, download XLSX/status/filename, tres módulos históricos,
 vista móvil y publicación/ejecución de tres formularios de reglas.
+El ciclo actual añade carga UI de CSV, XLSX con selección de hoja, JSON,
+Parquet y TXT con delimitador, además del recorrido de navegación completo.
 
 ## Preservación y operación
 
-La migración nueva es `0002_evidence_v2`; `0001_initial.py` conserva su hash.
+La migración más reciente es `0004_exception_validation`; las migraciones ya
+aplicadas conservan su hash.
 El snapshot de la SQLite previa conservó todas sus columnas históricas en
 10 datasets, 20 versiones, 9 configuraciones, 25 runs, 67 findings,
 13 excepciones y 108 eventos. Docker usa PostgreSQL y volúmenes propios;
@@ -77,6 +94,15 @@ API/worker/PostgreSQL operan en red interna. Nginx puede tener salida en Docker
 Desktop; no se certifica bloqueo total de red del host. No hay llamadas cloud
 obligatorias. Reinicio sin borrar volúmenes y comparación estricta de huellas
 pasaron. Backup/restauración SQLite WAL también pasó en destino nuevo.
+
+El ciclo de arquitectura se ejecutó con
+`python scripts/tests/docker_e2e_cycle.py` en proyectos `trackvance-e2e-*`
+temporales. Sus volúmenes se eliminaron al terminar. La evidencia final está en
+`.codex-local/architecture-e2e/verified-cycle.log` y
+`.codex-local/architecture-e2e/trackvance-e2e-architecture-verified/`.
+La comparación de la instalación principal está en
+`.codex-local/architecture-alignment/before.json` y `after.json`; todas las
+huellas coinciden. Las pruebas no agregaron datos a la instalación del usuario.
 
 ## Entregables
 
@@ -107,4 +133,8 @@ por API, según el alcance documentado del editor.
 
 Capturas: [Intake](../../outputs/corrections/screenshots/intake-excel-button.png), [ReconOps](../../outputs/corrections/screenshots/recon-excel-button.png), [Sentinel](../../outputs/corrections/screenshots/sentinel-excel-button.png), [versión derivada](../../outputs/corrections/screenshots/derived-version.png).
 
-Durante la validación se corrigieron un path Alembic instalado en Docker, roundtrip de metadata vacía en Recon, selectores E2E ambiguos y la selección inestable del fixture del smoke; las repeticiones finales se registran arriba.
+Durante la validación se corrigieron un path Alembic instalado en Docker,
+roundtrip de metadata vacía en Recon, selectores E2E ambiguos y la selección
+inestable del fixture del smoke. En el ciclo de arquitectura se corrigieron
+además dos selectores de los nuevos E2E y la dependencia de path del perfil;
+las repeticiones finales completas se registran arriba.

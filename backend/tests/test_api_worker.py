@@ -6,8 +6,17 @@ from pathlib import Path
 from sqlalchemy import select
 
 from trackvance.db import utcnow
-from trackvance.models import AuditEvent, AuthSession, Dataset, DatasetVersion, Finding, Job, Run
-from trackvance.services import create_exception
+from trackvance.models import (
+    AuditEvent,
+    AuthSession,
+    Configuration,
+    Dataset,
+    DatasetVersion,
+    Finding,
+    Job,
+    Run,
+)
+from trackvance.services import create_exception, create_version, enqueue
 from trackvance.worker import process_once
 
 
@@ -128,7 +137,7 @@ def test_cancelled_queue_is_never_processed(authenticated, queued_intake):
     assert authenticated.post(url).status_code == 409
 
 
-def test_exception_version_conflicts_transitions_and_resolution_requirements(authenticated, database, queued_intake):
+def test_exception_version_conflicts_transitions_and_resolution_requirements(authenticated, database, queued_intake, tmp_path):
     assert process_once("test-worker") is True
     with database() as db:
         finding = db.scalar(select(Finding).where(Finding.run_id == queued_intake["run_id"]))
@@ -143,16 +152,44 @@ def test_exception_version_conflicts_transitions_and_resolution_requirements(aut
     assert response.json()["version"] == 2
     stale = authenticated.patch(url, json={"version": 1, "owner": "Stale writer"})
     assert stale.status_code == 409 and stale.json()["error"]["code"] == "VERSION_CONFLICT"
-    incomplete = authenticated.patch(url, json={"version": 2, "state": "RESOLVED"})
-    assert incomplete.status_code == 422 and incomplete.json()["error"]["code"] == "RESOLUTION_REQUIRED"
-    resolved = authenticated.patch(url, json={"version": 2, "state": "RESOLVED", "root_cause": "Invalid source amount", "resolution": "Source file corrected"})
-    assert resolved.status_code == 200 and resolved.json()["version"] == 3
-    forbidden = authenticated.patch(url, json={"version": 3, "state": "INVESTIGATING"})
-    assert forbidden.status_code == 422 and forbidden.json()["error"]["code"] == "INVALID_TRANSITION"
-    reopened = authenticated.patch(url, json={"version": 3, "state": "OPEN", "comment": "Recheck"})
-    assert reopened.status_code == 200 and reopened.json()["version"] == 4
+    direct = authenticated.patch(url, json={"version": 2, "state": "RESOLVED", "root_cause": "Invalid source amount", "resolution": "Source file corrected"})
+    assert direct.status_code == 422 and direct.json()["error"]["code"] == "INVALID_TRANSITION"
+    pending = authenticated.patch(url, json={"version": 2, "state": "PENDING_VALIDATION"})
+    assert pending.status_code == 200 and pending.json()["version"] == 3
+    unverified = authenticated.patch(url, json={"version": 3, "state": "RESOLVED", "root_cause": "Invalid source amount", "resolution": "Source file corrected"})
+    assert unverified.status_code == 422
+    assert unverified.json()["error"]["code"] == "TECHNICAL_VALIDATION_REQUIRED"
+
+    corrected = tmp_path / "corrected-orders.csv"
+    corrected.write_text("order_id,amount\nA,12.25\nB,1\nC,2\n", encoding="utf-8")
+    with database() as db:
+        origin = db.get(Run, queued_intake["run_id"])
+        dataset = db.get(DatasetVersion, origin.dataset_version_id)
+        corrected_version = create_version(db, db.get(Dataset, dataset.dataset_id), corrected, corrected.name)
+        validation_run = enqueue(db, db.get(Configuration, origin.config_id), corrected_version, None, "Test User")
+        db.commit()
+        validation_run_id = validation_run.id
+    assert process_once("validation-worker") is True
+    validated = authenticated.get(url).json()
+    assert validated["version"] == 4
+    assert validated["technical_validation"]["can_resolve"] is True
+    assert validated["validation_run_id"] == validation_run_id
+    resolved = authenticated.patch(url, json={"version": 4, "state": "RESOLVED", "root_cause": "Invalid source amount", "resolution": "Source file corrected"})
+    assert resolved.status_code == 200 and resolved.json()["version"] == 5
+    assert resolved.json()["technical_validation"]["status"] == "VALIDATED"
+    reopened = authenticated.patch(url, json={"version": 5, "state": "OPEN", "comment": "Recheck"})
+    assert reopened.status_code == 200 and reopened.json()["version"] == 6
+    no_reason = authenticated.patch(url, json={"version": 6, "state": "ACCEPTED"})
+    assert no_reason.status_code == 422
+    assert no_reason.json()["error"]["code"] == "ADMINISTRATIVE_REASON_REQUIRED"
+    accepted = authenticated.patch(url, json={"version": 6, "state": "ACCEPTED", "administrative_reason": "Riesgo documentado"})
+    assert accepted.status_code == 200 and accepted.json()["version"] == 7
     current = authenticated.get(url).json()
     assert current["owner"] == "Analyst"
     assert [(event["from_state"], event["to_state"]) for event in current["events"]] == [
-        (None, "OPEN"), ("OPEN", "INVESTIGATING"), ("INVESTIGATING", "RESOLVED"), ("RESOLVED", "OPEN")]
+        (None, "OPEN"), ("OPEN", "INVESTIGATING"),
+        ("INVESTIGATING", "PENDING_VALIDATION"),
+        ("PENDING_VALIDATION", "PENDING_VALIDATION"),
+        ("PENDING_VALIDATION", "RESOLVED"), ("RESOLVED", "OPEN"),
+        ("OPEN", "ACCEPTED")]
     assert "Stale writer" not in json.dumps(current)

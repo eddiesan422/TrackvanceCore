@@ -20,6 +20,7 @@ def check() -> dict:
     from alembic.config import Config
     from alembic.migration import MigrationContext
     from sqlalchemy.engine import make_url
+
     from trackvance import models  # noqa: F401
     from trackvance.config import BACKEND_DIR, DATABASE_URL
     from trackvance.db import Base

@@ -81,8 +81,12 @@ def test_certified_business_cycle_and_reports(authenticated, database):
     finding_id = recon["findings"][0]["id"]
     case = client.post(f'/api/v1/findings/{finding_id}/exceptions').json()
     case = client.patch(f"/api/v1/exceptions/{case['id']}", json={"version": case["version"], "state": "INVESTIGATING", "owner": "Test User"}).json()
-    case = client.patch(f"/api/v1/exceptions/{case['id']}", json={"version": case["version"], "state": "RESOLVED", "root_cause": "Duplicados en la fuente", "resolution": "Corregir próxima entrega"}).json()
-    assert case["version"] == 3 and case["state"] == "RESOLVED" and case["run_id"] == recon["id"] and len(case["events"]) == 3
+    case = client.patch(f"/api/v1/exceptions/{case['id']}", json={
+        "version": case["version"],
+        "state": "ACCEPTED",
+        "administrative_reason": "Riesgo aceptado para certificar el cierre administrativo separado.",
+    }).json()
+    assert case["version"] == 3 and case["state"] == "ACCEPTED" and case["run_id"] == recon["id"] and len(case["events"]) == 3
     with database() as db:
         events = db.scalars(select(AuditEvent)).all()
         kinds = {e.event_type for e in events}

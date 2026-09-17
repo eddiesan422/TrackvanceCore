@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/health": {
@@ -326,6 +326,72 @@
         ]
       }
     },
+    "/api/v1/datasets/uploads/inspect": {
+      "post": {
+        "summary": "Inspect Dataset Upload",
+        "description": "Inspect a bounded sample/embedded schema before creating an immutable version.",
+        "operationId": "inspect_dataset_upload_api_v1_datasets_uploads_inspect_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetFileInspection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/datasets/{dataset_id}": {
       "get": {
         "summary": "Dataset Detail",
@@ -347,6 +413,73 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ]
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/schema": {
+      "get": {
+        "summary": "Dataset Schema",
+        "description": "Return the latest immutable version schema without scanning business rows.\n\nThe default response uses the profile captured when the version was created.\nAn explicit refresh reads only the canonical Parquet footer and combines its\nphysical types with the persisted logical inference.",
+        "operationId": "dataset_schema_api_v1_datasets__dataset_id__schema_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetSchemaResponse"
+                }
               }
             }
           },
@@ -2025,6 +2158,78 @@
         ]
       }
     },
+    "/api/v1/exceptions/{case_id}/validate": {
+      "post": {
+        "summary": "Validate Exception",
+        "operationId": "validate_exception_api_v1_exceptions__case_id__validate_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExceptionValidationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ]
+      }
+    },
     "/api/v1/audit-events": {
       "get": {
         "summary": "Audit Events",
@@ -2161,12 +2366,121 @@
       "get": {
         "summary": "Dashboard",
         "operationId": "dashboard_api_v1_dashboard_get",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "7d",
+                "30d",
+                "90d",
+                "all"
+              ],
+              "type": "string",
+              "default": "30d",
+              "title": "Period"
+            }
+          },
+          {
+            "name": "dataset_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "intake",
+                    "recon",
+                    "sentinel"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ATTENTION",
+                    "HEALTHY",
+                    "IN_PROGRESS",
+                    "TECHNICAL_FAILURE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "criticality",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "CRITICAL",
+                    "HIGH",
+                    "MEDIUM",
+                    "LOW"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Criticality"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           },
@@ -2580,6 +2894,25 @@
   },
   "components": {
     "schemas": {
+      "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "reader_options": {
+            "type": "string",
+            "title": "Reader Options",
+            "default": "{}"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post"
+      },
       "Body_upload_version_api_v1_datasets__dataset_id__versions_upload_post": {
         "properties": {
           "file": {
@@ -2590,6 +2923,11 @@
           "column_overrides": {
             "type": "string",
             "title": "Column Overrides",
+            "default": "{}"
+          },
+          "reader_options": {
+            "type": "string",
+            "title": "Reader Options",
             "default": "{}"
           }
         },
@@ -2673,6 +3011,235 @@
         ],
         "title": "DatasetBody"
       },
+      "DatasetFileInspection": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "format_label": {
+            "type": "string",
+            "title": "Format Label"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "sheets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sheets"
+          },
+          "selected_sheet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Sheet"
+          },
+          "detected_delimiter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Delimiter"
+          },
+          "reader_options": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Reader Options"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetSchemaColumn"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "sampled_rows": {
+            "type": "integer",
+            "title": "Sampled Rows",
+            "default": 0
+          },
+          "supported_formats": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Supported Formats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "format",
+          "format_label",
+          "filename"
+        ],
+        "title": "DatasetFileInspection"
+      },
+      "DatasetSchemaColumn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "logical_type": {
+            "type": "string",
+            "title": "Logical Type"
+          },
+          "native_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Type"
+          },
+          "nullable": {
+            "type": "boolean",
+            "title": "Nullable",
+            "default": false
+          },
+          "semantic_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Tag"
+          },
+          "numeric": {
+            "type": "boolean",
+            "title": "Numeric",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "logical_type"
+        ],
+        "title": "DatasetSchemaColumn"
+      },
+      "DatasetSchemaResponse": {
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "title": "Dataset Id"
+          },
+          "dataset_name": {
+            "type": "string",
+            "title": "Dataset Name"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "schema_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Hash"
+          },
+          "version_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Created At"
+          },
+          "scan_mode": {
+            "type": "string",
+            "enum": [
+              "NO_VERSION",
+              "PERSISTED_PROFILE",
+              "CANONICAL_PARQUET_METADATA"
+            ],
+            "title": "Scan Mode"
+          },
+          "scanned_rows": {
+            "type": "integer",
+            "title": "Scanned Rows",
+            "default": 0
+          },
+          "scanned_at": {
+            "type": "string",
+            "title": "Scanned At"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetSchemaColumn"
+            },
+            "type": "array",
+            "title": "Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset_id",
+          "dataset_name",
+          "scan_mode",
+          "scanned_at"
+        ],
+        "title": "DatasetSchemaResponse"
+      },
       "ExceptionBody": {
         "properties": {
           "version": {
@@ -2687,10 +3254,11 @@
                 "enum": [
                   "OPEN",
                   "INVESTIGATING",
-                  "WAITING_EXTERNAL",
+                  "PENDING_VALIDATION",
                   "RESOLVED",
+                  "DISCARDED",
                   "ACCEPTED",
-                  "FALSE_POSITIVE"
+                  "NOT_APPLICABLE"
                 ]
               },
               {
@@ -2736,6 +3304,18 @@
             ],
             "title": "Resolution"
           },
+          "administrative_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Reason"
+          },
           "comment": {
             "anyOf": [
               {
@@ -2755,6 +3335,46 @@
           "version"
         ],
         "title": "ExceptionBody"
+      },
+      "ExceptionValidationBody": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "validation_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Run Id"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "ExceptionValidationBody"
       },
       "HTTPValidationError": {
         "properties": {

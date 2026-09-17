@@ -35,6 +35,11 @@ volúmenes. No se debe usar `down -v` para reiniciar o actualizar una instalaci�
 El prototipo nativo usa `.local/trackvance.db` y `.local/storage`; ese entorno no
 es la base PostgreSQL de Docker y no se modifica al arrancar Compose.
 
+Los cuatro servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
+Windows sin levantar Trackvance; el proyecto permanece detenido hasta ejecutar
+manualmente `docker compose up -d --wait` desde la raíz. Para apagarlo sin borrar
+contenedores ni volúmenes se utiliza `docker compose stop`.
+
 ## Readiness y diagnósticos
 
 `GET /api/v1/health/ready` verifica conexión SQL, revisión Alembic y una escritura
@@ -73,14 +78,17 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La corrección añade `0002_evidence_v2`, sin modificar `0001_initial`. La API aplica
-las migraciones al iniciar. En bases SQLite previas sin tabla Alembic, el adaptador
+La revisión actual llega a `0004_exception_validation`, precedida por
+`0001_initial`, `0002_evidence_v2` y `0003_dataset_ingestion_metadata`. Las
+correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
+puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
+En bases SQLite previas sin tabla Alembic, el adaptador
 solo adopta un schema original reconocido o uno que coincida con el modelo actual;
 un schema desconocido exige revisión y no se modifica a ciegas.
 
 `scripts/check_postgres_migrations.py` usa `DATABASE_URL` del backend, crea una base
-temporal de nombre aleatorio y comprueba upgrade v1→v2 con datos históricos, actors,
-paridad con modelos y un ciclo downgrade/upgrade. El downgrade se realiza solamente
+temporal de nombre aleatorio y comprueba upgrade desde v1 hasta head con datos
+históricos, actores, paridad con modelos y un ciclo downgrade/upgrade. El downgrade se realiza solamente
 en esa base temporal. La base de aplicación nunca se baja de versión ni se elimina.
 El usuario PostgreSQL debe tener permiso de creación de bases para esta prueba.
 
@@ -171,6 +179,33 @@ El workflow GitHub Actions está preparado para backend, frontend, PostgreSQL y 
 Compose. Los resultados locales no implican que dicho workflow remoto ya se haya
 ejecutado; este ciclo no publica ni hace push al repositorio.
 
-## Instalación que queda encendida
+## Instalación con arranque manual
 
-El 14 de septiembre se deja el proyecto `trackvance-certification` en http://localhost:3100, con los cuatro servicios saludables y política de reinicio `unless-stopped`. La configuración local `.env` conserva proyecto, puerto y override de red interna; `docker compose ps` muestra esta instalación. No se publica su contraseña. El reinicio completo de API, worker, web y PostgreSQL conservó todas las huellas comparadas y 81 artifacts. Los snapshots están en `.codex-local/operations-evidence/pre-final-rebuild.json` y `post-final-rebuild.json`.
+El proyecto local `trackvance-certification` usa `http://localhost:3100` cuando
+está activo y conserva sus datos en volúmenes. Su política de reinicio es `no`,
+por lo que no arranca junto con Docker Desktop. La configuración `.env` conserva
+el nombre del proyecto, puerto y override de red interna; no se publica su
+contraseña. Los snapshots históricos de persistencia están en
+`.codex-local/operations-evidence/pre-final-rebuild.json` y
+`post-final-rebuild.json`.
+
+## Revisión de arquitectura - 16 de septiembre de 2026
+
+El rebuild de la instalación principal conservó exactamente las huellas de
+7 datasets, 12 versiones, 7 configuraciones, 10 runs, 21 findings, 1 excepción,
+49 eventos de auditoría, 102 métricas y 39 artifacts. La comparación está en
+`.codex-local/architecture-alignment/before.json` y `after.json`.
+API, worker, web y PostgreSQL quedaron saludables; los cuatro conservan
+`restart=no`. La aplicación queda activa en localhost:3100, sin arranque
+automático cuando se reinicie Docker Desktop.
+
+Para repetir todo el ciclo sin datos de prueba en la instalación habitual:
+
+```powershell
+python scripts/tests/docker_e2e_cycle.py
+```
+
+El runner genera un nombre `trackvance-e2e-*` y puerto libre, rechaza recursos
+preexistentes, construye los contenedores y ejecuta doctor, migraciones,
+smoke, Playwright y comparación de hashes tras restart. Al finalizar elimina
+solo ese proyecto y sus volúmenes. Guarda evidencia en `.codex-local/`.

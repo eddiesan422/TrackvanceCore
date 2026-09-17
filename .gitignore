@@ -9,6 +9,8 @@ data/
 backend/storage/
 backups/
 restored/
+outputs/
+tmp/
 *.sqlite
 *.sqlite3
 *.db

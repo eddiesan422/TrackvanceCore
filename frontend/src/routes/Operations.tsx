@@ -1,17 +1,38 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Activity, ArrowUpRight, BookOpen, Check, ClipboardList, Cpu, RefreshCw, ShieldCheck, Users } from 'lucide-react'
+import { Activity, ArrowUpRight, Ban, BookOpen, Check, CheckCircle2, ClipboardList, Cpu, RefreshCw, ShieldCheck, Users } from 'lucide-react'
 import { api } from '../api/client'
 import type { Collection, RecordData } from '../api/client'
 import { Badge, date, Empty, ErrorState, Field, label, Loading, Modal, Notice, number, PageHeading, SearchBox } from '../components/ui'
 
-const states = ['OPEN', 'INVESTIGATING', 'WAITING_EXTERNAL', 'RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE']
-const transitions: Record<string, string[]> = {
-  OPEN: ['INVESTIGATING', 'WAITING_EXTERNAL', 'RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE'],
-  INVESTIGATING: ['WAITING_EXTERNAL', 'RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE'],
-  WAITING_EXTERNAL: ['INVESTIGATING', 'RESOLVED', 'ACCEPTED'],
-  RESOLVED: ['OPEN'], ACCEPTED: ['OPEN'], FALSE_POSITIVE: ['OPEN'],
+const states = ['OPEN', 'INVESTIGATING', 'PENDING_VALIDATION', 'RESOLVED', 'DISCARDED', 'ACCEPTED', 'NOT_APPLICABLE', 'WAITING_EXTERNAL', 'FALSE_POSITIVE']
+const workflowTransitions: Record<string, string[]> = {
+  OPEN: ['INVESTIGATING'],
+  INVESTIGATING: ['PENDING_VALIDATION'],
+  PENDING_VALIDATION: ['INVESTIGATING'],
+  WAITING_EXTERNAL: ['INVESTIGATING', 'PENDING_VALIDATION'],
+}
+const administrativeStates = ['DISCARDED', 'ACCEPTED', 'NOT_APPLICABLE']
+
+function exceptionRunId(item: RecordData) {
+  return item.origin_run_id || item.run_id
+}
+
+function technicalValidation(item: RecordData) {
+  const validation = item.technical_validation || {}
+  const validationRunId = validation.validation_run_id || item.validation_run_id
+  const validated = validation.validated === true || validation.status === 'VALIDATED'
+  return {
+    status: validation.status || (validated ? 'VALIDATED' : 'NOT_REQUESTED'),
+    eligible: Boolean(validation.eligible),
+    validated,
+    canResolve: validated && Boolean(validation.can_resolve ?? true),
+    reason: validation.reason || (validated ? 'Una ejecución posterior confirmó que el problema ya no está presente.' : 'Se requiere una ejecución posterior del mismo control que confirme la corrección.'),
+    validationRunId,
+    validatedAt: validation.validated_at || item.validated_at,
+    evidence: validation.evidence || item.validation_evidence,
+  }
 }
 
 function ExceptionEditor({ item, onSaved }: { item: RecordData; onSaved: () => void }) {
@@ -19,25 +40,69 @@ function ExceptionEditor({ item, onSaved }: { item: RecordData; onSaved: () => v
   const [state, setState] = useState(item.state), [owner, setOwner] = useState(item.owner)
   const [cause, setCause] = useState(item.root_cause || ''), [resolution, setResolution] = useState(item.resolution || '')
   const [comment, setComment] = useState('')
+  const [administrativeState, setAdministrativeState] = useState(''), [administrativeReason, setAdministrativeReason] = useState(item.administrative_reason || '')
+  const validation = technicalValidation(item)
+  const originRunId = exceptionRunId(item)
+  const refresh = () => {
+    cache.invalidateQueries({ queryKey: ['exceptions'] })
+    cache.invalidateQueries({ queryKey: ['exception', item.id] })
+    cache.invalidateQueries({ queryKey: ['dashboard'] })
+    cache.invalidateQueries({ queryKey: ['audit'] })
+    onSaved()
+  }
   const update = useMutation({
     mutationFn: () => api(`/exceptions/${item.id}`, { method: 'PATCH', body: JSON.stringify({ version: item.version, state, owner, root_cause: cause, resolution, comment }) }),
-    onSuccess: () => {
-      cache.invalidateQueries({ queryKey: ['exceptions'] })
-      cache.invalidateQueries({ queryKey: ['exception', item.id] })
-      cache.invalidateQueries({ queryKey: ['dashboard'] })
-      cache.invalidateQueries({ queryKey: ['audit'] })
-      onSaved()
-    },
+    onSuccess: refresh,
   })
+  const validate = useMutation({
+    mutationFn: () => api(`/exceptions/${item.id}/validate`, { method: 'POST', body: JSON.stringify({ version: item.version }) }),
+    onSuccess: refresh,
+  })
+  const resolve = useMutation({
+    mutationFn: () => api(`/exceptions/${item.id}`, { method: 'PATCH', body: JSON.stringify({ version: item.version, state: 'RESOLVED', owner, root_cause: cause, resolution, comment }) }),
+    onSuccess: refresh,
+  })
+  const administrativeClose = useMutation({
+    mutationFn: () => api(`/exceptions/${item.id}`, { method: 'PATCH', body: JSON.stringify({ version: item.version, state: administrativeState, owner, root_cause: cause, administrative_reason: administrativeReason, comment }) }),
+    onSuccess: refresh,
+  })
+  const reopen = useMutation({
+    mutationFn: () => api(`/exceptions/${item.id}`, { method: 'PATCH', body: JSON.stringify({ version: item.version, state: 'OPEN', comment: comment || 'Excepción reabierta' }) }),
+    onSuccess: refresh,
+  })
+  const terminal = ['RESOLVED', ...administrativeStates, 'FALSE_POSITIVE'].includes(item.state)
+  const workflowOptions = terminal ? [item.state] : [item.state, ...(workflowTransitions[item.state] || [])].filter((value, index, values) => !administrativeStates.includes(value) && value !== 'RESOLVED' && value !== 'FALSE_POSITIVE' && values.indexOf(value) === index)
+  const workflowDirty = state !== item.state || owner !== item.owner || cause !== (item.root_cause || '') || resolution !== (item.resolution || '') || comment.length > 0
+  const resolveFieldsComplete = cause.trim().length > 0 && resolution.trim().length > 0
+  const resolveBlockedReason = item.state !== 'PENDING_VALIDATION' ? 'La excepción debe estar en Pendiente de validación antes de resolverse.' : !validation.canResolve ? validation.reason : !resolveFieldsComplete ? 'Registra la causa raíz y la corrección aplicada antes de resolver.' : ''
+  const validationBlockedReason = item.state !== 'PENDING_VALIDATION'
+    ? 'Guarda primero el estado Pendiente de validación.'
+    : !validation.eligible && !validation.validated ? validation.reason : ''
+  const actionError = update.error || validate.error || resolve.error || administrativeClose.error || reopen.error
   return <form className="form-stack" onSubmit={event => { event.preventDefault(); update.mutate() }}>
-    <div className="detail-summary"><Badge value={item.severity}/><Badge value={item.state}/><span>{label(item.module)}</span><Link to={`/runs/${item.run_id}`} className="text-link">Ver ejecución de origen <ArrowUpRight size={15}/></Link></div>
-    <div className="form-grid"><Field label="Estado"><select value={state} onChange={event => setState(event.target.value)}>{[item.state, ...(transitions[item.state] || [])].map(value => <option key={value} value={value}>{label(value)}</option>)}</select></Field><Field label="Responsable"><input required maxLength={120} value={owner} onChange={event => setOwner(event.target.value)}/></Field></div>
-    <Field label="Causa raíz" hint="Describe por qué ocurrió la diferencia."><textarea rows={3} maxLength={10000} value={cause} onChange={event => setCause(event.target.value)} required={state === 'RESOLVED'}/></Field>
-    <Field label="Resolución o justificación"><textarea rows={3} maxLength={10000} value={resolution} onChange={event => setResolution(event.target.value)} required={['RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE'].includes(state)}/></Field>
-    <Field label="Comentario para el historial"><input maxLength={10000} value={comment} onChange={event => setComment(event.target.value)} placeholder="Qué cambió en esta revisión"/></Field>
-    {update.error && <ErrorState error={update.error} retry={() => cache.invalidateQueries({ queryKey: ['exception', item.id] })}/>}
-    <div className="modal-footer"><span className="muted">Versión {item.version} · {date(item.updated_at)}</span><button className="button primary" disabled={update.isPending}><Check size={16}/>{update.isPending ? 'Guardando…' : 'Guardar cambios'}</button></div>
-    <section className="case-history"><h3>Historial de la excepción</h3>{[...(item.events || [])].reverse().map((event: RecordData, index: number) => <div className="history-event" key={`${event.timestamp}-${index}`}><Activity size={16}/><div><strong>{event.actor} · {label(event.to_state)}</strong><p>{event.comment}</p><small>{date(event.timestamp)}</small></div></div>)}</section>
+    <div className="detail-summary"><Badge value={item.severity}/><Badge value={item.state}/><span>{label(item.module)}</span>{originRunId && <Link to={`/runs/${originRunId}`} className="text-link">Ver ejecución de origen <ArrowUpRight size={15}/></Link>}</div>
+    <section className="exception-origin" aria-label="Origen de la excepción">
+      <div><span>Control o configuración</span><strong>{item.configuration_name || 'Configuración histórica'}</strong>{item.configuration_version && <small>Versión {item.configuration_version}</small>}</div>
+      <div><span>ID de configuración</span><strong className="mono">{item.configuration_id || 'No disponible en registros históricos'}</strong></div>
+      <div><span>Ejecución de origen</span>{originRunId ? <Link to={`/runs/${originRunId}`} className="text-link mono">{originRunId} <ArrowUpRight size={13}/></Link> : <strong>—</strong>}</div>
+    </section>
+    <div className="form-grid"><Field label="Estado de gestión"><select value={state} onChange={event => setState(event.target.value)} disabled={terminal}>{workflowOptions.map(value => <option key={value} value={value}>{label(value)}</option>)}</select></Field><Field label="Responsable"><input required maxLength={120} value={owner} onChange={event => setOwner(event.target.value)} disabled={terminal}/></Field></div>
+    <Field label="Causa raíz" hint="Describe por qué ocurrió la diferencia."><textarea rows={3} maxLength={10000} value={cause} onChange={event => setCause(event.target.value)} disabled={terminal}/></Field>
+    <Field label="Corrección aplicada" hint="Describe el cambio que una ejecución posterior debe confirmar."><textarea rows={3} maxLength={10000} value={resolution} onChange={event => setResolution(event.target.value)} disabled={terminal}/></Field>
+    <Field label="Comentario para el historial"><input maxLength={10000} value={comment} onChange={event => setComment(event.target.value)} placeholder="Qué cambió en esta revisión" disabled={terminal}/></Field>
+    {(!terminal || item.state === 'RESOLVED') && <section className={`technical-validation ${validation.validated ? 'validated' : ''} ${item.state === 'RESOLVED' && !validation.validated ? 'historical' : ''}`} aria-labelledby="technical-validation-title">
+      <div className="validation-heading"><span className="validation-icon">{validation.validated ? <CheckCircle2 size={19}/> : <ShieldCheck size={19}/>}</span><div><h3 id="technical-validation-title">Validación técnica</h3><p>{validation.validated ? 'Trackvance verificó la corrección en una ejecución posterior del mismo control.' : item.state === 'RESOLVED' ? 'Este cierre se registró antes de que Trackvance exigiera evidencia técnica estructurada.' : 'La excepción solo podrá resolverse cuando una ejecución posterior confirme que el hallazgo desapareció.'}</p></div><Badge value={validation.status}/></div>
+      {validation.validated ? <div className="validation-result"><strong>Validada técnicamente</strong><span>{validation.reason}</span><div>{validation.validationRunId && <Link to={`/runs/${validation.validationRunId}`} className="text-link">Ver ejecución de validación <ArrowUpRight size={14}/></Link>}{validation.validatedAt && <small>{date(validation.validatedAt)}</small>}</div></div> : item.state === 'RESOLVED' ? <div className="validation-blocked"><Ban size={16}/><div><strong>Cierre histórico sin evidencia técnica estructurada</strong><p>El estado histórico se conserva, pero no se afirma que Trackvance haya verificado la corrección.</p></div></div> : <div className="validation-blocked"><Ban size={16}/><div><strong>{validation.status === 'FAILED' ? 'El problema sigue presente' : validation.eligible ? 'Ejecución posterior disponible' : 'Resolución bloqueada'}</strong><p>{validation.reason}</p></div></div>}
+      {validation.evidence && <details className="validation-evidence"><summary>Detalle de la evidencia técnica</summary><pre>{typeof validation.evidence === 'string' ? validation.evidence : JSON.stringify(validation.evidence, null, 2)}</pre></details>}
+      {!terminal && <><div className="validation-actions"><button className="button secondary" type="button" onClick={() => validate.mutate()} disabled={validate.isPending || validation.validated || Boolean(validationBlockedReason)} title={validationBlockedReason}>{validate.isPending ? 'Validando…' : 'Validar corrección'}</button><button className="button primary" type="button" onClick={() => resolve.mutate()} disabled={resolve.isPending || Boolean(resolveBlockedReason)} title={resolveBlockedReason}><Check size={16}/>{resolve.isPending ? 'Resolviendo…' : 'Resolver excepción'}</button></div>{resolveBlockedReason && <small className="blocked-reason" role="note">{resolveBlockedReason}</small>}</>}
+    </section>}
+    {!terminal && <details className="administrative-close"><summary>Cierre administrativo</summary><div><p>Descartar, aceptar o marcar como no aplicable exige un motivo. Esta decisión no equivale a una resolución verificada.</p><Field label="Decisión administrativa"><select value={administrativeState} onChange={event => setAdministrativeState(event.target.value)}><option value="">Selecciona una decisión</option>{administrativeStates.map(value => <option key={value} value={value}>{label(value)}</option>)}</select></Field><Field label="Motivo administrativo" hint="Explica por qué se cierra el caso sin confirmar una corrección técnica."><textarea rows={3} maxLength={10000} value={administrativeReason} onChange={event => setAdministrativeReason(event.target.value)} required={Boolean(administrativeState)}/></Field><button className="button secondary" type="button" onClick={() => administrativeClose.mutate()} disabled={administrativeClose.isPending || !administrativeState || !administrativeReason.trim()}>{administrativeClose.isPending ? 'Registrando…' : 'Registrar cierre administrativo'}</button></div></details>}
+    {item.state === 'RESOLVED' && validation.validated && <Notice success>Esta excepción fue resuelta después de una validación técnica.</Notice>}
+    {item.state === 'RESOLVED' && !validation.validated && <Notice>El cierre histórico se conserva para no alterar el historial, sin equipararlo a una resolución técnicamente validada.</Notice>}
+    {terminal && item.state !== 'RESOLVED' && <Notice>{`Esta excepción terminó mediante una decisión administrativa: ${label(item.state)}. No se considera una resolución técnica.`}</Notice>}
+    {actionError && <ErrorState error={actionError} retry={() => cache.invalidateQueries({ queryKey: ['exception', item.id] })}/>}
+    <div className="modal-footer"><span className="muted">Versión {item.version} · {date(item.updated_at)}</span>{terminal ? <button className="button secondary" type="button" onClick={() => reopen.mutate()} disabled={reopen.isPending}>{reopen.isPending ? 'Reabriendo…' : 'Reabrir excepción'}</button> : <button className="button secondary" disabled={update.isPending || !workflowDirty}><Check size={16}/>{update.isPending ? 'Guardando…' : 'Guardar gestión'}</button>}</div>
+    <section className="case-history"><h3>Historial de la excepción</h3>{[...(item.events || [])].reverse().map((event: RecordData, index: number) => <div className="history-event" key={`${event.timestamp}-${index}`}><Activity size={16}/><div><strong>{event.actor} · {event.event_type === 'TECHNICAL_VALIDATION' ? `Validación técnica · ${label(event.validation_status)}` : label(event.to_state)}</strong><p>{event.comment}</p>{event.administrative_reason && <p>Motivo administrativo: {event.administrative_reason}</p>}<div className="history-meta"><small>{date(event.timestamp)}</small>{event.validation_run_id && <Link to={`/runs/${event.validation_run_id}`} className="text-link">Ver ejecución validada <ArrowUpRight size={12}/></Link>}</div></div></div>)}</section>
   </form>
 }
 
@@ -47,7 +112,7 @@ export function ExceptionsPage() {
   const cases = useQuery({ queryKey: ['exceptions', 'list'], queryFn: () => api<Collection>('/exceptions') })
   const detail = useQuery({ queryKey: ['exception', selected], queryFn: () => api(`/exceptions/${selected}`), enabled: !!selected })
   const rows = cases.data?.items || [], filtered = rows.filter(item => `${item.title} ${item.display_id} ${item.owner}`.toLowerCase().includes(search.toLowerCase()) && (!state || item.state === state) && (!severity || item.severity === severity))
-  const open = rows.filter(item => ['OPEN', 'INVESTIGATING', 'WAITING_EXTERNAL'].includes(item.state))
+  const open = rows.filter(item => ['OPEN', 'INVESTIGATING', 'PENDING_VALIDATION', 'WAITING_EXTERNAL'].includes(item.state))
   return <><PageHeading eyebrow="DEL HALLAZGO A LA RESOLUCIÓN" title="Excepciones" description="Investiga cada diferencia, asigna un responsable y conserva las decisiones de tu equipo."/>
     <div className="compact-stats"><div><ClipboardList size={19}/><strong>{number(open.length)}</strong><span>pendientes de resolución</span></div><div><ShieldCheck size={19}/><strong>{number(rows.filter(item => item.state === 'RESOLVED').length)}</strong><span>resueltas</span></div><div><Activity size={19}/><span>Historial y evidencia en cada caso</span></div></div>
     {saved && <Notice success>Los cambios de la excepción quedaron registrados.</Notice>}
@@ -86,7 +151,7 @@ export function SettingsPage() {
     {tab === 'system' ? engines.isPending ? <Loading/> : engines.error ? <ErrorState error={engines.error} retry={() => engines.refetch()}/> : <>
       <section className="panel"><div className="panel-heading"><div><h2>Estado del procesador</h2><p>Los controles se ejecutan en un proceso local independiente.</p></div><Badge value={engines.data.worker?.status}/></div><div className="profile-stats"><div><span>Última señal</span><strong style={{ fontSize: '1rem' }}>{date(engines.data.worker?.last_seen)}</strong></div><div><span>Máximo por carga</span><strong>{number(engines.data.limits?.max_upload_mb)} <small>MiB</small></strong></div><div><span>Filas por archivo</span><strong>{number(engines.data.limits?.max_rows)}</strong></div></div></section>
       <section className="panel" style={{ marginTop: 24 }}><div className="panel-heading"><div><h2>Motores de procesamiento</h2><p>Disponibilidad efectiva de esta instalación.</p></div></div><div className="table-scroll"><table><thead><tr><th>Motor</th><th>Disponibilidad</th><th>Versión</th><th>Capacidad</th></tr></thead><tbody>{engines.data.items?.map((item: RecordData) => <tr key={item.id}><td><strong>{item.name}</strong></td><td><Badge value={item.available ? 'ACTIVE' : 'PLANNED'}>{item.available ? 'Disponible' : 'Próxima etapa'}</Badge></td><td className="mono">{item.version || '—'}</td><td>{item.description}</td></tr>)}</tbody></table></div></section>
-      <Notice>Las cargas admiten CSV UTF-8 y los informes se descargan en Excel XLSX. Las reglas avanzadas se configuran desde cada módulo. Los permisos se aplican por rol; la administración de cuentas todavía no dispone de formulario.</Notice>
+      <Notice>Las cargas admiten CSV, Excel XLSX, JSON, Parquet y TXT delimitado; los informes se descargan en Excel XLSX. Las reglas avanzadas se configuran desde cada módulo. Los permisos se aplican por rol; la administración de cuentas todavía no dispone de formulario.</Notice>
     </> : <section className="panel"><div className="panel-heading"><div><h2>Cuentas de esta organización</h2><p>Consulta de usuarios; la edición de roles queda para la siguiente etapa.</p></div></div>{users.isPending ? <Loading/> : users.error ? <ErrorState error={users.error} retry={() => users.refetch()}/> : <div className="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th></tr></thead><tbody>{users.data?.items.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.email}</td><td><Badge value={item.role}/></td></tr>)}</tbody></table></div>}</section>}
   </>
 }

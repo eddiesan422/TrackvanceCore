@@ -1,4 +1,4 @@
-# Contrato prototipo local 0.2.0
+# Contrato prototipo local 0.3.0
 
 El esquema ejecutable versionado está en [openapi.json](openapi.json). Se
 genera desde la aplicación y documenta sesión cookie, CSRF, MIME XLSX,
@@ -8,25 +8,42 @@ Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.2.0',mode:'local-prototype',demo_enabled:true}`.
+- `GET /health` → `{status:'ok',version:'0.3.0',mode:'local-prototype',demo_enabled:true}`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; también `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `{user:{id,name,email,role,permissions:[]},organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`.
 - `POST /auth/login` `{email,password}` → mismo.
 - `GET /me` → mismo.
 - `POST /auth/logout` → `{ok:true}`.
-- `GET /dashboard` → `{stats:{datasets,total_rows,runs,open_exceptions,health_score},recent_runs:Run[],activity:Audit[],module_status:[{module,name,status,runs,issues}],volume_history:[{date,rows}],organization_name,prototype:true}`. health_score = porcentaje checks/resultados conformes de últimas ejecuciones.
+- `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `health_history` desglosa salud general, Intake, ReconOps y Sentinel; `recent_runs` añade dataset, registros procesados, hallazgos, duración, estado operativo y salud cuando existen. `health_score` pondera por unidades evaluadas. `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado de negocio está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
 - `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen},limits:{max_upload_mb,max_rows},mode:'local-prototype'}`.
 
 ## Datasets
 
-`Dataset = {id,name,description,domain,owner,criticality,status,created_at,version_count,row_count,column_count,latest_version_id,updated_at}`.
+`Dataset = {id,name,description,domain,owner,criticality,status,created_at,version_count,row_count,column_count,latest_version_id,origin,origin_label,origin_source_type,updated_at}`. El origen se deriva de la última versión inmutable: `UPLOAD` se presenta como `MANUAL` / “Manual”, `INTAKE_OUTPUT` como `DATA_INTAKE` / “Data Intake” y los datasets sin versiones como `UNKNOWN` / “Sin versiones”. Tipos futuros de conectores conservan un código y una etiqueta legible.
 
-`Version = {id,dataset_id,version,filename,source_type,sha256,schema_hash,size_bytes,row_count,column_count,profile_status,created_at,schema:[{name,logical_type,nullable}],profile:{row_count,column_count,columns:[{name,logical_type,null_count,null_rate,distinct_count}]}}`.
+`Version = {id,dataset_id,version,filename,source_type,sha256,schema_hash,size_bytes,row_count,column_count,profile_status,created_at,schema:[{name,logical_type,native_type?,nullable}],profile:{row_count,column_count,columns:[{name,logical_type,null_count,null_rate,distinct_count}]},ingestion_metadata:{reader:{key,version},source_format,format_label,reader_options,row_numbering,native_schema}}`.
 
 - `GET /datasets` → lista Dataset.
-- `POST /datasets` `{name,description?:'',domain?:'Operaciones',owner?:'Equipo de datos',criticality?:'HIGH'}` → Dataset 201.
+- `POST /datasets` `{name,description?:'',domain?:'Operaciones',owner?:'Equipo de datos',criticality?:'HIGH'}` → Dataset 201. Un nombre ya usado en la organización devuelve 409 `DATASET_NAME_EXISTS` con el ID existente para orientar la carga de una versión nueva.
 - `GET /datasets/{id}` → Dataset más `{versions:Version[]}` (recientes primero).
-- `POST /datasets/{id}/versions/upload` multipart `file` CSV UTF-8 coma o punto y coma → Version 201 (profiling real sincrónico limitado a 10MB/100k filas, explícito para prototipo).
+- `GET /datasets/{id}/schema` → esquema de la última versión desde el perfil
+  persistido, con `{version_id,version,schema_hash,scan_mode,scanned_rows:0,
+  columns:[{name,logical_type,native_type,nullable,semantic_tag,numeric}]}`.
+  `?refresh=true` vuelve a consultar el footer del Parquet canónico y conserva
+  los tipos lógicos inferidos; no recorre las filas del dataset.
+- `POST /datasets/uploads/inspect` multipart `file` y `reader_options` JSON
+  opcional → detección previa `{format,format_label,sheets,selected_sheet,
+  detected_delimiter,columns,row_count?,sampled_rows,supported_formats}`. Usa
+  como máximo 100 filas para la inspección y el esquema embebido de Parquet.
+- `POST /datasets/{id}/versions/upload` multipart `file`, `column_overrides`
+  JSON opcional y `reader_options` JSON opcional → Version 201. Admite CSV,
+  XLSX, JSON/JSONL/NDJSON, Parquet/PQ y TXT/TSV delimitado, hasta 10 MiB,
+  100.000 filas y 100 columnas. `reader_options` acepta `sheet_name` para
+  Excel y `delimiter` para TXT; las opciones efectivas quedan en la versión.
+  `column_overrides` asocia cada nombre con `logical_type` (`STRING`,
+  `DECIMAL`, `INT64`, `DATE`, `TIMESTAMP` o `BOOLEAN`) y, opcionalmente,
+  `semantic_tag: "IDENTIFIER"`. El override se valida contra el archivo y se
+  persiste en el esquema inmutable de esa versión.
 - `GET /dataset-versions/{id}/profile` → Version más `{sample:row[]}`.
 
 ## Configuraciones y ejecuciones
@@ -59,13 +76,15 @@ Sentinel metrics: `{row_count,null_rate,health_score,failed_checks,total_checks,
 
 `Finding = {id,run_id,title,code,severity,details,created_at,exception_id}`.
 
-`Exception = {id,display_id,finding_id,run_id,title,module,severity,state,owner,root_cause,resolution,version,created_at,updated_at,events:[{timestamp,actor,from_state,to_state,comment}]}`.
+`Exception = {id,display_id,finding_id,run_id,origin_run_id,origin_run,configuration_id,configuration_name,configuration_version,validation_run_id,validation_run,validated_at,validation_evidence,technical_validation:{status,eligible,validated,can_resolve,reason,candidate_run_id,validation_run_id,validated_at,evidence},title,module,severity,state,owner,root_cause,resolution,administrative_reason,version,created_at,updated_at,events:[{timestamp,actor,from_state,to_state,event_type,comment,validation_run_id?}]}`. `origin_run` y `validation_run` son resúmenes navegables; el run de origen permanece inmutable.
 
 - `GET /findings` → lista Finding.
 - `POST /findings/{id}/exceptions` `{}` → Exception 201 (idempotente por finding).
 - `GET /exceptions?state=&module=&severity=` → lista Exception.
 - `GET /exceptions/{id}` → Exception más finding.
-- `PATCH /exceptions/{id}` `{version:number,state?:'INVESTIGATING',owner?:string,root_cause?:string,resolution?:string,comment?:string}` → Exception. Version obsoleta 409. RESOLVED exige root_cause y resolution; ACCEPTED/FALSE_POSITIVE exige resolution. Estados OPEN, INVESTIGATING, WAITING_EXTERNAL, RESOLVED, ACCEPTED, FALSE_POSITIVE.
+- `POST /exceptions/{id}/validate` `{version:number,validation_run_id?:string}` → Exception. Evalúa una ejecución posterior `SUCCESS` del mismo `configuration_id`; si se omite `validation_run_id`, usa la candidata elegible más reciente. Data Intake exige que desaparezca el fallo de la misma regla/columna, ReconOps que el control quede conforme o desaparezca la clasificación asociada y Sentinel que el monitor termine `HEALTHY`. La validación registra ejecución, fecha y evidencia sin modificar el run original. Sin run posterior devuelve 409 `VALIDATION_RUN_REQUIRED`; un run indicado que ya no es el más reciente devuelve 409 `VALIDATION_RUN_OUTDATED`. Si el problema persiste, conserva evidencia `FAILED`, incrementa la versión y mantiene `PENDING_VALIDATION`.
+- Al completarse una ejecución, el worker reevalúa las excepciones `PENDING_VALIDATION` de esa misma configuración y actualiza su evidencia. Una validación positiva habilita la acción humana `RESOLVED`; no cambia por sí sola el estado final del caso.
+- `PATCH /exceptions/{id}` `{version:number,state?:'OPEN'|'INVESTIGATING'|'PENDING_VALIDATION'|'RESOLVED'|'DISCARDED'|'ACCEPTED'|'NOT_APPLICABLE',owner?:string,root_cause?:string,resolution?:string,administrative_reason?:string,comment?:string}` → Exception. Version obsoleta 409. `RESOLVED` solo se acepta desde `PENDING_VALIDATION`, reevalúa el último run posterior y exige causa raíz y resolución; sin evidencia positiva devuelve 422 `TECHNICAL_VALIDATION_REQUIRED`. `DISCARDED`, `ACCEPTED` y `NOT_APPLICABLE` exigen `administrative_reason` (422 `ADMINISTRATIVE_REASON_REQUIRED` si falta), no equivalen a una resolución técnica y no establecen evidencia de validación. Los estados históricos `WAITING_EXTERNAL` y `FALSE_POSITIVE` siguen siendo legibles.
 - `GET /audit-events` → lista Audit `{id,event_type,actor,subject_type,subject_id,message,created_at,metadata}`.
 - `GET /rules` → lista `{id,code,name,type,module,description,severity}` (catálogo real reglas soportadas).
 - `GET /users` → lista User (solo lectura en prototipo).
@@ -84,7 +103,7 @@ uv run python -m trackvance.worker
 
 Variables: `DATABASE_URL` (SQLite por defecto o PostgreSQL psycopg), `TRACKVANCE_STORAGE_DIR` (alias `TRACKVANCE_STORAGE_ROOT` admitido), `DEMO_SEED_ENABLED=true`, `TRACKVANCE_WEB_ORIGIN=http://localhost:3000`, `MAX_UPLOAD_BYTES=10485760`, `TRACKVANCE_MAX_ROWS=100000`. API startup aplica Alembic, backfill de artifacts y demo idempotente. Worker espera schema inicializado. Dockerfile en backend, context raíz, copia backend y demo. La sesión demo solo disponible si seed habilitado.
 
-## Adiciones y semántica 0.2.0
+## Adiciones y semántica 0.3.0
 
 `DatasetVersion` añade `original_artifact_id`, `canonical_artifact_id`,
 `source_run_id`, `parent_version_id`, `is_derived`, `has_original_upload`,

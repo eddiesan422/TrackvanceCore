@@ -1,6 +1,6 @@
-# Validación del frontend 0.2.0
+# Validación del frontend 0.3.0
 
-Fecha de verificación: 13 de septiembre de 2026, 21:09, America/Bogota.
+Fecha de verificación: 16 de septiembre de 2026, America/Bogota.
 Proyecto: `frontend/`. Entorno: Windows, Node.js y pnpm locales.
 
 ## Resultado
@@ -9,13 +9,27 @@ Proyecto: `frontend/`. Entorno: Windows, Node.js y pnpm locales.
 | --- | --- |
 | `pnpm lint` | Correcto, sin advertencias. |
 | `pnpm typecheck` | Correcto. |
-| `pnpm test` | **42 pruebas correctas en 7 archivos**. Vitest 3.2.0, entorno jsdom. |
+| `pnpm test` | **67 pruebas correctas en 8 archivos**. Vitest 3.2.0, entorno jsdom. |
 | `pnpm build` | Correcto. Vite 7.3.6 genera `frontend/dist/`. |
+| `pnpm test:e2e` | **13 escenarios correctos** contra Docker/PostgreSQL en una instalación aislada (40,4 s). |
 
-El paquete identifica esta entrega como `0.2.0` y el pie de la aplicación muestra `v0.2`.
-Esta verificación comprueba componentes, estados de interfaz, permisos de acciones y cuerpos de las solicitudes. Las pruebas de componentes simulan la API: no sustituyen las pruebas de los motores, la exportación Excel real ni el flujo completo con servidor y navegador. Las pruebas `frontend/tests-e2e/corrections.spec.ts` se validan por separado y no se modificaron en este cierre.
+El paquete identifica esta entrega como `0.3.0` y el pie de la aplicación muestra `v0.3`.
 
-Se agregó `frontend/tests-e2e/rule-builders.spec.ts` con tres escenarios de publicación desde los formularios reales: Intake con fecha no futura, Recon con igualdad exacta y normalización declarada, y Sentinel con tipo de esquema respecto de la versión anterior. Cada escenario exige respuesta HTTP 201, comprueba la configuración persistida mediante GET y ejecuta el control para verificar su resultado. Las cargas de preparación usan la API; los contratos, controles y monitores se crean desde la interfaz. Playwright descubre los tres escenarios con `pnpm exec playwright test --list rule-builders.spec.ts`; su ejecución contra el servidor integrado queda pendiente del rebuild final. No se incluyen como pruebas aprobadas en la tabla anterior.
+`multiformat-navigation.spec.ts` añade carga real de CSV, XLSX con hoja,
+JSON, Parquet y TXT delimitado, inspección de columnas y navegación por los
+módulos. El runner aislado ejecuta además 84 comprobaciones API, migraciones
+y persistencia después del restart, y elimina únicamente sus volúmenes.
+Esta verificación comprueba componentes, estados de interfaz, permisos de acciones y cuerpos de las solicitudes. Las pruebas de componentes simulan la API: no sustituyen las pruebas de los motores, la exportación Excel real ni el flujo completo con servidor y navegador. Las pruebas Playwright se validan por separado contra el stack local.
+
+`frontend/tests-e2e/rule-builders.spec.ts` contiene tres escenarios de publicación desde los formularios reales: Intake con fecha no futura, Recon con igualdad exacta y normalización declarada, y Sentinel con tipo de esquema respecto de la versión anterior. Cada escenario exige respuesta HTTP 201, comprueba la configuración persistida mediante GET y ejecuta el control para verificar su resultado. Las cargas de preparación usan la API; los contratos, controles y monitores se crean desde la interfaz. Los tres escenarios pasaron dentro de la suite E2E completa.
+
+`frontend/tests-e2e/exception-validation.spec.ts` crea sus propios datasets y
+un control ReconOps. Comprueba que no se pueda resolver sin un run posterior,
+que el paso a pendiente de validación conserve el bloqueo, que una nueva
+conciliación conforme habilite la validación y la resolución, y que el detalle
+enlace los runs de origen y confirmación. También verifica por separado un
+cierre administrativo con motivo obligatorio, sin presentarlo como resolución
+técnica. El escenario no depende de datasets demo preexistentes.
 
 ## Comportamiento validado
 
@@ -44,12 +58,13 @@ Intake también adapta el texto introductorio de los hallazgos. Recon decide el 
 | Archivo | Pruebas | Alcance principal |
 | --- | ---: | --- |
 | `src/api/client.test.ts` | 4 | CSRF, credenciales, nombres seguros de descargas y errores de red/permisos. |
-| `src/features/datasets/Datasets.test.tsx` | 1 | Archivo recibido e identificadores explícitos en multipart. |
-| `src/features/datasets/VersionIdentity.test.tsx` | 5 | Valores observados, procedencia, artefactos, permisos y perfil histórico. |
+| `src/features/datasets/Datasets.test.tsx` | 15 | Formatos de carga, inspección y corrección de esquema, identificadores, áreas, origen y ordenamiento. |
+| `src/features/datasets/VersionIdentity.test.tsx` | 6 | Valores observados, procedencia, artefactos, permisos y perfil histórico. |
 | `src/features/runs/RuleBuilder.test.tsx` | 11 | Reglas declarativas, normalización y comparaciones. |
-| `src/features/runs/ConfigDialog.test.tsx` | 6 | Publicación y nueva versión, configuración histórica, errores y cuerpo de solicitud de cambio de tipo. |
+| `src/features/runs/ConfigDialog.test.tsx` | 9 | Esquema detectado, selección múltiple y “Todos”, publicación, configuración histórica y errores. |
 | `src/features/runs/Runs.test.tsx` | 13 | Descargas, estados, permisos, valores, códigos y numeración de resultados. |
-| `src/routes/Operations.test.tsx` | 2 | Taxonomía y búsqueda del alias histórico `EXACT_MATCH`. |
+| `src/routes/Dashboard.test.tsx` | 2 | Filtros globales y presentación operativa del Centro de Control. |
+| `src/routes/Operations.test.tsx` | 7 | Flujo de excepción, bloqueo y validación técnica, cierre administrativo, compatibilidad histórica y taxonomía `EXACT_MATCH`. |
 
 ## Alcance del editor y opciones avanzadas de API
 
@@ -62,6 +77,6 @@ El formulario cubre las reglas descritas arriba; no es un editor completo de tod
 - La banda histórica visual utiliza `row_count`, con ventana, mínimo de observaciones y multiplicador IQR. No hay editor genérico de `metric_threshold`.
 - Las transformaciones de Intake, las propiedades avanzadas de una regla (`rule_id`, `scope`, `enabled`, mensaje personalizado) y las opciones no representadas por controles del formulario se administran por API. La interfaz no aplica transformaciones implícitas a los valores observados.
 - El formulario ofrece tipo esperado fijo o comparación con la versión anterior. Para la segunda opción envía `schema_type` sin `expected_type`: su prueba de componente verifica ese cuerpo de solicitud; la resolución y aceptación de la línea base deben validarse con el backend y los flujos de integración.
-- Los nombres de columnas se escriben de manera explícita. La lista de columnas de origen ayuda a configurar; la validación definitiva de columnas, reglas y parámetros corresponde a la API.
+- Los selectores de Data Intake usan el esquema detectado y permiten elegir todas las columnas elegibles. La validación definitiva de columnas, reglas y parámetros corresponde a la API.
 
 La capa de acceso conserva registros de evidencia heterogéneos mediante `RecordData`; todavía no se genera un cliente de tipos a partir de OpenAPI. Los controles de permisos de la interfaz mejoran el flujo de uso y se complementan con la autorización del backend.

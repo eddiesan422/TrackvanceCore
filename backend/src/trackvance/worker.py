@@ -12,13 +12,14 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import OperationalError
 
-from .config import STORAGE_DIR
+from .artifactstore import artifact_store
 from .db import SessionLocal, iso, require_record, utcnow
+from .execution import ExecutionEngine, execution_engine
 from .models import Job, Run, uid
-from .services import audit, execute_run
+from .services import audit
 
 logger = logging.getLogger(__name__)
-HEARTBEAT = STORAGE_DIR / "worker-heartbeat.json"
+HEARTBEAT = artifact_store.location("worker-heartbeat.json")
 LEASE_SECONDS = 90
 
 
@@ -46,9 +47,14 @@ def heartbeat(owner, stop, active):
         stop.wait(10)
 
 
-def process_once(owner: str | None = None, active: dict | None = None) -> bool:
+def process_once(
+    owner: str | None = None,
+    active: dict | None = None,
+    engine: ExecutionEngine | None = None,
+) -> bool:
     """Process at most one job; callable by integration tests without a daemon."""
     owner, active = owner or uid(), active if active is not None else {}
+    selected_engine = engine or execution_engine
     eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()))
     with SessionLocal() as db:
         job = db.scalar(select(Job).where(eligible).order_by(Job.created_at).limit(1))
@@ -70,7 +76,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
     try:
         with SessionLocal() as db:
             run = require_record(db, Run, run_id)
-            execute_run(db, run, lease_owner=owner)
+            selected_engine.execute(db, run, lease_owner=owner)
             job = require_record(db, Job, job_id)
             job.status, job.lease_until = run.status, None
             db.commit()

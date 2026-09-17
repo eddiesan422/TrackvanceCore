@@ -15,7 +15,8 @@ x-backend: &backend
     PYTHONUNBUFFERED: '1'
   volumes:
     - trackvance_data:/var/lib/trackvance
-  restart: unless-stopped
+  # Trackvance only starts through an explicit `docker compose up`.
+  restart: "no"
 
 services:
   postgres:
@@ -31,7 +32,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    restart: unless-stopped
+    restart: "no"
 
   api:
     <<: *backend
@@ -73,7 +74,7 @@ services:
       interval: 15s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   postgres_data:

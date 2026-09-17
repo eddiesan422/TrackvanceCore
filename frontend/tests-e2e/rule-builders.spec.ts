@@ -46,6 +46,13 @@ async function publish(page: Page, dialog: Locator, endpoint: string, button: st
   return stored
 }
 
+async function selectIntakeColumns(dialog: Locator, label: string, columns: string[]) {
+  await dialog.getByRole('button', { name: `${label}: abrir selector`, exact: true }).click()
+  const options = dialog.getByRole('group', { name: `Opciones de ${label}`, exact: true })
+  for (const column of columns) await options.getByRole('checkbox', { name: new RegExp(`^${column} \\(`) }).check()
+  await dialog.getByRole('button', { name: `${label}: cerrar selector`, exact: true }).click()
+}
+
 async function execute(page: Page, configId: string, action: string) {
   await page.getByRole('button', { name: 'Nueva ejecución', exact: true }).click()
   const dialog = page.getByRole('dialog')
@@ -66,7 +73,11 @@ test('el formulario Intake publica y ejecuta una regla de fecha no futura', asyn
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Nombre del contrato', { exact: true }).fill(name)
   await dialog.getByLabel('Dataset', { exact: true }).selectOption(datasetId)
-  await dialog.getByLabel('Columnas obligatorias', { exact: true }).fill('order_id, transaction_date')
+  const schemaRefresh = page.waitForResponse(response => response.url().includes(`/api/v1/datasets/${datasetId}/schema?refresh=true`))
+  await dialog.getByRole('button', { name: 'Actualizar esquema', exact: true }).click()
+  expect((await schemaRefresh).status()).toBe(200)
+  await expect(dialog.getByText('Metadata de la última versión verificada sin leer filas del dataset.')).toBeVisible()
+  await selectIntakeColumns(dialog, 'Columnas obligatorias', ['order_id', 'transaction_date'])
   await dialog.getByLabel('Porcentaje máximo de filas con error (%)', { exact: true }).fill('0')
   await dialog.getByRole('button', { name: 'Agregar regla', exact: true }).click()
   await dialog.getByLabel('Tipo de regla', { exact: true }).selectOption('date_rule')
