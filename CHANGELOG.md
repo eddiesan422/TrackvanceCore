@@ -35,6 +35,9 @@
 - Certifica 533 pruebas backend/scripts, 109 de frontend, 24 escenarios distintos
   de navegador y seis jobs de GitHub Actions. El backup usa streaming privado
   compatible con Windows/Linux; no depende de permisos de escritura en un bind.
+- Sincroniza las ediciones consecutivas del E2E de excepciones con la revisión
+  visible guardada; evita adelantarse al render al consultar únicamente la API,
+  sin modificar la funcionalidad ni introducir reintentos.
 - Mide un fixture variado de 106.194.531 bytes con ambos motores y los tres
   módulos. Los tiers superiores quedan sin ejecutar por preflight; los límites
   por defecto no se elevan ni se presenta PySpark como disponible.

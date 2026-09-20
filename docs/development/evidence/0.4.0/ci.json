@@ -29,8 +29,51 @@
         "backup-restore-e2e": "success",
         "benchmark-smoke": "success"
       }
+    },
+    {
+      "id": 35489378994,
+      "ref": "feat/local-prototype",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/35489378994",
+      "conclusion": "failure",
+      "head_sha": "69d48a0f0103105b270218a778f3f0f0a65ecc39",
+      "jobs": {
+        "frontend": "success",
+        "backend": "success",
+        "backup-restore-e2e": "success",
+        "compose-e2e": "success",
+        "benchmark-smoke": "success",
+        "connections-e2e": "failure"
+      },
+      "failure": {
+        "job": "connections-e2e",
+        "test": "roadmap-source-cycle.spec.ts: PostgreSQL",
+        "message": "Test timeout of 180000ms exceeded while waiting for the disabled 'Guardar gestión' button to become enabled.",
+        "playwright": {
+          "passed": 22,
+          "failed": 1,
+          "skipped": 1
+        }
+      },
+      "correction": "Test-only: await PATCH 200, rendered saved revision and enabled state selector before the next edit; no product, timeout or retry changes."
+    },
+    {
+      "id": 35489379287,
+      "ref": "v0.4.0",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/35489379287",
+      "conclusion": "success",
+      "head_sha": "69d48a0f0103105b270218a778f3f0f0a65ecc39",
+      "jobs": {
+        "frontend": "success",
+        "backend": "success",
+        "connections-e2e": "success",
+        "compose-e2e": "success",
+        "backup-restore-e2e": "success",
+        "benchmark-smoke": "success"
+      }
     }
   ],
-  "final_status": "PASS",
-  "certified_code_commit": "a03d87ecb051d88abfe57111ae90853f9dcbcf66"
+  "certified_application_commit": "69d48a0f0103105b270218a778f3f0f0a65ecc39",
+  "certified_tag": "v0.4.0",
+  "certified_tag_status": "PASS",
+  "subsequent_branch_workflows": "https://github.com/eddiesan422/TrackvanceCore/actions/workflows/ci.yml?query=branch%3Afeat%2Flocal-prototype"
 }

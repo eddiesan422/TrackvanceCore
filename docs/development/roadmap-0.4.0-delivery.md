@@ -62,6 +62,7 @@ regla y los XLSX conservan métricas y razones técnicas.
 - Backup que pasaba en Windows pero fallaba en el runner Linux por ownership del bind: transferencia tar por streaming host/contenedor, sin elevar el usuario, con directorios 0700 y archivos 0600 en POSIX.
 - Tipo EXCEPTION omitido en el verificador de linaje: soporte del vínculo EXCEPTION_EVIDENCE, regresiones de destino inexistente y cruce de organización; restore con adjunto real.
 - Selector E2E ambiguo al aparecer la nueva tabla de métricas: verificación del código en la tabla de hallazgos correspondiente.
+- Carrera del test de gestión de excepciones: un estado confirmado por API podía adelantarse al formulario de la nueva revisión. El test espera PATCH 200, versión visible y selector habilitado antes de volver a editar, sin ampliar timeouts ni añadir retries.
 
 ## Límites y evidencia
 
@@ -101,8 +102,12 @@ Playwright aprobados; Ruff, Mypy (33 archivos), ESLint, TypeScript y build corre
 Migraciones PostgreSQL hasta 0007, 84 comprobaciones smoke API, 62 comprobaciones
 PostgreSQL/SQL Server, restart con 206 artifacts y recuperación integral: PASS.
 
-Los [seis jobs de CI](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35488848150) terminaron SUCCESS sobre el commit de código `a03d87ec`.
-La publicación posterior de documentación/PDF no cambia ese código.
+Los [seis jobs del tag v0.4.0](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35489379287) terminaron SUCCESS sobre `69d48a0f`, incluida la publicación de documentación/PDF.
+La ejecución simultánea de la rama detectó la carrera del test descrita arriba;
+su corrección posterior sólo sincroniza la prueba con la revisión visible y
+conserva intactos el código funcional y el tag publicado. El historial de ambas
+ejecuciones está en [la evidencia CI](evidence/0.4.0/ci.json); el estado de cada
+commit posterior se consulta en [los workflows de la rama](https://github.com/eddiesan422/TrackvanceCore/actions/workflows/ci.yml?query=branch%3Afeat%2Flocal-prototype).
 
 La instalación principal está en 0.4.0/0007, con sus cuatro servicios healthy,
 backup previo verificado, registros anteriores preservados y restart=no.

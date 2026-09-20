@@ -22,7 +22,7 @@ El [informe de entrega](roadmap-0.4.0-delivery.md) resume el alcance funcional.
 | Compose integral | 19 escenarios aprobados; cinco opt-in cubiertos en los otros ciclos. Restart, hashes y 21 tablas: PASS. |
 | Backup/restore | PASS: 7 artifacts, 1 credencial, 124 relaciones; caso/adjunto, programación y 31 métricas recuperados tras destruir el origen. |
 | Benchmark | PASS: 106.194.531 bytes, 50.000 filas y cuatro columnas, ambos motores y tres módulos. Smoke CI de 1 MiB: PASS, no certificante. |
-| GitHub Actions | [PASS: seis jobs](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35488848150) sobre a03d87ec; backend, frontend, Compose, conexiones, backup/restore y benchmark smoke. |
+| GitHub Actions del tag v0.4.0 | [PASS: seis jobs](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35489379287) sobre 69d48a0f; backend, frontend, Compose, conexiones, backup/restore y benchmark smoke. Historial completo y repetición de rama descritos abajo. |
 
 Avisos no bloqueantes: dos deprecaciones de Starlette/AnyIO y advertencia Vite
 por chunk mayor de 500 kB. No se ocultan ni se deshabilitan controles.
@@ -83,6 +83,19 @@ EXCEPTION ausente en el verificador de linaje. El primer CI 0.4.0 detectó adem�
 PermissionError de backup en Linux: se reemplazó el bind escribible por streaming
 sin elevar permisos. La repetición remota aprobó todos los jobs. Los fallos del harness de volumen
 (413 del proxy y timeout fuera del contrato) se documentan en el análisis de volumen.
+
+La publicación del tag v0.4.0 aprobó sus seis jobs. En la ejecución simultánea de
+la rama, el escenario PostgreSQL de `roadmap-source-cycle.spec.ts` llegó a la
+siguiente edición antes de que React Query mostrara la nueva revisión del caso.
+Se corrigió exclusivamente el test: espera el PATCH 200, la versión visible y el
+selector habilitado. No cambian producto, timeouts ni retries. Las ejecuciones
+originales se conservan en [el historial CI](evidence/0.4.0/ci.json), incluido el
+fallo; los commits posteriores y sus resultados están en [los workflows de la
+rama](https://github.com/eddiesan422/TrackvanceCore/actions/workflows/ci.yml?query=branch%3Afeat%2Flocal-prototype).
+La repetición local con el test corregido aprobó los 23 escenarios Playwright,
+62 comprobaciones de conectores, 84 de API y persistencia tras restart. El opt-in
+de instalación limpia se mantiene certificado por su ejecución separada. Se
+repitieron también las 109 pruebas frontend, ESLint y TypeScript: PASS.
 
 500 MiB, 1 GiB, 2 GiB y 5 GiB quedaron NOT_RUN_RESOURCE_LIMIT: no se generaron
 ni ejecutaron por exceder el presupuesto. El máximo certificado corresponde al

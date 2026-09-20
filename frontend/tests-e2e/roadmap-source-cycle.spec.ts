@@ -30,6 +30,26 @@ async function execute(page: Page, contractId: string) {
   return (await page.request.get(`/api/v1/runs/${id}`)).json()
 }
 
+async function saveException(page: Page, caseId: string, expectedState: string) {
+  const dialog = page.getByRole('dialog')
+  const state = dialog.getByLabel('Estado de gestión', { exact: true })
+  const save = dialog.getByRole('button', { name: 'Guardar gestión', exact: true })
+  await expect(state).toHaveValue(expectedState)
+  await expect(save).toBeEnabled()
+  const response = page.waitForResponse(candidate =>
+    new URL(candidate.url()).pathname === `/api/v1/exceptions/${caseId}` && candidate.request().method() === 'PATCH')
+  await save.click()
+  const savedResponse = await response
+  expect(savedResponse.status()).toBe(200)
+  const saved = await savedResponse.json()
+  expect(saved.state).toBe(expectedState)
+  // The API can commit before React Query renders the new version-keyed form.
+  // Finish this UI operation only once its authoritative revision is visible.
+  await expect(dialog.getByText(new RegExp(`^Versión ${saved.version} ·`))).toBeVisible()
+  await expect(state).toHaveValue(expectedState)
+  await expect(state).toBeEnabled()
+}
+
 for (const [engine, engineLabel, host, tls] of [
   ['POSTGRESQL', 'PostgreSQL', 'source-postgres', 'disable'],
   ['SQLSERVER', 'SQL Server', 'source-sqlserver', 'off'],
@@ -99,16 +119,13 @@ for (const [engine, engineLabel, host, tls] of [
     await page.getByLabel('Prioridad del caso', { exact: true }).selectOption('CRITICAL')
     await page.getByLabel('SLA (horas)', { exact: true }).fill('24')
     await page.getByLabel('Comentario para el historial', { exact: true }).fill('Corregir departamento en la fuente; validar nuevamente.')
-    await page.getByRole('button', { name: 'Guardar gestión', exact: true }).click()
-    await expect.poll(async () => (await (await page.request.get(`/api/v1/exceptions/${caseId}`)).json()).state).toBe('ASSIGNED')
+    await saveException(page, caseId, 'ASSIGNED')
     await page.getByLabel('Estado de gestión', { exact: true }).selectOption('INVESTIGATING')
-    await page.getByRole('button', { name: 'Guardar gestión', exact: true }).click()
-    await expect.poll(async () => (await (await page.request.get(`/api/v1/exceptions/${caseId}`)).json()).state).toBe('INVESTIGATING')
+    await saveException(page, caseId, 'INVESTIGATING')
     await page.getByLabel('Estado de gestión', { exact: true }).selectOption('PENDING_VALIDATION')
     await page.getByLabel('Causa raíz', { exact: true }).fill('Departamento faltante en registro colombiano.')
     await page.getByLabel('Corrección aplicada', { exact: true }).fill('Departamento corregido en la base fuente.')
-    await page.getByRole('button', { name: 'Guardar gestión', exact: true }).click()
-    await expect.poll(async () => (await (await page.request.get(`/api/v1/exceptions/${caseId}`)).json()).state).toBe('PENDING_VALIDATION')
+    await saveException(page, caseId, 'PENDING_VALIDATION')
     fixture(engine, 'correct')
     await page.goto(`/datasets/${source.dataset.id}`)
     await page.getByRole('button', { name: 'Nueva versión desde la fuente', exact: true }).click()
