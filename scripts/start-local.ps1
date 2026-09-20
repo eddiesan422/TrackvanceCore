@@ -53,6 +53,7 @@ $env:DATABASE_URL = 'sqlite:///' + (Join-Path $runtimeRoot 'trackvance.db').Repl
 $env:TRACKVANCE_STORAGE_ROOT = Join-Path $runtimeRoot 'storage'
 $env:TRACKVANCE_STORAGE_DIR = $env:TRACKVANCE_STORAGE_ROOT
 $env:TRACKVANCE_WEB_ORIGIN = 'http://localhost:3000'
+$env:DEMO_ACCESS_ENABLED = 'true'
 $env:DEMO_SEED_ENABLED = 'true'
 $env:PYTHONUTF8 = '1'
 $env:PYTHONUNBUFFERED = '1'

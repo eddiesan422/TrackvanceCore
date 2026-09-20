@@ -2,6 +2,11 @@
 
 Fecha: 2026-09-16. Estado: aplicado.
 
+Actualización 2026-09-19: PostgreSQL y SQL Server ya implementan esta frontera.
+La configuración, secretos, snapshots y separación de Data Delivery se deciden en
+[ADR 0007](0007-external-connections.md). Las menciones a esos dos adaptadores como
+futuros describen el estado histórico al aceptar este ADR.
+
 ## Contexto
 
 El prototipo ya separaba los lectores de archivos y compilaba reglas portables,
@@ -23,9 +28,8 @@ Mantener el monolito modular y declarar cuatro fronteras estructurales:
   backfill de rutas históricas.
 - `DatasetSource` adquiere datos y produce `DatasetReadResult`.
   `LocalFileDatasetSource` delega CSV, XLSX, JSON, Parquet y TXT al registro de
-  `DatasetReader`. Un futuro origen PostgreSQL, SQL Server, S3, Azure Blob o API
-  puede implementar el mismo puerto y entregar el modelo común sin cambiar el
-  motor de calidad.
+  `DatasetReader`. PostgreSQL y SQL Server ya implementan el mismo puerto; S3,
+  Azure Blob o API pueden entregar el modelo común sin cambiar el motor de calidad.
 - `ExecutionEngine` ejecuta un `Run` persistido completo. El adaptador
   `LocalExecutionEngine` usa la implementación actual Polars/Python. Este puerto
   es distinto de `portable_engine.ProcessingEngine`, que compila y evalúa la
@@ -40,7 +44,8 @@ tablas, paths históricos, hashes, manifests y estados de jobs no cambian.
 
 ## Límites actuales
 
-Sólo se instalan adaptadores locales. El planner puede identificar una carga que
+Se instalan adaptadores de archivo, PostgreSQL y SQL Server; el almacenamiento y
+la ejecución siguen siendo locales. El planner puede identificar una carga que
 requiere PySpark y mantiene `ENGINE_UNAVAILABLE` mientras dicho adaptador no esté
 instalado; no simula procesamiento distribuido. Redis/Celery y object storage se
 mantienen como adapters futuros y no son dependencias del prototipo.

@@ -1,11 +1,66 @@
-# Revisión de arquitectura 0.3.0 - 16 de septiembre de 2026
+# Revisión de arquitectura 0.4.0 - 19 de septiembre de 2026
 
-La revisión mantiene el monolito modular, los datos y los contratos HTTP.
-No crea migraciones nuevas: el head continúa en `0004_exception_validation`.
-El archivo OpenAPI mantiene sus contratos; la especificación técnica enumera
-las rutas generadas reales.
+## Estado actual del código y de la instalación principal
 
-## Código y pruebas de esta revisión
+La revisión 0.4.0 conserva el monolito modular, los contratos HTTP y los puertos
+`StorageProvider`, `DatasetSource`, `ExecutionEngine` y `JobQueue`. Mantiene los
+cinco lectores de archivo y las fuentes PostgreSQL/SQL Server detrás de
+`DatasetSource`; los motores de calidad siguen consumiendo snapshots y no escriben
+en bases externas. `SecretStore` mantiene credenciales fuera de metadata y el
+worker continúa sin acceso a sus volúmenes.
+
+El grafo de migraciones del código llega a `0007_monitor_scheduling` y define
+**21 tablas de aplicación**. La instalación principal sigue en
+`0005_external_connections` mientras se prepara el upgrade final; este documento
+no la presenta como migrada todavía. Sus datos, proyecto, puerto web 3100 y puertos
+internos se conservan. Solo la web permanece publicada en localhost; API y
+PostgreSQL continúan dentro de la red Compose.
+
+## Cambios de arquitectura en 0.4.0
+
+| Área | Cambio implementado |
+| --- | --- |
+| Intake y ReconOps | Semántica avanzada en servicios y motores portables, referencias a versiones inmutables y evidencia por regla/comparación. |
+| Sentinel | Scheduler local en el worker, revisiones inmutables, ocurrencias transaccionales, series y alertas internas. |
+| Excepciones | API dedicada para asignación, SLA, comentarios y adjuntos publicados por `StorageProvider`; validación técnica compartida con el worker. |
+| Identidad | Administración local mediante API, roles base, permisos efectivos, Argon2, revocación de sesiones y protección del último administrador. |
+| Operación | Backup/restore coordinado de PostgreSQL, artifacts, secretos y clave; reset con plan exacto; doctor, verificación de linaje y benchmark aislado. |
+| Presentación | Conexiones, usuarios, programación y gestión de casos se integran en React conservando el cliente HTTP y el control autoritativo del backend. |
+
+Las migraciones son aditivas y no reescriben revisiones ya aplicadas:
+
+| Migración | Persistencia añadida |
+| --- | --- |
+| `0005_external_connections` | `external_connections`, `external_connection_versions` y `dataset_source_bindings`. |
+| `0006_local_identity_exceptions` | Campos de usuarios/excepciones y `exception_attachments`. |
+| `0007_monitor_scheduling` | `monitor_schedules`, `monitor_schedule_versions` y `monitor_occurrences`. |
+
+## Evidencia frontend de 0.4.0
+
+ESLint, TypeScript y build terminaron correctamente; el bundle JavaScript de
+535,26 kB (`535.26 kB` en la salida de Vite) produjo una advertencia de tamaño no
+bloqueante. Vitest aprobó **109
+pruebas en 12 archivos**. El ciclo Playwright `connections-final` aprobó **23
+escenarios** y omitió el escenario limpio opt-in; ese escenario se ejecutó y pasó
+una vez en un ciclo limpio separado. El total es **24 escenarios distintos
+aprobados**. El detalle está en [validación frontend](frontend-validation.md).
+
+## Historial explícito de 0.3.0
+
+### Evolución Conexiones - 19 de septiembre de 2026
+
+Esa revisión implementó PostgreSQL y SQL Server como fuentes de solo lectura
+mediante `DatasetSource`; añadió `SecretStore`, configuraciones inmutables, bindings
+y snapshots Parquet. Su head era `0005_external_connections` y OpenAPI incorporó
+las rutas `/connections` y `/datasets/{id}/refresh-source`. La decisión se conserva
+en [ADR 0007](../adr/0007-external-connections.md).
+
+### Revisión de arquitectura base - 16 de septiembre de 2026
+
+La revisión mantuvo el monolito modular, los datos y los contratos HTTP. En ese
+corte no se crearon migraciones: el head era `0004_exception_validation`.
+
+### Código y pruebas de aquella revisión
 
 | Archivo | Cambio |
 | --- | --- |
@@ -30,7 +85,7 @@ operación, alcance y resultados de validación. La especificación oficial en
 `ProductOne/Documentación` se reemplazó por una revisión de 26 páginas con
 fuente editable y generador reproducible; la edición original se archivó.
 
-## Resultados
+### Resultados históricos
 
 - pytest: 233 aprobadas (222 backend y 11 scripts).
 - Ruff/Mypy/ESLint/TypeScript/build: aprobados.
@@ -40,6 +95,7 @@ fuente editable y generador reproducible; la edición original se archivó.
 - Main: 7 datasets, 12 versiones, 10 runs, 1 excepción y 39 artifacts conservados.
 - Cuatro servicios saludables en localhost:3100; restart=no.
 
-Dos avisos de deprecación de Starlette/AnyIO permanecen. Los adaptadores de
-producto (PySpark, Redis/Celery, cloud, OIDC e infraestructura distribuida)
-están documentados como pendientes, sin dependencias adicionales en el runtime.
+En aquel ciclo se registraron dos avisos de deprecación de Starlette/AnyIO. Los
+adaptadores de producto (PySpark, Redis/Celery, cloud, OIDC e infraestructura
+distribuida) quedaron documentados como pendientes, sin dependencias adicionales
+en el runtime.

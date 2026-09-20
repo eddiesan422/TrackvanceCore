@@ -41,6 +41,12 @@ _AUDIT_KEYS = frozenset({
     "reason_code", "error_code", "legacy_identity", "actor_identity_resolution", "fields",
     "attempt", "attempts", "schema_version", "permission", "result_artifact_id", "sensitivity",
     "reader_key", "reader_version", "sheet_name", "delimiter",
+    "connection_id", "connection_version_id", "connection_version", "schema_name", "object_name",
+    "object_kind", "captured_at", "sampled_rows", "canonical_artifact_id", "enabled", "draft",
+    "schedule_id", "schedule_version_id", "planned_at", "dispatched_at", "coalesced_intervals",
+    "interval_seconds", "assigned_user_id", "priority", "sla_hours", "due_at",
+    "auto_resolve_enabled", "closure_type", "changed_fields", "active", "sessions_revoked", "policy",
+    "origin_run_id", "validation_run_id", "criterion",
 })
 
 

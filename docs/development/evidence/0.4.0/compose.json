@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "project": "trackvance-e2e-1760-e9394d",
+  "port": 61622,
+  "smoke": "PASS",
+  "playwright": "PASS",
+  "migrations": "PASS",
+  "persistence_after_restart": "PASS",
+  "restart_policies": [
+    "no"
+  ]
+}

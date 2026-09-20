@@ -1,0 +1,40 @@
+# Opt-in overlay for the isolated connections certification runner. These are
+# EXTERNAL source systems; the normal `postgres` service remains Trackvance's DB.
+services:
+  source-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trackvance_source
+      POSTGRES_USER: source_admin
+      POSTGRES_PASSWORD: ${SOURCE_POSTGRES_PASSWORD:?Use scripts/tests/connections_cycle.py}
+    volumes:
+      - source_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U source_admin -d trackvance_source']
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: "no"
+
+  source-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${SOURCE_MSSQL_SA_PASSWORD:?Use scripts/tests/connections_cycle.py}
+      MSSQL_MEMORY_LIMIT_MB: '2048'
+    volumes:
+      - source_sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "SELECT 1" -o /dev/null'
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 50
+    restart: "no"
+
+volumes:
+  source_postgres_data:
+  source_sqlserver_data:

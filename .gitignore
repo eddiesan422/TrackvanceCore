@@ -9,6 +9,10 @@ data/
 backend/storage/
 backups/
 restored/
+backend/credentials/
+backend/keys/
+*.secret
+master.key
 outputs/
 tmp/
 *.sqlite

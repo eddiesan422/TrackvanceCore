@@ -115,6 +115,11 @@ with engine.connect() as connection:
     assert row["validation_run_id"] is None
     assert row["validation_evidence"] == {}
     assert row["administrative_reason"] == ""
+    assert row["priority"] == "HIGH"
+    assert row["assigned_user_id"] is None
+    assert row["auto_resolve_enabled"] is False
+    assert row["due_at"] is None and row["reopened_at"] is None
+    assert row["events"] == [{"to_state": "RESOLVED"}]
 engine.dispose()
 '''
     result = subprocess.run(

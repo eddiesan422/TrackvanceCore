@@ -1,6 +1,6 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.3.0, 16 de septiembre de 2026.
+Revisión de implementación: 0.4.0, evolución funcional local, 19 de septiembre de 2026.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y un
 worker que comparte los modelos y servicios del backend. Docker Compose con
@@ -22,12 +22,16 @@ flowchart LR
   W --> A[API FastAPI]
   A --> P[(PostgreSQL: metadata y jobs)]
   K[Worker local] --> P
+  K --> SCH[Scheduler Sentinel local]
+  SCH --> P
   A --> S[StorageProvider]
   K --> S
   S --> V[(Volumen persistente de artifacts)]
   K --> E[LocalExecutionEngine: Polars / Python]
   A --> D[DatasetSource + DatasetReader]
   D --> F[CSV / XLSX / JSON / Parquet / TXT]
+  D --> EXT[PostgreSQL / SQL Server externos]
+  A --> SEC[SecretStore: credenciales cifradas]
 ```
 
 Compose levanta `web`, `api`, `worker` y `postgres`. Solamente `web` publica un
@@ -41,7 +45,12 @@ datasets y versiones, configuraciones, runs, jobs, excepciones, auditoría y
 referencias de evidencia. El volumen `trackvance_data`, compartido por API y
 worker, conserva archivos recibidos, Parquet canónicos, resultados, manifests y
 exports. Los bytes de los archivos no se guardan en PostgreSQL. Detener o recrear
-contenedores conservando sus volúmenes mantiene ambas partes de la instalación.
+contenedores conservando sus volúmenes mantiene esas partes de la instalación.
+Solo la API monta `connection_credentials` y `connection_keys`: el primero
+contiene credenciales externas cifradas y el segundo su clave maestra. El worker
+accede únicamente a `trackvance_data` y procesa snapshots sin recuperar secretos.
+La recuperación de Conexiones requiere conservar metadata, artifacts y ambos
+volúmenes de secretos de forma coordinada y con acceso restringido.
 
 El lanzador directo con SQLite permanece como facilidad de desarrollo y pruebas.
 Es una instalación separada, con su propia base y almacenamiento en `.local/`.
@@ -52,11 +61,13 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 | Frontera | Responsabilidad | Adaptador actual | Evolución preparada |
 | --- | --- | --- | --- |
 | `StorageProvider` | Publicar artifacts inmutables, leerlos, materializarlos y asignar staging temporal | `FileArtifactStore`, volumen local | S3/Azure Blob, cache local acotado y migración de locators |
-| `DatasetSource` | Adquirir datos y entregar `DatasetReadResult` | `LocalFileDatasetSource` | PostgreSQL, SQL Server, APIs y object storage como fuentes |
+| `DatasetSource` | Adquirir datos y entregar `DatasetReadResult` | Archivos locales, PostgreSQL y SQL Server | APIs, otros motores y object storage como fuentes |
+| `SecretStore` | Guardar y recuperar credenciales aisladas por organización | Fernet en volumen local; clave en volumen separado | Key Vault, Secrets Manager o Vault |
 | `DatasetReader` | Interpretar un formato y normalizar su estructura | CSV, XLSX, JSON/JSON Lines, Parquet, TXT/TSV | Nuevos formatos sin cambios en reglas |
 | `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine`, Polars/Python | Adaptador de ejecución distribuida |
 | `ProcessingEngine` | Compilar/evaluar expresiones portables de reglas | Compiladores Polars y DuckDB | Otros compiladores con pruebas de paridad |
 | `JobQueue` | Registrar la entrega de un run para ejecución asíncrona | `DatabaseJobQueue`, consumida mediante leases | Publicación y consumo Redis/Celery |
+| `NotificationDelivery` | Contrato de entrega de alertas externas | Sin adaptador; Findings internos operativos | Email, Teams, Slack o Webhook |
 
 `ExecutionPlanner` estima memoria y disco antes de aceptar una ejecución. Elige
 POLARS dentro del presupuesto local; si la carga necesita PYSPARK, devuelve
@@ -82,10 +93,16 @@ completamente independientes.
 | --- | --- | --- |
 | API y autorización | `backend/src/trackvance/api.py`, `permissions.py` | HTTP, sesiones, CSRF, permisos y ámbito de organización |
 | Aplicación | `services.py`, `dashboard.py` | Casos de uso, versiones, ejecución, excepciones y cockpit |
+| Conexiones | `connections_api.py`, `connections_service.py` | Endpoints, prueba, configuración versionada, bindings, adquisición y linaje |
+| Fuentes externas | `dataset_sources.py` | Adaptadores PostgreSQL/SQL Server de solo lectura, metadata, límites y representación normalizada |
+| Credenciales | `credential_store.py` | Contrato `SecretStore`, cifrado local y aislamiento de credenciales por organización |
 | Semántica de dominio | `config_semantics.py`, `processing.py`, `portable_engine.py`, `manifests.py` | Configuraciones declarativas, reglas, resultados y evidencia |
 | Modelo persistido | `models.py`, `db.py`, `backend/migrations/` | ORM, transacciones y evolución del schema |
 | Almacenamiento y entrada | `artifactstore.py`, `dataset_readers.py` | Puertos, adaptadores locales, integridad y lectura multiformato |
 | Ejecución asíncrona | `execution.py`, `jobqueue.py`, `worker.py`, `planner.py` | Entrega de jobs, leases, heartbeat, presupuesto y procesamiento |
+| Sentinel programado | `scheduler.py`, `sentinel_api.py` | Programaciones, revisiones, ocurrencias, despacho transaccional e histórico de series |
+| Gestión de casos | `exceptions_api.py` | Responsable, prioridad, SLA, comentarios, adjuntos y filtros; validación compartida en servicios |
+| Administración local | `identity_api.py` | Usuarios, roles base, permisos, contraseñas, revocación de sesiones y auditoría |
 | Presentación | `frontend/src/` | Pantallas React, formularios, estados, navegación y cliente HTTP |
 | Operación | `compose.yml`, `deploy/`, `scripts/`, `.github/workflows/` | Imágenes, proxy, arranque, diagnósticos y comprobaciones |
 
@@ -99,12 +116,13 @@ inicialización SQLite pueden consultar el filesystem como infraestructura local
 | Módulo | Responsabilidad actual |
 | --- | --- |
 | Datasets | Inspección acotada, tipos corregibles, identificadores, áreas, versiones inmutables y linaje |
-| Data Intake | Contratos, transforms explícitos, reglas por columna/registro, decisión y salida canónica Parquet |
-| ReconOps | Claves normalizadas explícitamente, comparación exacta, tolerancias absolutas/porcentuales/temporales y agregación simple 1:N sum/count |
-| Sentinel | Schema, nulls, frescura, volumen, distinct/uniqueness, reglas declarativas y bandas históricas median/IQR |
-| Excepciones | Hallazgo y configuración de origen, gestión, validación posterior, resolución técnica y cierres administrativos diferenciados |
+| Conexiones | Configuración versionada, prueba de acceso, descubrimiento SQL, preview acotado y snapshots de entrada |
+| Data Intake | Contratos, transforms, reglas simples/compuestas, tipo/longitud/rango/fecha, condiciones, comparaciones e integridad referencial contra snapshots |
+| ReconOps | Claves simples/compuestas, transforms por lado, comparación por columna, nulls, tolerancias y agregaciones 1:N/N:1 SUM/COUNT |
+| Sentinel | Schema, nulls, frescura, volumen, distinct/uniqueness, bandas median/IQR, programación local, alertas internas y series compatibles |
+| Excepciones | Hallazgo/configuración, responsable, prioridad, SLA, adjuntos, reapertura, validación posterior, resolución automática opcional y cierres administrativos |
 | Centro de Control | Filtros, salud, fallos, atención priorizada, tendencias y navegación a recursos |
-| Auditoría e identidad | Actor estable, eventos sanitizados, sesión, CSRF, permisos y aislamiento por organización |
+| Auditoría e identidad | Administración local de usuarios/roles, actor estable, eventos sanitizados, sesiones, CSRF y aislamiento por organización |
 
 Cada DatasetVersion conserva artifacts y hashes. Las configuraciones publicadas
 son snapshots; modificar una configuración crea una versión. Cada run conserva
@@ -117,8 +135,27 @@ incluyen resumen, resultados y trazabilidad.
 Una excepción conserva su hallazgo y run originales. Resolverla exige una
 ejecución posterior del mismo snapshot de control que demuestre la corrección
 según el módulo. El run original no cambia. Los cierres administrativos exigen
-motivo y no equivalen a una resolución técnica. La automatización de la resolución
-queda como ampliación posterior.
+motivo y no equivalen a una resolución técnica. La política automática por caso,
+apagada por defecto, aplica la misma validación desde el worker y registra actor
+SYSTEM y run confirmatorio. Las reglas nuevas tienen `rule_id`: cero filas
+evaluadas no demuestra corrección. Una reapertura exige evidencia posterior nueva.
+En casos abiertos legacy, la identificación compatible por código/columna exige
+también contadores suficientes; ausencia de Finding sin evaluación demostrable
+no habilita un nuevo cierre. Los casos ya resueltos conservan su historia.
+
+Las reglas referenciales fijan otra DatasetVersion de la organización; se cargan
+por StorageProvider y se añaden al plan y manifest con sus hashes. El motor recibe
+frames normalizados, nunca una conexión externa. Los transformadores de Recon
+actúan antes de normalizar claves y agregar; las configuraciones nuevas no toman
+arbitrariamente el primer valor no agregado de un grupo. La compatibilidad legacy
+se centraliza y no reescribe snapshots ni fingerprints históricos.
+
+El scheduler usa tres tablas: `monitor_schedules`, revisiones inmutables en
+`monitor_schedule_versions` y `monitor_occurrences` enlazadas a configuración,
+DatasetVersion y Run. Despacha la última versión registrada con actor SYSTEM.
+Agrupa atrasos y omite solapamientos; cada decisión queda registrada. No refresca
+fuentes ni añade un servicio externo. La cronología visible usa fechas previstas,
+despacho e inicio real; el worker detenido implica programación detenida.
 
 ## Arquitectura local y arquitectura de producto
 
@@ -127,11 +164,11 @@ queda como ampliación posterior.
 | Despliegue | Docker Compose, cuatro servicios | Kubernetes: AKS, EKS u OpenShift; mismos límites del monolito |
 | Metadata | PostgreSQL 16 en volumen | PostgreSQL administrado, políticas de disponibilidad y recuperación |
 | Artifacts | `FileArtifactStore` en volumen | S3 o Azure Blob mediante `StorageProvider` |
-| Fuentes | Cinco formatos de archivo | PostgreSQL, SQL Server, S3, Azure Blob y APIs mediante `DatasetSource` |
+| Fuentes | Cinco formatos de archivo, PostgreSQL y SQL Server | S3, Azure Blob, APIs y otros motores mediante `DatasetSource` |
 | Procesamiento | Polars/Python; DuckDB para reglas portables | Polars y PySpark según presupuesto y capacidad instalada |
 | Cola | Jobs PostgreSQL, leases, reintentos y heartbeat | Redis/Celery con entrega fiable y workers escalables |
-| Identidad | Sesión local/demo, CSRF y RBAC backend | OIDC/SSO y administración completa de identidades |
-| Secretos | Variables de entorno y `.env` local excluido de Git | Key Vault o Vault y rotación |
+| Identidad | Usuarios locales, roles base, contraseñas, revocación de sesiones, CSRF y RBAC | Federación OIDC/SSO y gobierno de identidad productivo |
+| Secretos | Configuración local; credenciales externas cifradas con clave separada | Key Vault, Secrets Manager o Vault y rotación |
 | Observabilidad | Logs, readiness, heartbeat y auditoría | OpenTelemetry, Prometheus y Grafana |
 | Infraestructura | Compose y scripts operativos | Terraform, Helm y despliegues controlados |
 | Entrega | Workflow de checks backend/frontend/migraciones/E2E | Controles de seguridad, dependencias e imágenes y promoción de entornos |
@@ -148,7 +185,9 @@ de organización se conserva en metadata y artifacts. Los eventos registran acto
 estable y metadata sanitizada; las opciones de lectura no deben contener tokens,
 passwords ni cadenas de conexión. `.env`, almacenamiento, archivos de usuario,
 backups y resultados de pruebas quedan excluidos de Git. El acceso demo es para
-revisión local y requiere sustitución antes de una exposición de producto.
+revisión local, se controla con `DEMO_ACCESS_ENABLED` y requiere sustitución antes
+de una exposición de producto. `DEMO_SEED_ENABLED` es independiente: sólo decide
+si se crean datos sintéticos durante el arranque.
 
 La carga admite por defecto 10 MiB, 100.000 filas y 100 columnas. La inspección
 previa usa hasta 100 registros cuando corresponde, o metadata embebida Parquet;
@@ -157,26 +196,35 @@ inicial permanece síncrona y acotada. Las ejecuciones de módulos pasan al work
 La lectura XLSX/JSON y el profiling de gran volumen requieren una evolución
 asíncrona antes de ampliar estos límites.
 
-La revisión del schema actual es `0004_exception_validation`; los cambios de
-schema futuros deben usar nuevas migraciones Alembic. El desacoplamiento mediante
-puertos no cambia tablas ni reescribe evidencia histórica. Los runbooks de
-arranque, reinicio, comprobación de hashes y copias están en
-[operación](development/operations.md). El backup integral automatizado de
-PostgreSQL y artifacts sigue pendiente; el utilitario de backup actual es para
-SQLite.
+La revisión del schema actual es `0007_monitor_scheduling`, con 21 tablas de
+aplicación. `0006_local_identity_exceptions` añade campos y adjuntos; `0007` añade
+programaciones. Los cambios futuros requieren migraciones Alembic nuevas. Los
+runbooks de arranque, reinicio, diagnóstico, reset, backup y restore están en
+[operación](development/operations.md); su certificación se registra en
+[validación](development/validation.md). Los ensayos destructivos sólo usan
+proyectos, bases y volúmenes aislados. La recuperación de una conexión exige el
+conjunto consistente PostgreSQL, artifacts, credenciales cifradas y clave.
+
+El framework de volumen registra recursos y resultados medidos. Los límites por
+defecto no aumentan porque exista un runner: sólo una medición completa puede
+justificar cambiarlos en ExecutionPlanner. Un volumen rechazado por preflight o
+no ejecutado por recursos no se presenta como máximo certificado. PySpark sigue
+sin adaptador operativo.
+
+La medición principal usa payload variado determinista: 106.194.531 bytes de
+archivo, 50.000 filas, cuatro columnas y 79.145.600 bytes de Parquet canónico.
+También adquiere snapshots PostgreSQL y SQL Server y ejecuta Intake sobre ambos.
+Los tiers mayores quedaron sin ejecutar por presupuesto; el resultado no es un
+límite general por tamaño. El restore aislado verificó hashes y relaciones antes
+de probar la credencial PostgreSQL recuperada, refrescar y ejecutar nuevamente.
+Los comandos y resultados detallados están en [ADR 0013](adr/0013-local-backup-restore.md)
+y [volumen](development/volume-benchmark.md).
 
 ## Secuencia de evolución
 
-1. Incorporar un adaptador de fuente con credenciales externas y límites en el
-   origen; certificar su normalización contra los lectores actuales.
-2. Incorporar almacenamiento remoto, materialización acotada y una migración de
-   locators; conservar IDs, hashes y linaje existentes.
-3. Incorporar Redis/Celery con entrega transaccional, idempotencia, cancelación y
-   recuperación verificadas; conservar las transiciones de jobs y runs.
-4. Implementar PySpark tras pruebas de paridad de reglas, presupuestos y evidencia;
-   habilitar el planner sólo cuando el motor esté realmente disponible.
-5. Añadir OIDC, secretos, observabilidad y despliegue Kubernetes; certificar
-   aislamiento, recuperación, escala y CI/CD antes de declarar operación de producto.
-
-Cada paso conserva las configuraciones versionadas, las reglas declarativas, los
-resultados de negocio y la trazabilidad de los módulos.
+La secuencia oficial está en [roadmap](roadmap.md): conservar Conexiones y las
+fuentes PostgreSQL/SQL Server; completar Intake, ReconOps, Sentinel programado,
+excepciones, administración local de usuarios, operación y benchmarks medidos.
+La productización comienza sólo después de esos nueve puntos y con una nueva
+autorización de alcance. Los adaptadores y despliegues cloud del mapa anterior
+siguen siendo objetivos futuros, no trabajo de este ciclo.

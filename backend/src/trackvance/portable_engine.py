@@ -6,6 +6,7 @@ Regex runs in the native linear-time Rust/RE2 engines, with a common supported s
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Context, Decimal, localcontext
@@ -14,7 +15,13 @@ from typing import Protocol
 import duckdb
 import polars as pl
 
-from .config_semantics import METRIC_TYPES, RuleDefinition, _comparison, portable_regex_pattern
+from .config_semantics import (
+    COLUMN_TYPES,
+    METRIC_TYPES,
+    RuleDefinition,
+    _comparison,
+    portable_regex_pattern,
+)
 
 DECIMAL_PATTERN = r"^[+-]?[0-9]+(?:\.[0-9]+)?$"
 DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
@@ -274,7 +281,10 @@ def _prepare_comparison(
     for source, target in frame.iter_rows():
         invalid, difference, tolerance, left, right = False, None, None, source, target
         both_null = source is None and target is None
-        null_match = both_null and p.get("equal_nulls", False)
+        null_policy = p.get("null_policy")
+        null_match = both_null and (
+            null_policy == "MATCH_NULLS" or (null_policy is None and p.get("equal_nulls", False))
+        )
         if kind == "exact_compare":
             left, right = (
                 normalized_value(source, p["normalization"]),
@@ -319,6 +329,8 @@ def _prepare_comparison(
                 tolerance = Decimal(p.get("hours", p.get("days", "0"))) * (
                     3600 if "hours" in p else 86400
                 )
+        if (source is None or target is None) and null_policy is not None:
+            invalid = null_policy == "INVALID"
         records.append(
             {
                 "left": left,
@@ -367,20 +379,121 @@ def _prepare_comparison(
     ), facts
 
 
+@dataclass(frozen=True)
+class RuleEvaluation:
+    passed: list[bool]
+    evaluated: list[bool]
+
+
+def scalar_compare(left, right, parameters: dict) -> bool:
+    """Deterministic lowering for typed comparisons, without implicit coercion."""
+    from .processing import iso_date, iso_timestamp, money
+
+    if left is None or right is None:
+        return False
+    kind = parameters.get("logical_type", "STRING")
+    convert = {"DECIMAL": money, "DATE": iso_date, "TIMESTAMP": iso_timestamp}.get(kind, str)
+    left, right = convert(left), convert(right)
+    if left is None or right is None:
+        return False
+    operator = parameters.get("operator", "eq")
+    return {
+        "eq": left == right,
+        "ne": left != right,
+        "gt": left > right,
+        "gte": left >= right,
+        "lt": left < right,
+        "lte": left <= right,
+    }[operator]
+
+
+def condition_matches(row: dict, condition: dict | None) -> bool:
+    if condition is None:
+        return True
+    if "all" in condition:
+        return all(condition_matches(row, child) for child in condition["all"])
+    if "any" in condition:
+        return any(condition_matches(row, child) for child in condition["any"])
+    value = row[condition["column"]]
+    if condition.get("operator") == "is_null":
+        return value is None
+    if condition.get("operator") == "not_null":
+        return value is not None
+    return scalar_compare(value, condition.get("value"), condition)
+
+
+def prepare_rule_evaluation(
+    frame: pl.DataFrame,
+    expression: PortableRuleExpression,
+    references: dict[str, pl.DataFrame] | None = None,
+) -> tuple[pl.DataFrame, list[bool]]:
+    from .config_semantics import rule_columns
+
+    rule = expression.definition
+    missing = set(rule_columns(rule)) - set(frame.columns)
+    if missing:
+        raise ValueError("Columnas de la regla ausentes: " + ", ".join(sorted(missing)))
+    p = rule.parameters
+    if (
+        rule.when is None
+        and p.get("null_policy") != "IGNORE"
+        and rule.type not in {"compound_unique", "length", "column_compare", "reference"}
+    ):
+        return frame, [True] * frame.height
+    columns = p.get("columns", [rule.column] if rule.column else [])
+    if rule.type == "column_compare":
+        columns = [*columns, p["other_column"]]
+    rows = frame.to_dicts()
+    applicable = [
+        condition_matches(row, rule.when)
+        and not (
+            p.get("null_policy") == "IGNORE"
+            and rule.type not in {"required", "not_null"}
+            and any(row[c] is None for c in columns)
+        )
+        for row in rows
+    ]
+    if rule.type not in {"compound_unique", "length", "column_compare", "reference"}:
+        return frame, applicable
+    keys = [tuple(row[c] for c in columns) for row in rows]
+    counts = Counter(key for key, active in zip(keys, applicable, strict=True) if active)
+    reference_keys = set()
+    if rule.type == "reference":
+        reference = (references or {}).get(p["dataset_version_id"])
+        if reference is None:
+            raise ValueError(
+                "La referencia inmutable no está disponible en el contexto de ejecución."
+            )
+        if set(p["reference_columns"]) - set(reference.columns):
+            raise ValueError("Columnas ausentes en la versión de referencia.")
+        reference_keys = {
+            tuple(row)
+            for row in reference.select(p["reference_columns"]).iter_rows()
+            if all(v is not None for v in row)
+        }
+    values = []
+    for row, key in zip(rows, keys, strict=True):
+        if any(v is None for v in key):
+            values.append(p.get("null_policy", "ALLOW") != "FAIL")
+        elif rule.type == "compound_unique":
+            values.append(counts[key] == 1)
+        elif rule.type == "reference":
+            values.append(key in reference_keys)
+        elif rule.type == "length":
+            assert rule.column is not None
+            length = len(str(row[rule.column]))
+            values.append(p.get("min", 0) <= length <= p.get("max", 1000000))
+        else:
+            assert rule.column is not None
+            values.append(scalar_compare(row[rule.column], row[p["other_column"]], p))
+    return frame.with_columns(
+        pl.Series("__tv_rule_valid", ["true" if v else "false" for v in values], dtype=pl.String)
+    ), applicable
+
+
 def compile_rule(rule: RuleDefinition | dict, observed_at: datetime) -> PortableRuleExpression:
     definition = rule if isinstance(rule, RuleDefinition) else RuleDefinition.model_validate(rule)
-    if definition.type not in {
-        "required",
-        "not_null",
-        "unique",
-        "numeric",
-        "positive",
-        "type",
-        "range",
-        "allowed_values",
-        "regex",
-        "date_rule",
-    }:
+    if definition.type not in COLUMN_TYPES:
         raise ValueError("La regla agregada requiere el compilador de métricas Sentinel.")
     observed = (
         observed_at.replace(tzinfo=UTC)
@@ -393,7 +506,19 @@ def compile_rule(rule: RuleDefinition | dict, observed_at: datetime) -> Portable
 class ProcessingEngine(Protocol):
     family: str
 
-    def validate(self, frame: pl.DataFrame, expression: PortableRuleExpression) -> list[bool]: ...
+    def validate(
+        self,
+        frame: pl.DataFrame,
+        expression: PortableRuleExpression,
+        references: dict[str, pl.DataFrame] | None = None,
+    ) -> list[bool]: ...
+
+    def evaluate(
+        self,
+        frame: pl.DataFrame,
+        expression: PortableRuleExpression,
+        references: dict[str, pl.DataFrame] | None = None,
+    ) -> RuleEvaluation: ...
 
     def compare(
         self, frame: pl.DataFrame, expression: PortableComparisonExpression
@@ -410,6 +535,30 @@ class ProcessingEngine(Protocol):
 
 
 class MetricCompilerMixin(ProcessingEngine):
+    def _validate_native(
+        self, frame: pl.DataFrame, expression: PortableRuleExpression
+    ) -> list[bool]:
+        raise NotImplementedError
+
+    def evaluate(
+        self,
+        frame: pl.DataFrame,
+        expression: PortableRuleExpression,
+        references: dict[str, pl.DataFrame] | None = None,
+    ) -> RuleEvaluation:
+        prepared, evaluated = prepare_rule_evaluation(frame, expression, references)
+        selected = prepared.filter(pl.Series(evaluated, dtype=pl.Boolean))
+        valid = iter(self._validate_native(selected, expression) if selected.height else [])
+        return RuleEvaluation([next(valid) if active else True for active in evaluated], evaluated)
+
+    def validate(
+        self,
+        frame: pl.DataFrame,
+        expression: PortableRuleExpression,
+        references: dict[str, pl.DataFrame] | None = None,
+    ) -> list[bool]:
+        return self.evaluate(frame, expression, references).passed
+
     def measure(
         self,
         profile: dict,
@@ -444,6 +593,8 @@ class PolarsCompiler(MetricCompilerMixin):
     ) -> pl.Expr:
         rule, observed = expression.definition, expression.observed_at
         p, kind = rule.parameters, rule.type
+        if kind in {"compound_unique", "length", "column_compare", "reference"}:
+            return pl.col("__tv_rule_valid") == "true"
         assert rule.column is not None
         col = pl.col(rule.column).cast(pl.String)
         numeric = col.str.contains(DECIMAL_PATTERN)
@@ -512,7 +663,9 @@ class PolarsCompiler(MetricCompilerMixin):
         allow_null = p.get("null_policy", "ALLOW") != "FAIL"
         return pl.when(col.is_null()).then(pl.lit(allow_null)).otherwise(valid.fill_null(False))
 
-    def validate(self, frame: pl.DataFrame, expression: PortableRuleExpression) -> list[bool]:
+    def _validate_native(
+        self, frame: pl.DataFrame, expression: PortableRuleExpression
+    ) -> list[bool]:
         bounds = None
         if expression.definition.type == "range":
             frame, bounds = _range_relation(frame, expression)
@@ -553,6 +706,8 @@ class DuckDBCompiler(MetricCompilerMixin):
     ) -> tuple[str, list]:
         rule, observed = expression.definition, expression.observed_at
         p, kind = rule.parameters, rule.type
+        if kind in {"compound_unique", "length", "column_compare", "reference"}:
+            return "\"__tv_rule_valid\" = 'true'", []
         col = '"' + str(rule.column).replace('"', '""') + '"'
         params: list = []
 
@@ -626,7 +781,9 @@ class DuckDBCompiler(MetricCompilerMixin):
             params,
         )
 
-    def validate(self, frame: pl.DataFrame, expression: PortableRuleExpression) -> list[bool]:
+    def _validate_native(
+        self, frame: pl.DataFrame, expression: PortableRuleExpression
+    ) -> list[bool]:
         bounds = None
         if expression.definition.type == "range":
             frame, bounds = _range_relation(frame, expression)

@@ -15,7 +15,13 @@ from typing import Any
 import polars as pl
 
 from .config import MAX_ROWS
-from .config_semantics import METRIC_TYPES, ConfigurationError, RuleDefinition, effective_config
+from .config_semantics import (
+    METRIC_TYPES,
+    ConfigurationError,
+    RuleDefinition,
+    effective_config,
+    rule_columns,
+)
 from .portable_engine import (
     TIMESTAMP_PATTERN,
     PolarsCompiler,
@@ -29,9 +35,7 @@ class ProcessingError(ValueError):
     pass
 
 
-LOGICAL_SCHEMA_TYPES = frozenset(
-    {"STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN"}
-)
+LOGICAL_SCHEMA_TYPES = frozenset({"STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN"})
 COLUMN_OVERRIDE_FIELDS = frozenset({"logical_type", "semantic_tag"})
 
 
@@ -420,16 +424,34 @@ def configured_rules(config: dict) -> list[RuleDefinition]:
     return [r for r in rules if r.enabled]
 
 
+def rule_failure_message(rule: RuleDefinition, columns: str) -> str:
+    if rule.message:
+        return rule.message
+    parameters = rule.parameters
+    if rule.type == "compound_unique":
+        return f"La combinación de {columns} aparece más de una vez en los registros evaluados."
+    if rule.type == "length":
+        return f"{columns}: longitud esperada entre {parameters.get('min', 0)} y {parameters.get('max', 'sin máximo')} caracteres Unicode."
+    if rule.type == "column_compare":
+        return f"Se esperaba {rule.column} {parameters.get('operator', 'eq')} {parameters['other_column']} con semántica {parameters.get('logical_type', 'STRING')}."
+    if rule.type == "reference":
+        return f"La clave de {columns} no existe en la versión de referencia o incumple su política de nulos."
+    return f"{columns}: incumple la regla {rule.code}"
+
+
 def intake(
     frame: pl.DataFrame,
     config: dict,
     observed_at: datetime | None = None,
     input_row_numbers: list[int] | None = None,
+    references: dict[str, pl.DataFrame] | None = None,
 ) -> tuple[list[dict], dict, pl.DataFrame]:
     config = effective_config("INTAKE", config)
     transformed = apply_transforms(frame, config["transforms"])
     rules = configured_rules(config)
-    missing = sorted({r.column for r in rules if r.column} - set(transformed.columns))
+    missing = sorted(
+        {column for rule in rules for column in rule_columns(rule)} - set(transformed.columns)
+    )
     if missing:
         raise ProcessingError(f"Columnas del contrato ausentes: {', '.join(missing)}")
     errors: list[dict] = []
@@ -440,15 +462,23 @@ def intake(
     original = frame.to_dicts()
     input_lines = _record_lines(frame, input_row_numbers)
     for rule in rules:
-        assert rule.column is not None
-        passed = PolarsCompiler().validate(transformed, compile_rule(rule, observed))
+        columns = rule.parameters.get("columns", [rule.column] if rule.column else [])
+        if rule.type == "column_compare":
+            columns = [*columns, rule.parameters["other_column"]]
+        column_label = ", ".join(columns)
+        evaluation = PolarsCompiler().evaluate(
+            transformed, compile_rule(rule, observed), references
+        )
+        passed = evaluation.passed
         failed_indices = [i for i, valid in enumerate(passed) if not valid]
         summaries.append(
             {
                 "code": rule.code,
-                "column": rule.column,
+                "column": column_label,
+                "columns": columns,
                 "severity": rule.severity,
-                "evaluated_count": transformed.height,
+                "evaluated_count": sum(evaluation.evaluated),
+                "skipped_count": transformed.height - sum(evaluation.evaluated),
                 "failed_count": len(failed_indices),
                 "status": "FAIL" if failed_indices else "PASS",
                 "rule_id": rule.rule_id,
@@ -459,10 +489,16 @@ def intake(
                 {
                     "original_row_number": input_lines[i],
                     "rule_code": rule.code,
-                    "column": rule.column,
-                    "received_value": original[i][rule.column],
+                    "column": column_label,
+                    "columns": columns,
+                    "rule_id": rule.rule_id,
+                    "received_value": original[i][columns[0]]
+                    if len(columns) == 1
+                    else {c: original[i][c] for c in columns},
                     "severity": rule.severity,
-                    "message": rule.message or f"{rule.column}: incumple la regla {rule.code}",
+                    "message": rule_failure_message(rule, column_label),
+                    "parameters": rule.parameters,
+                    "condition": rule.when,
                     "classification": rule.severity,
                 }
             )
@@ -507,17 +543,22 @@ def reconcile(
     except (ConfigurationError, ValueError) as exc:
         raise ProcessingError(str(exc)) from exc
     keys, rules = config["key_columns"], config["comparison_rules"]
+    source = apply_transforms(source, config["source_transforms"])
+    target = apply_transforms(target, config["target_transforms"])
     if not rules:
         raise ProcessingError("El control necesita al menos una comparación.")
     aggregation = config.get("aggregation")
+    aggregations = config.get("aggregations") or ([aggregation] if aggregation else [])
+    aggregation = aggregations[0] if aggregations else None
     for name, frame, side_name in [("origen", source, "SOURCE"), ("destino", target, "TARGET")]:
         needed = set(
             keys + [r["source_column" if side_name == "SOURCE" else "target_column"] for r in rules]
         )
         if aggregation and aggregation["side"] == side_name:
-            needed.discard(aggregation["output_column"])
-            if aggregation["operation"] == "sum":
-                needed.add(aggregation["column"])
+            for item in aggregations:
+                needed.discard(item["output_column"])
+                if item["operation"] == "sum":
+                    needed.add(item["column"])
         missing = needed - set(frame.columns)
         if missing:
             raise ProcessingError(f"Columnas ausentes en {name}: {', '.join(sorted(missing))}")
@@ -566,20 +607,29 @@ def reconcile(
     if aggregation:
         side = 0 if aggregation["side"] == "SOURCE" else 1
         for key, group in list(groups[side].items()):
-            record = dict(group[0][0])
+            record = (
+                {column: group[0][0][column] for column in keys}
+                if "aggregations" in config
+                else dict(group[0][0])
+            )
             aggregate: Decimal | None
-            if aggregation["operation"] == "count":
-                aggregate = Decimal(len(group))
-            else:
-                numbers = [money(row[0][aggregation["column"]]) for row in group]
-                valid_numbers = [v for v in numbers if v is not None]
-                with exact_decimal_context(*valid_numbers):
-                    aggregate = (
-                        sum(valid_numbers, Decimal(0))
-                        if len(valid_numbers) == len(numbers)
-                        else None
+            for item in aggregations:
+                if item["operation"] == "count":
+                    aggregate = Decimal(len(group))
+                else:
+                    numbers = [money(row[0][item["column"]]) for row in group]
+                    valid_numbers = [v for v in numbers if v is not None]
+                    with exact_decimal_context(*valid_numbers):
+                        aggregate = (
+                            sum(valid_numbers, Decimal(0))
+                            if len(valid_numbers) == len(numbers)
+                            else None
+                        )
+                record[item["output_column"]] = str(aggregate) if aggregate is not None else None
+                if aggregate is None:
+                    record.setdefault("__tv_invalid_aggregate_columns", []).append(
+                        item["output_column"]
                     )
-            record[aggregation["output_column"]] = str(aggregate) if aggregate is not None else None
             groups[side][key] = [(record, group[0][1], [item[1] for item in group])]
     for key in sorted(set(groups[0]) | set(groups[1])):
         left, right = groups[0].get(key, []), groups[1].get(key, [])
@@ -624,6 +674,12 @@ def reconcile(
         evaluated.append(PolarsCompiler().compare(compared, expression))
     for index, (display, s, t) in enumerate(pairs):
         details = [checks[index] for checks in evaluated]
+        for detail in details:
+            if detail["source_column"] in s[0].get("__tv_invalid_aggregate_columns", []) or detail[
+                "target_column"
+            ] in t[0].get("__tv_invalid_aggregate_columns", []):
+                detail["invalid"], detail["passed"] = True, False
+                detail["message"] = "La agregación contiene un valor no numérico o nulo."
         invalid = any(d["invalid"] for d in details)
         matched = all(d["passed"] for d in details)
         emit(
@@ -666,11 +722,25 @@ def reconcile(
                 "INVALID",
             ]
         },
+        "comparisons": [
+            {
+                "code": rule["code"],
+                "source_column": rule["source_column"],
+                "target_column": rule["target_column"],
+                "evaluated_count": len(checks),
+                "failed_count": sum(not check["passed"] for check in checks),
+                "invalid_count": sum(check["invalid"] for check in checks),
+            }
+            for rule, checks in zip(rules, evaluated, strict=True)
+        ],
         "diagnostics": {
             "key_normalization": config["key_normalization"],
             "key_normalization_policy": config["key_normalization_policy"],
             "comparison_rules": rules,
             "aggregation": aggregation,
+            "aggregations": aggregations,
+            "source_transforms": config["source_transforms"],
+            "target_transforms": config["target_transforms"],
             "semantics_version": 2,
         },
     }
@@ -687,6 +757,7 @@ def sentinel(
     frame: pl.DataFrame | None = None,
     previous_schema: list | None = None,
     history: list | None = None,
+    references: dict[str, pl.DataFrame] | None = None,
 ) -> tuple[list, dict]:
     checks, metric_records = [], []
     observed = observed_at or datetime.now(UTC)
@@ -812,11 +883,13 @@ def sentinel(
                 metric["passed"],
                 metric["message"],
                 **{key: metric[key] for key in ("column", "metric_key") if key in metric},
+                severity=rule.severity,
+                rule_id=rule.rule_id,
             )
         else:
             if frame is None:
                 raise ProcessingError("El control por registro requiere el Parquet canónico.")
-            if column not in frame.columns:
+            if set(rule_columns(rule)) - set(frame.columns):
                 add(
                     rule.code,
                     f"{rule.code} · {column}",
@@ -825,9 +898,12 @@ def sentinel(
                     False,
                     "Columna ausente",
                     column=column,
+                    severity=rule.severity,
+                    rule_id=rule.rule_id,
                 )
                 continue
-            mask = PolarsCompiler().validate(frame, compile_rule(rule, observed))
+            evaluation = PolarsCompiler().evaluate(frame, compile_rule(rule, observed), references)
+            mask = evaluation.passed
             failed = sum(not value for value in mask)
             add(
                 rule.code,
@@ -837,8 +913,11 @@ def sentinel(
                 failed == 0,
                 rule.message or f"{failed} registros incumplen de {frame.height}",
                 column=column,
-                evaluated_count=frame.height,
+                evaluated_count=sum(evaluation.evaluated),
+                skipped_count=frame.height - sum(evaluation.evaluated),
                 failed_count=failed,
+                severity=rule.severity,
+                rule_id=rule.rule_id,
             )
     failed = sum(c["status"] == "FAIL" for c in checks)
     return checks, {

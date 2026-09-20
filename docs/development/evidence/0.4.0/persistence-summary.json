@@ -1,0 +1,30 @@
+{
+  "migration": "0007_monitor_scheduling",
+  "schema_version": 2,
+  "validated_relationships": 1562,
+  "verified_artifacts": 206,
+  "verified_secrets": 0,
+  "table_counts": {
+    "artifact_links": 262,
+    "artifacts": 206,
+    "audit_events": 304,
+    "configurations": 31,
+    "dataset_source_bindings": 0,
+    "dataset_versions": 70,
+    "datasets": 56,
+    "exception_attachments": 1,
+    "exceptions": 11,
+    "external_connection_versions": 0,
+    "external_connections": 0,
+    "findings": 47,
+    "idempotency_keys": 0,
+    "jobs": 43,
+    "metric_history": 250,
+    "monitor_occurrences": 2,
+    "monitor_schedule_versions": 4,
+    "monitor_schedules": 1,
+    "runs": 43,
+    "sessions": 24,
+    "users": 7
+  }
+}

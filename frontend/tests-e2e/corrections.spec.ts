@@ -67,7 +67,7 @@ test('upload → Intake fecha no futura → Recon diferencia → excepción → 
   const contract = await post(page, '/intake/contracts', { name, dataset_id: datasetId, config: { required_columns: ['order_id'], max_error_rate: 0, rules: [{ code: 'DATE_NOT_FUTURE', type: 'date_rule', column: 'transaction_date', parameters: { not_future: true } }] } }, headers)
   const intake = await executeUI(page, 'intake', contract.id, 'Validar datos')
   await expect(page.getByRole('columnheader', { name: 'Línea del archivo' })).toBeVisible()
-  await expect(page.getByText('DATE_NOT_FUTURE', { exact: true })).toBeVisible()
+  await expect(page.locator('.results-table').getByText('DATE_NOT_FUTURE', { exact: true })).toBeVisible()
   await downloadExcel(page, intake, 'intake', testInfo.outputPath('intake.xlsx'))
   await page.screenshot({ path: testInfo.outputPath('intake-excel-button.png'), fullPage: true })
   const intakeRun = await (await page.request.get(`/api/v1/runs/${intake}`)).json()

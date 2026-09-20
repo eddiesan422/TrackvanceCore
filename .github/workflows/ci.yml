@@ -84,6 +84,8 @@ jobs:
       TRACKVANCE_WEB_ORIGIN: http://localhost:3100
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       PLAYWRIGHT_CHANNEL: chromium
+      DEMO_ACCESS_ENABLED: 'true'
+      DEMO_SEED_ENABLED: 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -99,6 +101,24 @@ jobs:
       - name: Install browser
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+      - name: Verify demo access without demo seed on fresh volumes
+        env:
+          DEMO_ACCESS_ENABLED: 'true'
+          DEMO_SEED_ENABLED: 'false'
+          TV_EXPECT_CLEAN_DEMO: 'true'
+        run: |
+          set -euo pipefail
+          cleanup() {
+            result=$?
+            if [ "$result" -ne 0 ]; then
+              docker compose logs --tail=120 || true
+            fi
+            docker compose down -v --remove-orphans || true
+            return "$result"
+          }
+          trap cleanup EXIT
+          docker compose up --build --detach --wait --wait-timeout 240
+          (cd frontend && pnpm exec playwright test tests-e2e/demo-access-clean.spec.ts)
       - name: Start isolated local stack
         run: docker compose up --build --detach --wait --wait-timeout 240
       - name: Readiness and worker
@@ -110,9 +130,13 @@ jobs:
         run: pnpm test:e2e
       - name: Restart with retained volumes
         run: |
+          docker compose cp scripts/verify_storage.py api:/tmp/verify_storage.py
+          docker compose exec -T api python /tmp/verify_storage.py snapshot > persistence-before.json
           docker compose restart
           docker compose up --detach --wait --wait-timeout 120
           python scripts/doctor.py --base-url http://localhost:3100 --docker
+          docker compose exec -T api python /tmp/verify_storage.py snapshot > persistence-after.json
+          python scripts/verify_storage.py compare persistence-before.json persistence-after.json
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -121,6 +145,8 @@ jobs:
           path: |
             frontend/playwright-report/
             frontend/test-results/
+            persistence-before.json
+            persistence-after.json
           if-no-files-found: ignore
       - name: Container logs on failure
         if: failure()
@@ -128,3 +154,73 @@ jobs:
       - name: Stop isolated stack without deleting volumes
         if: always()
         run: docker compose down
+  connections-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@11.19.0
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Real PostgreSQL and SQL Server certification
+        run: python scripts/tests/connections_cycle.py --full-playwright
+      - name: Upload source certification and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: connections-evidence
+          path: .codex-local/connections-e2e/
+          include-hidden-files: true
+          if-no-files-found: ignore
+  backup-restore-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
+        run: python scripts/tests/docker_backup_cycle.py
+      - name: Upload sanitized recovery results only
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: recovery-results
+          path: .codex-local/recovery/**/result.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+  benchmark-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Exercise the benchmark harness at bounded smoke volume
+        run: python scripts/tests/benchmark_cycle.py --target-mib 1 --rows 1000 --file-only --max-wall-seconds 600
+      - name: Upload measured smoke results (not volume certification)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-smoke-results
+          path: |
+            .codex-local/benchmarks/**/result.json
+            .codex-local/benchmarks/**/cleanup.json
+          include-hidden-files: true
+          if-no-files-found: ignore

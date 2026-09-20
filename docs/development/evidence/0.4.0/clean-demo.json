@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "project": "trackvance-e2e-clean-f51c52066dc1",
+  "base_url": "http://127.0.0.1:55771",
+  "suite": "demo-access-clean.spec.ts",
+  "cleaned": true,
+  "demo_access_enabled": true,
+  "demo_seed_enabled": false,
+  "browser_output": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\roadmap-0.4.0\\clean-demo-browser",
+  "reporter": "line",
+  "playwright_exit_code": 0
+}

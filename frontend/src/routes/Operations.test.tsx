@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
@@ -23,6 +23,7 @@ const baseException = {
 
 function mockExceptionApi(detail: Record<string, unknown>) {
   vi.mocked(api).mockImplementation(async (path, options) => {
+    if (path === '/exceptions/assignees') return { items: [{ id: 'stable-user-id', name: 'Equipo Trackvance', role: 'Administrator' }], total: 1 }
     if (path === '/exceptions') return { items: [detail], total: 1 }
     if (path === '/exceptions/case-1' && !options) return detail
     if (path === '/exceptions/case-1/validate') return detail
@@ -32,6 +33,95 @@ function mockExceptionApi(detail: Record<string, unknown>) {
 }
 
 describe('Exception technical resolution flow', () => {
+  it('blocks next edits until the saved revision finishes refreshing', async () => {
+    const user = userEvent.setup()
+    const original = { ...baseException, state: 'OPEN' }
+    const assigned = { ...original, state: 'ASSIGNED', assigned_user_id: 'stable-user-id', version: 3 }
+    let releasePatch!: (value: typeof assigned) => void
+    let releaseRefresh!: (value: typeof assigned) => void
+    let detailReads = 0
+    vi.mocked(api).mockImplementation(async (path, options) => {
+      if (path === '/exceptions/assignees') return { items: [{ id: 'stable-user-id', name: 'Equipo Trackvance' }], total: 1 }
+      if (path === '/exceptions') return { items: [original], total: 1 }
+      if (path === '/exceptions/case-1' && !options) {
+        detailReads += 1
+        return detailReads === 1 ? original : new Promise<typeof assigned>(resolve => { releaseRefresh = resolve })
+      }
+      if (path === '/exceptions/case-1' && options?.method === 'PATCH') return new Promise<typeof assigned>(resolve => { releasePatch = resolve })
+      throw new Error(`Unexpected request ${path}`)
+    })
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions' })
+    const state = await screen.findByLabelText('Estado de gestión')
+    await user.selectOptions(screen.getByLabelText('Responsable'), 'stable-user-id')
+    await user.selectOptions(state, 'ASSIGNED')
+    await user.click(screen.getByRole('button', { name: 'Guardar gestión' }))
+    expect(state).toBeDisabled()
+    expect(screen.getByLabelText('Causa raíz')).toBeDisabled()
+    expect(screen.getByLabelText('Archivo de evidencia')).toBeDisabled()
+    await act(async () => releasePatch(assigned))
+    await waitFor(() => expect(detailReads).toBe(2))
+    expect(state).toBeDisabled()
+    await user.selectOptions(state, 'INVESTIGATING')
+    expect(state).toHaveValue('ASSIGNED')
+    await act(async () => releaseRefresh(assigned))
+    await waitFor(() => expect(screen.getByLabelText('Estado de gestión')).toBeEnabled())
+    expect(screen.getByLabelText('Estado de gestión')).toHaveValue('ASSIGNED')
+    expect(screen.getByText(/^Versión 3 ·/)).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Estado de gestión'), 'INVESTIGATING')
+    await user.click(screen.getByRole('button', { name: 'Guardar gestión' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/exceptions/case-1', expect.objectContaining({
+      method: 'PATCH', body: expect.stringContaining('"version":3,"state":"INVESTIGATING"'),
+    })))
+  })
+
+  it('saves stable assignment, priority, SLA and the explicit automatic policy', async () => {
+    const user = userEvent.setup()
+    mockExceptionApi({ ...baseException, state: 'OPEN', priority: 'HIGH', auto_resolve_enabled: false })
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions' })
+    const dialog = await screen.findByRole('dialog')
+    await user.selectOptions(await within(dialog).findByLabelText('Responsable'), 'stable-user-id')
+    await user.selectOptions(within(dialog).getByLabelText('Estado de gestión'), 'ASSIGNED')
+    await user.selectOptions(within(dialog).getByLabelText('Prioridad del caso'), 'CRITICAL')
+    await user.type(within(dialog).getByLabelText('SLA (horas)'), '24')
+    await user.click(within(dialog).getByLabelText('Resolver automáticamente tras validación técnica'))
+    await user.click(within(dialog).getByRole('button', { name: 'Guardar gestión' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/exceptions/case-1', expect.objectContaining({ method: 'PATCH', body: expect.stringContaining('"assigned_user_id":"stable-user-id","priority":"CRITICAL","sla_hours":24,"auto_resolve_enabled":true') })))
+  })
+
+  it('uploads bounded evidence as multipart with the current case version', async () => {
+    const user = userEvent.setup()
+    mockExceptionApi({ ...baseException, attachments: [] })
+    vi.mocked(api).mockImplementationOnce(async () => ({ items: [], total: 0 }))
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions' })
+    const upload = await screen.findByLabelText('Archivo de evidencia')
+    await user.upload(upload, new File(['Comprobante'], 'evidencia.txt', { type: 'text/plain' }))
+    await user.click(screen.getByRole('button', { name: 'Adjuntar evidencia' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/exceptions/case-1/attachments', expect.objectContaining({ method: 'POST', body: expect.any(FormData) })))
+    const call = vi.mocked(api).mock.calls.find(([path]) => path.endsWith('/attachments'))!
+    expect((call[1]?.body as FormData).get('version')).toBe('2')
+  })
+
+  it('disables management and reopening for read-only roles', async () => {
+    mockExceptionApi({ ...baseException, state: 'RESOLVED' })
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions', permissions: ['exceptions:read'] })
+    expect(await screen.findByRole('button', { name: 'Reabrir excepción' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Agregar comentario' })).toBeDisabled()
+    expect(screen.queryByLabelText('Archivo de evidencia')).not.toBeInTheDocument()
+  })
+
+  it('blocks technical and administrative closure when the role lacks close permission', async () => {
+    const user = userEvent.setup()
+    mockExceptionApi({ ...baseException, root_cause: 'Fuente', resolution: 'Corregida',
+      technical_validation: { status: 'VALIDATED', eligible: true, validated: true, can_resolve: true } })
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions', permissions: ['exceptions:write'] })
+    expect(await screen.findByRole('button', { name: 'Resolver excepción' })).toBeDisabled()
+    expect(screen.getByText('Tu rol no tiene permiso para cerrar excepciones.')).toBeInTheDocument()
+    await user.click(screen.getByText('Cierre administrativo'))
+    await user.selectOptions(screen.getByLabelText('Decisión administrativa'), 'ACCEPTED')
+    await user.type(screen.getByLabelText('Motivo administrativo'), 'Aceptada por negocio')
+    expect(screen.getByRole('button', { name: 'Registrar cierre administrativo' })).toBeDisabled()
+  })
+
   it('blocks resolution without later technical evidence and keeps administrative closure separate', async () => {
     const user = userEvent.setup()
     mockExceptionApi({ ...baseException, technical_validation: { status: 'NO_LATER_RUN', eligible: false, validated: false, can_resolve: false, reason: 'Aún no existe una ejecución posterior del mismo control.' } })
@@ -112,6 +202,8 @@ describe('Exception technical resolution flow', () => {
     expect(screen.getByText('Esta excepción fue resuelta después de una validación técnica.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Ver ejecución de validación/ })).toHaveAttribute('href', '/runs/run-validation')
     expect(screen.queryByRole('button', { name: 'Resolver excepción' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reabrir excepción' })).toBeDisabled()
+    await userEvent.setup().type(screen.getByLabelText('Comentario para el historial'), 'Se detectó recurrencia')
     expect(screen.getByRole('button', { name: 'Reabrir excepción' })).toBeEnabled()
   })
 })

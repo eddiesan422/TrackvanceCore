@@ -14,6 +14,7 @@ TEST_ROOT = Path(_sandbox.name).resolve()
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_ROOT / 'test.db').as_posix()}"
 os.environ["TRACKVANCE_STORAGE_DIR"] = str(TEST_ROOT / "storage")
 os.environ["TRACKVANCE_STORAGE_ROOT"] = str(TEST_ROOT / "storage")
+os.environ["DEMO_ACCESS_ENABLED"] = "false"
 os.environ["DEMO_SEED_ENABLED"] = "false"
 
 

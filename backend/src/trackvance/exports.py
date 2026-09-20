@@ -307,7 +307,11 @@ def _summary(
         "Informe de ejecución · Fechas en UTC",
         [29, 47, 24, 30, 35],
     )
-    config = _mapping(_mapping(manifest.get("configuration")).get("config", configuration.get("config", configuration)))
+    config = _mapping(
+        _mapping(manifest.get("configuration")).get(
+            "config", configuration.get("config", configuration)
+        )
+    )
     metrics = _mapping(run.get("metrics", manifest.get("metrics")))
     processing = _mapping(manifest.get("processing", run.get("execution_plan")))
     input_version = inputs[0] if inputs else {}
@@ -401,13 +405,15 @@ def _intake(
             _label(r.get("status")),
             r.get("evaluated_count"),
             r.get("failed_count"),
+            r.get("skipped_count", 0),
+            _label(r.get("severity")),
         )
         for r in metrics.get("rules", [])
     ]
     _table(
         ws,
         "ResumenReglas",
-        ["Regla", "Columna", "Estado", "Evaluadas", "Incumplimientos"],
+        ["Regla", "Columna", "Estado", "Evaluadas", "Incumplimientos", "Excluidas", "Severidad"],
         rule_rows,
         start_row=row,
     )
@@ -422,7 +428,9 @@ def _intake(
         errors,
         "ErroresIntake",
         [
-            "Registro de la versión" if metrics.get("source_row_numbering") == "RECORD_NUMBER" else "Línea del archivo",
+            "Registro de la versión"
+            if metrics.get("source_row_numbering") == "RECORD_NUMBER"
+            else "Línea del archivo",
             "Regla",
             "Columna",
             "Valor recibido",
@@ -478,11 +486,22 @@ def _recon(
     metrics: Mapping[str, Any],
 ) -> None:
     normalization = _mapping(config.get("key_normalization"))
-    options = [("Claves", ", ".join(config.get("key_columns", []))),
-               ("Normalización de claves", _normalization_description(normalization))]
-    aggregation = _mapping(config.get("aggregation"))
-    if aggregation:
-        options.append(("Agregación 1:N", f"Lado {aggregation.get('side')}; {aggregation.get('operation')} de {aggregation.get('column', 'registros')} → {aggregation.get('output_column')}"))
+    options = [
+        ("Claves", ", ".join(config.get("key_columns", []))),
+        ("Normalización de claves", _normalization_description(normalization)),
+    ]
+    for aggregation in config.get("aggregations") or (
+        [config["aggregation"]] if config.get("aggregation") else []
+    ):
+        options.append(
+            (
+                "Agregación N:1" if aggregation.get("side") == "SOURCE" else "Agregación 1:N",
+                f"Lado {aggregation.get('side')}; {aggregation.get('operation')} de {aggregation.get('column', 'registros')} → {aggregation.get('output_column')}",
+            )
+        )
+    for side, label in (("source", "origen"), ("target", "destino")):
+        if config.get(f"{side}_transforms"):
+            options.append((f"Transformaciones {label}", _text(config[f"{side}_transforms"])))
     end = _table(
         ws,
         "OpcionesConciliacion",
@@ -492,12 +511,36 @@ def _recon(
     )
     comparisons = config.get("comparison_rules", [])
     if not comparisons and config.get("amount_column"):
-        comparisons = [{"type": "numeric_tolerance", "source_column": config['amount_column'],
-                        "target_column": config['amount_column'], "parameters": {"abs": config.get('tolerance')}}]
-    _table(ws, "Comparaciones", ["Campo origen", "Campo destino", "Comparación", "Tolerancia / política", "Normalización de valores"],
-           [(c.get("source_column"), c.get("target_column"), c.get("code", str(c.get("type", "")).upper()),
-             _comparison_policy(c), _normalization_description(_mapping(c.get("parameters")).get("normalization", {})))
-            for c in comparisons], start_row=end + 3)
+        comparisons = [
+            {
+                "type": "numeric_tolerance",
+                "source_column": config["amount_column"],
+                "target_column": config["amount_column"],
+                "parameters": {"abs": config.get("tolerance")},
+            }
+        ]
+    _table(
+        ws,
+        "Comparaciones",
+        [
+            "Campo origen",
+            "Campo destino",
+            "Comparación",
+            "Tolerancia / política",
+            "Normalización de valores",
+        ],
+        [
+            (
+                c.get("source_column"),
+                c.get("target_column"),
+                c.get("code", str(c.get("type", "")).upper()),
+                _comparison_policy(c),
+                _normalization_description(_mapping(c.get("parameters")).get("normalization", {})),
+            )
+            for c in comparisons
+        ],
+        start_row=end + 3,
+    )
     headers = [
         "Key",
         "Clasificación",
@@ -505,8 +548,12 @@ def _recon(
         "Valor destino",
         "Diferencia",
         "Tolerancia",
-        "Registro origen" if metrics.get("source_row_numbering") == "RECORD_NUMBER" else "Línea origen",
-        "Registro destino" if metrics.get("target_row_numbering") == "RECORD_NUMBER" else "Línea destino",
+        "Registro origen"
+        if metrics.get("source_row_numbering") == "RECORD_NUMBER"
+        else "Línea origen",
+        "Registro destino"
+        if metrics.get("target_row_numbering") == "RECORD_NUMBER"
+        else "Línea destino",
         "Mensaje",
         "Detalle de comparaciones",
     ]
@@ -586,20 +633,41 @@ def _normalization_description(policy: Mapping[str, Any]) -> str:
 
 def _comparison_policy(comparison: Mapping[str, Any]) -> str:
     kind, params = comparison.get("type"), _mapping(comparison.get("parameters"))
-    nulls = "; nulos iguales" if params.get("equal_nulls") else "; nulos no coinciden"
+    nulls = (
+        "; política nulos: " + str(params["null_policy"])
+        if params.get("null_policy")
+        else "; nulos iguales"
+        if params.get("equal_nulls")
+        else "; nulos no coinciden"
+    )
     if kind == "numeric_tolerance":
         text = f"Absoluta: {params.get('abs', 0)}"
         if params.get("percent") is not None:
             text += f"; {params['percent']}% sobre {params.get('denominator', 'SOURCE')}; cero: EXACT_ONLY"
         return text + nulls
     if kind == "date_tolerance":
-        return (f"{params['hours']} horas" if "hours" in params else f"{params.get('days', 0)} días") + "; UTC" + nulls
+        return (
+            (f"{params['hours']} horas" if "hours" in params else f"{params.get('days', 0)} días")
+            + "; UTC"
+            + nulls
+        )
     return "Igualdad exacta" + nulls
 
 
 def _sentinel(book: Workbook, metrics: Mapping[str, Any], results: list[Mapping[str, Any]]) -> None:
     checks = results or metrics.get("checks", [])
-    headers = ["Control", "Code", "Estado", "Valor observado", "Valor esperado", "Detalle"]
+    headers = [
+        "Control",
+        "Code",
+        "Estado",
+        "Valor observado",
+        "Valor esperado",
+        "Detalle",
+        "Severidad",
+        "Evaluadas",
+        "Fallidas",
+        "Excluidas",
+    ]
     for name, title, rows in [
         ("Controles", "Controles de Sentinel", checks),
         ("Hallazgos", "Hallazgos de Sentinel", [r for r in checks if r.get("status") == "FAIL"]),
@@ -623,6 +691,10 @@ def _sentinel(book: Workbook, metrics: Mapping[str, Any], results: list[Mapping[
                     r.get("actual", r.get("observed_value")),
                     r.get("expected"),
                     r.get("message", r.get("detail")),
+                    _label(r.get("severity", "ERROR")),
+                    r.get("evaluated_count"),
+                    r.get("failed_count"),
+                    r.get("skipped_count"),
                 )
                 for r in rows
             ),
@@ -663,10 +735,14 @@ def _trace(
         (
             "Procesamiento",
             "Política de claves",
-            _mapping(config_evidence.get("config", configuration.get("config"))).get("key_normalization"),
+            _mapping(config_evidence.get("config", configuration.get("config"))).get(
+                "key_normalization"
+            ),
         ),
     ]
     manifest_inputs = manifest.get("inputs", [])
+    for reference in manifest.get("references", []):
+        rows.extend(("Dataset de referencia", str(key), value) for key, value in reference.items())
     for index, item in enumerate(inputs):
         evidence: Mapping[str, Any] = next(
             (v for v in manifest_inputs if v.get("dataset_version_id") == item.get("id")), {}
@@ -686,12 +762,23 @@ def _trace(
             ("Original artifact ID", item.get("original_artifact_id")),
             ("Canonical artifact ID", item.get("canonical_artifact_id")),
             ("Canonical SHA-256", evidence.get("canonical_sha256")),
-            ("Numeración de registros", evidence.get("row_numbering", _mapping(item.get("profile")).get("row_numbering"))),
+            (
+                "Numeración de registros",
+                evidence.get("row_numbering", _mapping(item.get("profile")).get("row_numbering")),
+            ),
         ]:
             rows.append((section, label, value))
     end = _table(ws, "EvidenciaRun", ["Recurso", "Referencia", "Valor"], rows)
-    config_rows = _flatten(_redact(_mapping(config_evidence.get("config", configuration.get("config")))))
-    end = _table(ws, "ConfiguracionEvidencia", ["Parámetro", "Configuración efectiva"], config_rows, start_row=end + 3)
+    config_rows = _flatten(
+        _redact(_mapping(config_evidence.get("config", configuration.get("config"))))
+    )
+    end = _table(
+        ws,
+        "ConfiguracionEvidencia",
+        ["Parámetro", "Configuración efectiva"],
+        config_rows,
+        start_row=end + 3,
+    )
     _table(
         ws,
         "ArtefactosResultado",

@@ -8,7 +8,10 @@ x-backend: &backend
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-trackvance}:${POSTGRES_PASSWORD:?Create .env with POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trackvance}
     TRACKVANCE_STORAGE_ROOT: /var/lib/trackvance
     TRACKVANCE_STORAGE_DIR: /var/lib/trackvance
+    TRACKVANCE_SECRETS_DIR: /var/lib/trackvance-credentials
+    TRACKVANCE_SECRET_KEY_FILE: /var/lib/trackvance-keys/master.key
     TRACKVANCE_WEB_ORIGIN: ${TRACKVANCE_WEB_ORIGIN:-http://localhost:3000}
+    DEMO_ACCESS_ENABLED: ${DEMO_ACCESS_ENABLED:-${DEMO_SEED_ENABLED:-true}}
     DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
     MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
     TRACKVANCE_MAX_ROWS: ${TRACKVANCE_MAX_ROWS:-100000}
@@ -37,6 +40,10 @@ services:
   api:
     <<: *backend
     command: ['python', '-m', 'uvicorn', 'trackvance.api:app', '--host', '0.0.0.0', '--port', '8000']
+    volumes:
+      - trackvance_data:/var/lib/trackvance
+      - connection_credentials:/var/lib/trackvance-credentials
+      - connection_keys:/var/lib/trackvance-keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,3 +86,5 @@ services:
 volumes:
   postgres_data:
   trackvance_data:
+  connection_credentials:
+  connection_keys:

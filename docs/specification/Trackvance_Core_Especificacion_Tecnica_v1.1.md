@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-Revisión de implementación 0.3.0 | 16 de septiembre de 2026
+Revisión de implementación 0.4.0 | 19 de septiembre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -10,7 +10,7 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps y Sentinel con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles y conserva evidencia verificable del resultado.
 
-Esta especificación describe la entrega 0.3.0 verificada el 16 de septiembre de 2026. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado y se identifica esta revisión de implementación. Los resultados de pruebas y los límites pendientes aparecen en la sección de aceptación.
+Esta especificación describe la evolución funcional local 0.4.0: conserva Conexiones PostgreSQL/SQL Server e incorpora reglas avanzadas, conciliación configurable, programación Sentinel, gestión de excepciones y administración de usuarios. Operación, recuperación y benchmarks se describen según su evidencia real. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. Los resultados de certificación de esta revisión se registran en la sección de aceptación; no se extrapolan los de 0.3.0.
 
 | Estado | Significado normativo |
 | --- | --- |
@@ -31,7 +31,7 @@ Esta especificación describe la entrega 0.3.0 verificada el 16 de septiembre de
 
 ### Qué no se certifica como implementado
 
-PySpark operativo, Redis/Celery, conectores a bases remotas u object storage, OAuth2/OIDC, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Sus contratos y plan de evolución se detallan más adelante.
+PySpark operativo, Redis/Celery productivo, conectores distintos de PostgreSQL/SQL Server, object storage remoto, OIDC/SSO, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Data Delivery/DataSink es una responsabilidad futura independiente de las entradas. El roadmap oficial completa primero los puntos funcionales 1 a 9; la productización del punto 10 requiere una evolución posterior y no forma parte de este ciclo.
 
 ## 2. Arquitectura lógica estable
 
@@ -41,13 +41,15 @@ La separación principal es entre adquisición de datos, almacenamiento interno 
 
 | Puerto / componente | Responsabilidad | Adaptador local |
 | --- | --- | --- |
-| DatasetSource | Adquirir datos desde una fuente y devolver el modelo común. | LocalFileDatasetSource |
+| DatasetSource | Adquirir datos desde una fuente y devolver el modelo común. | Archivos locales, PostgreSQL y SQL Server |
+| SecretStore | Gestionar credenciales por organización, fuera de artifacts. | Cifrado Fernet local, clave separada |
 | DatasetReader | Interpretar un formato de archivo y sus opciones de lectura. | CSV, XLSX, JSON, Parquet, TXT |
 | StorageProvider | Publicar bytes inmutables, materializar un artefacto y asignar staging temporal. | FileArtifactStore |
 | ExecutionEngine | Ejecutar un Run completo con evidencia y linaje. | LocalExecutionEngine |
 | ProcessingEngine | Compilar/evaluar expresiones portables de reglas y comparaciones. | Polars; DuckDB para paridad cubierta |
 | ExecutionPlanner | Estimar recursos y fijar un plan antes de ejecutar. | Presupuesto de memoria/disco local |
 | JobQueue | Publicar el trabajo asociado a un Run. | DatabaseJobQueue |
+| NotificationDelivery | Contrato para entregar una alerta fuera del sistema. | PREPARADO; las alertas actuales son Findings internos |
 
 Las reglas no reciben cadenas de conexión ni conocen CSV, Excel o buckets. Trabajan sobre el modelo común producido por los lectores y el Parquet canónico. La orquestación usa identidades de versiones y configuraciones, genera hallazgos y publica evidencia mediante los puertos.
 
@@ -67,10 +69,12 @@ IMPLEMENTADO. Docker Compose es el entorno de referencia para operación y certi
 | --- | --- | --- |
 | web | React compilado servido por nginx y proxy a /api. | Publicado solo en 127.0.0.1; puerto configurable. |
 | api | FastAPI, sesión/RBAC, carga, configuración, consulta y downloads. | Red interna Compose; comparte trackvance_data. |
-| worker | Procesa trabajos del mismo monolito, leases y heartbeat. | Red interna; comparte metadata y trackvance_data. |
+| worker | Despacha programación Sentinel y procesa jobs, leases y heartbeat del mismo monolito. | Red interna; comparte metadata y trackvance_data. |
 | postgres | PostgreSQL 16 para metadata. | Volumen postgres_data; sin puerto publicado al host. |
 
 El volumen trackvance_data se monta en /var/lib/trackvance para API y worker. FileArtifactStore administra artifacts/<id>/data.<ext> y staging tmp; las rutas históricas permanecen legibles. No se guardan datasets como blobs SQL. Los volúmenes sobreviven a stop, restart, recreación de contenedores y docker compose down. down -v elimina volúmenes y no es un comando de actualización.
+
+Solo API monta connection_credentials y connection_keys para adquirir fuentes externas. El worker monta únicamente trackvance_data: consume snapshots canónicos sin recuperar credenciales de conexión. La copia de recuperación debe conservar metadata, artifacts, credenciales cifradas y clave de forma coordinada.
 
 Todos los servicios declaran restart: "no". Trackvance permanece detenido al iniciar Docker Desktop hasta que el usuario ejecute el arranque. La instancia del equipo usa trackvance-certification y http://localhost:3100; el valor por defecto del repositorio es 3000.
 
@@ -104,13 +108,19 @@ La preparación descarga imágenes y dependencias. Una vez construidas, la opera
 | processing.py / config_semantics.py | Semántica de perfil, reglas, normalización y resultados. |
 | portable_engine.py / planner.py | Compilación portable, evaluación y preflight. |
 | dataset_readers.py | DatasetSource, registry y lectores por formato. |
+| connections_api.py / connections_service.py | Contratos HTTP, configuración versionada, bindings y adquisición de fuentes. |
+| dataset_sources.py / credential_store.py | Adaptadores SQL de solo lectura y contrato/proveedor de secretos. |
 | artifactstore.py | StorageProvider y adaptador local inmutable. |
 | execution.py / jobqueue.py / worker.py | Puerto de ejecución, publicación, consumo y recuperación local. |
 | manifests.py / exports.py | Compatibilidad de evidencia y reportes Excel. |
 | permissions.py / audit_context.py | Política RBAC, actor y sanitización de metadata. |
 | dashboard.py | Agregación operativa del Centro de Control. |
+| scheduler.py / sentinel_api.py | Programaciones versionadas, ocurrencias, despacho local e histórico de series. |
+| exceptions_api.py | Asignación, SLA, comentarios, adjuntos y gestión de casos con concurrencia optimista. |
+| identity_api.py | Usuarios locales, roles, permisos efectivos, contraseñas y revocación de sesiones. |
+| operations_common.py | Inventario e integridad compartidos por las herramientas de mantenimiento. |
 
-El frontend se organiza en app, components, features/datasets, features/runs y routes; comparte cliente HTTP, componentes visuales y queries. La organización por bounded contexts/domain/application/infrastructure podrá profundizarse cuando el tamaño lo justifique. No se mueve código sin un beneficio funcional o de frontera concreto.
+El frontend se organiza en app, components, features/datasets, features/connections, features/runs, features/identity y routes; comparte cliente HTTP, componentes visuales y queries. RuleBuilder, ComparisonBuilder y TransformBuilder utilizan esquema real; MonitorSchedulePanel gestiona programación e historia. La organización por bounded contexts/domain/application/infrastructure podrá profundizarse cuando el tamaño lo justifique. No se mueve código sin un beneficio funcional o de frontera concreto.
 
 No forman parte del stack instalado React Hook Form, Zod, Tailwind, TanStack Table, Recharts, PyArrow ni PySpark. La documentación inicial que los proponía se interpreta como antecedente de diseño, no como inventario actual.
 
@@ -134,9 +144,47 @@ La resolución usa firmas fuertes, contenido, extensión y detección delimitada
 
 La carga admite por defecto 10 MiB, 100.000 filas y 100 columnas. La inspección previa usa hasta 100 registros y metadata embebida donde existe. Los lectores limitan expansiones XLSX/Parquet y tamaño de celdas. La inspección controla la muestra; la carga/perfil inicial completos siguen siendo síncronos y acotados.
 
-### Conectores preparados
+### Conectores externos
 
-Un DatasetSource futuro para PostgreSQL, SQL Server, S3, Azure Blob o API deberá resolver credenciales fuera de reader_options, aplicar límites/pushdown en origen, registrar opciones reproducibles sin secretos y producir el mismo modelo común. La adquisición podrá ejecutarse en un job sin cambiar las reglas. Esos conectores no están implementados en el runtime local.
+PostgreSQLDatasetSource y SQLServerDatasetSource están implementados. Resuelven credenciales mediante SecretStore, limitan consultas en origen, conservan metadata reproducible sin secretos y producen el modelo común. S3, Azure Blob, REST, Oracle, MySQL, Snowflake y Databricks son futuros adaptadores. La adquisición podrá ejecutarse en un job sin cambiar las reglas.
+
+## 5A. Módulo Conexiones
+
+IMPLEMENTADO. Permite crear, probar, editar, deshabilitar y eliminar lógicamente conexiones PostgreSQL y SQL Server. La conexión registra nombre, motor, host, puerto, base, usuario y opciones controladas. La contraseña se envía únicamente al guardar/probar y nunca vuelve en una respuesta. El formulario exige una prueba vigente y backend vuelve a verificar antes de guardar. La deshabilitación puede hacerse aunque la fuente esté caída.
+
+Después de conectar, el usuario explora schemas, tablas y vistas accesibles. La vista previa muestra nombres, tipos nativos/lógicos, nulabilidad y hasta 100 registros. La detección del esquema usa catálogos; no escanea la tabla completa. Registrar la selección crea un Dataset, su binding de origen y una DatasetVersion canónica Parquet mediante StorageProvider. Los motores de calidad siguen leyendo versiones locales inmutables.
+
+### Límites de responsabilidad
+
+El PostgreSQL interno guarda solo metadata del sistema. PostgreSQL/SQL Server externos son fuentes del usuario y tienen credenciales independientes. Ningún adaptador escribe filas en la fuente. No se recibe SQL arbitrario; se seleccionan identificadores previamente descubiertos y citados según el motor. PostgreSQL usa transacciones read-only. En SQL Server la intención read-only es informativa: es obligatorio usar una cuenta con permisos SELECT mínimos, sin permisos de escritura.
+
+Las fuentes externas requieren acceso de red desde API. El overlay offline restringe esa salida; el Compose base permite conexión a fuentes accesibles, sin añadir dependencias cloud. Para fuentes en el PC bajo Docker Desktop puede usarse host.docker.internal. La configuración local conserva restart=no.
+
+### Representación y límites
+
+El preview aplica LIMIT/TOP en origen; el snapshot lee por lotes de 100 hasta 100.000 filas, 100 columnas y 64 MiB de valores normalizados. Cada celda tiene límite de 64 KiB. Una fila adicional detecta el exceso y se rechaza la importación completa: nunca se guarda una muestra parcial como si fuera un dataset completo. Timeout configurable de conexión 1..15 segundos; consulta 1..60 segundos. La adquisición sigue siendo síncrona y acotada.
+
+Los valores se conservan como texto/null: Decimal sin redondeo float, fechas ISO, Unicode y espacios originales. Los identificadores siguen la política id/*_id y permiten override. Los binarios son Base64. SQL Server timestamp se interpreta como rowversion; datetimeoffset se conserva como ISO con offset. El orden DATABASE_UNSPECIFIED depende del motor; SNAPSHOT_ROW es posición en el snapshot, no un número físico en la tabla externa.
+
+### Versiones y evidencia
+
+La conexión tiene ID estable y revisión para concurrencia optimista. Cada edición crea ExternalConnectionVersion inmutable con hash de configuración y referencia opaca de credencial. Un binding conserva dataset, conexión, schema, tabla/vista y overrides. Actualizar desde fuente usa la configuración vigente y crea una versión nueva. Fallos de acceso no modifican versiones anteriores.
+
+ingestion_metadata.source conserva connection_id, connection_version_id, connection_version, source_type, schema_name, object_name, object_kind, config_hash y captured_at. El linaje SOURCE_SNAPSHOT apunta a la revisión de conexión; REFRESH_OF apunta al snapshot anterior. Los manifests de runs incluyen la identidad de fuente de cada DatasetVersion. El run original y su hash permanecen inmutables aunque cambie la conexión.
+
+### SecretStore, permisos y auditoría
+
+El contrato put/get/delete permite sustituir el proveedor local por Azure Key Vault, AWS Secrets Manager o HashiCorp Vault. La implementación local cifra con Fernet autenticado, vincula credencial a organización/referencia y persiste en connection_credentials; la clave maestra reside en connection_keys. En Linux los directorios son 0700 y archivos 0600; Windows directo hereda ACL del usuario. El backup debe proteger ambos volúmenes por separado del almacenamiento de artifacts. Una clave perdida no se reemplaza silenciosamente si ya existen secretos. Rotación automática de clave maestra permanece pendiente.
+
+La contraseña guardada solo se reutiliza en pruebas o ediciones cuando host, puerto, base, usuario y modo TLS coinciden con la versión vigente. Cambiar cualquiera exige una contraseña explícita; su ausencia devuelve 422 PASSWORD_REQUIRED_FOR_ENDPOINT_CHANGE antes de contactar el destino. Nombre y timeouts pueden cambiar conservando el secreto. Esto impide redirigir una credencial guardada a otro servidor desde un formulario de edición.
+
+Transporte cifrado por defecto: PostgreSQL sslmode=require y SQL Server encryption=require. PostgreSQL permite verify-ca/verify-full con CA configurada. Requerir cifrado no equivale a verificar identidad del servidor; la confianza de certificados debe administrarse en el driver. Los modos disable/off se reservan para pruebas locales. FreeTDS comparte timeouts a nivel proceso; el adaptador SQL Server serializa conexiones para evitar carreras.
+
+RBAC separa connections:read, connections:use y connections:manage. Administradores y responsables de datos administran; Analista puede usar. Los roles de consulta solo ven metadata. Todas las rutas verifican organización. La auditoría registra creación, edición, prueba, preview, baja y adquisición con actor estable; nunca password, DSN ni filas de preview. Los errores de drivers se convierten a códigos controlados y mensajes constantes.
+
+### Fuentes futuras y Data Delivery
+
+Un nuevo adaptador implementa DatasetSource y su normalización, registra opciones permitidas y aporta pruebas de permisos, límites, tipos y trazabilidad. Fuentes no SQL tendrán DTOs específicos, sin forzar el concepto de schema/tabla sobre buckets o APIs. El motor de calidad no cambia. Un futuro módulo Destinos / Data Delivery tendrá un puerto independiente de escritura, RBAC e idempotencia propios. DatasetSource no incorpora write ni entrega hacia sistemas externos.
 
 ## 6. Carga, esquema y versionado
 
@@ -176,34 +224,46 @@ Los perfiles incluyen conteos de nulos y distintos, tasas y razón de unicidad, 
 
 ### Transformaciones funcionales
 
-Intake admite una lista ordenada de transforms {column,type,parameters}: trim, case, unicode_normalization, empty_to_null, id_padding, remove_characters, decimal_parse y date_parse. Se ejecutan únicamente cuando el contrato las declara y afectan al output de esa ejecución. El upload original y su perfil histórico no se reescriben.
+Intake y ReconOps admiten listas ordenadas de transforms {column,type,parameters}: trim, case, unicode_normalization, empty_to_null, id_padding, remove_characters, decimal_parse y date_parse. Recon mantiene listas independientes para origen y destino. Sólo se ejecutan cuando el contrato las declara. El upload original, Parquet de entrada y perfil histórico no se reescriben; los resultados conservan los parámetros efectivos.
 
 Las configuraciones nuevas se validan y normalizan a schema_version=2. configuration_hash usa JSON determinista con claves ordenadas y SHA-256; stored_config_hash conserva además la identidad de la configuración almacenada. La adaptación legacy se centraliza en config_semantics y manifests, evitando condiciones de versión dispersas en módulos.
 
 ## 8. Reglas portables y Data Intake
 
-RuleDefinition declara type, column, severity ERROR/WARNING, enabled, parameters, code opcional y message opcional. El código ausente se deriva de type; un código personalizado debe ser estable. La declaración se compila a una representación portable antes de evaluarse con el engine. No se admite scripting arbitrario ni Python eval/exec.
+RuleDefinition declara type, column o columnas en parameters, severity ERROR/WARNING, enabled, parameters, when opcional, code/message opcionales y rule_id estable. El código ausente se deriva de type. Publicar una regla nueva asigna rule_id; la lectura de configuraciones históricas nunca fabrica IDs ni altera sus fingerprints. La declaración se compila a una representación portable antes de evaluarse con el engine. No se admite scripting arbitrario ni Python eval/exec.
 
 | Tipo / código | Parámetros y semántica |
 | --- | --- |
 | required / REQUIRED | Campo presente, no null y no vacío. Whitespace no es vacío sin trim declarado. |
 | not_null / NOT_NULL | Rechaza null. |
 | unique / UNIQUE | Incumplen todos los registros duplicados; null_policy explícita. |
+| compound_unique / COMPOUND_UNIQUE | Tupla de columns; todos los miembros de una combinación repetida incumplen, sin concatenar valores con separadores ambiguos. |
 | numeric / NUMERIC | Decimal finito con punto; conserva precisión. |
 | positive / POSITIVE | Decimal estrictamente mayor que cero. |
 | type / TYPE | logical_type STRING, INT64, DECIMAL, DATE, TIMESTAMP o BOOLEAN. |
 | range / RANGE | gt/gte y lt/lte, límites Decimal inequívocos. |
+| length / LENGTH | min/max enteros inclusivos en puntos de código Unicode observados, sin trim ni conteo por bytes. |
 | allowed_values / ALLOWED_VALUES | values con hasta 1000 escalares; pertenencia exacta. |
 | regex / REGEX | Subconjunto portable Rust/RE2, flags i/m/s, máximo 500 caracteres. |
 | date_rule / DATE_RULE | not_future, min/max ISO, timezone UTC y null_policy. |
+| column_compare / COLUMN_COMPARE | Columna comparada contra other_column mediante eq/ne/gt/gte/lt/lte y logical_type STRING/DECIMAL/DATE/TIMESTAMP declarado. |
+| reference / REFERENCE | Una o varias columns deben existir en reference_columns de una DatasetVersion explícita e inmutable. |
 
-null_policy admite ALLOW, FAIL o IGNORE según la regla. Los shorthand históricos numeric/positive conservan FAIL. El instante de referencia de fecha se fija al inicio del Run para que una misma ejecución no cambie de criterio entre registros.
+null_policy admite ALLOW, FAIL o IGNORE según la regla. IGNORE excluye la fila de evaluated_count; no se cuenta como una evaluación aprobada. Los shorthand históricos numeric/positive conservan FAIL. El instante de referencia de fecha se fija al inicio del Run para que una misma ejecución no cambie de criterio entre registros.
+
+### Condiciones y referencias seguras
+
+when acepta una condición tipada o un árbol all/any: hasta cuatro niveles, 64 nodos y diez condiciones por grupo. Los operadores son eq/ne/gt/gte/lt/lte/is_null/not_null. No hay código de usuario. Los literales se validan al publicar; una fecha o número mal formado no convierte silenciosamente una condición en falsa.
+
+La condición filtra la población antes de evaluar la regla. En unicidad condicional se comparan únicamente las filas elegibles. Las excluidas por condición o IGNORE quedan en skipped_count. Ejemplo: country eq CO -> required department. El editor permite construir una condición simple con columnas reales; la API admite árboles acotados. El editor conserva una condición compuesta existente sin reinterpretarla.
+
+REFERENCE fija dataset_version_id y correspondencia de columnas en el contrato. La API valida organización, existencia del snapshot y columnas; el worker materializa exclusivamente el Parquet verificado mediante StorageProvider. La comparación de tuplas conserva texto/null y no conecta desde el motor a una BD externa. El plan incluye el tamaño de las referencias; el manifest registra references y ArtifactLink registra RUN_REFERENCE. Un dataset de referencia vacío rechaza filas aplicables; null se gobierna por la política declarada.
 
 ### Editor y resultados
 
-Al elegir dataset, el editor carga su esquema. Columnas obligatorias, sin duplicados, numéricas y positivas usan multiselect con Todos; las positivas sólo permiten columnas numéricas. El sistema detecta candidatos, pero el usuario decide las reglas. El esquema puede actualizarse desde el formulario. Las reglas avanzadas se construyen mediante los controles disponibles o mediante la API documentada; no todas las opciones de la DSL tienen editor visual completo.
+Al elegir dataset, el editor carga su esquema. Columnas obligatorias, sin duplicados, numéricas y positivas usan multiselect con Todos; las positivas sólo permiten columnas numéricas. Las reglas avanzadas seleccionan columnas reales y muestran parámetros por tipo. Las referencias permiten elegir dataset, versión y columnas con su esquema persistido. El sistema detecta candidatos, pero el usuario decide las reglas. Actualizar esquema no obliga a escanear datasets completos.
 
-Intake devuelve total_rows, valid_rows, error_rows, warning_rows, acceptance_rate, resultados por regla y decisión APPROVED/APPROVED_WITH_WARNINGS/REJECTED según severidad y max_error_rate. Una fila puede producir varios errores; error_rows cuenta registros afectados, no la suma de mensajes.
+Intake devuelve total_rows, valid_rows, error_rows, warning_rows, acceptance_rate y decisión APPROVED/APPROVED_WITH_WARNINGS/REJECTED según severidad y max_error_rate. Cada regla conserva rule_id cuando existe, code, columnas, severity, status, evaluated_count, failed_count, skipped_count, parámetros y condición. La evidencia identifica valor recibido y motivo. Una fila puede producir varios errores; error_rows cuenta registros afectados, no la suma de mensajes. WARNING conserva la fila aceptada y su advertencia. Una regla sin filas evaluadas no demuestra corrección técnica de una excepción.
 
 El output reutilizable se guarda como Parquet INTAKE_ACCEPTED, con source_type=INTAKE_OUTPUT, canonical_artifact_id, parent_version_id y source_run_id. No tiene upload original ficticio. La UI muestra Artefacto derivado/Fuente de la versión y el linaje enlaza el input y el IntakeRun.
 
@@ -219,18 +279,26 @@ case admite NONE/UPPER/LOWER y unicode_normalization NONE/NFC/NFKC. Los controle
 
 | Regla | Semántica |
 | --- | --- |
-| EXACT_COMPARE | Igualdad textual exacta tras la normalización declarada; admite múltiples pares de columnas y equal_nulls. |
+| EXACT_COMPARE | Igualdad textual exacta tras la normalización declarada, con configuración independiente por par de columnas. |
 | NUMERIC_TOLERANCE | Comparación Decimal con abs y percent opcional; denominador SOURCE/TARGET/MAX_ABS y política de denominador cero EXACT_ONLY. Umbral inclusivo. |
 | DATE_TOLERANCE | Diferencia temporal contra hours o days, con zona UTC y equal_nulls. |
-| AGGREGATE_COMPARE | Capacidad 1:N simple por claves con sum o count sobre un lado; después se aplican comparison_rules sobre output_column. |
+| AGGREGATE_COMPARE | 1:N agregando destino o N:1 agregando origen, con una o varias operaciones SUM/COUNT sobre el mismo lado. comparison_rules consumen las columnas resultantes. |
 
 EXACT_MATCH se conserva como alias explícito legacy de NUMERIC_TOLERANCE. Una tolerancia numérica cero sigue comparando magnitudes: "01" y "1" pueden coincidir. Esto es distinto de EXACT_COMPARE. amount_column/tolerance históricos se adaptan sin modificar el snapshot.
+
+### Políticas y orden de ejecución
+
+Cada comparación admite null_policy MATCH_NULLS, MISMATCH o INVALID; el adaptador conserva equal_nulls de controles históricos. Con MATCH_NULLS dos null coinciden, uno solo produce diferencia; MISMATCH considera cualquier null una diferencia; INVALID clasifica el registro como inválido. Un valor numérico/temporal mal formado conserva INVALID y nunca se equipara a un null válido.
+
+El orden determinista es transforms de origen/destino, normalización de claves, agrupación explícita y comparaciones. Se configuran las transformaciones por columna y lado; no existen conversiones implícitas adicionales. Los parámetros se persisten en control, config hash, diagnostics, manifest y Excel.
+
+Las agregaciones nuevas sólo conservan claves y outputs definidos. Una comparación no puede tomar arbitrariamente el primer valor no agregado de un grupo. SUM inválido se propaga a la comparación que consume ese output; COUNT puede evaluarse independientemente. Los controles históricos que usaban aggregation singular se leen con su comportamiento anterior; una nueva publicación debe satisfacer las validaciones actuales. No se admite N:M ni fuzzy matching.
 
 ### Clasificaciones estables
 
 MATCH, VALUE_MISMATCH, SOURCE_ONLY, TARGET_ONLY, DUPLICATE_SOURCE, DUPLICATE_TARGET e INVALID. Las filas duplicadas no se convierten en coincidencias arbitrarias. Las comparaciones conservan valores, regla, diferencia, tolerancia y líneas origen/destino; agregaciones conservan las líneas de sus integrantes.
 
-metrics incluye source_rows/target_rows, matched, mismatched, faltantes, duplicados, invalid, total_rows, match_rate y counts por clasificación. La decisión es CONFORME o WITH_FINDINGS. Los hallazgos agrupan categorías distintas de MATCH; la evidencia conserva el detalle verificable de cada resultado.
+metrics incluye source_rows/target_rows, matched, mismatched, faltantes, duplicados, invalid, total_rows, match_rate, counts por clasificación y evaluadas/fallidas/inválidas por comparación. La decisión es CONFORME o WITH_FINDINGS. Los hallazgos agrupan categorías distintas de MATCH; UI y Excel permiten revisar el detalle verificable de cada comparación y el linaje de ambos inputs.
 
 La precisión monetaria se implementa con Decimal y contexto suficiente para sumas, diferencias y porcentajes. Las expresiones tienen pruebas de paridad Polars/DuckDB donde se declara soporte. No se infiere equivalencia de todo el pipeline entre motores a partir de estas pruebas.
 
@@ -251,7 +319,7 @@ Sentinel ejecuta monitores sobre una DatasetVersion y produce checks explicables
 | METRIC_THRESHOLD | Métrica/columna, operador y threshold o min/max. |
 | HISTORICAL_BAND | window, min_history, iqr_multiplier y fallback explícito. |
 
-Las reglas por registro de Intake también pueden evaluarse como checks de Sentinel con conteos evaluados/fallidos. El resultado indica code, name, status, actual, expected y message. La salud es la fracción de checks aprobados; cero fallos da HEALTHY y cualquier fallo da ALERT.
+Las reglas por registro de Intake también pueden evaluarse como checks de Sentinel con conteos evaluados/fallidos/excluidos. El resultado indica code, name, status, actual, expected, severity, rule_id cuando existe y message. La severidad declarada llega a Findings y Excel. La salud es la fracción de checks aprobados; cero fallos da HEALTHY y cualquier fallo da ALERT, incluso cuando su severidad es WARNING.
 
 ### Compatibilidad de series
 
@@ -260,6 +328,16 @@ SentinelMetricHistory conserva run_id, monitor_id, metric_key, dimensiones y has
 La banda histórica utiliza mediana e IQR con el método MEDIAN_IQR_LINEAR_V1. Cuando no hay historia suficiente, el resultado identifica FIXED_THRESHOLD_FALLBACK o PREVIOUS_COMPATIBLE_METRIC según la política. El expected muestra qué método se aplicó; no inventa una referencia estadística.
 
 El monitor puede detectar schema drift sin que el worker falle técnicamente. El Run original conserva ALERT aunque una versión posterior vuelva a estar saludable. Las excepciones asociadas sólo se validan cuando una ejecución posterior del mismo snapshot de monitor termina HEALTHY.
+
+### Programación local e historia visible
+
+El worker consulta monitor_schedules antes de consumir la cola existente. La programación referencia una Configuration inmutable. Una edición crea MonitorScheduleVersion con intervalo, activación, inicio y actor; no mueve programaciones a una nueva versión del monitor automáticamente. Se admiten intervalos de un minuto a 31 días. La UI recibe hora local y la convierte a UTC; la API exige zona explícita.
+
+En cada despacho se fija la última DatasetVersion registrada. No se consulta ni actualiza automáticamente la fuente externa; el refresh de una conexión sigue siendo adquisición separada. MonitorOccurrence conserva configuración, revisión de horario, DatasetVersion, fecha prevista, despacho y Run. El Run aporta inicio real, finalización, estado, métricas y evidencia. La metadata schedule se incluye en execution_plan y manifest.
+
+COALESCE_LATEST agrupa intervalos vencidos tras una pausa; SKIP_WHILE_ACTIVE evita solapar runs del mismo monitor. NO_DATASET_VERSION documenta la ausencia de entrada. Cursor, ocurrencia, Run, Job y auditoría se confirman en una sola transacción con compare-and-swap y unicidad por fecha prevista. El actor es SYSTEM / trackvance:local-scheduler.
+
+Mientras Docker o el worker están detenidos no hay ejecución. Un job largo puede retrasar el siguiente tick; la diferencia entre fecha prevista e inicio real queda visible. Las series agrupan muestras por métrica, dimensiones, método y versión, con un máximo de 2000 muestras recientes. Las alertas internas son Findings y aparecen en Sentinel y Centro de Control. NotificationDelivery prepara una interfaz futura; Email, Teams, Slack y Webhook no están integrados.
 
 ## 11. Excepciones con validación técnica
 
@@ -270,26 +348,38 @@ Una excepción nace de un Finding y conserva finding_id, run_id de origen y conf
 | Estado | Función |
 | --- | --- |
 | OPEN / Abierta | Hallazgo convertido en caso, pendiente de gestión. |
+| ASSIGNED / Asignada | Caso asignado a un usuario activo y autorizado de la organización. |
 | INVESTIGATING / En gestión | Responsable investiga causa y prepara corrección. |
 | PENDING_VALIDATION | Espera evidencia técnica posterior. |
 | RESOLVED / Resuelta | Evidencia válida, causa y resolución documentadas. |
 | DISCARDED / Descartada | Cierre administrativo con motivo obligatorio. |
 | ACCEPTED / Aceptada | Riesgo o situación aceptada con motivo obligatorio. |
 | NOT_APPLICABLE / No aplica | Cierre administrativo justificado. |
+| REOPENED / Reabierta | Caso cerrado que vuelve a gestión con comentario y nueva fecha de referencia. |
 
 ### Criterios de elegibilidad
 
 Se requiere un Run posterior SUCCESS, de la misma organización y el mismo configuration_id. Publicar otra versión de configuración crea otro snapshot y no valida automáticamente la excepción anterior. Se selecciona la candidata elegible más reciente; no se acepta una validación positiva obsoleta cuando existe una ejecución posterior que vuelve a fallar.
 
-- Intake: debe pasar la regla/columna que originó el hallazgo.
+- Intake: la regla con rule_id que originó el hallazgo debe estar presente, evaluar al menos una fila y tener cero incumplimientos. En un caso histórico abierto sin ID se identifica la regla mediante su código/columna y fingerprint compatible, pero también se exigen métricas suficientes: evaluated_count mayor que cero y failed_count igual a cero. La mera ausencia de otro Finding no demuestra que la regla se haya evaluado.
 - ReconOps: el control debe quedar conforme o desaparecer la clasificación asociada al hallazgo.
 - Sentinel: el monitor debe volver a HEALTHY.
 
 La UI deshabilita Resolver mientras no se cumplen los criterios y muestra el motivo. Una validación correcta se presenta como Validada técnicamente y enlaza el Run confirmatorio. Resolver sólo se acepta desde PENDING_VALIDATION y exige causa raíz y resolución. La API reevalúa antes de guardar.
 
-El worker actualiza evidencia de casos PENDING_VALIDATION al terminar un Run. Conserva validation_run_id, validated_at, validation_evidence y evento TECHNICAL_VALIDATION. Esto prepara una política futura de resolución automática; hoy la resolución final sigue siendo una acción humana.
+El worker actualiza evidencia de casos PENDING_VALIDATION al terminar un Run. Conserva validation_run_id, validated_at, validation_evidence y evento TECHNICAL_VALIDATION. auto_resolve_enabled es una política por caso deshabilitada por defecto; habilitarla requiere permiso de cierre. Cuando está activa y la misma comprobación técnica es válida, el worker puede resolver el caso con actor SYSTEM, evento EXCEPTION_AUTO_RESOLVED, política CASE_OPT_IN y Run confirmatorio. No inventa una causa raíz humana y no duplica cierres en reintentos.
+
+### Gestión operativa
+
+Cada caso admite assigned_user_id, prioridad, SLA en horas, due_at, comentarios y adjuntos. La prioridad es independiente de la severidad histórica. El SLA se calcula desde creación o reapertura, con UTC; una fecha objetivo explícita prevalece. No hay calendario laboral implícito. Los filtros backend cubren estado, módulo, severidad, prioridad, responsable, vencimiento y texto.
+
+Reabrir exige comentario; conserva el cierre anterior en timeline y reinicia el plazo. Una ejecución creada antes de la reapertura no prueba la corrección actual. Se preservan las transiciones históricas OPEN -> INVESTIGATING y reapertura hacia OPEN para compatibilidad.
+
+Los adjuntos permitidos se limitan a 10 MiB, se publican inmutables mediante StorageProvider y registran Artifact EXCEPTION_ATTACHMENT, hash y relación EXCEPTION_EVIDENCE. No se ejecutan ni se usan como reglas. La descarga exige organización/permisos, verifica integridad, fuerza attachment/nosniff y genera auditoría. Nombre y descripción se sanitizan; el filename nunca define una ruta física.
 
 Las mutaciones usan version para concurrencia optimista. Timeline conserva actor estable, fecha, estado anterior/nuevo, comentario y referencia de validación. Los cierres administrativos no equivalen a RESOLVED ni fabrican evidencia. WAITING_EXTERNAL/FALSE_POSITIVE y resoluciones históricas permanecen legibles; los registros anteriores sin prueba se identifican como históricos, sin inventar un Run confirmatorio.
+
+Si el Run candidato no contiene métricas suficientes para identificar y probar la regla histórica, el nuevo cierre queda bloqueado con motivo de evidencia insuficiente. Se requiere ejecutar nuevamente el mismo control y obtener evidencia verificable. Esto no modifica casos ya RESOLVED ni sus timelines históricos; endurece únicamente las nuevas decisiones de resolución.
 
 ## 12. Centro de Control y navegación
 
@@ -310,7 +400,7 @@ health_score se pondera por unidades evaluadas según la agregación del backend
 
 ### Rutas SPA
 
-/; /datasets; /datasets/:id; /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /exceptions; /rules; /audit; /settings/*. El menú conserva los módulos y el diseño navy/teal. Estados de carga, vacío y error tienen tratamiento específico; se conserva request_id en errores para diagnóstico.
+/; /datasets; /datasets/:id; /connections; /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /exceptions; /rules; /audit; /settings/*. La administración de usuarios está integrada en Configuración. El menú conserva los módulos y el diseño navy/teal. Estados de carga, vacío y error tienen tratamiento específico; se conserva request_id en errores para diagnóstico.
 
 Los detalles de dataset separan archivo original, fuente derivada, esquema/perfil y linaje. Los detalles de run separan Completada de Rechazado/Con hallazgos/Alerta. Los labels de negocio acompañan reason codes técnicos en resultados y evidencia. La numeración se muestra como Línea del archivo cuando representa línea física o Registro de la versión cuando corresponde.
 
@@ -330,9 +420,10 @@ FileArtifactStore confina las rutas al root configurado, verifica tamaño/SHA-25
 | SENTINEL_PROFILE | Checks/resultados del monitor. |
 | RUN_MANIFEST | Evidencia JSON de ejecución. |
 | EXPORT_XLSX | Reporte estructurado generado bajo demanda. |
+| EXCEPTION_ATTACHMENT | Evidencia documental adjunta a un caso, inmutable y con hash. |
 | GENERATED_DEMO / legacy | Datos ficticios o artefactos históricos identificados explícitamente. |
 
-Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM y EXPORT_OF entre versiones, runs y artefactos.
+Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM, RUN_REFERENCE, EXCEPTION_EVIDENCE, SOURCE_SNAPSHOT, REFRESH_OF y EXPORT_OF entre versiones, runs, fuentes y artefactos.
 
 Antes de procesar o descargar, se comprueba la identidad registrada y su integridad. ARTIFACT_HASH_MISMATCH/ARTIFACT_INTEGRITY_ERROR impide usar bytes corruptos; no recalcula silenciosamente el hash histórico. El backfill aditivo registra archivos legacy verificables, cuenta ausentes/corruptos y conserva historia.
 
@@ -359,7 +450,7 @@ Cada Run completado publica un manifest inmutable con schema_version=2. read_man
 }
 ```
 
-El contrato completo incluye started_at/finished_at, identidad/legacy, versión de Trackvance, plan processing con engine/version, inputs con DatasetVersion/SHA/schema hash/origen/ingestion_metadata, configuración efectiva/id/version/config_hash/stored_config_hash, métricas, output_version_id y result_artifacts.
+El contrato completo incluye started_at/finished_at, identidad/legacy, versión de Trackvance, plan processing con engine/version y schedule cuando corresponde, inputs con DatasetVersion/SHA/schema hash/origen/ingestion_metadata, configuración efectiva/id/version/config_hash/stored_config_hash, métricas, output_version_id y result_artifacts. references añade identidad y hashes de DatasetVersions usadas para integridad referencial; es una extensión aditiva de schema 2. Los snapshots anteriores no se reescriben.
 
 La versión del producto y la del motor se distinguen: engine_version de nivel superior identifica Trackvance en el manifest actual; processing.engine_version identifica la versión real de Polars. La UI y exports muestran ambas con su contexto.
 
@@ -369,6 +460,8 @@ AuditEvent conserva actor_type, actor_id estable, actor visible, actor_legacy, e
 
 DATASET_UPLOADED, DATASET_DERIVED, CONFIGURATION_PUBLISHED, RUN_QUEUED, RUN_COMPLETED, EXCEPTION_CREATED, EXCEPTION_UPDATED y EXCEPTION_VALIDATION_CHECKED documentan el ciclo. EXPORT_DOWNLOADED, EVIDENCE_DOWNLOADED y ARTIFACT_DOWNLOADED registran el acceso relevante a evidencia. La UI enlaza recursos desde los eventos.
 
+La administración añade USER_CREATED, USER_UPDATED y USER_PASSWORD_RESET. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos eventos.
+
 Se excluyen claves de passwords, tokens y secretos de metadata/evidencia. Los casos legacy sin identidad demostrable se marcan como legacy; no se atribuyen a un UUID de usuario inventado. Las auditorías de exportación agregan evidencia sin alterar el manifest original del Run.
 
 ## 15. Reportes Excel de negocio
@@ -377,9 +470,9 @@ IMPLEMENTADO. La UI ofrece Exportar Excel y genera .xlsx mediante openpyxl. CSV 
 
 | Módulo | Hojas y contenido |
 | --- | --- |
-| Intake | Resumen: contrato/version, dataset/version, run, fechas, estado/decisión, filas/tasas/umbral/motor y reglas. Errores: línea, regla, columna, valor, severidad, mensaje y clasificación. Reglas: configuración efectiva. Trazabilidad: IDs/hashes/actor/plan/artefactos. |
-| ReconOps | Resumen: control, ambos inputs, claves/comparaciones/tolerancias, siete conteos y match rate. Resultados: clave, clasificación, valores, diferencia, tolerancia, líneas, mensaje y comparaciones. Hallazgos: no MATCH. Trazabilidad: ambos inputs y evidencia. |
-| Sentinel | Resumen: monitor, versión, filas, checks/fallos, salud y decisión. Controles: código/estado/observado/esperado/detalle. Hallazgos: sólo fallidos. Trazabilidad: input, configuración, motor y artefactos. |
+| Intake | Resumen: contrato/version, dataset/version, run, fechas, estado/decisión, filas/tasas/umbral/motor y reglas con evaluadas/fallidas/excluidas/severidad. Errores: línea, regla, columnas, valores recibidos, severidad, motivo y clasificación. Reglas: configuración efectiva. Trazabilidad: inputs, referencias, IDs/hashes/actor/plan/artefactos. |
+| ReconOps | Resumen: control, ambos inputs, claves/comparaciones/tolerancias/nulls/transforms/agregaciones, siete conteos y match rate. Resultados: clave, clasificación, valores, diferencia, tolerancia, líneas, mensaje y comparaciones. Hallazgos: no MATCH. Trazabilidad: ambos inputs y evidencia. |
+| Sentinel | Resumen: monitor, versión, filas, checks/fallos, salud y decisión. Controles: código/estado/observado/esperado/detalle, severidad y conteos evaluados/fallidos/excluidos. Hallazgos: sólo fallidos. Trazabilidad: input, referencias, configuración, motor y artefactos. |
 
 El diseño usa encabezados navy, teal para acentos, rojo para incumplimientos y amber para warning. Tablas con autofiltro, paneles inmovilizados, anchos legibles, ajuste de texto y formatos de fecha, porcentaje y decimal. Las columnas técnicas se concentran en Trazabilidad y los reason codes siguen disponibles.
 
@@ -416,11 +509,11 @@ La presencia de timeout_seconds en el plan no equivale a un límite duro por pro
 
 ## 17. Modelo persistente y migraciones
 
-PostgreSQL mantiene 14 tablas de aplicación. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen aún tablas dedicadas organizations/roles/permissions.
+PostgreSQL mantiene 21 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
 
 | Tabla | Identidad / relación principal |
 | --- | --- |
-| users | Usuario, organization_id, role, password_hash, active. |
+| users | Usuario, organization_id, role, password_hash, active, version y fechas de actualización/cambio de contraseña. |
 | sessions | Token hash, usuario, CSRF y expiración. |
 | datasets | Nombre único por organización, área, owner, criticidad y estado. |
 | dataset_versions | Versión única por dataset, schema/profile, artifacts y lineage. |
@@ -428,16 +521,23 @@ PostgreSQL mantiene 14 tablas de aplicación. El esquema real es más compacto q
 | runs | Snapshot de inputs/config, actor, plan, métricas, decisión y evidencia. |
 | jobs | Run único, estado, intentos y lease. |
 | findings | Run, código, fingerprint único por Run y detalles. |
-| exceptions | Finding único, configuración, origen, validación y timeline/version. |
+| exceptions | Finding único, configuración, origen, validación, asignación, prioridad, SLA, reapertura, política automática y timeline/version. |
+| exception_attachments | Caso, artifact inmutable, autor y descripción. |
 | audit_events | Actor estable, sujeto, request/run y metadata sanitizada. |
 | idempotency_keys | Organización/ruta/key, hash request y Run. |
 | artifacts | Identidad inmutable, kind, locator, hash/tamaño/MIME. |
 | artifact_links | Relación dirigida única entre entidades. |
 | metric_history | Métrica/dimensión/run, método/version y valor. |
+| external_connections | Identidad, revisión vigente, estado y última prueba; ámbito por organización. |
+| external_connection_versions | Configuración inmutable, referencia de secreto y config_hash. |
+| dataset_source_bindings | Dataset, conexión, schema, tabla/vista y overrides. |
+| monitor_schedules | Monitor único, revisión vigente, habilitación, cursor y fecha de actualización. |
+| monitor_schedule_versions | Revisión inmutable del intervalo, inicio, activación y actor de una programación. |
+| monitor_occurrences | Programación/revisión, monitor, versión evaluada, fecha prevista/real, estado, motivo y Run. |
 
 ### Cadena de trazabilidad
 
-Dataset -> DatasetVersion -> Configuration -> Run -> Finding -> Exception. La excepción añade Validation Run de la misma Configuration. ArtifactLink conecta originales, canónicos, outputs, manifests y exports. Las claves de organización y comprobaciones del servicio acotan todos los accesos.
+Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Finding -> Exception. La excepción añade Validation Run de la misma Configuration y artifacts adjuntos. La programación vincula su revisión y fecha prevista al Run; las reglas referenciales añaden snapshots de consulta. ArtifactLink conecta originales, canónicos, outputs, manifests y exports. Las claves de organización y comprobaciones del servicio acotan todos los accesos.
 
 | Migración | Cambio |
 | --- | --- |
@@ -445,8 +545,11 @@ Dataset -> DatasetVersion -> Configuration -> Run -> Finding -> Exception. La ex
 | 0002_evidence_v2 | Identidad, artefactos, linaje, evidencia y métricas versionadas. |
 | 0003_dataset_ingestion_metadata | Formato/lector/opciones/esquema nativo por versión. |
 | 0004_exception_validation | Configuración de origen, validación técnica y cierre administrativo. |
+| 0005_external_connections | Conexiones externas, configuraciones versionadas y bindings de datasets. |
+| 0006_local_identity_exceptions | Versionado de usuarios, fechas, campos operativos de excepciones y exception_attachments. |
+| 0007_monitor_scheduling | Programaciones, revisiones inmutables y ocurrencias Sentinel; unicidad e índices de despacho. |
 
-La revisión de puertos no necesita una migración nueva. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
+La revisión vigente es 0007_monitor_scheduling. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
 
 ## 18. API y errores
 
@@ -458,17 +561,25 @@ La base es /api/v1. OpenAPI generado desde FastAPI y backend/API_CONTRACT.md son
 
 Las listas comunes devuelven {items,total}; IDs son strings opacos y fechas ISO UTC. El cockpit devuelve un DTO agregado. Los downloads usan el MIME del artefacto verificado y filename sanitizado.
 
-Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticadas requieren X-CSRF-Token y validación de origen. Sesiones duran 12 horas en el prototipo. Passwords se verifican mediante Argon2. Acceso demo es explícito y depende de DEMO_SEED_ENABLED; no representa SSO de producción.
+Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticadas requieren X-CSRF-Token y validación de origen. Sesiones duran 12 horas en el prototipo. Passwords se verifican mediante Argon2. El acceso demo es explícito, depende de DEMO_ACCESS_ENABLED y no representa SSO de producción. DEMO_SEED_ENABLED controla por separado la creación de datos sintéticos.
 
 | Rol | Alcance local |
 | --- | --- |
-| Administrator | Lectura, autoría, ejecución, exports, auditoría, sistema y cierre de excepciones. |
-| Data Owner / Lead | Lectura/autoría/ejecución, exports, auditoría y cierre. |
-| Data Analyst | Lectura/autoría/ejecución, exports y auditoría; sin permiso de cierre administrativo. |
-| Operations | Lectura/exports y gestión de excepciones según permiso. |
-| Auditor | Lectura/exports/auditoría/usuarios/sistema; sin mutaciones operativas. |
+| Administrator | Lectura, autoría, ejecución, exports, auditoría, sistema, cierre de excepciones y administración/uso de conexiones. |
+| Data Owner / Lead | Lectura/autoría/ejecución, exports, auditoría, cierre y administración/uso de conexiones. |
+| Data Analyst | Lectura/autoría/ejecución, exports, auditoría y uso de conexiones; sin administración de conexiones ni cierre de excepciones. |
+| Operations | Lectura/exports y gestión de excepciones según permiso; solo consulta metadata de conexiones. |
+| Auditor | Lectura/exports/auditoría/usuarios/sistema y metadata de conexiones; sin mutaciones operativas. |
 
-permissions.py es la política central; roles desconocidos no reciben permisos. Se distinguen datasets:read/write, configurations:write, runs:read/execute, exceptions:read/write/close, exports:download, artifacts:download, audit:read, users:read/write y system:read. No existe todavía un CRUD completo de usuarios/roles/organizaciones pese a que algunos permisos preparen esa evolución.
+permissions.py es la política central; roles desconocidos no reciben permisos. Se distinguen datasets:read/write, configurations:write, runs:read/execute, exceptions:read/write/close, connections:read/use/manage, exports:download, artifacts:download, audit:read, users:read/write y system:read. connections:read permite consultar metadata; use permite probar una conexión guardada, explorar y adquirir snapshots; manage permite crear, editar, deshabilitar, eliminar y probar borradores. Los cierres técnicos y administrativos requieren exceptions:close además del permiso de gestión.
+
+### Administración local implementada
+
+Administrator puede listar, crear, editar, activar/desactivar usuarios, asignar roles base y restablecer contraseña. Auditor consulta cuentas y permisos efectivos; los demás accesos dependen de users:read/write. Las bajas son desactivaciones para conservar referencias históricas. Data Owner es un alias compatible de Data Owner / Lead; no se admiten roles arbitrarios.
+
+La contraseña explícita usa SecretStr, de 12 a 1024 caracteres, no se recorta y sólo persiste como hash Argon2. El reset define una nueva contraseña y revoca todas las sesiones; cambiar correo, rol o actividad también las revoca. Las respuestas nunca incluyen hash, token, sesión ni contraseña. El administrador entrega la contraseña por un canal seguro fuera de Trackvance.
+
+Las mutaciones requieren version y compare-and-swap. La degradación o desactivación de administradores protege al último administrador activo de la organización mediante bloqueo transaccional en PostgreSQL. Los conflictos de correo no revelan organizaciones ajenas. El middleware verifica rol y actividad actuales en cada solicitud. OIDC/SSO y directorio multi-organización administrable continúan como objetivos posteriores.
 
 ### Errores operativos
 
@@ -476,7 +587,7 @@ El envelope es {error:{code,message,details,request_id}}. Sesión inválida devu
 
 VALIDATION_RUN_REQUIRED, VALIDATION_RUN_OUTDATED, TECHNICAL_VALIDATION_REQUIRED y ADMINISTRATIVE_REASON_REQUIRED protegen las excepciones. VERSION_CONFLICT evita sobrescritura por formularios obsoletos. UNSUPPORTED_FORMAT, INVALID_DATA y UPLOAD_TOO_LARGE explican rechazos de carga. DATASET_NAME_EXISTS distingue el nombre duplicado de un conflicto genérico.
 
-Hardening objetivo: rate limiting, administración avanzada de sesiones, OIDC, sensibilidad/masking, política de retención, autorización por asignación y pruebas de penetración. No deben asumirse por existir sesión/RBAC local.
+Hardening objetivo: rate limiting, federación OIDC, sensibilidad/masking, política de retención, administración productiva de sesiones y pruebas de penetración. No deben asumirse por existir sesión/RBAC y administración local.
 
 ## 20. Configuración, operación y respaldo
 
@@ -489,19 +600,85 @@ La configuración es por entorno y defaults locales. .env.example es una plantil
 | TRACKVANCE_WEB_ORIGIN | Origen esperado; debe coincidir con WEB_PORT. |
 | COMPOSE_PROJECT_NAME / WEB_PORT | Instalación y puerto; no confundir volúmenes entre proyectos. |
 | POSTGRES_DB/USER/PASSWORD | Acceso local a metadata; password sólo en entorno. |
-| DEMO_SEED_ENABLED | Habilita seed/login demo explícitos. |
+| TRACKVANCE_SECRETS_DIR | Volumen de credenciales cifradas externas. |
+| TRACKVANCE_SECRET_KEY_FILE | Clave maestra local en volumen independiente. |
+| DEMO_ACCESS_ENABLED | Habilita únicamente el login demo explícito; garantiza la identidad y organización mínimas, no datos sintéticos. |
+| DEMO_SEED_ENABLED | Habilita únicamente el seed idempotente de datasets, configuraciones, ejecuciones, hallazgos y excepciones demo. |
 | MAX_UPLOAD_BYTES / TRACKVANCE_MAX_ROWS | 10 MiB y 100.000 filas por defecto. |
 | TRACKVANCE_WORKER_MEMORY_SOFT_BYTES | Presupuesto blando del planner. |
 | TRACKVANCE_TEMP_MIN_FREE_BYTES | Reserva mínima de disco temporal. |
 | TRACKVANCE_RUN_TIMEOUT_SECONDS | Valor del plan; no timeout duro certificado. |
 
+Para conservar el cierre seguro de instalaciones anteriores, si `DEMO_ACCESS_ENABLED` está ausente hereda el valor de `DEMO_SEED_ENABLED`. Al definir ambas variables explícitamente sus comportamientos son independientes.
+
 TRACKVANCE_ENV aparece como etiqueta en la plantilla; no selecciona por sí sola una política de seguridad productiva. No hay Settings Pydantic ni feature flags persistidos actualmente.
 
-Readiness comprueba SQL, Alembic head y escritura temporal. doctor.py comprueba HTTP, servicios y heartbeat. verify_storage.py snapshot calcula hashes de registros de negocio y valida todos los artifacts; compare exige igualdad antes/después de un reinicio en reposo. Entre capturas no deben ejecutarse login/exports/tests que agregan auditoría legítima.
+Readiness comprueba SQL, Alembic head y escritura temporal. doctor.py comprueba HTTP, servicios, migraciones y heartbeat, sin imprimir DSN ni secretos. verify_storage.py snapshot calcula hashes de registros de negocio, valida todos los artifacts y verifica referencias/credenciales cuando corresponde; compare exige igualdad antes/después de un reinicio en reposo. Entre capturas no deben ejecutarse login/exports/tests que agregan auditoría legítima.
 
-El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y restaura en destino nuevo con rutas reubicadas. PostgreSQL requiere pausar escrituras, pg_dump, copia coordinada de trackvance_data, hashes y restauración en base/volumen nuevos. El backup integral automático PostgreSQL+artifacts sigue pendiente; no se sustituye con una copia de archivos del data directory en caliente.
+El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y restaura en destino nuevo con rutas reubicadas. Incluye credenciales cifradas y clave maestra; una referencia de conexión sin su secreto o clave invalida el respaldo. La restauración conserva estos archivos en credentials/ y keys/ del destino con acceso restringido y mantiene compatibilidad con backups históricos sin conexiones.
+
+### Respaldo Docker consistente
+
+scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiquetas Compose verificables y los cuatro volúmenes esperados. Detiene temporalmente web y worker, captura el estado consistente, detiene API y produce pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials y connection_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que estaban activos al comenzar.
+
+backup-manifest.json registra schema_version, consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
+
+```text
+python scripts/docker_state.py backup --project trackvance-local --destination backups/local
+python scripts/docker_state.py verify --source backups/local
+```
+
+### Restauración en proyecto nuevo
+
+restore exige nombre distinto del origen y ningún recurso preexistente. Reconstruye volúmenes nuevos, restaura el dump en una transacción, repone artifacts/credenciales/clave, inicia API y valida Alembic y la igualdad de la huella. Sólo inicia el resto del sistema con --start; sin esa opción deja el destino detenido tras verificarlo. --smoke requiere --start y está reservado para un ensayo aislado con identidad demo disponible. La salida es un recibo de restauración con hash del manifest y estado de verificación, sin secretos.
+
+```powershell
+python scripts/docker_state.py restore --source backups/local `
+  --target-project trackvance-restored --web-port 3200 --start
+```
+
+La instalación destino debe disponer del código/imágenes y configuración de entorno compatibles. Una restauración fallida detiene el proyecto nuevo para diagnóstico; no borra el origen ni lo reemplaza. La prueba E2E destruye sólo su entorno temporal, restaura y comprueba hashes y funcionalidad, incluidos secretos y reconexión a motores de prueba. La evidencia ejecutada se registra en aceptación.
+
+El drill ampliado trackvance-recovery-src-final-e19a -> trackvance-recovery-dst-final-e19a terminó PASS: eliminó el proyecto fuente antes de restaurar y verificó siete artifacts, un secreto, 124 relaciones y Alembic 0007_monitor_scheduling. La credencial PostgreSQL restaurada permitió conectar, refrescar a DatasetVersion v2 y ejecutar el mismo contrato: el nuevo Run fue APPROVED y el original permaneció REJECTED. Se conservaron hashes, linaje e historia y pasaron doctor, smoke API y búsqueda de secretos en logs.
+
+La recuperación incluyó una excepción con responsable/SLA y un adjunto, además de una programación Sentinel, dos revisiones, una ocurrencia y 31 muestras de métricas. El caso conservó su timeline y quedó PENDING_VALIDATION con validación técnica VALIDATED tras la nueva ejecución; auto_resolve_enabled permaneció false. La programación siguió pausada y su ocurrencia, métricas y alertas históricas se conservaron. El drill verificó HTML HTTP 200; Playwright no se ejecutó dentro de este ensayo y su certificación es independiente. Su resultado schema 3 y los ensayos previos quedan como evidencia separada.
+
+### Reset deliberado
+
+El reset destruye metadata, datasets, runs, artifacts y secretos del proyecto seleccionado. El script Windows soportado detecta COMPOSE_PROJECT_NAME y delega en plan-reset/reset de docker_state.py. El plan enumera nombres e IDs exactos de contenedores, volúmenes y redes; incluye hash y caducidad de 15 minutos. La ejecución exige el token literal de confirmación y vuelve a verificar que el inventario no cambió. Un proyecto ajeno a Trackvance, un plan alterado, vencido o con recursos cambiados se rechaza. .env se conserva por defecto. No se usa reset para actualizaciones o pruebas sobre la instalación principal.
 
 Para actualizar: terminar runs, respaldar, reconstruir imágenes, aplicar Alembic al iniciar, esperar healthchecks y comparar almacenamiento. Nunca ejecutar down -v sobre la instalación del usuario como parte de un upgrade.
+
+## 20A. Benchmark reproducible y límites comprobados
+
+scripts/tests/benchmark_cycle.py ejecuta un proyecto Docker aislado con archivos sintéticos, fuentes PostgreSQL/SQL Server reales, materialización canónica, Intake, ReconOps y Sentinel. Registra bytes, filas, duración, throughput, CPU, memoria, I/O, snapshots, plan y éxito/fallo; watchdog detiene su proyecto si supera recursos o tiempo. La progresión exige preflight y termina ante una restricción de recursos. Los tamaños no ejecutados se marcan como tales.
+
+### Medición real disponible
+
+El ciclo principal trackvance-bench-22852-894497 terminó PASS. Su fixture nominal de 100 MiB mide 106.194.531 bytes, 50.000 filas y cuatro columnas, con payload determinista variado SHAKE256_URLSAFE_V1. Docker Desktop 29.1.3 dispuso de 16 CPU y 16.326.524.928 bytes de memoria. La duración total fue 79,46 segundos. Las duraciones siguientes son tiempos de pared del runner, incluyendo transporte/espera cuando corresponde; no son microbenchmarks puros del motor.
+
+| Operación | Duración medida |
+| --- | --- |
+| Carga archivo origen / destino | 1,577 s / 1,306 s. |
+| Intake desde archivo | 3,083 s; 16.218 filas/s. |
+| ReconOps desde dos archivos | 4,076 s. |
+| Sentinel desde archivo | 2,046 s; 24.437 filas/s. |
+| Snapshot PostgreSQL / Intake asociado | 2,363 s / 3,112 s. |
+| Snapshot SQL Server / Intake asociado | 1,345 s / 3,067 s. |
+
+El HWM de proceso fue 812.998.656 bytes en API y 1.051.635.712 en worker; los picos cgroup fueron 1.253.138.432 y 1.224.929.280 respectivamente. El muestreo agregado registró 2.697.222.681 bytes con nueve muestras y CPU máximo agregado de 122,41 %, donde 100 % equivale a un núcleo. Los contenedores no registraron OOM. El almacenamiento temporal tuvo pico observado de 185.340.131 bytes y el crecimiento de storage fue 670.790.434 bytes, con 112 muestras cada 0,2 s. Los muestreos no garantizan capturar todos los picos transitorios; se conservan junto con cgroup/HWM en el JSON.
+
+### Representatividad y progresión detenida
+
+El payload variado tiene 2098 caracteres por fila. El archivo produjo Parquet canónico de 79.145.600 bytes. La fuente PostgreSQL leyó 106.144.494 bytes lógicos y produjo 55.099.067 bytes canónicos; SQL Server leyó 105.750.000 y produjo 55.107.251. Se conservaron hashes y linaje de estos snapshots. Las fuentes y el archivo usan generadores deterministas distintos; sus tamaños comprimidos no deben equipararse.
+
+El ensayo anterior trackvance-bench-25400-6b857b también pasó con payload repetido y Parquet SQL de sólo 26.909 bytes; se conserva como antecedente de compresibilidad, no como resultado principal de presión de recursos. La medición variada mejora esa cobertura, pero sigue siendo un perfil de 50.000 filas y cuatro columnas. No establece un máximo universal de Polars ni certifica millones de claves, todas las formas de reglas o un dataset con 100 columnas. Otro perfil requiere otro ensayo reproducible.
+
+Se usaron overrides exclusivos del proyecto temporal: upload de 128 MiB, snapshot de 160 MiB, presupuesto blando del planner de 6 GiB y 1200 segundos en el plan. Los defaults de la instalación no se modificaron. El Recon estimó 5.097.337.488 bytes para ambos inputs; el watchdog no registró una violación.
+
+500 MiB, 1 GiB, 2 GiB y 5 GiB aparecen NOT_RUN_RESOURCE_LIMIT porque la estimación Recon excedía el presupuesto local. No son fallos de ejecución medidos. El máximo comprobado de este perfil es el fixture indicado, con sus overrides y limitaciones. No se proclama completada una matriz de volumen que no se haya ejecutado.
+
+Se conservan los límites operativos por defecto de 10 MiB/upload, 100.000 filas, 100 columnas y 64 MiB de snapshot SQL. Los warnings/rechazos de ExecutionPlanner siguen el presupuesto configurado de memoria/disco y ENGINE_UNAVAILABLE cuando solicita un engine no instalado. La evidencia no justifica elevarlos ni fijar un umbral universal de migración a PySpark. PySpark se recomienda como evaluación de producto ante cargas que superen el presupuesto local, pero su adaptador no se implementa en este ciclo.
 
 ## 21. Arquitectura final de producto
 
@@ -514,7 +691,7 @@ OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales
 | Despliegue | Docker y Kubernetes, AKS, EKS u OpenShift; Helm para releases. |
 | Metadata | PostgreSQL administrado, backups y recuperación verificados. |
 | Storage interno | S3 o Azure Blob mediante StorageProvider, locators, hashes y retención. |
-| Fuentes | PostgreSQL, SQL Server, S3, Azure Blob y APIs mediante DatasetSource. |
+| Fuentes | PostgreSQL y SQL Server implementados; S3, Azure Blob, APIs y otros motores futuros mediante DatasetSource. |
 | Jobs | Redis + Celery, reintentos/leases e idempotencia; entrega transaccional definida. |
 | Compute | Polars para cargas estándar, PySpark para grandes volúmenes con paridad certificada. |
 | Identidad | OAuth2/OIDC + SSO con Entra ID, Keycloak u otro IdP; RBAC/org scope propios. |
@@ -526,7 +703,7 @@ OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales
 ### Pasos de evolución sin cambiar reglas
 
 1. Introducir locator remoto y materialización acotada en un StorageProvider, migrando referencias y validando hashes históricos.
-2. Implementar conectores DatasetSource con límites, credenciales externas y snapshots reproducibles.
+2. Ampliar PostgreSQL/SQL Server con otros conectores DatasetSource, límites, credenciales externas y snapshots reproducibles.
 3. Implementar JobQueue Redis/Celery con patrón transaccional/outbox o garantía equivalente; conservar Run y evidencia idempotentes.
 4. Añadir ExecutionEngine PySpark, capacidades del planner y pruebas de paridad antes de habilitarlo.
 5. Integrar IdP, secretos y observabilidad; aplicar tests de aislamiento y recuperación.
@@ -539,6 +716,14 @@ Los puertos actuales reducen el área de cambio, pero no certifican esos adapter
 La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, build frontend, Playwright, smoke API, migraciones PostgreSQL y prueba de persistencia tras restart. El runner crea un proyecto Compose temporal con sus propios volúmenes y elimina únicamente esos datos al terminar.
 
 @validation
+
+### Certificación local de esta revisión
+
+La ejecución consolidada local aprobó 524 tests pytest en 39,77 s, con dos warnings de deprecación de las dependencias de pruebas. Ruff pasó; Mypy comprobó 33 archivos. ESLint, TypeScript y build frontend pasaron; Vitest aprobó 109 tests en 12 archivos. El bundle principal compilado fue de 535,26 kB; su aviso de tamaño no se presenta como fallo de compilación.
+
+La certificación de Conexiones completó 62 comprobaciones con PostgreSQL y SQL Server reales y 23 pruebas Playwright, omitiendo sólo el escenario clean-demo de activación explícita. Ese escenario pasó por separado: en total se probaron 24 escenarios de navegador distintos. El ciclo Compose aprobó 19 pruebas Playwright; sus cinco casos opt-in se cubrieron en las ejecuciones independientes y no se suman como escenarios nuevos.
+
+El ciclo Compose también aprobó smoke API, doctor, migraciones PostgreSQL e integridad después del reinicio. La comparación conservó exactamente 21 tablas, 56 datasets, 70 versiones, 43 runs, 206 artifacts, 1562 relaciones y un adjunto. El drill de recuperación ampliado se describe en la sección 20 y el benchmark medido en 20A. Las pruebas se ejecutaron en proyectos y volúmenes aislados. El resultado de GitHub Actions se informa separadamente; estos éxitos locales no equivalen a un workflow remoto aprobado.
 
 ### Escenarios de negocio conservados
 
@@ -554,11 +739,11 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 La cobertura nueva incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage.
 
-El workflow ci.yml contiene jobs backend, frontend y compose-e2e, con migraciones en PostgreSQL temporal y evidencia de navegador. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
+El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones se prueba con motores reales PostgreSQL y SQL Server, usuarios SELECT, caída/reconexión, versiones, Intake y búsqueda de secretos en logs/metadata. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
 
 ### Pendientes explícitos
 
-PySpark y conectores productivos; Redis/Celery; OIDC/SSO; Kubernetes/Helm/Terraform; observabilidad distribuida; stress/timeout duro; backup integral PostgreSQL automatizado; masking/sensibilidad; agrupación multi-finding y resolución automática. Estos pendientes no bloquean la operación local acotada y no se presentan como capacidades ya instaladas.
+PySpark, conectores adicionales, Data Delivery, rotación automática de clave maestra, Redis/Celery productivo, OIDC/SSO, Kubernetes/Helm/Terraform, observabilidad distribuida y masking/sensibilidad permanecen fuera de este ciclo. La adquisición asíncrona de grandes volúmenes, timeout duro y agrupación multi-finding no se simulan. Los volúmenes no ejecutados, fallos o gates sin certificar se identifican explícitamente en validación y benchmarks; no se reclasifican como éxitos.
 
 ## 23. Decisiones vigentes y control documental
 
@@ -570,12 +755,20 @@ PySpark y conectores productivos; Redis/Celery; OIDC/SSO; Kubernetes/Helm/Terraf
 | Lectores y frontera común de calidad | docs/adr/0004-dataset-readers.md. |
 | Resolución de excepciones validada técnicamente | docs/adr/0005-technical-validation-of-exceptions.md. |
 | Puertos de storage, fuentes, ejecución y cola | docs/adr/0006-architecture-ports.md. |
+| Conexiones, secretos, snapshots y frontera Data Delivery | docs/adr/0007-external-connections.md. |
+| Reglas avanzadas, condiciones, referencias e identidad | docs/adr/0008-advanced-intake-rules.md. |
+| ReconOps configurable, transforms, nulls y agregaciones | docs/adr/0009-configurable-reconciliation.md. |
+| Scheduler Sentinel local y series compatibles | docs/adr/0010-local-sentinel-scheduler.md. |
+| Asignación, SLA, adjuntos y resolución automática | docs/adr/0011-advanced-exception-workflow.md. |
+| Administración local de usuarios y sesiones | docs/adr/0012-local-identity-administration.md. |
+| Backup, restore y reset verificables | docs/adr/0013-local-backup-restore.md. |
+| Benchmark y política de escalado con evidencia | docs/adr/0014-volume-benchmark-policy.md. |
 
 ### Precedencia y cambios de esta revisión
 
 Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones/roles, librerías no instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa.
 
-Se actualizan la arquitectura local/final, esquema real de 14 tablas, API generada, cinco lectores, profiling exacto, overrides, catálogo de reglas, key normalization, Parquet Intake, manifests v2, Excel, cockpit, RBAC, auditoría, excepciones técnicas, persistencia Docker y arranque manual.
+Se actualizan arquitectura local/final, esquema real de 21 tablas, API generada, cinco lectores, Conexiones PostgreSQL/SQL Server, SecretStore, snapshots, profiling exacto, reglas avanzadas, referencias, ReconOps configurable, Sentinel programado, excepciones con SLA y cierre verificado, usuarios/RBAC, operación, benchmarks y límites comprobados. Se preservan Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
 
 El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de semántica requiere ADR, pruebas, actualización de esta fuente y del PDF; un cambio de base de datos requiere Alembic nuevo. Las versiones de configs/manifests/métricas se gestionan separadas de la versión del producto.
 
@@ -585,5 +778,7 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | --- | --- | --- |
 | 10-09-2026 | Especificación v1.1 inicial | Diseño y objetivo de producto. |
 | 16-09-2026 | v1.1, implementación 0.3.0 | Consolidación del estado real, fronteras de infraestructura y validación local. |
+| 19-09-2026 | v1.1, evolución Conexiones | PostgreSQL, SQL Server, secretos cifrados, snapshots y pruebas con motores reales. |
+| 19-09-2026 | v1.1, implementación 0.4.0 | Maduración funcional del roadmap local; resultados y límites según evidencia de esta revisión. |
 
-La fuente editable acompaña al PDF en Documentación. README, docs/architecture.md, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle.
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. Los resultados de validación son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.4.0.

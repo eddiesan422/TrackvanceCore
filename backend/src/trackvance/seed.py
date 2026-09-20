@@ -1,4 +1,4 @@
-"""Idempotent, small, deterministic fixtures. Demo access is explicit in the UI."""
+"""Provision the demo identity and synthetic fixtures as independent concerns."""
 
 import os
 import secrets
@@ -7,7 +7,12 @@ from datetime import timedelta
 from argon2 import PasswordHasher
 from sqlalchemy import select
 
-from .config import BACKEND_DIR, DEMO_ENABLED, DEMO_USER_ID
+from .config import (
+    BACKEND_DIR,
+    DEMO_ACCESS_ENABLED,
+    DEMO_SEED_ENABLED,
+    DEMO_USER_ID,
+)
 from .db import Base, SessionLocal, engine, iso, utcnow
 from .models import AuditEvent, Configuration, Dataset, DatasetVersion, Finding, Job, Run, User
 from .services import audit, create_exception, create_version, enqueue, execute_run
@@ -15,19 +20,36 @@ from .services import audit, create_exception, create_version, enqueue, execute_
 DEMO_DIR = BACKEND_DIR.parent / "demo"
 
 
+def _ensure_demo_user(db):
+    user = db.get(User, DEMO_USER_ID)
+    if not user:
+        password = os.getenv("TRACKVANCE_ADMIN_PASSWORD") or secrets.token_urlsafe(48)
+        user = User(
+            id=DEMO_USER_ID,
+            name="Equipo Trackvance",
+            email=os.getenv("TRACKVANCE_ADMIN_EMAIL", "demo@trackvance.local").lower(),
+            role="Administrator",
+            password_hash=PasswordHasher().hash(password),
+        )
+        db.add(user)
+        db.flush()
+    return user
+
+
+def ensure_demo_user():
+    """Create only the identity required by passwordless demo access."""
+    with SessionLocal() as db:
+        _ensure_demo_user(db)
+        db.commit()
+
+
 def seed_demo():
-    if not DEMO_ENABLED:
+    if not DEMO_SEED_ENABLED:
         return
     with SessionLocal() as db:
         if db.scalar(select(AuditEvent).where(AuditEvent.event_type == "DEMO_SEED_COMPLETED")):
             return
         now = utcnow()
-        user = db.get(User, DEMO_USER_ID)
-        if not user:
-            password = os.getenv("TRACKVANCE_ADMIN_PASSWORD") or secrets.token_urlsafe(48)
-            user = User(id=DEMO_USER_ID, name="Equipo Trackvance", email=os.getenv("TRACKVANCE_ADMIN_EMAIL", "demo@trackvance.local").lower(), role="Administrator", password_hash=PasswordHasher().hash(password))
-            db.add(user)
-        db.flush()
 
         def dataset(identifier, name, domain, description, owner):
             row = db.get(Dataset, identifier)
@@ -99,8 +121,14 @@ def seed_demo():
 
 def main():
     Base.metadata.create_all(engine)
+    if DEMO_ACCESS_ENABLED:
+        ensure_demo_user()
     seed_demo()
-    print("Trackvance: esquema inicializado y demo disponible." if DEMO_ENABLED else "Trackvance: esquema inicializado; demo deshabilitada.")
+    print(
+        "Trackvance: esquema inicializado; "
+        f"acceso demo {'habilitado' if DEMO_ACCESS_ENABLED else 'deshabilitado'}; "
+        f"datos demo {'habilitados' if DEMO_SEED_ENABLED else 'deshabilitados'}."
+    )
 
 
 if __name__ == "__main__":

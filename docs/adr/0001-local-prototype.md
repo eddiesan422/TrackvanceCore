@@ -25,9 +25,11 @@ Ofrecer dos arranques:
    y exposición de la interfaz únicamente en loopback.
 
 La sesión de demostración se inicia mediante una acción explícita del usuario
-y requiere `DEMO_SEED_ENABLED=true`. No representa autenticación endurecida
-para despliegue público. Los datos de ejemplo pertenecen a una organización
-ficticia y se generan de forma reproducible.
+y requiere `DEMO_ACCESS_ENABLED=true`. No representa autenticación endurecida
+para despliegue público. La creación reproducible de los datos de ejemplo de la
+organización ficticia se controla, de forma independiente, mediante
+`DEMO_SEED_ENABLED=true`. Con acceso habilitado y seed deshabilitado sólo se
+aprovisionan la identidad y organización mínimas necesarias para autenticar.
 
 ## Límites deliberados
 

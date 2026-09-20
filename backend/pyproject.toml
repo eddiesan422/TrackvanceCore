@@ -1,6 +1,6 @@
 [project]
 name = "trackvance-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Trackvance Core local prototype API and processing worker"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -11,6 +11,8 @@ dependencies = [
   "python-multipart>=0.0.20",
   "argon2-cffi>=23.1",
   "psycopg[binary]>=3.2,<4",
+  "pymssql>=2.3.13,<3",
+  "cryptography>=46,<51",
   "alembic>=1.15,<2",
   "openpyxl>=3.1.5",
   "duckdb>=1.5.5",

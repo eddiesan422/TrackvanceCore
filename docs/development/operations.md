@@ -78,8 +78,10 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual llega a `0004_exception_validation`, precedida por
-`0001_initial`, `0002_evidence_v2` y `0003_dataset_ingestion_metadata`. Las
+La revisión actual llega a `0007_monitor_scheduling`, precedida por
+`0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
+`0004_exception_validation`, `0005_external_connections` y
+`0006_local_identity_exceptions`. Las
 correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
 puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
 En bases SQLite previas sin tabla Alembic, el adaptador
@@ -121,6 +123,9 @@ El respaldo usa la API de backup de SQLite; consolida una fuente WAL en un solo
 archivo de copia, sin alterar el journal del origen. Incluye todos los archivos
 referenciados por versiones, runs y ArtifactStore, conserva sus bytes y genera un
 manifest con SHA-256/tamaños. Se comprueban `integrity_check`, rutas y cobertura.
+Incluye también las credenciales cifradas y su clave maestra del modo directo.
+Si la base referencia conexiones externas, la ausencia de un secreto o de su
+clave impide declarar válido el respaldo; no se inventan credenciales nuevas.
 
 ```powershell
 python scripts/backup_local.py backup --source .local --destination backups/local-2026-09-13
@@ -131,27 +136,85 @@ python scripts/backup_local.py restore --source backups/local-2026-09-13 --desti
 Los destinos deben ser nuevos y estar fuera del origen. Una restauración valida
 todos los hashes antes de crear el destino. Reubica las rutas internas hacia el
 nuevo almacenamiento, conserva IDs/versiones/configuraciones y verifica referencias.
+Las credenciales y la clave se restauran en `credentials/` y `keys/` del destino;
+ambos directorios deben conservar acceso restringido. Los respaldos históricos
+sin conexiones continúan siendo compatibles.
 No sustituye la instalación activa. Los backups contienen datos locales y deben
 guardarse fuera de Git, con permisos equivalentes a los del almacenamiento original.
 
-## Copia de PostgreSQL y ArtifactStore
+## Copia y restauración Docker coordinada
 
-El utilitario SQLite no sirve para PostgreSQL. Para una copia Compose consistente:
+`docker_state.py` automatiza PostgreSQL, ArtifactStore, SecretStore y su clave como
+una sola unidad. El proyecto y la carpeta de destino son explícitos; el destino debe
+ser nuevo. Durante una ventana breve detiene entrada, scheduler, worker y API,
+rechaza runs/jobs pendientes, genera `pg_dump --format=custom`, archiva los tres
+volúmenes y vuelve a iniciar solo los contenedores que estaban activos.
 
-1. Finalizar los runs y pausar nuevas operaciones; detener API y worker.
-2. Crear un dump PostgreSQL con `pg_dump --format=custom` dentro del contenedor
-   PostgreSQL y copiarlo al host con `docker compose cp`. Evitar redirección binaria
-   por PowerShell para no modificar los bytes del dump.
-3. Copiar el volumen `trackvance_data` completo, conservando la raíz de almacenamiento.
-   No respaldar directamente los archivos internos del volumen de PostgreSQL activo.
-4. Calcular SHA-256 del dump y de la copia de artifacts, conservarlos juntos y arrancar
-   API/worker. No incluir `.env` ni contraseñas en el manifest.
-5. Restaurar con `pg_restore` en una base nueva y con un volumen de artifacts nuevo;
-   ejecutar Alembic, readiness y `verify_storage.py` antes de usar la copia restaurada.
+```powershell
+python scripts/docker_state.py inventory --project trackvance-core
+python scripts/docker_state.py backup --project trackvance-core --destination backups/docker-20260919
+python scripts/docker_state.py verify --source backups/docker-20260919
+```
 
-La prueba automatizada de migrations usa PostgreSQL real; la utilidad automática de
-backup/restore de esta entrega está implementada para SQLite. Un proceso automatizado
-de backup integral PostgreSQL más su volumen de artifacts sigue pendiente.
+El manifest contiene hashes, tamaños, modos, revisión Alembic, imágenes y la huella
+quiescente; no contiene `.env`, contraseñas, referencias de secretos, clave ni rutas
+absolutas. La carpeta sí contiene credenciales cifradas y clave maestra: restringir
+su acceso y no publicarla como artifact de CI. Un backup parcial queda para
+diagnóstico, pero `verify` no lo acepta.
+
+La restauración solo opera sobre otro proyecto `trackvance-...` sin contenedores,
+volúmenes ni redes. Valida todo antes de crear recursos, restaura PostgreSQL en una
+transacción, extrae rutas seguras y exige una huella idéntica que incluye todas las
+tablas, SHA de artifacts, FK, linaje por organización y decrypt de cada secreto.
+Sin `--start` deja el destino verificado y detenido.
+
+```powershell
+python scripts/docker_state.py restore --source backups/docker-20260919 `
+  --target-project trackvance-recovery-20260919
+python scripts/doctor.py --base-url http://localhost:3200 --docker `
+  --project trackvance-recovery-20260919 --recovery-ready
+```
+
+`--start --web-port 3200` deja la copia activa. `--smoke` requiere `--start` y se
+reserva para copias aisladas con identidad demo; agrega registros legítimos después
+de comparar la huella. Una falla detiene el proyecto nuevo para diagnóstico y nunca
+modifica ni elimina el origen.
+
+El drill destructivo seguro crea tres proyectos desechables: PostgreSQL externa,
+aplicación fuente y restauración. Crea por API una conexión/snapshot/run, respalda,
+elimina la aplicación fuente antes del restore, prueba la credencial restaurada,
+refresca la fuente y ejecuta Intake. Conserva solo `result.json` como evidencia CI:
+
+```powershell
+python scripts/tests/docker_backup_cycle.py
+```
+
+El drill certificado del 19 de septiembre terminó `PASS` con siete artifacts, un
+secreto y 124 relaciones exactas. La aplicación fuente fue destruida antes de la
+restauración; después se reutilizó la credencial restaurada contra la PostgreSQL
+externa, se refrescó el datasource y se ejecutó un Intake nuevo. La comprobación web
+de este drill es HTTP/HTML 200; Playwright queda registrado como `NOT_RUN` y se cubre
+en su suite separada.
+
+## Reset local con plan exacto
+
+El reset nunca se ejecuta directamente desde un nombre o patrón. Primero genera un
+plan de 15 minutos con los IDs actuales y una confirmación literal. El wrapper
+detecta el proyecto desde `COMPOSE_PROJECT_NAME`, `.env` o `name:` de Compose; se
+puede fijar con `-Project`.
+
+```powershell
+.\scripts\reset-local.ps1 -Project trackvance-core
+# Revisar el JSON y copiar required_confirmation de la salida anterior.
+.\scripts\reset-local.ps1 -Plan .codex-local\reset-plans\trackvance-core-AAAAmmdd-HHmmss.json `
+  -Confirm 'RESET:trackvance-core:0123456789ab'
+```
+
+Antes de eliminar, `reset` recalcula el hash, comprueba expiración, etiquetas y el
+inventario completo; cualquier cambio aborta. Elimina solo los IDs del plan, sin
+glob, `down -v` ni `prune`, y escribe recibo fuera de los volúmenes. Se recomienda
+un backup verificado antes de resetear, pero el comando no impone un backup ni una
+segunda excepción oculta.
 
 ## Evidencia de esta ejecución — 13 de septiembre de 2026
 
@@ -188,6 +251,33 @@ el nombre del proyecto, puerto y override de red interna; no se publica su
 contraseña. Los snapshots históricos de persistencia están en
 `.codex-local/operations-evidence/pre-final-rebuild.json` y
 `post-final-rebuild.json`.
+
+### Conexiones externas - 19 de septiembre de 2026
+
+Para consumir PostgreSQL/SQL Server externos, la instalación principal usa ahora
+el Compose base (`COMPOSE_FILE=compose.yml`), conservando proyecto, puerto, datos y
+`restart=no`. El overlay offline continúa disponible como opción para operación
+sin fuentes externas; bloquea la salida necesaria para consultar esas bases.
+No se publican puertos adicionales de PostgreSQL interno ni de API.
+
+El arranque aplica la migración aditiva `0005_external_connections`. Además de
+`postgres_data` y `trackvance_data`, preserva `connection_credentials` (cifrado) y
+`connection_keys` (clave maestra). Solo la API monta estos dos últimos volúmenes;
+el worker monta únicamente `trackvance_data`. El respaldo debe incluir un dump de
+metadata y las copias coordinadas de artifacts, credenciales y clave descritas
+arriba. Los secretos no son artifacts descargables y no deben incluirse en logs,
+Git o contextos de build.
+
+Configura las fuentes con cuentas SELECT y TLS. Para un servidor en el PC usa un
+host accesible desde Docker, como `host.docker.internal`. La BD interna almacena
+solo metadata; el snapshot de la fuente se guarda como Parquet en ArtifactStore.
+La lectura inicial es síncrona y acotada; límites y opciones en ADR 0007.
+
+La certificación independiente se ejecuta con
+`python scripts/tests/connections_cycle.py --full-playwright`: crea PostgreSQL y
+SQL Server reales en un proyecto nuevo, verifica migraciones, fuentes, Intake,
+exports, UI, fallos de acceso y persistencia; finalmente elimina sus propios
+contenedores y volúmenes. No añade datos de prueba a la instalación habitual.
 
 ## Revisión de arquitectura - 16 de septiembre de 2026
 

@@ -1,0 +1,18 @@
+{
+  "pytest backend + scripts": "524 aprobadas en 39,77 s. Dos avisos de deprecación Starlette/AnyIO.",
+  "Ruff / Mypy": "PASS; 33 archivos fuente revisados por Mypy.",
+  "ESLint / TypeScript / build": "PASS; bundle JS 535,26 kB / 160,00 kB gzip, advertencia no bloqueante de tamaño.",
+  "Vitest": "109 aprobadas en 12 archivos.",
+  "Playwright": "23 aprobadas con fuentes reales y 1 opt-in limpio aprobado por separado: 24 escenarios distintos. Compose: 19 aprobadas, cinco opt-in cubiertos aparte.",
+  "Smoke API / doctor": "84 comprobaciones API y 7 doctor aprobadas.",
+  "Conexiones reales": "62 comprobaciones PostgreSQL 16 / SQL Server 2022: lectura SELECT, permisos, conexión, descubrimiento, snapshots, caída/reconexión y secretos aprobados.",
+  "Migraciones PostgreSQL": "Upgrade histórico, paridad ORM, Alembic check y downgrade/upgrade temporal aprobados hasta 0007_monitor_scheduling.",
+  "Restart aislado": "21 tablas, 56 datasets, 70 versiones, 43 runs, 206 artifacts, 1.562 relaciones y un adjunto idénticos tras restart.",
+  "Backup/restore integral": "PASS: origen destruido antes del restore; 7 artifacts, 1 secreto, 124 relaciones, caso/adjunto/SLA, schedule con dos versiones, una ocurrencia y 31 métricas conservados.",
+  "Funcionalidad recuperada": "Credencial PostgreSQL restaurada utilizable; refresh e Intake APPROVED con original REJECTED inmutable. Caso técnicamente validado, auto=false, historial Sentinel intacto. HTML 200; Playwright certificado por separado.",
+  "Benchmark real": "PASS: CSV variado de 106.194.531 bytes, 50.000 filas, cuatro columnas; 79,46 s total, tres módulos, snapshots PostgreSQL/SQL Server e Intake de ambos.",
+  "Volúmenes no ejecutados": "500 MiB, 1 GiB, 2 GiB y 5 GiB: NOT_RUN_RESOURCE_LIMIT por preflight. No se afirma capacidad medida de esos tamaños.",
+  "Benchmark smoke CI": "PASS local con 1.074.923 bytes y 1.000 filas, 37,71 s; no certifica volumen.",
+  "GitHub Actions": "Pendiente del workflow del commit 0.4.0; los resultados anteriores no certifican esta revisión.",
+  "Instalación principal": "Preservada, aún en migración 0005 mientras se completa la certificación; actualización pendiente. Sin borrados de datos reales."
+}

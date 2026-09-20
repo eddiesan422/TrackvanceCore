@@ -10,12 +10,13 @@ from typing import cast
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from .artifactstore import artifact_store
 from .db import SessionLocal, iso, require_record, utcnow
 from .execution import ExecutionEngine, execution_engine
 from .models import Job, Run, uid
+from .scheduler import ScheduleError, tick
 from .services import audit
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,11 @@ def main():
     logger.info("Worker local listo. Esperando trabajos persistidos.")
     while not stop.is_set():
         try:
+            try:
+                tick()
+            except (ScheduleError, ValueError, IntegrityError):
+                # Scheduler metadata errors must not prevent execution of independent jobs.
+                logger.error("No se pudo despachar Sentinel; revisa la integridad de las programaciones.")
             if not process_once(owner, active):
                 stop.wait(1)
         except OperationalError:

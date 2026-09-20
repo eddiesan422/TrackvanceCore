@@ -13,7 +13,7 @@ from .models import AuditEvent, Dataset, DatasetVersion, ExceptionCase, Finding,
 from .services import audit_dto, run_dto
 
 ACTIVE_EXCEPTION_STATES = frozenset(
-    {"OPEN", "INVESTIGATING", "PENDING_VALIDATION", "WAITING_EXTERNAL"}
+    {"OPEN", "ASSIGNED", "REOPENED", "INVESTIGATING", "PENDING_VALIDATION", "WAITING_EXTERNAL"}
 )
 HEALTHY_DECISIONS = frozenset({"APPROVED", "CONFORME", "HEALTHY"})
 IN_PROGRESS_STATUSES = frozenset({"QUEUED", "RUNNING"})

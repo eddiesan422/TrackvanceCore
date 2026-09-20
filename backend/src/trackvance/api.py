@@ -8,7 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 import polars as pl
 from argon2 import PasswordHasher
@@ -19,8 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select, text, update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -28,7 +27,8 @@ from . import __version__
 from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
 from .config import (
-    DEMO_ENABLED,
+    DEMO_ACCESS_ENABLED,
+    DEMO_SEED_ENABLED,
     DEMO_USER_ID,
     MAX_ROWS,
     MAX_UPLOAD_BYTES,
@@ -36,13 +36,20 @@ from .config import (
     WEB_ORIGIN,
 )
 from .config_semantics import RuleDefinition, effective_config, validate_config
+from .connections_api import router as connections_router
+from .connections_service import ConnectionOperationError
+from .credential_store import SecretStoreError
 from .dashboard import DashboardFilters, build_dashboard
 from .dataset_readers import (
     UnsupportedDatasetFormat,
     dataset_reader_registry,
     inspect_dataset,
 )
+from .dataset_sources import SourceError
 from .db import SessionLocal, get_db, iso, utcnow
+from .exceptions_api import router as exceptions_router
+from .identity_api import router as identity_router
+from .identity_api import user_dto
 from .migrate import migrate, migration_ready
 from .models import (
     Artifact,
@@ -51,7 +58,6 @@ from .models import (
     Configuration,
     Dataset,
     DatasetVersion,
-    ExceptionCase,
     Finding,
     IdempotencyKey,
     Job,
@@ -59,10 +65,12 @@ from .models import (
     User,
     uid,
 )
+from .operations_common import OperationError
 from .permissions import permissions_for, required_permission
 from .processing import ProcessingError, money, profile_frame
+from .scheduler import ScheduleError
+from .sentinel_api import router as sentinel_router
 from .services import (
-    assess_exception_validation,
     audit,
     audit_dto,
     backfill_artifacts,
@@ -73,7 +81,6 @@ from .services import (
     enqueue,
     exception_dto,
     finding_dto,
-    record_exception_validation,
     register_export,
     result_rows,
     run_actor,
@@ -100,14 +107,17 @@ async def lifespan(_app):
     with SessionLocal() as db:
         backfill_artifacts(db)
         db.commit()
-    if DEMO_ENABLED:
-        from .seed import seed_demo
+    from .seed import ensure_demo_user, seed_demo
+
+    if DEMO_ACCESS_ENABLED:
+        ensure_demo_user()
+    if DEMO_SEED_ENABLED:
         seed_demo()
     yield
 
 
 app = FastAPI(title="Trackvance Core", version=__version__, lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([WEB_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"])), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"])
+app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([WEB_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"])), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"])
 
 
 @app.middleware("http")
@@ -146,6 +156,31 @@ async def session_boundary(request: Request, call_next):
 @app.exception_handler(APIError)
 async def api_error(request, exc):
     return error_response(request, exc.status, exc.code, exc.message, exc.details)
+
+
+@app.exception_handler(OperationError)
+async def operation_error(request, exc):
+    return error_response(request, exc.status, exc.code, exc.message, exc.details)
+
+
+@app.exception_handler(ConnectionOperationError)
+async def connection_error(request, exc):
+    return error_response(request, exc.status, exc.code, exc.message)
+
+
+@app.exception_handler(ScheduleError)
+async def schedule_error(request: Request, exc: ScheduleError):
+    return error_response(request, exc.status, exc.code, exc.message)
+
+
+@app.exception_handler(SourceError)
+async def source_error(request, exc):
+    return error_response(request, 422, exc.code, str(exc))
+
+
+@app.exception_handler(SecretStoreError)
+async def secret_store_error(request, _exc):
+    return error_response(request, 503, "CREDENTIAL_STORE_UNAVAILABLE", "No se pudieron recuperar las credenciales de la conexión.")
 
 
 @app.exception_handler(ProcessingError)
@@ -200,10 +235,6 @@ def scoped(db, model, user):
     return db.scalars(select(model).where(model.organization_id == user.organization_id).order_by(model.created_at.desc())).all()
 
 
-def user_dto(user):
-    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role, "permissions": permissions_for(user.role)}
-
-
 def identity(user, csrf):
     return {"user": user_dto(user), "organization": {"id": user.organization_id, "name": "Trackvance Demo"}, "csrf_token": csrf, "demo_mode": user.id == DEMO_USER_ID}
 
@@ -214,7 +245,15 @@ router = APIRouter(prefix="/api/v1")
 @app.get("/health")
 @router.get("/health")
 def health():
-    return {"status": "ok", "version": __version__, "mode": "local-prototype", "demo_enabled": DEMO_ENABLED}
+    return {
+        "status": "ok",
+        "version": __version__,
+        "mode": "local-prototype",
+        # Kept for clients of the original health contract; it now means access.
+        "demo_enabled": DEMO_ACCESS_ENABLED,
+        "demo_access_enabled": DEMO_ACCESS_ENABLED,
+        "demo_seed_enabled": DEMO_SEED_ENABLED,
+    }
 
 
 @app.get("/health/ready")
@@ -255,11 +294,11 @@ class LoginBody(BaseModel):
 
 @router.post("/auth/demo")
 def demo_login(request: Request, response: Response, db: Session = Depends(get_db)):
-    if not DEMO_ENABLED:
+    if not DEMO_ACCESS_ENABLED:
         raise APIError(404, "DEMO_DISABLED", "El acceso demo no está habilitado.")
     user = db.get(User, DEMO_USER_ID)
     if not user or not user.active:
-        raise APIError(503, "DEMO_UNAVAILABLE", "Los datos demo aún no están disponibles.")
+        raise APIError(503, "DEMO_UNAVAILABLE", "El usuario demo aún no está disponible.")
     return establish_session(request, response, db, user)
 
 
@@ -703,6 +742,9 @@ class ReconRules(ColumnRules):
     key_normalization: KeyNormalization = Field(default_factory=KeyNormalization)
     comparison_rules: list[dict] = Field(default_factory=list, max_length=100)
     aggregation: dict | None = None
+    aggregations: list[dict] = Field(default_factory=list, max_length=100)
+    source_transforms: list[dict] = Field(default_factory=list, max_length=100)
+    target_transforms: list[dict] = Field(default_factory=list, max_length=100)
     key_columns: list[str] = Field(min_length=1)
     amount_column: str | None = Field(default=None, min_length=1, max_length=240)
     tolerance: str = "0.01"
@@ -755,12 +797,25 @@ def save_configuration(module, body, db, user):
         data["config"] = validate_config(module, data["config"])
     except ValueError as exc:
         raise APIError(422, "INVALID_RULE_CONFIGURATION", str(exc)) from exc
+    validate_rule_references(db, data["config"], user)
     config = Configuration(organization_id=user.organization_id, module=module, **data)
     db.add(config)
     db.flush()
     audit(db, "CONFIGURATION_PUBLISHED", "configuration", config.id, f"Configuración publicada: {config.name}", user.name, user.organization_id, {"module": module, "version": 1})
     db.commit()
     return config_dto(db, config)
+
+
+def validate_rule_references(db: Session, config: dict, user: User) -> None:
+    """Only immutable versions in this organization can enter a rule snapshot."""
+    for rule in config.get("rules", []):
+        if rule.get("type") != "reference":
+            continue
+        parameters = rule["parameters"]
+        reference = owned(db, DatasetVersion, parameters["dataset_version_id"], user)
+        available = {column["name"] for column in reference.schema_json}
+        if set(parameters["reference_columns"]) - available:
+            raise APIError(422, "INVALID_RULE_REFERENCE", "Las columnas de referencia no existen en la versión seleccionada.")
 
 
 @router.get("/intake/contracts")
@@ -1036,118 +1091,18 @@ def finding_exception(finding_id: str, db: Session = Depends(get_db), user: User
     return exception_dto(db, case)
 
 
-@router.get("/exceptions")
-def exceptions(state: str | None = None, module: str | None = None, severity: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([exception_dto(db, c) for c in scoped(db, ExceptionCase, user) if (not state or c.state == state) and (not module or c.module == module) and (not severity or c.severity == severity)])
-
-
-@router.get("/exceptions/{case_id}")
-def exception_detail(case_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    case = owned(db, ExceptionCase, case_id, user)
-    finding = db.get(Finding, case.finding_id) if case.finding_id else None
-    return {**exception_dto(db, case), "finding": finding_dto(db, finding) if finding else None}
-
-
-class ExceptionBody(InputModel):
-    version: int = Field(ge=1)
-    state: Literal["OPEN", "INVESTIGATING", "PENDING_VALIDATION", "RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE"] | None = None
-    owner: str | None = Field(default=None, min_length=1, max_length=120)
-    root_cause: str | None = Field(default=None, max_length=10000)
-    resolution: str | None = Field(default=None, max_length=10000)
-    administrative_reason: str | None = Field(default=None, max_length=10000)
-    comment: str | None = Field(default=None, max_length=10000)
-
-
-class ExceptionValidationBody(InputModel):
-    version: int = Field(ge=1)
-    validation_run_id: str | None = Field(default=None, min_length=1, max_length=64)
-    comment: str | None = Field(default=None, max_length=10000)
-
-
-@router.post("/exceptions/{case_id}/validate")
-def validate_exception(case_id: str, body: ExceptionValidationBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    case = owned(db, ExceptionCase, case_id, user)
-    if case.version != body.version:
-        raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
-    if case.state != "PENDING_VALIDATION":
-        raise APIError(422, "VALIDATION_STATE_REQUIRED", "Pasa la excepción a Pendiente de validación antes de verificar la corrección.")
-    assessment = assess_exception_validation(db, case, body.validation_run_id)
-    if assessment["status"] == "INVALID_RUN":
-        raise APIError(409, "VALIDATION_RUN_OUTDATED", assessment["reason"], {"latest_run_id": assessment["candidate_run_id"]})
-    if assessment["status"] == "NO_LATER_RUN":
-        raise APIError(409, "VALIDATION_RUN_REQUIRED", assessment["reason"])
-    record_exception_validation(db, case, assessment, user.name, body.comment)
-    db.commit()
-    db.refresh(case)
-    return exception_dto(db, case)
-
-
-@router.patch("/exceptions/{case_id}")
-def update_exception(case_id: str, body: ExceptionBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    case = owned(db, ExceptionCase, case_id, user)
-    if case.version != body.version:
-        raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
-    changes = {key: value for key, value in body.model_dump(exclude={"version", "comment"}, exclude_unset=True).items() if value is not None}
-    state = changes.get("state", case.state)
-    administrative_states = {"DISCARDED", "ACCEPTED", "NOT_APPLICABLE"}
-    transitions = {
-        "OPEN": {"INVESTIGATING", *administrative_states},
-        "INVESTIGATING": {"PENDING_VALIDATION", *administrative_states},
-        "PENDING_VALIDATION": {"INVESTIGATING", "RESOLVED", *administrative_states},
-        "RESOLVED": {"OPEN"},
-        "DISCARDED": {"OPEN"},
-        "ACCEPTED": {"OPEN"},
-        "NOT_APPLICABLE": {"OPEN"},
-        # Historical states remain operable without creating new records in them.
-        "WAITING_EXTERNAL": {"INVESTIGATING", "PENDING_VALIDATION", *administrative_states},
-        "FALSE_POSITIVE": {"OPEN"},
-    }
-    if state != case.state and state not in transitions[case.state]:
-        raise APIError(422, "INVALID_TRANSITION", "La transición de estado no está permitida.")
-    if state == "RESOLVED" and state != case.state and (not changes.get("root_cause", case.root_cause).strip() or not changes.get("resolution", case.resolution).strip()):
-        raise APIError(422, "RESOLUTION_REQUIRED", "Para resolver, registra causa raíz y resolución.")
-    assessment = None
-    if state == "RESOLVED" and state != case.state:
-        assessment = assess_exception_validation(db, case)
-        if not assessment["can_resolve"]:
-            raise APIError(422, "TECHNICAL_VALIDATION_REQUIRED", assessment["reason"], assessment)
-        changes["validation_run_id"] = assessment["validation_run_id"]
-        changes["validated_at"] = utcnow()
-        changes["validation_evidence"] = assessment["evidence"]
-    if state in administrative_states and state != case.state:
-        reason = changes.get("administrative_reason", case.administrative_reason).strip()
-        if not reason:
-            raise APIError(422, "ADMINISTRATIVE_REASON_REQUIRED", "Registra el motivo del cierre administrativo.")
-    if state != case.state and state in {"OPEN", "INVESTIGATING", "PENDING_VALIDATION"}:
-        changes.update(validation_run_id=None, validated_at=None, validation_evidence={})
-    now = utcnow()
-    changes.update(version=case.version + 1, updated_at=now, events=[*(case.events or []), {
-        "timestamp": iso(now), "actor": user.name, "actor_type": "USER", "actor_id": user.id,
-        "from_state": case.state, "to_state": state, "event_type": "STATE_CHANGE" if state != case.state else "CASE_UPDATED",
-        "comment": body.comment or "Excepción actualizada",
-        "validation_run_id": assessment["validation_run_id"] if assessment else None,
-        "administrative_reason": changes.get("administrative_reason") if state in administrative_states else None,
-    }])
-    result = db.execute(update(ExceptionCase).where(ExceptionCase.id == case.id, ExceptionCase.version == body.version).values(**changes).execution_options(synchronize_session=False))
-    if cast(CursorResult, result).rowcount != 1:
-        raise APIError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
-    audit(db, "EXCEPTION_UPDATED", "exception", case.id, f"{case.display_id}: {state}", user.name, user.organization_id, {
-        "from_state": case.state, "to_state": state, "configuration_id": case.configuration_id,
-        "origin_run_id": case.run_id,
-        "validation_run_id": assessment["validation_run_id"] if assessment else None,
-        "closure_type": "TECHNICAL" if state == "RESOLVED" else "ADMINISTRATIVE" if state in administrative_states else None,
-    })
-    db.commit()
-    db.refresh(case)
-    return exception_dto(db, case)
-
-
 @router.get("/audit-events")
 def audit_events(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return listing([audit_dto(a) for a in scoped(db, AuditEvent, user)])
 
 
 RULES = [
+    ("NOT_NULL", "No nulo", "intake", "Rechaza null y conserva texto vacío; política distinta de REQUIRED."),
+    ("TYPE", "Tipo de dato", "intake", "Verifica tipo lógico explícito por registro."),
+    ("COMPOUND_UNIQUE", "Unicidad compuesta", "intake", "Comprueba la combinación de varias columnas sin concatenarlas."),
+    ("LENGTH", "Longitud de texto", "intake", "Límites inclusivos de caracteres Unicode."),
+    ("COLUMN_COMPARE", "Comparación entre columnas", "intake", "Compara dos columnas con operador y semántica declarados."),
+    ("REFERENCE", "Integridad referencial", "intake", "Valida pertenencia a una DatasetVersion inmutable de la misma organización."),
     ("REQUIRED", "Campo obligatorio", "intake", "Rechaza valores nulos o vacíos en columnas obligatorias."),
     ("UNIQUE", "Clave única", "intake", "Detecta todas las filas con claves duplicadas."),
     ("NUMERIC", "Formato decimal", "intake", "Valida números finitos con punto decimal."),
@@ -1177,9 +1132,7 @@ def rules():
     return listing([{"id": code, "code": code, "name": name, "type": "BUILT_IN", "module": module, "description": description, "severity": "HIGH", "legacy_aliases": ["EXACT_MATCH"] if code == "NUMERIC_TOLERANCE" else []} for code, name, module, description in RULES])
 
 
-@router.get("/users")
-def users(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([user_dto(u) for u in scoped(db, User, user)])
+
 
 
 @router.get("/system/engines")
@@ -1230,6 +1183,7 @@ def publish_configuration_version(configuration_id: str, body: ConfigurationVers
         config = validate_config(module, schema.model_validate(body.config).model_dump())
     except ValueError as exc:
         raise APIError(422, "INVALID_RULE_CONFIGURATION", str(exc)) from exc
+    validate_rule_references(db, config, user)
     new = Configuration(organization_id=user.organization_id, name=previous.name, module=module, version=previous.version + 1, dataset_id=previous.dataset_id, target_dataset_id=previous.target_dataset_id, owner=previous.owner, description=body.description if body.description is not None else previous.description, config=config, previous_version_id=previous.id)
     db.add(new)
     db.flush()
@@ -1270,6 +1224,10 @@ def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user
 
 
 app.include_router(router)
+app.include_router(connections_router)
+app.include_router(identity_router)
+app.include_router(exceptions_router)
+app.include_router(sentinel_router)
 
 
 def openapi_contract():
@@ -1282,12 +1240,15 @@ def openapi_contract():
         "type": "apiKey", "in": "cookie", "name": COOKIE,
         "description": "Sesión local HttpOnly. Las mutaciones requieren además X-CSRF-Token.",
     }
-    public = {"/api/v1/health", "/api/v1/health/ready", "/api/v1/auth/demo", "/api/v1/auth/login"}
+    public = {"/health", "/health/ready", "/api/v1/health", "/api/v1/health/ready", "/api/v1/auth/demo", "/api/v1/auth/login"}
     for path, operations in schema["paths"].items():
         for method, operation in operations.items():
             if method not in {"get", "post", "patch", "put", "delete"} or path in public:
                 continue
             operation["security"] = [{"LocalSession": []}]
+            permission = required_permission(path.removeprefix("/api/v1"), method.upper())
+            if permission:
+                operation["x-required-permission"] = permission
             if method != "get":
                 operation.setdefault("parameters", []).append({"name": "X-CSRF-Token", "in": "header", "required": True, "schema": {"type": "string"}})
             for status, description in [(401, "Sesión ausente o vencida"), (403, "Permiso u origen no autorizado / CSRF inválido"), (404, "Recurso no disponible en la organización"), (409, "Conflicto de versión, precondición o integridad")]:

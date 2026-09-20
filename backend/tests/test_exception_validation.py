@@ -12,6 +12,7 @@ from trackvance.models import (
     ExceptionCase,
     Finding,
     Run,
+    User,
 )
 from trackvance.services import (
     assess_exception_validation,
@@ -19,6 +20,30 @@ from trackvance.services import (
     exception_dto,
     record_exception_validation,
 )
+
+
+@pytest.mark.parametrize("role", ["Data Analyst", "Operations", "Data Owner", "Administrator"])
+@pytest.mark.parametrize("state", ["RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE"])
+def test_exception_closure_requires_close_permission(authenticated, database, role, state):
+    with database() as db:
+        case, *_ = make_case(db, "sentinel", candidate_decision="HEALTHY")
+        db.get(User, "test-user").role = role
+        db.commit()
+        case_id = case.id
+    url = f"/api/v1/exceptions/{case_id}"
+    managed = authenticated.patch(url, json={"version": 1, "comment": "En gestión"})
+    assert managed.status_code == 200
+    response = authenticated.patch(url, json={
+        "version": 2, "state": state, "root_cause": "Fuente corregida",
+        "resolution": "Validación saludable", "administrative_reason": "Excepción aceptada por negocio",
+    })
+    allowed = role in {"Data Owner", "Administrator"}
+    assert response.status_code == (200 if allowed else 403), response.text
+    if not allowed:
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+        current = authenticated.get(url).json()
+        assert current["state"] == "PENDING_VALIDATION"
+        assert current["version"] == 2
 
 
 def make_case(
@@ -94,6 +119,8 @@ def make_case(
         initiated_by="Test User",
         created_at=now - timedelta(minutes=1),
         finished_at=now - timedelta(minutes=1),
+        metrics={"rules": [{"code": "REQUIRED", "column": "customer_id", "evaluated_count": 1,
+                            "failed_count": 1 if repeated_finding else 0}]} if module == "intake" else {},
     )
     db.add(candidate)
     db.flush()

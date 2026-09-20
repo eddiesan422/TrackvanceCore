@@ -1,12 +1,15 @@
 {
-  "pytest backend + operaciones": "233 aprobadas: 222 backend y 11 scripts; 2 avisos de deprecación de dependencias.",
-  "Ruff / Mypy": "Aprobados; Mypy revisó 22 archivos fuente.",
-  "ESLint / TypeScript / build": "Aprobados; build Vite generado correctamente.",
-  "Vitest": "67 pruebas aprobadas en 8 archivos.",
-  "Playwright": "13 flujos aprobados en Docker/PostgreSQL, 40,4 segundos.",
+  "pytest backend + operaciones": "363 aprobadas; API, seguridad, adapters, backups y runner de Conexiones. Dos avisos de deprecación de dependencias.",
+  "Ruff / Mypy": "Aprobados; Mypy revisó 27 archivos fuente.",
+  "ESLint / TypeScript / build": "Aprobados. Build Vite: aviso de bundle de 500,53 kB (151,44 kB gzip); sin error de compilación.",
+  "Vitest": "89 pruebas aprobadas en 9 archivos.",
+  "Playwright": "15 flujos aprobados en Docker con ambos motores (48,2 s); el escenario opt-in de acceso limpio pasó por separado (1,1 s). Total: 16.",
   "Smoke API / doctor": "84 comprobaciones aprobadas; doctor 7/7.",
-  "Migraciones PostgreSQL": "Upgrade histórico, paridad ORM y downgrade/upgrade en base temporal: aprobados.",
+  "Conexiones reales": "PostgreSQL y SQL Server: 62 comprobaciones de conexión, permisos, metadata, snapshot, Intake, caída y secretos aprobadas.",
+  "Migraciones PostgreSQL": "Upgrade histórico hasta 0005, paridad ORM, Alembic check y downgrade/upgrade en base temporal: aprobados.",
   "Restart aislado": "Registros y hashes idénticos: 45 datasets, 59 versiones, 37 runs y 173 artifacts verificados.",
-  "Instancia principal": "Rebuild sin pérdida: huellas PostgreSQL/artifacts idénticas antes/después. Cuatro servicios healthy en localhost:3100; restart=no.",
-  "Limpieza de pruebas": "Proyectos E2E y volúmenes temporales eliminados. Datos de usuario preservados."
+  "Instancia principal": "Cuatro servicios healthy en localhost:3100, migración 0005, restart=no. Sin datasets, versiones, runs ni conexiones de prueba; acceso demo sin seed.",
+  "Limpieza de pruebas": "Proyectos E2E y volúmenes temporales eliminados. Datos de usuario preservados.",
+  "Backup SQLite y secretos": "Backup v2 y restore conservan credenciales utilizables; hashes, corrupción, referencias, traversal y compatibilidad v1 verificados.",
+  "Seguridad de conexión": "Cambio de destino/TLS exige contraseña; cierre de excepción exige permiso; DELETE exige versión vigente; solo API monta secretos y claves."
 }

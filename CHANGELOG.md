@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.4.0 - madurez funcional local
+
+- Adopta el roadmap funcional hasta el punto 9; productización y Data Delivery
+  permanecen fuera de este ciclo. Conserva Conexiones PostgreSQL/SQL Server,
+  cinco formatos de archivo y el monolito modular con sus puertos existentes.
+- Amplía Intake con unicidad compuesta, longitud, comparación entre columnas,
+  condiciones declarativas y referencias a DatasetVersions inmutables. El editor
+  usa columnas reales; resultados y Excel conservan identidad de regla, filas
+  evaluadas/fallidas/excluidas, severidad, evidencia y linaje de referencias.
+- Completa Recon con transforms explícitos por fuente, políticas de nulos,
+  múltiples comparaciones y agregaciones SUM/COUNT por columna en 1:N/N:1.
+  Rechaza agregaciones ambiguas y conserva las categorías históricas.
+- Añade programación local de Sentinel, revisiones inmutables, ocurrencias
+  transaccionales, agrupación de atrasos, control de solapamiento, histórico
+  separado por método/versión, evolución y alertas internas navegables.
+- Madura excepciones con asignación estable, prioridad, SLA, fecha objetivo,
+  vencimientos, comentarios, adjuntos con StorageProvider, ASSIGNED/REOPENED y
+  política automática deshabilitada por defecto. RESOLVED exige validación
+  posterior; una regla sin filas evaluadas no demuestra una corrección.
+- Añade administración local de usuarios, roles y permisos, activación,
+  contraseñas Argon2, revocación de sesiones y protección del último administrador.
+- Incorpora reset con plan verificable y confirmación explícita, backup Docker
+  PostgreSQL/artifacts/credenciales/claves, restore fresco, hashes y diagnóstico
+  integral. Las pruebas destructivas operan exclusivamente en proyectos aislados.
+- Añade un framework de volumen con datos sintéticos reales, medición de recursos,
+  límites de seguridad y distinción entre volumen medido y no ejecutado.
+- Crea migraciones aditivas `0006_local_identity_exceptions` y
+  `0007_monitor_scheduling`, además de `0005_external_connections` del ciclo de
+  Conexiones. No reescribe migraciones, snapshots, configs o runs históricos.
+- Amplía pruebas unitarias, integración, interfaz y ciclos Docker/Playwright;
+  agrega backup/restore a CI y el flujo avanzado de fuentes a la certificación.
+  Resultados y límites reales se publican en `docs/development/validation.md`.
+
+## 0.3.0 - evolución Conexiones — 2026-09-19
+
+- Añade el módulo Conexiones con creación, prueba, edición, deshabilitación y
+  baja lógica de fuentes PostgreSQL y SQL Server.
+- Implementa `PostgreSQLDatasetSource` y `SQLServerDatasetSource` detrás del
+  puerto común; descubre schemas, tablas/vistas y tipos, y ofrece preview acotado.
+- Registra selecciones como datasets con snapshots Parquet inmutables, refresh,
+  configuración versionada y linaje completo hacia fuente y objeto originales.
+- Añade `SecretStore` y un proveedor local con cifrado autenticado, clave en un
+  volumen separado, referencias opacas, aislamiento por organización y errores
+  sanitizados. Las respuestas, auditoría, logs y metadata excluyen credenciales.
+- Incorpora la migración aditiva `0005_external_connections`, RBAC y auditoría
+  de Conexiones, sin modificar configuraciones ni runs históricos.
+- Certifica ambos motores reales con usuarios SELECT, errores de acceso,
+  permisos, tablas/vistas, tipos, caída/reconexión, Intake, Excel y Playwright.
+- Declara Data Delivery como puerto futuro separado; esta evolución no escribe
+  en fuentes externas ni añade una dependencia cloud.
+
 ## 0.3.0 — 2026-09-16
 
 - Documenta Docker Compose con PostgreSQL y volumen persistente como instalación

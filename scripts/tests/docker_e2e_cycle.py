@@ -83,6 +83,7 @@ def main() -> int:
             "WEB_PORT": str(port),
             "TRACKVANCE_WEB_ORIGIN": base_url,
             "POSTGRES_PASSWORD": "trackvance-isolated-e2e",
+            "DEMO_ACCESS_ENABLED": "true",
             "DEMO_SEED_ENABLED": "true",
             "TV_E2E_URL": base_url,
         }

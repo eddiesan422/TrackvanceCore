@@ -1,0 +1,37 @@
+# Opt-in limits for the disposable benchmark runner only. Production defaults in
+# compose.yml stay unchanged. The 160 MiB source cap exists solely so a measured
+# 100 MiB baseline can cross the normal 64 MiB safety boundary in isolation.
+services:
+  postgres:
+    mem_limit: ${BENCHMARK_POSTGRES_MEMORY_LIMIT:-1g}
+
+  api:
+    environment:
+      MAX_UPLOAD_BYTES: '134217728'
+      TRACKVANCE_MAX_ROWS: '100000'
+      TRACKVANCE_MAX_SNAPSHOT_BYTES: '167772160'
+      TRACKVANCE_WORKER_MEMORY_SOFT_BYTES: '6442450944'
+      TRACKVANCE_TEMP_MIN_FREE_BYTES: '2147483648'
+      TRACKVANCE_RUN_TIMEOUT_SECONDS: '1200'
+    mem_limit: ${BENCHMARK_API_MEMORY_LIMIT:-2g}
+
+  worker:
+    environment:
+      MAX_UPLOAD_BYTES: '134217728'
+      TRACKVANCE_MAX_ROWS: '100000'
+      TRACKVANCE_MAX_SNAPSHOT_BYTES: '167772160'
+      TRACKVANCE_WORKER_MEMORY_SOFT_BYTES: '6442450944'
+      TRACKVANCE_TEMP_MIN_FREE_BYTES: '2147483648'
+      TRACKVANCE_RUN_TIMEOUT_SECONDS: '1200'
+    mem_limit: ${BENCHMARK_WORKER_MEMORY_LIMIT:-7g}
+
+  web:
+    mem_limit: ${BENCHMARK_WEB_MEMORY_LIMIT:-256m}
+    volumes:
+      - ./deploy/docker/nginx.benchmark.conf:/etc/nginx/conf.d/default.conf:ro
+
+  source-postgres:
+    mem_limit: 768m
+
+  source-sqlserver:
+    mem_limit: 2560m

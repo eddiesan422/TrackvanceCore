@@ -23,8 +23,9 @@ COPY demo/ /app/demo/
 RUN uv sync --frozen --no-dev --no-editable \
     && groupadd --system trackvance \
     && useradd --system --gid trackvance --home-dir /app trackvance \
-    && mkdir -p /var/lib/trackvance \
-    && chown -R trackvance:trackvance /var/lib/trackvance
+    && mkdir -p /var/lib/trackvance /var/lib/trackvance-credentials /var/lib/trackvance-keys \
+    && chown -R trackvance:trackvance /var/lib/trackvance /var/lib/trackvance-credentials /var/lib/trackvance-keys \
+    && chmod 700 /var/lib/trackvance-credentials /var/lib/trackvance-keys
 
 USER trackvance
 EXPOSE 8000

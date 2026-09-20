@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/health": {
@@ -18,25 +18,8 @@
                 "schema": {}
               }
             }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
           }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
+        }
       }
     },
     "/health/ready": {
@@ -51,25 +34,8 @@
                 "schema": {}
               }
             }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
           }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/health": {
@@ -262,7 +228,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "datasets:read"
       },
       "post": {
         "summary": "New Dataset",
@@ -314,6 +281,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "datasets:write",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -380,6 +348,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "datasets:write",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -443,7 +412,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "datasets:read"
       }
     },
     "/api/v1/datasets/{dataset_id}/schema": {
@@ -510,7 +480,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "datasets:read"
       }
     },
     "/api/v1/datasets/{dataset_id}/versions/upload": {
@@ -582,7 +553,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "datasets:write"
       }
     },
     "/api/v1/dataset-versions/{version_id}/profile": {
@@ -636,7 +608,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "datasets:read"
       }
     },
     "/api/v1/monitors": {
@@ -669,7 +642,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       },
       "post": {
         "summary": "Monitor",
@@ -721,6 +695,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "configurations:write",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -763,7 +738,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       },
       "post": {
         "summary": "Recon Control",
@@ -815,6 +791,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "configurations:write",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -857,7 +834,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       },
       "post": {
         "summary": "Intake Contract",
@@ -909,6 +887,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "configurations:write",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -972,6 +951,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "runs:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -1035,6 +1015,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "runs:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -1116,7 +1097,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:execute"
       }
     },
     "/api/v1/runs": {
@@ -1182,7 +1164,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/runs/{run_id}": {
@@ -1236,7 +1219,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/runs/{run_id}/cancel": {
@@ -1298,7 +1282,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:execute"
       }
     },
     "/api/v1/recon/runs/{run_id}/results": {
@@ -1388,7 +1373,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/intake/runs/{run_id}/errors": {
@@ -1478,7 +1464,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/runs/{run_id}/results": {
@@ -1568,7 +1555,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/runs/{run_id}/evidence": {
@@ -1622,7 +1610,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "artifacts:download"
       }
     },
     "/api/v1/artifacts/{artifact_id}/download": {
@@ -1676,7 +1665,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "artifacts:download"
       }
     },
     "/api/v1/runs/{run_id}/export.xlsx": {
@@ -1733,7 +1723,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "exports:download"
       }
     },
     "/api/v1/runs/{run_id}/export.csv": {
@@ -1789,7 +1780,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "exports:download"
       }
     },
     "/api/v1/monitors/{monitor_id}/metrics": {
@@ -1843,7 +1835,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/findings": {
@@ -1876,7 +1869,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/findings/{finding_id}/exceptions": {
@@ -1938,296 +1932,8 @@
           {
             "LocalSession": []
           }
-        ]
-      }
-    },
-    "/api/v1/exceptions": {
-      "get": {
-        "summary": "Exceptions",
-        "operationId": "exceptions_api_v1_exceptions_get",
-        "parameters": [
-          {
-            "name": "state",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "State"
-            }
-          },
-          {
-            "name": "module",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Module"
-            }
-          },
-          {
-            "name": "severity",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Severity"
-            }
-          }
         ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
-      }
-    },
-    "/api/v1/exceptions/{case_id}": {
-      "get": {
-        "summary": "Exception Detail",
-        "operationId": "exception_detail_api_v1_exceptions__case_id__get",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Case Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
-      },
-      "patch": {
-        "summary": "Update Exception",
-        "operationId": "update_exception_api_v1_exceptions__case_id__patch",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExceptionBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
-      }
-    },
-    "/api/v1/exceptions/{case_id}/validate": {
-      "post": {
-        "summary": "Validate Exception",
-        "operationId": "validate_exception_api_v1_exceptions__case_id__validate_post",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExceptionValidationBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
+        "x-required-permission": "exceptions:write"
       }
     },
     "/api/v1/audit-events": {
@@ -2260,7 +1966,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "audit:read"
       }
     },
     "/api/v1/rules": {
@@ -2293,40 +2000,8 @@
           {
             "LocalSession": []
           }
-        ]
-      }
-    },
-    "/api/v1/users": {
-      "get": {
-        "summary": "Users",
-        "operationId": "users_api_v1_users_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/system/engines": {
@@ -2359,7 +2034,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "system:read"
       }
     },
     "/api/v1/dashboard": {
@@ -2501,7 +2177,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/monitors/{configuration_id}/versions": {
@@ -2573,7 +2250,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "configurations:write"
       }
     },
     "/api/v1/recon/controls/{configuration_id}/versions": {
@@ -2645,7 +2323,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "configurations:write"
       }
     },
     "/api/v1/intake/contracts/{configuration_id}/versions": {
@@ -2717,7 +2396,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "configurations:write"
       }
     },
     "/api/v1/runs/{run_id}/execution-plan": {
@@ -2771,7 +2451,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/runs/{run_id}/diagnostics": {
@@ -2825,7 +2506,8 @@
           {
             "LocalSession": []
           }
-        ]
+        ],
+        "x-required-permission": "runs:read"
       }
     },
     "/api/v1/execution-plans/preview": {
@@ -2879,6 +2561,7 @@
             "LocalSession": []
           }
         ],
+        "x-required-permission": "runs:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -2889,6 +2572,2222 @@
             }
           }
         ]
+      }
+    },
+    "/api/v1/connections": {
+      "get": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "List Connections",
+        "operationId": "list_connections_api_v1_connections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:read"
+      },
+      "post": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Create Connection",
+        "operationId": "create_connection_api_v1_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/connections/test": {
+      "post": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Test Draft",
+        "operationId": "test_draft_api_v1_connections_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionTestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/connections/{connection_id}": {
+      "get": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Connection Detail",
+        "operationId": "connection_detail_api_v1_connections__connection_id__get",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:read"
+      },
+      "patch": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Update Connection",
+        "operationId": "update_connection_api_v1_connections__connection_id__patch",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:manage"
+      },
+      "delete": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Delete Connection",
+        "operationId": "delete_connection_api_v1_connections__connection_id__delete",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Version"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:manage"
+      }
+    },
+    "/api/v1/connections/{connection_id}/test": {
+      "post": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Test Connection",
+        "operationId": "test_connection_api_v1_connections__connection_id__test_post",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/connections/{connection_id}/schemas": {
+      "get": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Schemas",
+        "operationId": "schemas_api_v1_connections__connection_id__schemas_get",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceSchemasResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/connections/{connection_id}/objects": {
+      "get": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Objects",
+        "operationId": "objects_api_v1_connections__connection_id__objects_get",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "schema_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Schema Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceObjectsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/connections/{connection_id}/preview": {
+      "get": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Preview",
+        "operationId": "preview_api_v1_connections__connection_id__preview_get",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "schema_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Schema Name"
+            }
+          },
+          {
+            "name": "object_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Object Name"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/connections/{connection_id}/datasets": {
+      "post": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Register Source Dataset",
+        "operationId": "register_source_dataset_api_v1_connections__connection_id__datasets_post",
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDatasetBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDatasetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/refresh-source": {
+      "post": {
+        "tags": [
+          "Conexiones"
+        ],
+        "summary": "Refresh Source",
+        "operationId": "refresh_source_api_v1_datasets__dataset_id__refresh_source_post",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "connections:use"
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "Users",
+        "operationId": "users_api_v1_users_get",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:read"
+      },
+      "post": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "Create User",
+        "operationId": "create_user_api_v1_users_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:write",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/users/roles": {
+      "get": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "Roles",
+        "operationId": "roles_api_v1_users_roles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:read"
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "get": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "User Detail",
+        "operationId": "user_detail_api_v1_users__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:read"
+      },
+      "patch": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "Edit User",
+        "operationId": "edit_user_api_v1_users__user_id__patch",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:write"
+      }
+    },
+    "/api/v1/users/{user_id}/reset-password": {
+      "post": {
+        "tags": [
+          "Usuarios locales"
+        ],
+        "summary": "Reset Password",
+        "operationId": "reset_password_api_v1_users__user_id__reset_password_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:write"
+      }
+    },
+    "/api/v1/exceptions": {
+      "get": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Exceptions",
+        "operationId": "exceptions_api_v1_exceptions_get",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
+            }
+          },
+          {
+            "name": "assigned_user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assigned User Id"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:read"
+      }
+    },
+    "/api/v1/exceptions/assignees": {
+      "get": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Assignees",
+        "operationId": "assignees_api_v1_exceptions_assignees_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:read"
+      }
+    },
+    "/api/v1/exceptions/{case_id}": {
+      "get": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Detail",
+        "operationId": "detail_api_v1_exceptions__case_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:read"
+      },
+      "patch": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Update Case",
+        "operationId": "update_case_api_v1_exceptions__case_id__patch",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CasePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:write"
+      }
+    },
+    "/api/v1/exceptions/{case_id}/validate": {
+      "post": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Validate",
+        "operationId": "validate_api_v1_exceptions__case_id__validate_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:write"
+      }
+    },
+    "/api/v1/exceptions/{case_id}/comments": {
+      "post": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Comment",
+        "operationId": "comment_api_v1_exceptions__case_id__comments_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:write"
+      }
+    },
+    "/api/v1/exceptions/{case_id}/attachments": {
+      "post": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Upload Attachment",
+        "operationId": "upload_attachment_api_v1_exceptions__case_id__attachments_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_attachment_api_v1_exceptions__case_id__attachments_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:write"
+      }
+    },
+    "/api/v1/exceptions/{case_id}/attachments/{attachment_id}/download": {
+      "get": {
+        "tags": [
+          "Excepciones"
+        ],
+        "summary": "Attachment Download",
+        "operationId": "attachment_download_api_v1_exceptions__case_id__attachments__attachment_id__download_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attachment Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "exceptions:read"
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/schedule": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Get Schedule",
+        "operationId": "get_schedule_api_v1_monitors__monitor_id__schedule_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ScheduleResponse"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get Schedule Api V1 Monitors  Monitor Id  Schedule Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
+      },
+      "post": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Configure Schedule",
+        "operationId": "configure_schedule_api_v1_monitors__monitor_id__schedule_post",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "configurations:write"
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/occurrences": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Occurrences",
+        "operationId": "occurrences_api_v1_monitors__monitor_id__occurrences_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceCollection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/series": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Metric Series",
+        "operationId": "metric_series_api_v1_monitors__monitor_id__series_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "include_versions",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Versions"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricSeriesCollection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
+      }
+    },
+    "/api/v1/monitors/{monitor_id}/alerts": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Monitor Alerts",
+        "operationId": "monitor_alerts_api_v1_monitors__monitor_id__alerts_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
       }
     }
   },
@@ -2913,6 +4812,30 @@
         ],
         "title": "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post"
       },
+      "Body_upload_attachment_api_v1_exceptions__case_id__attachments_post": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "file"
+        ],
+        "title": "Body_upload_attachment_api_v1_exceptions__case_id__attachments_post"
+      },
       "Body_upload_version_api_v1_datasets__dataset_id__versions_upload_post": {
         "properties": {
           "file": {
@@ -2936,6 +4859,192 @@
           "file"
         ],
         "title": "Body_upload_version_api_v1_datasets__dataset_id__versions_upload_post"
+      },
+      "CasePatch": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "OPEN",
+                  "ASSIGNED",
+                  "INVESTIGATING",
+                  "PENDING_VALIDATION",
+                  "RESOLVED",
+                  "DISCARDED",
+                  "ACCEPTED",
+                  "NOT_APPLICABLE",
+                  "REOPENED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "assigned_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned User Id"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "CRITICAL",
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "sla_hours": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8760.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sla Hours"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "auto_resolve_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Resolve Enabled"
+          },
+          "root_cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "administrative_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Reason"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "CasePatch"
+      },
+      "CommentBody": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "comment"
+        ],
+        "title": "CommentBody"
       },
       "ConfigurationVersionBody": {
         "properties": {
@@ -2963,6 +5072,441 @@
           "config"
         ],
         "title": "ConfigurationVersionBody"
+      },
+      "ConnectionBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "POSTGRESQL",
+              "SQLSERVER"
+            ],
+            "title": "Source Type"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port"
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "source_type",
+          "host",
+          "port",
+          "database",
+          "username"
+        ],
+        "title": "ConnectionBody"
+      },
+      "ConnectionDeleteResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "ConnectionDeleteResponse"
+      },
+      "ConnectionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ConnectionListResponse"
+      },
+      "ConnectionPatch": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 65535.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "database": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "ConnectionPatch"
+      },
+      "ConnectionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "POSTGRESQL",
+              "SQLSERVER"
+            ],
+            "title": "Source Type"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "title": "Port"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options"
+          },
+          "connection_version_id": {
+            "type": "string",
+            "title": "Connection Version Id"
+          },
+          "config_hash": {
+            "type": "string",
+            "title": "Config Hash"
+          },
+          "last_test_status": {
+            "type": "string",
+            "title": "Last Test Status"
+          },
+          "last_test_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test At"
+          },
+          "last_test_message": {
+            "type": "string",
+            "title": "Last Test Message"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "source_type",
+          "enabled",
+          "version",
+          "host",
+          "port",
+          "database",
+          "username",
+          "options",
+          "connection_version_id",
+          "config_hash",
+          "last_test_status",
+          "last_test_at",
+          "last_test_message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConnectionResponse"
+      },
+      "ConnectionTestBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "POSTGRESQL",
+              "SQLSERVER"
+            ],
+            "title": "Source Type"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port"
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "source_type",
+          "host",
+          "port",
+          "database",
+          "username"
+        ],
+        "title": "ConnectionTestBody"
+      },
+      "ConnectionTestResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "SUCCESS",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "tested_at": {
+            "type": "string",
+            "title": "Tested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "message",
+          "tested_at"
+        ],
+        "title": "ConnectionTestResponse"
       },
       "DatasetBody": {
         "properties": {
@@ -3240,142 +5784,6 @@
         ],
         "title": "DatasetSchemaResponse"
       },
-      "ExceptionBody": {
-        "properties": {
-          "version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Version"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "OPEN",
-                  "INVESTIGATING",
-                  "PENDING_VALIDATION",
-                  "RESOLVED",
-                  "DISCARDED",
-                  "ACCEPTED",
-                  "NOT_APPLICABLE"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "State"
-          },
-          "owner": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 120,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner"
-          },
-          "root_cause": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Cause"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution"
-          },
-          "administrative_reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Administrative Reason"
-          },
-          "comment": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "version"
-        ],
-        "title": "ExceptionBody"
-      },
-      "ExceptionValidationBody": {
-        "properties": {
-          "version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Version"
-          },
-          "validation_run_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 64,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validation Run Id"
-          },
-          "comment": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "version"
-        ],
-        "title": "ExceptionValidationBody"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3564,6 +5972,143 @@
         ],
         "title": "LoginBody"
       },
+      "MetricPointResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "configuration_id": {
+            "type": "string",
+            "title": "Configuration Id"
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "title": "Dataset Version Id"
+          },
+          "observed_at": {
+            "type": "string",
+            "title": "Observed At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "exact_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact Value"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "configuration_id",
+          "dataset_version_id",
+          "observed_at",
+          "value",
+          "exact_value",
+          "decision"
+        ],
+        "title": "MetricPointResponse"
+      },
+      "MetricSeriesCollection": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricSeriesResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "sample_count": {
+            "type": "integer",
+            "title": "Sample Count"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "includes_configuration_versions": {
+            "type": "boolean",
+            "title": "Includes Configuration Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "sample_count",
+          "limit",
+          "includes_configuration_versions"
+        ],
+        "title": "MetricSeriesCollection"
+      },
+      "MetricSeriesResponse": {
+        "properties": {
+          "metric_key": {
+            "type": "string",
+            "title": "Metric Key"
+          },
+          "dimensions": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "metric_definition_version": {
+            "type": "integer",
+            "title": "Metric Definition Version"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MetricPointResponse"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_key",
+          "dimensions",
+          "method",
+          "metric_definition_version",
+          "points"
+        ],
+        "title": "MetricSeriesResponse"
+      },
       "MonitorBody": {
         "properties": {
           "name": {
@@ -3675,6 +6220,177 @@
         "type": "object",
         "title": "MonitorRunBody"
       },
+      "OccurrenceCollection": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OccurrenceResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "OccurrenceCollection"
+      },
+      "OccurrenceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "schedule_id": {
+            "type": "string",
+            "title": "Schedule Id"
+          },
+          "schedule_version_id": {
+            "type": "string",
+            "title": "Schedule Version Id"
+          },
+          "monitor_id": {
+            "type": "string",
+            "title": "Monitor Id"
+          },
+          "dataset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Version Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "planned_at": {
+            "type": "string",
+            "title": "Planned At"
+          },
+          "dispatched_at": {
+            "type": "string",
+            "title": "Dispatched At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "coalesced_intervals": {
+            "type": "integer",
+            "title": "Coalesced Intervals"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "schedule_id",
+          "schedule_version_id",
+          "monitor_id",
+          "dataset_version_id",
+          "run_id",
+          "planned_at",
+          "dispatched_at",
+          "started_at",
+          "finished_at",
+          "status",
+          "decision",
+          "reason_code",
+          "coalesced_intervals",
+          "metrics"
+        ],
+        "title": "OccurrenceResponse"
+      },
+      "PasswordReset": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 12,
+            "format": "password",
+            "title": "Password",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "password"
+        ],
+        "title": "PasswordReset"
+      },
       "PlanPreviewBody": {
         "properties": {
           "configuration_id": {
@@ -3778,6 +6494,33 @@
               }
             ],
             "title": "Aggregation"
+          },
+          "aggregations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Aggregations"
+          },
+          "source_transforms": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Source Transforms"
+          },
+          "target_transforms": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Target Transforms"
           },
           "key_columns": {
             "items": {
@@ -3908,6 +6651,18 @@
               }
             ],
             "title": "Message"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When"
           }
         },
         "additionalProperties": false,
@@ -3916,6 +6671,579 @@
           "type"
         ],
         "title": "RuleDefinition"
+      },
+      "ScheduleBody": {
+        "properties": {
+          "interval_seconds": {
+            "type": "integer",
+            "maximum": 2678400.0,
+            "minimum": 60.0,
+            "title": "Interval Seconds"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "interval_seconds"
+        ],
+        "title": "ScheduleBody"
+      },
+      "ScheduleResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "monitor_id": {
+            "type": "string",
+            "title": "Monitor Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "schedule_version_id": {
+            "type": "string",
+            "title": "Schedule Version Id"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "title": "Interval Seconds"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "next_run_at": {
+            "type": "string",
+            "title": "Next Run At"
+          },
+          "starts_at": {
+            "type": "string",
+            "title": "Starts At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "source_policy": {
+            "type": "string",
+            "title": "Source Policy"
+          },
+          "misfire_policy": {
+            "type": "string",
+            "title": "Misfire Policy"
+          },
+          "overlap_policy": {
+            "type": "string",
+            "title": "Overlap Policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "monitor_id",
+          "version",
+          "schedule_version_id",
+          "interval_seconds",
+          "enabled",
+          "next_run_at",
+          "starts_at",
+          "updated_at",
+          "source_policy",
+          "misfire_policy",
+          "overlap_policy"
+        ],
+        "title": "ScheduleResponse"
+      },
+      "SourceColumnResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "native_type": {
+            "type": "string",
+            "title": "Native Type"
+          },
+          "logical_type": {
+            "type": "string",
+            "title": "Logical Type"
+          },
+          "nullable": {
+            "type": "boolean",
+            "title": "Nullable"
+          },
+          "numeric": {
+            "type": "boolean",
+            "title": "Numeric"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "native_type",
+          "logical_type",
+          "nullable",
+          "numeric"
+        ],
+        "title": "SourceColumnResponse"
+      },
+      "SourceDatasetBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Domain",
+            "default": "Operaciones"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description",
+            "default": ""
+          },
+          "schema_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Schema Name"
+          },
+          "object_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Object Name"
+          },
+          "column_overrides": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Column Overrides"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "schema_name",
+          "object_name"
+        ],
+        "title": "SourceDatasetBody"
+      },
+      "SourceDatasetResponse": {
+        "properties": {
+          "dataset": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dataset",
+            "description": "Dataset DTO compartido con GET /datasets/{id}."
+          },
+          "version": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Version",
+            "description": "DatasetVersion inmutable, con Parquet canónico, artifacts y linaje."
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "version"
+        ],
+        "title": "SourceDatasetResponse"
+      },
+      "SourceObjectResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "TABLE",
+              "VIEW"
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "SourceObjectResponse"
+      },
+      "SourceObjectsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceObjectResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SourceObjectsResponse"
+      },
+      "SourcePreviewResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SourceColumnResponse"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "Valores normalizados de la muestra; máximo 100 registros."
+          },
+          "sampled_rows": {
+            "type": "integer",
+            "title": "Sampled Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "rows",
+          "sampled_rows"
+        ],
+        "title": "SourcePreviewResponse"
+      },
+      "SourceSchemasResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SourceSchemasResponse"
+      },
+      "UserCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Administrator",
+              "Data Owner",
+              "Data Owner / Lead",
+              "Data Analyst",
+              "Operations",
+              "Auditor"
+            ],
+            "title": "Role",
+            "default": "Data Analyst"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 12,
+            "format": "password",
+            "title": "Password",
+            "writeOnly": true
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
+        "title": "UserCreate"
+      },
+      "UserListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "UserListResponse"
+      },
+      "UserPatch": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "Administrator",
+                  "Data Owner",
+                  "Data Owner / Lead",
+                  "Data Analyst",
+                  "Operations",
+                  "Auditor"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "UserPatch"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "password_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Changed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "active",
+          "permissions",
+          "version",
+          "created_at",
+          "updated_at",
+          "password_changed_at"
+        ],
+        "title": "UserResponse"
+      },
+      "ValidationBody": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "validation_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Run Id"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "ValidationBody"
       },
       "ValidationError": {
         "properties": {

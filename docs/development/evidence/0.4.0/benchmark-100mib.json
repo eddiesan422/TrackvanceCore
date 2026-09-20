@@ -1,0 +1,429 @@
+{
+  "certification": true,
+  "container_metrics": {
+    "api": {
+      "cgroup_peak_memory_bytes": 1253138432,
+      "cpu_usage_usec": 8888021,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 812998656,
+      "vmrss_bytes": 355463168
+    },
+    "postgres": {
+      "cgroup_peak_memory_bytes": 97026048,
+      "cpu_usage_usec": 1415406,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 26869760,
+      "vmrss_bytes": 26869760
+    },
+    "source-postgres": {
+      "cgroup_peak_memory_bytes": 499183616,
+      "cpu_usage_usec": 6806707,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 26607616,
+      "vmrss_bytes": 26607616
+    },
+    "source-sqlserver": {
+      "cgroup_peak_memory_bytes": 1150980096,
+      "cpu_usage_usec": 16627005,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 3276800,
+      "vmrss_bytes": 3276800
+    },
+    "web": {
+      "cgroup_peak_memory_bytes": 128974848,
+      "cpu_usage_usec": 382694,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 5767168,
+      "vmrss_bytes": 5767168
+    },
+    "worker": {
+      "cgroup_peak_memory_bytes": 1224929280,
+      "cpu_usage_usec": 12621151,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 1051635712,
+      "vmrss_bytes": 329871360
+    }
+  },
+  "external_sources": {
+    "logical_bytes": {
+      "POSTGRESQL": 106144494,
+      "SQLSERVER": 105750000
+    },
+    "snapshots": {
+      "POSTGRESQL": {
+        "artifacts": [
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "ce9da99510c7c6af162bed6944b3311c23fef874a33bf97b99704322f4ea796b",
+            "size_bytes": 55099067
+          }
+        ],
+        "canonical_size_bytes": 55099067,
+        "connection_id": "56e371e4-10c4-41ea-b868-b0a5fd8b7644",
+        "dataset_id": "dcc7a767-d1c0-4c33-964c-706a767d934f",
+        "run_id": "923dd7fe-9da6-4084-8f8e-df13d28efa67",
+        "source_identity": {
+          "captured_at": "2026-09-20T03:47:57.986114Z",
+          "config_hash": "b5c9ac9b965bb4908bd57f806c572756ec46be4aebb0e134eb2bb862e4732d5d",
+          "connection_id": "56e371e4-10c4-41ea-b868-b0a5fd8b7644",
+          "connection_version": 1,
+          "connection_version_id": "1c472677-4b90-4f35-bd93-f99be90697c9",
+          "object_kind": "TABLE",
+          "object_name": "benchmark_records",
+          "schema_name": "source_data",
+          "source_type": "POSTGRESQL"
+        },
+        "version_id": "f00e46fa-e2fa-495d-b5c2-435fb24f6a1f"
+      },
+      "SQLSERVER": {
+        "artifacts": [
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "10ababbf37f5b7da3bacb795a6a83b646c4d24e74021b964767ced198372e93f",
+            "size_bytes": 55107251
+          }
+        ],
+        "canonical_size_bytes": 55107251,
+        "connection_id": "49805688-2b42-4629-a594-a6080704ede4",
+        "dataset_id": "79632ccc-cfda-481a-8b46-9ff766a03296",
+        "run_id": "39a95063-e4a4-4fe3-8349-75ce28b16223",
+        "source_identity": {
+          "captured_at": "2026-09-20T03:48:02.561214Z",
+          "config_hash": "2526cafcd0d064abceece6de7d649ab556a440d520c2867a60193bbb86bbb18b",
+          "connection_id": "49805688-2b42-4629-a594-a6080704ede4",
+          "connection_version": 1,
+          "connection_version_id": "df3a01d6-cb06-44a8-8442-a7409beb5028",
+          "object_kind": "TABLE",
+          "object_name": "benchmark_records",
+          "schema_name": "source_data",
+          "source_type": "SQLSERVER"
+        },
+        "version_id": "bf953c81-1713-499d-baea-78a80cb05202"
+      }
+    }
+  },
+  "file_workloads": {
+    "datasets": [
+      "7850608e-caf7-4af6-951d-74eba812f9c6",
+      "28256f28-5088-4131-8902-27d44593bb99"
+    ],
+    "execution_plans": {
+      "intake": {
+        "allowed": true,
+        "config_hash": "256defb82b064d6807af020c3f7f423083eb1d013263b2364402165ee5c6e20d",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 106194531,
+        "estimated_working_set_bytes": 1274334372,
+        "free_temp_bytes": 1001488695296,
+        "key_normalization": null,
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2466067241,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      },
+      "recon": {
+        "allowed": true,
+        "config_hash": "bb38a72a3ad75f3d5b0d8d442e7fcc3a7cddb42f9dd2d4a9b0b67ff39bda1590",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 212389062,
+        "estimated_working_set_bytes": 5097337488,
+        "free_temp_bytes": 1001409417216,
+        "key_normalization": {
+          "case": "NONE",
+          "trim": false,
+          "unicode_normalization": "NONE"
+        },
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2784650834,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      },
+      "sentinel": {
+        "allowed": true,
+        "config_hash": "f1b93fd9f8881e303bedce6893696cf0a2ef049d759176365b310685f1022d11",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 106194531,
+        "estimated_working_set_bytes": 1274334372,
+        "free_temp_bytes": 1001408872448,
+        "key_normalization": null,
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2466067241,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      }
+    },
+    "runs": {
+      "intake": "239f13d7-0631-45aa-a8ee-8d606d80d2de",
+      "recon": "4f425b78-ef33-4876-9d92-5b1f872c1b30",
+      "sentinel": "0a01460c-360a-4472-9d54-1cc666468236"
+    },
+    "version_metrics": [
+      {
+        "artifacts": [
+          {
+            "kind": "ORIGINAL_UPLOAD",
+            "sha256": "0353b26611a305b581766ec3ee8d9073068ad66633f45ed79c9c70e74b08b6bb",
+            "size_bytes": 106194531
+          },
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "5afebe69ace92a13dc2531919155089ae62586e378fdf86376976e79148af9cb",
+            "size_bytes": 79145600
+          }
+        ],
+        "column_count": 4,
+        "input_size_bytes": 106194531,
+        "row_count": 50000,
+        "version_id": "53ef14b0-29bf-4dbb-85ce-2ce9abd0e98d"
+      },
+      {
+        "artifacts": [
+          {
+            "kind": "ORIGINAL_UPLOAD",
+            "sha256": "0353b26611a305b581766ec3ee8d9073068ad66633f45ed79c9c70e74b08b6bb",
+            "size_bytes": 106194531
+          },
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "5afebe69ace92a13dc2531919155089ae62586e378fdf86376976e79148af9cb",
+            "size_bytes": 79145600
+          }
+        ],
+        "column_count": 4,
+        "input_size_bytes": 106194531,
+        "row_count": 50000,
+        "version_id": "52ebe34a-6fa1-40b1-9cb7-3ff159961e2a"
+      }
+    ],
+    "versions": [
+      "53ef14b0-29bf-4dbb-85ce-2ce9abd0e98d",
+      "52ebe34a-6fa1-40b1-9cb7-3ff159961e2a"
+    ]
+  },
+  "fixture": {
+    "actual_bytes": 106194531,
+    "column_count": 4,
+    "fixture_mode": "varied",
+    "payload_bytes": 2098,
+    "payload_method": "SHAKE256_URLSAFE_V1",
+    "rows": 50000,
+    "seed_sha256": "67a2e732138a1a7abb17635cc23f3647ca803f297ca6cdceefa23a35d2707fcc",
+    "sha256": "0353b26611a305b581766ec3ee8d9073068ad66633f45ed79c9c70e74b08b6bb",
+    "target_bytes": 104857600
+  },
+  "machine": {
+    "docker": {
+      "architecture": "x86_64",
+      "cpus": 16,
+      "memory_bytes": 16326524928,
+      "operating_system": "Docker Desktop",
+      "server_version": "29.1.3",
+      "storage_driver": "overlayfs"
+    },
+    "host": {
+      "disk_free_bytes": 1462812532736,
+      "disk_total_bytes": 1999329292288,
+      "logical_cpus": 16,
+      "platform": "Windows-11-10.0.26200-SP0"
+    }
+  },
+  "project": "trackvance-bench-22852-894497",
+  "requested": {
+    "file_only": false,
+    "fixture_mode": "varied",
+    "max_wall_seconds": 2700,
+    "rows": 50000,
+    "target_mib": 100
+  },
+  "resources": {
+    "breached": null,
+    "disk_stop_bytes": 10737418240,
+    "memory_stop_bytes": 14179041280,
+    "peak_block_io_bytes": 2815915000,
+    "peak_cpu_percent": 122.41,
+    "peak_memory_by_service": {
+      "api": 755918438,
+      "postgres": 52313456,
+      "source-postgres": 174587904,
+      "source-sqlserver": 1095216660,
+      "web": 14218690,
+      "worker": 670774067
+    },
+    "peak_total_memory_bytes": 2697222681,
+    "samples": 9
+  },
+  "schema_version": 1,
+  "status": "PASS",
+  "storage": {
+    "baseline_storage_bytes": 109005,
+    "peak_storage_bytes": 670899439,
+    "peak_storage_growth_bytes": 670790434,
+    "peak_temp_bytes": 185340131,
+    "sample_interval_seconds": 0.2,
+    "samples": 112
+  },
+  "throughput": [
+    {
+      "input_bytes_per_second": 67333474.22097802,
+      "operation": "file_upload_source",
+      "rows_per_second": 31702.891658788918
+    },
+    {
+      "input_bytes_per_second": 81304008.1265674,
+      "operation": "file_upload_target",
+      "rows_per_second": 38280.69457106383
+    },
+    {
+      "input_bytes_per_second": 34445034.667691454,
+      "operation": "intake_file",
+      "rows_per_second": 16217.894812159138
+    },
+    {
+      "input_bytes_per_second": 26052032.808409177,
+      "operation": "recon_file",
+      "rows_per_second": 12266.183843501873
+    },
+    {
+      "input_bytes_per_second": 51901935.38208963,
+      "operation": "sentinel_file",
+      "rows_per_second": 24437.197892088072
+    },
+    {
+      "input_bytes_per_second": 44949609.40079108,
+      "operation": "snapshot_postgresql",
+      "rows_per_second": 21163.806166624097
+    },
+    {
+      "input_bytes_per_second": 34127030.433920406,
+      "operation": "intake_postgresql",
+      "rows_per_second": 16068.167594205208
+    },
+    {
+      "input_bytes_per_second": 78940967.25357394,
+      "operation": "snapshot_sqlserver",
+      "rows_per_second": 37168.09449140744
+    },
+    {
+      "input_bytes_per_second": 34622053.277604625,
+      "operation": "intake_sqlserver",
+      "rows_per_second": 16301.241199325334
+    }
+  ],
+  "tiers": [
+    {
+      "actual_input_bytes": 106194531,
+      "disk_free_bytes": 1462812532736,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 5033164800,
+      "planner_soft_bytes": 6442450944,
+      "reason": null,
+      "size_mib": 100,
+      "status": "PASS"
+    },
+    {
+      "disk_free_bytes": 1462812532736,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 25165824000,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 500,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1462812532736,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 51539607552,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 1024,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1462812532736,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 103079215104,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 2048,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1462812532736,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 257698037760,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 5120,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    }
+  ],
+  "timings": [
+    {
+      "operation": "file_upload_source",
+      "wall_seconds": 1.5771432000001369
+    },
+    {
+      "operation": "file_upload_target",
+      "wall_seconds": 1.306141399999433
+    },
+    {
+      "operation": "intake_file",
+      "wall_seconds": 3.0830142000004344
+    },
+    {
+      "operation": "recon_file",
+      "wall_seconds": 4.076247400000284
+    },
+    {
+      "operation": "sentinel_file",
+      "wall_seconds": 2.0460610999998607
+    },
+    {
+      "operation": "snapshot_postgresql",
+      "wall_seconds": 2.3625240000001213
+    },
+    {
+      "operation": "intake_postgresql",
+      "wall_seconds": 3.111742499999309
+    },
+    {
+      "operation": "snapshot_sqlserver",
+      "wall_seconds": 1.3452397999999448
+    },
+    {
+      "operation": "intake_sqlserver",
+      "wall_seconds": 3.0672511000002487
+    }
+  ],
+  "wall_seconds": 79.4610633000002
+}

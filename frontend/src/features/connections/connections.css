@@ -1,0 +1,25 @@
+.connection-fields { margin:0; padding:0; border:0; min-width:0; }
+.connection-intro { color:var(--teal); }
+.connection-help { color:#627987; font-size:13px; line-height:1.6; margin:0; }
+.connection-test-code { display:block; margin-top:5px; font:11px ui-monospace,monospace; color:#687f8e; }
+.connection-details { margin-bottom:24px; padding:24px; display:grid; gap:18px; }
+.connection-summary { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:22px; }
+.connection-summary>div { display:flex; align-items:flex-start; flex-direction:column; gap:8px; overflow-wrap:anywhere; }
+.connection-summary>div>span:first-child { font-size:12px; color:#718793; }
+.connection-summary strong { font-size:13px; color:var(--navy); }
+.connection-actions { display:flex; flex-wrap:wrap; gap:20px; align-items:center; }
+.connection-actions .text-button { display:inline-flex; align-items:center; gap:6px; }
+.connection-delete { color:#ae554b; }
+.connection-browser-body { padding:24px; display:grid; gap:18px; }
+.connection-preview-heading { display:flex; align-items:center; flex-wrap:wrap; justify-content:space-between; gap:12px; margin-top:8px; }
+.connection-preview-heading h3,.connection-import h3 { margin:0; font-size:15px; color:var(--navy); }
+.connection-preview-heading>span { color:#708593; font-size:12px; }
+.connection-browser .table-scroll { border:1px solid #e0e8eb; border-radius:7px; max-height:350px; }
+.connection-browser thead { position:sticky; top:0; z-index:1; background:#f7f9fa; }
+.connection-import { border-top:1px solid #e0e8eb; padding-top:24px; margin-top:8px; }
+.connection-import>.button { justify-self:start; }
+.connection-created { display:grid; gap:16px; padding-top:15px; }
+.source-refresh { display:grid; gap:12px; margin:0 0 22px; }
+.source-refresh>.connection-actions { justify-content:flex-end; }
+@media(max-width:1000px) { .connection-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:640px) { .connection-details,.connection-browser-body { padding:18px; } .connection-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .connection-browser .panel-heading { align-items:flex-start; flex-direction:column; } }

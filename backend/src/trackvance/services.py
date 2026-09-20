@@ -19,7 +19,7 @@ from .artifactstore import (
 )
 from .audit_context import Actor, actor_context, legacy_actor, request_id_context, sanitize_metadata
 from .config import ORG_ID
-from .dataset_readers import delimited_record_lines, read_dataset
+from .dataset_readers import DatasetReadResult, delimited_record_lines, read_dataset
 from .db import iso, require_record, utcnow
 from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
@@ -29,8 +29,11 @@ from .models import (
     AuditEvent,
     Configuration,
     Dataset,
+    DatasetSourceBinding,
     DatasetVersion,
+    ExceptionAttachment,
     ExceptionCase,
+    ExternalConnection,
     Finding,
     Job,
     Run,
@@ -106,6 +109,8 @@ DATASET_ORIGINS = {
     "INTAKE_OUTPUT": ("DATA_INTAKE", "Data Intake"),
     "DEMO": ("DEMO", "Demo"),
     "GENERATED_DEMO": ("DEMO", "Demo"),
+    "POSTGRESQL": ("POSTGRESQL", "PostgreSQL"),
+    "SQLSERVER": ("SQLSERVER", "SQL Server"),
 }
 
 
@@ -126,6 +131,18 @@ def dataset_dto(db: Session, d: Dataset) -> dict:
     versions = db.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == d.id).order_by(DatasetVersion.version.desc())).all()
     latest = versions[0] if versions else None
     origin, origin_label = dataset_origin(latest.source_type if latest else None)
+    binding = db.scalar(select(DatasetSourceBinding).where(DatasetSourceBinding.dataset_id == d.id,
+                        DatasetSourceBinding.organization_id == d.organization_id))
+    connection = db.scalar(select(ExternalConnection).where(
+        ExternalConnection.id == binding.connection_id,
+        ExternalConnection.organization_id == d.organization_id,
+    )) if binding else None
+    connection_state = (
+        "DELETED" if binding and (connection is None or connection.deleted)
+        else "DISABLED" if connection and not connection.enabled
+        else "ACTIVE" if connection
+        else None
+    )
     return {"id": d.id, "name": d.name, "description": d.description, "domain": d.domain,
             "owner": d.owner, "criticality": d.criticality, "status": d.status,
             "created_at": iso(d.created_at), "version_count": len(versions),
@@ -133,6 +150,9 @@ def dataset_dto(db: Session, d: Dataset) -> dict:
             "latest_version_id": latest.id if latest else None,
             "origin": origin, "origin_label": origin_label,
             "origin_source_type": latest.source_type if latest else None,
+            "source_binding": {"connection_id": binding.connection_id, "schema_name": binding.schema_name,
+                               "object_name": binding.object_name, "object_kind": binding.object_kind,
+                               "connection_state": connection_state} if binding else None,
             "updated_at": iso(latest.created_at if latest else d.created_at)}
 
 
@@ -187,10 +207,41 @@ def _latest_validation_candidate(db: Session, case: ExceptionCase) -> Run | None
             Run.config_id == case.configuration_id,
             Run.status == "SUCCESS",
             Run.id != origin.id,
-            Run.created_at > origin.created_at,
+            Run.created_at > (case.reopened_at or origin.created_at),
         )
         .order_by(Run.created_at.desc(), Run.id.desc())
     )
+
+
+def _intake_validation_rules(finding: Finding, metrics: dict) -> list[dict]:
+    """Match a declared identity, or the historical code/column fingerprint.
+
+    Historical configurations may contain multiple rules for the same column and
+    code. Their old Finding aggregated that identity, so every matching summary
+    must demonstrate an evaluated pass; choosing only the first is insufficient.
+    """
+    rules = metrics.get("rules")
+    if not isinstance(rules, list):
+        return []
+    details = finding.details or {}
+    rule_id = details.get("rule_id")
+    if rule_id:
+        return [rule for rule in rules if isinstance(rule, dict) and rule.get("rule_id") == rule_id]
+    matches = []
+    for rule in rules:
+        if not isinstance(rule, dict) or not isinstance(rule.get("code"), str) or not isinstance(rule.get("column"), str):
+            continue
+        identity = f"{rule['code']}:{rule['column']}"
+        if (hashlib.sha256(identity.encode()).hexdigest() == finding.fingerprint
+                or identity == finding.code
+                or (rule["code"], rule["column"]) == (details.get("code"), details.get("column"))):
+            matches.append(rule)
+    return matches
+
+
+def _valid_rule_counts(rule: dict) -> bool:
+    return all(isinstance(rule.get(key), int) and not isinstance(rule[key], bool) and rule[key] >= 0
+               for key in ("evaluated_count", "failed_count"))
 
 
 def assess_exception_validation(
@@ -271,6 +322,7 @@ def assess_exception_validation(
     origin_finding = db.get(Finding, case.finding_id) if case.finding_id else None
     validated = False
     criterion = ""
+    rule_evaluation = None
     if origin_finding is None:
         reason = "La excepción histórica no conserva un hallazgo técnico que pueda volver a evaluarse."
         criterion = "ORIGIN_FINDING_REQUIRED"
@@ -281,13 +333,30 @@ def assess_exception_validation(
                 Finding.fingerprint == origin_finding.fingerprint,
             )
         )
-        validated = repeated is None
+        rules = _intake_validation_rules(origin_finding, candidate.metrics or {})
+        counts_available = bool(rules) and all(_valid_rule_counts(rule) for rule in rules)
+        evaluated = counts_available and all(rule["evaluated_count"] > 0 for rule in rules)
+        validated = evaluated and all(rule["failed_count"] == 0 for rule in rules) and repeated is None
+        rule_evaluation = {
+            "identity_method": "RULE_ID" if (origin_finding.details or {}).get("rule_id") else "LEGACY_CODE_COLUMN",
+            "summaries": [{key: rule.get(key) for key in (
+                "rule_id", "code", "column", "evaluated_count", "failed_count", "skipped_count",
+            )} for rule in rules],
+        }
         criterion = "INTAKE_RULE_NO_LONGER_FAILS"
         reason = (
             "La regla que originó la excepción pasó en la ejecución posterior."
             if validated
             else "La misma regla continúa generando incumplimientos en la ejecución posterior."
         )
+        if repeated is None and not counts_available:
+            criterion = "INTAKE_RULE_EVIDENCE_INSUFFICIENT"
+            reason = ("La ejecución posterior no conserva métricas identificables y contadores suficientes "
+                      "para demostrar el pase de la regla. Ejecuta nuevamente la misma configuración.")
+        elif repeated is None and not evaluated:
+            criterion = "INTAKE_RULE_NOT_EVALUATED"
+            reason = ("La regla no evaluó filas elegibles en la ejecución posterior; omitir filas o recibir "
+                      "un dataset vacío no demuestra corrección. Ejecuta la misma configuración con datos evaluables.")
     elif case.module == "recon":
         repeated = db.scalar(
             select(Finding).where(
@@ -341,6 +410,8 @@ def assess_exception_validation(
         "validation_run_decision": candidate.decision,
         "checked_at": checked_at,
     }
+    if rule_evaluation is not None:
+        evidence["rule_evaluation"] = rule_evaluation
     return {
         "status": evidence["status"],
         "eligible": True,
@@ -362,13 +433,32 @@ def exception_dto(db: Session, c: ExceptionCase) -> dict:
     config = db.get(Configuration, c.configuration_id)
     origin_run = db.get(Run, c.run_id)
     validation_run = db.get(Run, c.validation_run_id) if c.validation_run_id else None
+    assignee = db.get(User, c.assigned_user_id) if c.assigned_user_id else None
+    attachments = []
+    for attachment in db.scalars(select(ExceptionAttachment).where(
+        ExceptionAttachment.exception_id == c.id,
+        ExceptionAttachment.organization_id == c.organization_id,
+    ).order_by(ExceptionAttachment.created_at)):
+        artifact = db.get(Artifact, attachment.artifact_id)
+        if artifact and artifact.organization_id == c.organization_id:
+            attachments.append({"id": attachment.id, **artifact_dto(artifact),
+                                "description": attachment.description,
+                                "uploaded_by_id": attachment.uploaded_by_id,
+                                "created_at": iso(attachment.created_at)})
+    terminal = c.state in {"RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE", "FALSE_POSITIVE"}
     return {"id": c.id, "display_id": c.display_id, "finding_id": c.finding_id,
             "run_id": c.run_id, "origin_run_id": c.run_id,
             "configuration_id": c.configuration_id,
             "configuration_name": config.name if config else None,
             "configuration_version": config.version if config else None,
             "title": c.title, "module": c.module, "severity": c.severity, "state": c.state,
-            "owner": c.owner, "root_cause": c.root_cause, "resolution": c.resolution,
+            "owner": c.owner, "assigned_user_id": c.assigned_user_id,
+            "assignee": {"id": assignee.id, "name": assignee.name, "active": assignee.active} if assignee else None,
+            "priority": c.priority, "sla_hours": c.sla_hours, "due_at": iso(c.due_at),
+            "overdue": bool(not terminal and c.due_at and c.due_at.replace(tzinfo=UTC) < utcnow()),
+            "reopened_at": iso(c.reopened_at), "auto_resolve_enabled": c.auto_resolve_enabled,
+            "attachments": attachments,
+            "root_cause": c.root_cause, "resolution": c.resolution,
             "administrative_reason": c.administrative_reason,
             "validation_run_id": c.validation_run_id, "validated_at": iso(c.validated_at),
             "validation_evidence": c.validation_evidence or {},
@@ -392,11 +482,15 @@ def audit_dto(a: AuditEvent) -> dict:
             "request_id": a.request_id, "run_id": a.run_id}
 
 
-def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
+def create_version(db: Session, dataset: Dataset, source: Path | None, filename: str,
                    actor="Sistema", source_type="UPLOAD", created_at=None, parent_version_id=None,
                    column_overrides: dict | None = None, source_run_id: str | None = None,
-                   reader_options: dict | None = None) -> DatasetVersion:
-    read_result = read_dataset(source, filename, reader_options)
+                   reader_options: dict | None = None,
+                   read_result: DatasetReadResult | None = None) -> DatasetVersion:
+    if read_result is None:
+        if source is None:
+            raise ProcessingError("Se requiere una fuente de datos.")
+        read_result = read_dataset(source, filename, reader_options)
     frame = read_result.frame
     schema, profile, schema_hash = profile_frame(
         frame,
@@ -423,6 +517,8 @@ def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
     version_id = uid()
     original_artifact = None
     if source_type in {"UPLOAD", "GENERATED_DEMO"}:
+        if source is None:
+            raise ProcessingError("Se requiere el archivo recibido para conservar su identidad.")
         kind = "ORIGINAL_UPLOAD" if source_type == "UPLOAD" else "GENERATED_DEMO"
         original_artifact = storage_provider.put_file(
             db,
@@ -462,12 +558,15 @@ def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
     db.add(v)
     db.flush()
     if parent_version_id:
-        link_artifact(db, dataset.organization_id, "INTAKE_ACCEPTED_FROM", "DATASET_VERSION", v.id, "DATASET_VERSION", parent_version_id)
+        if source_type == "INTAKE_OUTPUT":
+            link_artifact(db, dataset.organization_id, "INTAKE_ACCEPTED_FROM", "DATASET_VERSION", v.id, "DATASET_VERSION", parent_version_id)
         link_artifact(db, dataset.organization_id, "DERIVED_FROM", "DATASET_VERSION", v.id, "DATASET_VERSION", parent_version_id)
     if source_run_id:
         link_artifact(db, dataset.organization_id, "RUN_OUTPUT", "RUN", source_run_id, "DATASET_VERSION", v.id)
         link_artifact(db, dataset.organization_id, "RUN_OUTPUT", "RUN", source_run_id, "ARTIFACT", canonical_artifact.id)
-    event = "DATASET_DERIVED" if source_type == "INTAKE_OUTPUT" else "DATASET_UPLOADED"
+    event = ("DATASET_DERIVED" if source_type == "INTAKE_OUTPUT" else
+             "DATASET_SOURCE_REFRESHED" if source_type in {"POSTGRESQL", "SQLSERVER"} else
+             "DATASET_UPLOADED")
     audit(db, event, "dataset_version", v.id, f"{filename}: {frame.height:,} registros", actor,
           dataset.organization_id, {"dataset_id": dataset.id, "sha256": v.sha256, "row_count": v.row_count,
                                     "source_type": source_type, "source_run_id": source_run_id,
@@ -477,6 +576,18 @@ def create_version(db: Session, dataset: Dataset, source: Path, filename: str,
                                     "sheet_name": read_result.selected_sheet,
                                     "delimiter": read_result.detected_delimiter}, run_id=source_run_id)
     return v
+
+
+def rule_reference_versions(db: Session, config: dict, organization_id: str) -> list[DatasetVersion]:
+    """Resolve published reference IDs; engines never discover or contact sources."""
+    identifiers = sorted({rule["parameters"]["dataset_version_id"] for rule in config.get("rules", []) if rule.get("type") == "reference" and rule.get("enabled", True)})
+    versions = []
+    for identifier in identifiers:
+        version = db.scalar(select(DatasetVersion).where(DatasetVersion.id == identifier, DatasetVersion.organization_id == organization_id))
+        if version is None:
+            raise ProcessingError("REFERENCE_VERSION_UNAVAILABLE: La referencia inmutable no está disponible.")
+        versions.append(version)
+    return versions
 
 
 def enqueue(
@@ -497,8 +608,9 @@ def enqueue(
 
     identity, legacy = resolve_actor(db, actor, config.organization_id)
     effective = effective_config(config.module, config.config)
+    references = rule_reference_versions(db, effective, config.organization_id)
     plan = ExecutionPlanner().plan(config.module,
-        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target] if v], effective)
+        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target, *references] if v], effective)
     plan["config_hash"] = configuration_hash(effective)
     run = Run(id=uid(), organization_id=config.organization_id, module=config.module, name=config.name,
               config_id=config.id, dataset_version_id=source.id, target_version_id=target.id if target else None,
@@ -513,6 +625,8 @@ def enqueue(
     for version in [source, target]:
         if version:
             link_artifact(db, run.organization_id, "RUN_INPUT", "RUN", run.id, "DATASET_VERSION", version.id)
+    for version in references:
+        link_artifact(db, run.organization_id, "RUN_REFERENCE", "RUN", run.id, "DATASET_VERSION", version.id)
     audit(db, "RUN_QUEUED" if plan["allowed"] else "RUN_FAILED", "run", run.id,
           f"Ejecución programada: {run.name}" if plan["allowed"] else f"{run.name}: {run.error}",
           actor, run.organization_id, {"reason_code": plan["reason_code"]})
@@ -583,7 +697,7 @@ def create_exception(db: Session, finding: Finding, actor: str) -> ExceptionCase
     case = ExceptionCase(id=uid(), organization_id=finding.organization_id,
                          display_id="EXC-" + uid()[:8].upper(), finding_id=finding.id, run_id=run.id,
                          configuration_id=run.config_id,
-                         title=finding.title, module=run.module, severity=finding.severity,
+                         title=finding.title, module=run.module, severity=finding.severity, priority=finding.severity,
                          events=[{"timestamp": iso(utcnow()), "actor": identity.display_name,
                                   "actor_type": identity.type, "actor_id": identity.id, "actor_legacy": legacy, "from_state": None,
                                   "to_state": "OPEN", "comment": "Excepción creada a partir del hallazgo"}])
@@ -628,12 +742,14 @@ def record_exception_validation(
         "comment": comment or assessment["reason"],
         "evidence": evidence,
     }
-    case.validation_evidence = evidence
-    case.validation_run_id = evidence["validation_run_id"] if assessment["validated"] else None
-    case.validated_at = now if assessment["validated"] else None
-    case.updated_at = now
-    case.version += 1
-    case.events = [*(case.events or []), event]
+    from .operations_common import save_case
+    save_case(db, case, case.version, {
+        "validation_evidence": evidence,
+        "validation_run_id": evidence["validation_run_id"] if assessment["validated"] else None,
+        "validated_at": now if assessment["validated"] else None,
+        "updated_at": now,
+        "events": [*(case.events or []), event],
+    })
     audit(
         db,
         "EXCEPTION_VALIDATION_CHECKED",
@@ -654,11 +770,8 @@ def record_exception_validation(
 
 
 def refresh_pending_exception_validations(db: Session, run: Run, actor: Actor | str) -> None:
-    """Attach current evidence after a run, without administratively resolving cases.
-
-    This is the seam for a future auto-resolution policy. Today it only updates
-    technical validation and deliberately leaves PENDING_VALIDATION unchanged.
-    """
+    """Validate after completion; an explicit case policy may resolve technically."""
+    from .operations_common import OperationError, save_case
     cases = db.scalars(
         select(ExceptionCase).where(
             ExceptionCase.organization_id == run.organization_id,
@@ -669,7 +782,32 @@ def refresh_pending_exception_validations(db: Session, run: Run, actor: Actor | 
     for case in cases:
         assessment = assess_exception_validation(db, case, run.id)
         if assessment["status"] in {"VALIDATED", "FAILED"}:
-            record_exception_validation(db, case, assessment, actor)
+            try:
+                with db.begin_nested():
+                    record_exception_validation(db, case, assessment, actor)
+                    if case.auto_resolve_enabled and assessment["can_resolve"]:
+                        identity = Actor("SYSTEM", "trackvance:auto-resolution", "Resolución automática")
+                        now = utcnow()
+                        event = {"timestamp": iso(now), "actor": identity.display_name,
+                                 "actor_type": identity.type, "actor_id": identity.id,
+                                 "from_state": "PENDING_VALIDATION", "to_state": "RESOLVED",
+                                 "event_type": "AUTO_RESOLVED", "comment": assessment["reason"],
+                                 "validation_run_id": run.id, "evidence": assessment["evidence"]}
+                        save_case(db, case, case.version, {
+                            "state": "RESOLVED", "updated_at": now,
+                            "resolution": case.resolution or assessment["reason"],
+                            "events": [*(case.events or []), event],
+                        })
+                        audit(db, "EXCEPTION_AUTO_RESOLVED", "exception", case.id,
+                              f"{case.display_id}: corrección verificada automáticamente", identity,
+                              case.organization_id, {"configuration_id": case.configuration_id,
+                              "origin_run_id": case.run_id, "validation_run_id": run.id,
+                              "closure_type": "TECHNICAL", "policy": "CASE_OPT_IN"}, run_id=run.id)
+            except OperationError as exc:
+                if exc.code != "VERSION_CONFLICT":
+                    raise
+                # A concurrent human update wins; a later check may retry safely.
+                db.refresh(case)
 
 
 def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_at=None):
@@ -683,8 +821,9 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
     effective = effective_config(config.module, config.config)
     source = require_record(db, DatasetVersion, run.dataset_version_id)
     target = require_record(db, DatasetVersion, run.target_version_id) if run.target_version_id else None
+    reference_versions = rule_reference_versions(db, effective, run.organization_id)
     current_plan = ExecutionPlanner().plan(config.module,
-        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target] if v], effective)
+        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target, *reference_versions] if v], effective)
     if not current_plan["allowed"]:
         raise ProcessingError(current_plan["rejection_code"])
     if run.cancel_requested:
@@ -694,10 +833,11 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
     run.started_at = run.started_at or observed_at or utcnow()
     db.commit()
     frame = ensure_input(source, db)
+    reference_frames = {v.id: ensure_input(v, db) for v in reference_versions}
     source_numbers, source_numbering = input_record_numbers(source)
     accepted = None
     if run.module == "intake":
-        rows, metrics, accepted = intake(frame, effective, observed_at=run.started_at, input_row_numbers=source_numbers)
+        rows, metrics, accepted = intake(frame, effective, observed_at=run.started_at, input_row_numbers=source_numbers, references=reference_frames)
         decision = metrics["decision"]
     elif run.module == "recon":
         target_version = require_record(db, DatasetVersion, run.target_version_id)
@@ -720,7 +860,7 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                         .order_by(SentinelMetricHistory.observed_at))]
         rows, metrics = sentinel(source.profile, source.schema_json, effective, source.created_at,
                                  baseline.profile if baseline else None, observed_at=run.started_at,
-                                 frame=frame, previous_schema=baseline.schema_json if baseline else None, history=history)
+                                 frame=frame, previous_schema=baseline.schema_json if baseline else None, history=history, references=reference_frames)
         decision = "HEALTHY" if metrics["failed_checks"] == 0 else "ALERT"
     metrics["source_row_numbering"] = source_numbering
     db.refresh(run)
@@ -769,7 +909,8 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
         for rule in metrics["rules"]:
             if rule["failed_count"]:
                 code = rule["code"] + ":" + rule["column"]
-                fingerprint = hashlib.sha256(code.encode()).hexdigest()
+                identity = "rule:" + rule["rule_id"] if rule.get("rule_id") else code
+                fingerprint = hashlib.sha256(identity.encode()).hexdigest()
                 if not db.scalar(select(Finding).where(Finding.run_id == run.id, Finding.fingerprint == fingerprint)):
                     db.add(Finding(organization_id=run.organization_id, run_id=run.id, fingerprint=fingerprint, code=code, title=f"{rule['column']}: {rule['failed_count']} incumplimientos de {rule['code']}", severity="MEDIUM" if rule.get("severity") == "WARNING" else "HIGH", details=rule))
     else:
@@ -777,9 +918,10 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
         grouped = Counter(r.get("classification") for r in issues) if run.module == "recon" else None
         findings: list[dict[str, Any]] = [{"code": code, "title": f"{count} registros · {code}", "details": {"count": count, "classification": code}, "severity": "HIGH" if code == "VALUE_MISMATCH" else "MEDIUM"} for code, count in (grouped or {}).items()]
         if run.module == "sentinel":
-            findings = [{"code": r["code"], "title": r["name"], "details": r, "severity": "HIGH"} for r in issues]
+            findings = [{"code": r["code"], "title": r["name"], "details": r, "severity": "MEDIUM" if r.get("severity") == "WARNING" else "HIGH"} for r in issues]
         for f in findings:
-            fingerprint = hashlib.sha256(f["code"].encode()).hexdigest()
+            identity = "rule:" + f["details"]["rule_id"] if f["details"].get("rule_id") else f["code"]
+            fingerprint = hashlib.sha256(identity.encode()).hexdigest()
             if not db.scalar(select(Finding).where(Finding.run_id == run.id, Finding.fingerprint == fingerprint)):
                 db.add(Finding(organization_id=run.organization_id, run_id=run.id, fingerprint=fingerprint, **f))
     run.metrics, run.decision, run.result_path = metrics, decision, result_artifact.path
@@ -812,6 +954,7 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                 "configuration": {"id": config.id, "name": config.name, "version": config.version, "config": effective,
                 "config_hash": configuration_hash(effective), "stored_config_hash": configuration_hash(config.config)},
                 "metrics": metrics, "output_version_id": run.output_version_id,
+                "references": [{"dataset_version_id": v.id, "dataset_id": v.dataset_id, "version": v.version, "artifact_sha256": v.sha256, "schema_hash": v.schema_hash, "canonical_artifact_id": v.canonical_artifact_id, "canonical_sha256": require_record(db, Artifact, v.canonical_artifact_id).sha256 if v.canonical_artifact_id else None} for v in reference_versions],
                 "result_artifacts": result_artifacts}
     temp_evidence = storage_provider.temporary_path(".json")
     try:

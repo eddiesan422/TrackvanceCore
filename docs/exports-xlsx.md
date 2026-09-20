@@ -24,19 +24,25 @@ la pérdida de precisión de Excel.
 
 1. **Resumen**: contrato/version, dataset/version, run, inicio/fin, estado
    técnico/decisión, filas totales/válidas/error/advertencia, aceptación,
-   umbral, motor/version y tabla de regla/columna/estado/evaluadas/fallidas.
+   umbral, motor/version y tabla de regla/columna/estado/evaluadas/fallidas,
+   filas excluidas y severidad. Las condiciones y `null_policy=IGNORE` excluyen
+   filas de la población evaluada; no se cuentan como controles aprobados.
 2. **Errores**: línea del archivo, regla, columna, valor recibido, severidad,
    mensaje y clasificación. Para una entrada interna sin CSV original se usa
    Registro de la versión. Una fila puede incumplir varias reglas.
 3. **Reglas**: configuración efectiva completa del contrato, con parámetros
-   y transformaciones declaradas.
+   y transformaciones declaradas, `rule_id`, condiciones y referencias a
+   DatasetVersions inmutables. Unicidad compuesta y comparación entre columnas
+   conservan todas las columnas y los valores recibidos.
 4. **Trazabilidad**: IDs, hashes, inputs, actor, configuración, plan/motor y
-   metadatos de artifacts resultantes.
+   metadatos de artifacts resultantes. Las referencias añaden identidad de
+   DatasetVersion, artifact canónico y SHA-256.
 
 ## ReconOps
 
 1. **Resumen**: control/version, ambos datasets/versiones, claves,
-   comparaciones, tolerancias, normalización declarada, conteos de las siete
+   comparaciones, tolerancias, políticas de null, normalización y transforms
+   declarados por lado, agregaciones 1:N/N:1 SUM/COUNT, conteos de las siete
    clasificaciones, match rate y metadatos de ejecución.
 2. **Resultados**: clave, clasificación, valor origen/destino, diferencia,
    tolerancia, línea/registro de cada lado, mensaje y detalle de todas las
@@ -50,7 +56,8 @@ la pérdida de precisión de Excel.
 
 1. **Resumen**: monitor/version, dataset/version, filas, checks/fallos,
    health score, HEALTHY/ALERT y estado técnico/run/motor.
-2. **Controles**: control, code, estado, observado, esperado y detalle.
+2. **Controles**: control, code, estado, observado, esperado, detalle, severidad
+   y conteos evaluados/fallidos/excluidos cuando se trata de reglas por fila.
 3. **Hallazgos**: sólo checks fallidos.
 4. **Trazabilidad**: identidad del input, hashes, configuración, actor,
    motor y artifacts. Las métricas conservan método/version en evidencia.

@@ -36,6 +36,9 @@ class User(Record, Base):
     role: Mapped[str] = mapped_column(String(40), default="Administrator")
     password_hash: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuthSession(Record, Base):
@@ -79,6 +82,47 @@ class DatasetVersion(Record, Base):
     original_artifact_id: Mapped[str | None] = mapped_column(ForeignKey("artifacts.id"), nullable=True)
     canonical_artifact_id: Mapped[str | None] = mapped_column(ForeignKey("artifacts.id"), nullable=True)
     source_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+
+class ExternalConnection(Record, Base):
+    """Organization-scoped source identity; configuration revisions are immutable."""
+
+    __tablename__ = "external_connections"
+    name: Mapped[str] = mapped_column(String(160))
+    source_type: Mapped[str] = mapped_column(String(30))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    last_test_status: Mapped[str] = mapped_column(String(20), default="UNTESTED")
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_message: Mapped[str] = mapped_column(String(240), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ExternalConnectionVersion(Record, Base):
+    __tablename__ = "external_connection_versions"
+    __table_args__ = (UniqueConstraint("connection_id", "version"),)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("external_connections.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    host: Mapped[str] = mapped_column(String(253))
+    port: Mapped[int] = mapped_column(Integer)
+    database: Mapped[str] = mapped_column(String(128))
+    username: Mapped[str] = mapped_column(String(128))
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    secret_reference: Mapped[str] = mapped_column(String(240))
+    config_hash: Mapped[str] = mapped_column(String(64))
+
+
+class DatasetSourceBinding(Record, Base):
+    """Selection to refresh; each resulting snapshot records its exact configuration."""
+
+    __tablename__ = "dataset_source_bindings"
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), unique=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("external_connections.id"), index=True)
+    schema_name: Mapped[str] = mapped_column(String(128))
+    object_name: Mapped[str] = mapped_column(String(128))
+    object_kind: Mapped[str] = mapped_column(String(20))
+    column_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Configuration(Record, Base):
@@ -155,6 +199,12 @@ class ExceptionCase(Record, Base):
     severity: Mapped[str] = mapped_column(String(20))
     state: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
     owner: Mapped[str] = mapped_column(String(120), default="Sin asignar")
+    assigned_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    priority: Mapped[str] = mapped_column(String(20), default="HIGH")
+    sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    auto_resolve_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     root_cause: Mapped[str] = mapped_column(Text, default="")
     resolution: Mapped[str] = mapped_column(Text, default="")
     administrative_reason: Mapped[str] = mapped_column(Text, default="")
@@ -163,6 +213,16 @@ class ExceptionCase(Record, Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     events: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class ExceptionAttachment(Record, Base):
+    """An immutable attachment belongs to a case and an organization."""
+
+    __tablename__ = "exception_attachments"
+    exception_id: Mapped[str] = mapped_column(ForeignKey("exceptions.id"), index=True)
+    artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), unique=True)
+    uploaded_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    description: Mapped[str] = mapped_column(String(500), default="")
 
 
 class AuditEvent(Record, Base):
@@ -221,7 +281,44 @@ class SentinelMetricHistory(Record, Base):
     metric_key: Mapped[str] = mapped_column(String(200), index=True)
     dimensions: Mapped[dict] = mapped_column(JSON, default=dict)
     dimension_hash: Mapped[str] = mapped_column(String(64))
-    numeric_value: Mapped[float | int | None] = mapped_column(JSON, nullable=True)
+    numeric_value: Mapped[str | float | int | None] = mapped_column(JSON, nullable=True)
     method: Mapped[str] = mapped_column(String(60))
     metric_definition_version: Mapped[int] = mapped_column(Integer)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class MonitorSchedule(Record, Base):
+    """Mutable dispatch cursor; settings are retained in immutable revisions."""
+
+    __tablename__ = "monitor_schedules"
+    monitor_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MonitorScheduleVersion(Record, Base):
+    __tablename__ = "monitor_schedule_versions"
+    __table_args__ = (UniqueConstraint("schedule_id", "version"),)
+    schedule_id: Mapped[str] = mapped_column(ForeignKey("monitor_schedules.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    interval_seconds: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    actor_id: Mapped[str] = mapped_column(String(64))
+
+
+class MonitorOccurrence(Record, Base):
+    __tablename__ = "monitor_occurrences"
+    __table_args__ = (UniqueConstraint("schedule_id", "planned_at"),)
+    schedule_id: Mapped[str] = mapped_column(ForeignKey("monitor_schedules.id"), index=True)
+    schedule_version_id: Mapped[str] = mapped_column(ForeignKey("monitor_schedule_versions.id"))
+    monitor_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"), index=True)
+    dataset_version_id: Mapped[str | None] = mapped_column(ForeignKey("dataset_versions.id"), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True, unique=True)
+    planned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    dispatched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(30))
+    reason_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    coalesced_intervals: Mapped[int] = mapped_column(Integer, default=0)

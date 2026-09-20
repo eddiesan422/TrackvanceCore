@@ -1,0 +1,316 @@
+{
+  "certification": false,
+  "container_metrics": {
+    "api": {
+      "cgroup_peak_memory_bytes": 172683264,
+      "cpu_usage_usec": 2396003,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 237793280,
+      "vmrss_bytes": 222932992
+    },
+    "postgres": {
+      "cgroup_peak_memory_bytes": 92102656,
+      "cpu_usage_usec": 1170612,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 27000832,
+      "vmrss_bytes": 27000832
+    },
+    "web": {
+      "cgroup_peak_memory_bytes": 17870848,
+      "cpu_usage_usec": 85247,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 5636096,
+      "vmrss_bytes": 5636096
+    },
+    "worker": {
+      "cgroup_peak_memory_bytes": 180244480,
+      "cpu_usage_usec": 2376587,
+      "exit_code": 0,
+      "oom_killed": false,
+      "vmhwm_bytes": 199684096,
+      "vmrss_bytes": 183386112
+    }
+  },
+  "file_workloads": {
+    "datasets": [
+      "2098a245-f46b-414b-bb9d-d19b44e23820",
+      "62e45628-c73e-4926-b60e-67bb7d931300"
+    ],
+    "execution_plans": {
+      "intake": {
+        "allowed": true,
+        "config_hash": "256defb82b064d6807af020c3f7f423083eb1d013263b2364402165ee5c6e20d",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 1074923,
+        "estimated_working_set_bytes": 12899076,
+        "free_temp_bytes": 1002044239872,
+        "key_normalization": null,
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2150708417,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      },
+      "recon": {
+        "allowed": true,
+        "config_hash": "bb38a72a3ad75f3d5b0d8d442e7fcc3a7cddb42f9dd2d4a9b0b67ff39bda1590",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 2149846,
+        "estimated_working_set_bytes": 51596304,
+        "free_temp_bytes": 1002043375616,
+        "key_normalization": {
+          "case": "NONE",
+          "trim": false,
+          "unicode_normalization": "NONE"
+        },
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2153933186,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      },
+      "sentinel": {
+        "allowed": true,
+        "config_hash": "f1b93fd9f8881e303bedce6893696cf0a2ef049d759176365b310685f1022d11",
+        "engine": "POLARS",
+        "engine_version": "1.44.2",
+        "estimated_input_bytes": 1074923,
+        "estimated_working_set_bytes": 12899076,
+        "free_temp_bytes": 1002043338752,
+        "key_normalization": null,
+        "reason_code": "STANDARD_MEMORY_BUDGET",
+        "rejection_code": null,
+        "required_temp_bytes": 2150708417,
+        "resource_budget": {
+          "memory_soft_bytes": 6442450944,
+          "temp_min_free_bytes": 2147483648,
+          "timeout_seconds": 1200
+        },
+        "schema_version": 2,
+        "spill_allowed": false,
+        "warnings": []
+      }
+    },
+    "runs": {
+      "intake": "13771f26-9484-4d33-847b-b3479e1b8ea2",
+      "recon": "20895b55-ca22-4d60-8dd7-b259d3d5d5fc",
+      "sentinel": "baabd0a1-c493-419f-ba8c-abaf8b6cdf60"
+    },
+    "version_metrics": [
+      {
+        "artifacts": [
+          {
+            "kind": "ORIGINAL_UPLOAD",
+            "sha256": "1214a61a8b7c53cebd613447febd9845b50786130e625ec36f8351f5fcd0fd7d",
+            "size_bytes": 1074923
+          },
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "8b2fef5d4d0afc7bc1d6960ce1a072029188b847d0c405b4e698308458190439",
+            "size_bytes": 796809
+          }
+        ],
+        "column_count": 4,
+        "input_size_bytes": 1074923,
+        "row_count": 1000,
+        "version_id": "c6c91182-5491-4f19-b2ff-e1706870ae33"
+      },
+      {
+        "artifacts": [
+          {
+            "kind": "ORIGINAL_UPLOAD",
+            "sha256": "1214a61a8b7c53cebd613447febd9845b50786130e625ec36f8351f5fcd0fd7d",
+            "size_bytes": 1074923
+          },
+          {
+            "kind": "CANONICAL_PARQUET",
+            "sha256": "8b2fef5d4d0afc7bc1d6960ce1a072029188b847d0c405b4e698308458190439",
+            "size_bytes": 796809
+          }
+        ],
+        "column_count": 4,
+        "input_size_bytes": 1074923,
+        "row_count": 1000,
+        "version_id": "6100822a-7a1a-4900-8bb8-c2c20b691df0"
+      }
+    ],
+    "versions": [
+      "c6c91182-5491-4f19-b2ff-e1706870ae33",
+      "6100822a-7a1a-4900-8bb8-c2c20b691df0"
+    ]
+  },
+  "fixture": {
+    "actual_bytes": 1074923,
+    "column_count": 4,
+    "fixture_mode": "varied",
+    "payload_bytes": 1049,
+    "payload_method": "SHAKE256_URLSAFE_V1",
+    "rows": 1000,
+    "seed_sha256": "67a2e732138a1a7abb17635cc23f3647ca803f297ca6cdceefa23a35d2707fcc",
+    "sha256": "1214a61a8b7c53cebd613447febd9845b50786130e625ec36f8351f5fcd0fd7d",
+    "target_bytes": 1048576
+  },
+  "machine": {
+    "docker": {
+      "architecture": "x86_64",
+      "cpus": 16,
+      "memory_bytes": 16326524928,
+      "operating_system": "Docker Desktop",
+      "server_version": "29.1.3",
+      "storage_driver": "overlayfs"
+    },
+    "host": {
+      "disk_free_bytes": 1461933350912,
+      "disk_total_bytes": 1999329292288,
+      "logical_cpus": 16,
+      "platform": "Windows-11-10.0.26200-SP0"
+    }
+  },
+  "project": "trackvance-bench-8164-4889d8",
+  "requested": {
+    "file_only": true,
+    "fixture_mode": "varied",
+    "max_wall_seconds": 600,
+    "rows": 1000,
+    "target_mib": 1
+  },
+  "resources": {
+    "breached": null,
+    "disk_stop_bytes": 10737418240,
+    "memory_stop_bytes": 14179041280,
+    "peak_block_io_bytes": 64794100,
+    "peak_cpu_percent": 29.01,
+    "peak_memory_by_service": {
+      "api": 146695782,
+      "postgres": 47993323,
+      "web": 14176747,
+      "worker": 104522055
+    },
+    "peak_total_memory_bytes": 313366936,
+    "samples": 2
+  },
+  "schema_version": 1,
+  "status": "PASS",
+  "storage": {
+    "baseline_storage_bytes": 109005,
+    "peak_storage_bytes": 4683465,
+    "peak_storage_growth_bytes": 4574460,
+    "peak_temp_bytes": 1074923,
+    "sample_interval_seconds": 0.2,
+    "samples": 22
+  },
+  "throughput": [
+    {
+      "input_bytes_per_second": 3388831.1257561035,
+      "operation": "file_upload_source",
+      "rows_per_second": 3152.6268632786755
+    },
+    {
+      "input_bytes_per_second": 13221473.703417614,
+      "operation": "file_upload_target",
+      "rows_per_second": 12299.926323483276
+    },
+    {
+      "input_bytes_per_second": 994271.9359270905,
+      "operation": "intake_file",
+      "rows_per_second": 924.9703801361497
+    },
+    {
+      "input_bytes_per_second": 1031961.2162157313,
+      "operation": "recon_file",
+      "rows_per_second": 960.0326871931584
+    },
+    {
+      "input_bytes_per_second": 993762.3310468362,
+      "operation": "sentinel_file",
+      "rows_per_second": 924.4962951270335
+    }
+  ],
+  "tiers": [
+    {
+      "disk_free_bytes": 1461933350912,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 5033164800,
+      "planner_soft_bytes": 6442450944,
+      "reason": null,
+      "size_mib": 100,
+      "status": "PLANNED"
+    },
+    {
+      "disk_free_bytes": 1461933350912,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 25165824000,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 500,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1461933350912,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 51539607552,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 1024,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1461933350912,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 103079215104,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 2048,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    },
+    {
+      "disk_free_bytes": 1461933350912,
+      "docker_available_after_reserve_bytes": 14179041280,
+      "estimated_recon_working_set_bytes": 257698037760,
+      "planner_soft_bytes": 6442450944,
+      "reason": "El Recon completo excede planner/Docker o la reserva de disco.",
+      "size_mib": 5120,
+      "status": "NOT_RUN_RESOURCE_LIMIT"
+    }
+  ],
+  "timings": [
+    {
+      "operation": "file_upload_source",
+      "wall_seconds": 0.31719580000026326
+    },
+    {
+      "operation": "file_upload_target",
+      "wall_seconds": 0.08130129999972269
+    },
+    {
+      "operation": "intake_file",
+      "wall_seconds": 1.0811156999998275
+    },
+    {
+      "operation": "recon_file",
+      "wall_seconds": 1.041631199999756
+    },
+    {
+      "operation": "sentinel_file",
+      "wall_seconds": 1.0816701000003377
+    }
+  ],
+  "wall_seconds": 37.71073760000036
+}
