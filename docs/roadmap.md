@@ -2,17 +2,17 @@
 
 La evolución funcional local precede a la productización. Este orden sustituye la secuencia anterior que adelantaba almacenamiento remoto, Redis/Celery o Kubernetes.
 
-| Punto | Alcance | Situación al abrir el ciclo 0.4.0 |
+| Punto | Alcance | Estado certificado en 0.4.0 |
 | --- | --- | --- |
-| 1 | Gestión de conexiones y fuentes externas | Implementado; conservar y recertificar |
-| 2 | PostgreSQL y SQL Server como DatasetSource | Implementado con motores reales; conservar y recertificar |
-| 3 | Data Intake configurable y reglas avanzadas | Ampliación funcional y certificación en curso |
-| 4 | ReconOps configurable, transformaciones y agregaciones | Ampliación funcional y certificación en curso |
-| 5 | Sentinel programado, histórico y alertas internas | Ampliación funcional y certificación en curso |
-| 6 | Excepciones con validación, SLA, adjuntos y política automática | Ampliación funcional y certificación en curso |
-| 7 | Administración local de usuarios, roles y permisos | Ampliación funcional y certificación en curso |
-| 8 | Reset, backup/restore integral y diagnóstico | Implementación y certificación aislada en curso |
-| 9 | Benchmarks reproducibles y límites medidos | Framework y medición real en curso; no asumir capacidad por volumen |
+| 1 | Gestión de conexiones y fuentes externas | Implementado y recertificado |
+| 2 | PostgreSQL y SQL Server como DatasetSource | Implementado y recertificado con ambos motores reales |
+| 3 | Data Intake configurable y reglas avanzadas | Implementado; unitarias, integración y E2E aprobadas |
+| 4 | ReconOps configurable, transformaciones y agregaciones | Implementado; unitarias, integración y E2E aprobadas |
+| 5 | Sentinel programado, histórico y alertas internas | Implementado; unitarias, integración y E2E aprobadas |
+| 6 | Excepciones con validación, SLA, adjuntos y política automática | Implementado; unitarias, integración y E2E aprobadas |
+| 7 | Administración local de usuarios, roles y permisos | Implementado; unitarias, integración y E2E aprobadas |
+| 8 | Reset, backup/restore integral y diagnóstico | Implementado; reset protegido y backup/restore destructivo aislado aprobados |
+| 9 | Benchmarks reproducibles y límites medidos | Framework certificado; máximo medido 106.194.531 bytes / 50.000 filas; tiers superiores detenidos por preflight |
 | 10 | Productización | Fuera del ciclo; objetivo futuro |
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.

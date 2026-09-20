@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - madurez funcional local
+## 0.4.0 — 2026-09-19 — madurez funcional local
 
 - Adopta el roadmap funcional hasta el punto 9; productización y Data Delivery
   permanecen fuera de este ciclo. Conserva Conexiones PostgreSQL/SQL Server,
@@ -32,6 +32,12 @@
 - Amplía pruebas unitarias, integración, interfaz y ciclos Docker/Playwright;
   agrega backup/restore a CI y el flujo avanzado de fuentes a la certificación.
   Resultados y límites reales se publican en `docs/development/validation.md`.
+- Certifica 533 pruebas backend/scripts, 109 de frontend, 24 escenarios distintos
+  de navegador y seis jobs de GitHub Actions. El backup usa streaming privado
+  compatible con Windows/Linux; no depende de permisos de escritura en un bind.
+- Mide un fixture variado de 106.194.531 bytes con ambos motores y los tres
+  módulos. Los tiers superiores quedan sin ejecutar por preflight; los límites
+  por defecto no se elevan ni se presenta PySpark como disponible.
 
 ## 0.3.0 - evolución Conexiones — 2026-09-19
 

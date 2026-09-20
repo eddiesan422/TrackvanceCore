@@ -48,5 +48,9 @@ Cuando ese archivo archivado está junto al generador, su hash se valida sin
 sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
-[validación](../development/validation.md). El conteo final de páginas y hash
-se registra al publicar el PDF revisado.
+[validación](../development/validation.md). La publicación 0.4.0 tiene **31 páginas
+y 25 marcadores**, todas renderizadas y revisadas, sin texto fuera de márgenes.
+La copia oficial y la versionada son idénticas. SHA-256 del PDF publicado:
+`62f04c3b3bc8a4e24bd3d22cc0f8f9c9212600d4b0215a82deaafa3e073bd64c`.
+La sección de aceptación registra los seis jobs de CI aprobados y conserva la
+incidencia Linux inicial junto con su corrección y recertificación.

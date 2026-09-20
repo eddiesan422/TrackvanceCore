@@ -93,3 +93,22 @@ Los informes reales descargados por Playwright están en `outputs/0.4.0/intake.x
 `recon.xlsx` y `sentinel.xlsx`. La misma carpeta contiene capturas de exportación,
 programación/histórico Sentinel, caso con SLA/adjunto y Centro de Control. Son
 evidencia local de fixtures aislados; los archivos de runtime no se incluyen en Git.
+
+## Resultado consolidado
+
+533 pruebas backend/scripts, 109 pruebas frontend y 24 escenarios distintos de
+Playwright aprobados; Ruff, Mypy (33 archivos), ESLint, TypeScript y build correctos.
+Migraciones PostgreSQL hasta 0007, 84 comprobaciones smoke API, 62 comprobaciones
+PostgreSQL/SQL Server, restart con 206 artifacts y recuperación integral: PASS.
+
+Los [seis jobs de CI](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35488848150) terminaron SUCCESS sobre el commit de código `a03d87ec`.
+La publicación posterior de documentación/PDF no cambia ese código.
+
+La instalación principal está en 0.4.0/0007, con sus cuatro servicios healthy,
+backup previo verificado, registros anteriores preservados y restart=no.
+No se sembraron datos de prueba en ella. Se entrega operativa en http://localhost:3100.
+
+El máximo de volumen certificado es el fixture variado de 106.194.531 bytes;
+500 MiB–5 GiB no se ejecutaron por preflight. No hay pruebas fallidas pendientes
+del alcance local certificado. Los objetivos de productización y conectores
+adicionales continúan fuera del ciclo, sin anunciar capacidades inexistentes.

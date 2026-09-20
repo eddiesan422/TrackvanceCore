@@ -13,7 +13,7 @@
   "Benchmark real": "PASS: CSV variado de 106.194.531 bytes, 50.000 filas, cuatro columnas; 79,46 s total, tres módulos, snapshots PostgreSQL/SQL Server e Intake de ambos.",
   "Volúmenes no ejecutados": "500 MiB, 1 GiB, 2 GiB y 5 GiB: NOT_RUN_RESOURCE_LIMIT por preflight. No se afirma capacidad medida de esos tamaños.",
   "Benchmark smoke CI": "PASS local con 1.074.923 bytes y 1.000 filas, 37,71 s; no certifica volumen.",
-  "GitHub Actions": "Pendiente del workflow del commit 0.4.0; los resultados anteriores no certifican esta revisión.",
+  "GitHub Actions": "PASS 6/6 jobs sobre a03d87ec: backend, frontend, compose-e2e, connections-e2e, backup-restore-e2e y benchmark-smoke. Workflow https://github.com/eddiesan422/TrackvanceCore/actions/runs/35488848150",
   "Instalación principal": "0.4.0 / Alembic 0007 en localhost:3100. Backup integral previo verificado, registros históricos e identidad conservados, cuatro servicios healthy, doctor recovery 10/10, restart=no. Sin datos de prueba insertados.",
-  "Backup Windows/Linux": "Helper sin privilegios: tar por streams, sin bind escribible, archivos privados POSIX. PermissionError Linux inicial reproducido y corregido; 9 regresiones añadidas."
+  "Backup Windows/Linux": "PASS local y CI Linux: helper sin privilegios, tar por streams, sin bind escribible y archivos privados POSIX. PermissionError inicial reproducido/corregido; 9 regresiones nuevas."
 }

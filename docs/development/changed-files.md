@@ -1,10 +1,20 @@
 # Archivos de Trackvance Core 0.4.0
 
 Comparación contra `76c878e96c514facbbe88a7ad38b581fa7975d23`, último commit de 0.3.0.
-Incluye Conexiones (desarrollado previamente sin commit) y el roadmap local 3–9.
+Incluye Conexiones, desarrollado previamente sin commit, y el roadmap local 3–9.
 Las migraciones 0001–0004 permanecen intactas; 0005, 0006 y 0007 se añaden a Git.
 
-148 archivos nuevos o modificados en este corte. Los resultados, cambios funcionales y límites están en [la entrega](roadmap-0.4.0-delivery.md).
+150 archivos nuevos o modificados. Cambios funcionales, migraciones, APIs y límites en [la entrega](roadmap-0.4.0-delivery.md).
+
+| Grupo | Archivos |
+| --- | ---: |
+| .github | 1 |
+| backend | 47 |
+| deploy | 3 |
+| docs | 39 |
+| frontend | 31 |
+| raíz/configuración | 6 |
+| scripts | 23 |
 
 | Archivo | Estado |
 | --- | --- |
@@ -81,9 +91,11 @@ Las migraciones 0001–0004 permanecen intactas; 0005, 0006 y 0007 se añaden a 
 | `docs/development/connections-delivery.md` | Nuevo |
 | `docs/development/evidence/0.4.0/benchmark-100mib.json` | Nuevo |
 | `docs/development/evidence/0.4.0/benchmark-smoke.json` | Nuevo |
+| `docs/development/evidence/0.4.0/ci.json` | Nuevo |
 | `docs/development/evidence/0.4.0/clean-demo.json` | Nuevo |
 | `docs/development/evidence/0.4.0/compose.json` | Nuevo |
 | `docs/development/evidence/0.4.0/connections.json` | Nuevo |
+| `docs/development/evidence/0.4.0/main-upgrade.json` | Nuevo |
 | `docs/development/evidence/0.4.0/persistence-summary.json` | Nuevo |
 | `docs/development/evidence/0.4.0/recovery.json` | Nuevo |
 | `docs/development/frontend-validation.md` | Modificado |
@@ -156,3 +168,8 @@ Las migraciones 0001–0004 permanecen intactas; 0005, 0006 y 0007 se añaden a 
 | `scripts/tests/test_roadmap_source_fixture.py` | Nuevo |
 | `scripts/tests/test_verify_storage.py` | Nuevo |
 | `scripts/verify_storage.py` | Modificado |
+
+La instalación conserva además copias sincronizadas de la especificación editable,
+el PDF y su generador en `ProductOne/Documentación`. Esas copias oficiales están
+fuera de la raíz Git; sus equivalentes versionados aparecen bajo `docs/specification`.
+Los backups, screenshots y XLSX de `outputs/0.4.0` son evidencia local ignorada por Git.
