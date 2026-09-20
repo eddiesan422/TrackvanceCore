@@ -623,6 +623,8 @@ scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiqueta
 
 backup-manifest.json registra schema_version, consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
 
+La transferencia de archivos usa streaming: el helper escribe el tar por stdout hacia un archivo abierto por el proceso del host; la restauración envía ese archivo por stdin. No carga el archivo completo en RAM ni necesita un bind mount del directorio del host o elevar el helper a root. En POSIX se crean directorios de backup 0700 y archivos 0600; los contenidos restaurados conservan los modos verificados. El helper sólo monta el volumen necesario y permanece sin red.
+
 ```text
 python scripts/docker_state.py backup --project trackvance-local --destination backups/local
 python scripts/docker_state.py verify --source backups/local
@@ -648,6 +650,8 @@ La recuperación incluyó una excepción con responsable/SLA y un adjunto, adem�
 El reset destruye metadata, datasets, runs, artifacts y secretos del proyecto seleccionado. El script Windows soportado detecta COMPOSE_PROJECT_NAME y delega en plan-reset/reset de docker_state.py. El plan enumera nombres e IDs exactos de contenedores, volúmenes y redes; incluye hash y caducidad de 15 minutos. La ejecución exige el token literal de confirmación y vuelve a verificar que el inventario no cambió. Un proyecto ajeno a Trackvance, un plan alterado, vencido o con recursos cambiados se rechaza. .env se conserva por defecto. No se usa reset para actualizaciones o pruebas sobre la instalación principal.
 
 Para actualizar: terminar runs, respaldar, reconstruir imágenes, aplicar Alembic al iniciar, esperar healthchecks y comparar almacenamiento. Nunca ejecutar down -v sobre la instalación del usuario como parte de un upgrade.
+
+La instalación principal se actualizó a 0.4.0 y Alembic 0007 después de un backup integral verificado. API, worker, web y PostgreSQL quedaron saludables con restart=no; la comprobación conservó los registros previos. Esta actualización no utilizó la instalación principal para pruebas destructivas.
 
 ## 20A. Benchmark reproducible y límites comprobados
 
@@ -719,7 +723,7 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 ### Certificación local de esta revisión
 
-La ejecución consolidada local aprobó 524 tests pytest en 39,77 s, con dos warnings de deprecación de las dependencias de pruebas. Ruff pasó; Mypy comprobó 33 archivos. ESLint, TypeScript y build frontend pasaron; Vitest aprobó 109 tests en 12 archivos. El bundle principal compilado fue de 535,26 kB; su aviso de tamaño no se presenta como fallo de compilación.
+La ejecución consolidada local aprobó 533 tests pytest en 41,66 s, con dos warnings de deprecación de las dependencias de pruebas. Incluye nueve regresiones nuevas del respaldo/restauración por streaming. Ruff pasó; Mypy comprobó 33 archivos. ESLint, TypeScript y build frontend pasaron; Vitest aprobó 109 tests en 12 archivos. El bundle principal compilado fue de 535,26 kB; su aviso de tamaño no se presenta como fallo de compilación.
 
 La certificación de Conexiones completó 62 comprobaciones con PostgreSQL y SQL Server reales y 23 pruebas Playwright, omitiendo sólo el escenario clean-demo de activación explícita. Ese escenario pasó por separado: en total se probaron 24 escenarios de navegador distintos. El ciclo Compose aprobó 19 pruebas Playwright; sus cinco casos opt-in se cubrieron en las ejecuciones independientes y no se suman como escenarios nuevos.
 
@@ -740,6 +744,10 @@ El ciclo Compose también aprobó smoke API, doctor, migraciones PostgreSQL e in
 La cobertura nueva incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage.
 
 El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones se prueba con motores reales PostgreSQL y SQL Server, usuarios SELECT, caída/reconexión, versiones, Intake y búsqueda de secretos en logs/metadata. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
+
+### Incidencia CI identificada y corrección
+
+El primer workflow 35488396043 aprobó backend, frontend y benchmark, pero su job de backup falló en Linux. El helper se ejecutaba como usuario trackvance e intentaba escribir sobre un bind del host con permisos 0755 de otro propietario; el sistema devolvió PermissionError 13. La causa se reprodujo y se corrigió transportando el tar por stdout/stdin con archivos privados abiertos en el host. No se relajaron permisos del host ni se ejecutó el helper como root. Las regresiones locales pasaron; el resultado del workflow remoto posterior debe confirmarse por separado antes de declarar CI completo en verde.
 
 ### Pendientes explícitos
 

@@ -1,0 +1,21 @@
+{
+  "version": "0.4.0",
+  "runs": [
+    {
+      "id": 35488396043,
+      "head_sha": "0ed05285de88486b925d59e3e2d327626fcd8e86",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/35488396043",
+      "conclusion": "failure",
+      "jobs": {
+        "backend": "success",
+        "frontend": "success",
+        "compose-e2e": "success",
+        "connections-e2e": "success",
+        "backup-restore-e2e": "failure",
+        "benchmark-smoke": "success"
+      },
+      "cause": "Linux host bind not writable by the unprivileged archive helper; reproduced errno13, corrected with file streaming and private POSIX modes."
+    }
+  ],
+  "final_status": "PENDING_FIXED_COMMIT"
+}

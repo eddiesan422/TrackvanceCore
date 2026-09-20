@@ -59,6 +59,7 @@ regla y los XLSX conservan métricas y razones técnicas.
 - Colisiones de intervalos programados y configuración inválida: idempotencia, revisión inmutable y aislamiento por savepoint.
 - Limpieza de runners que podía alcanzar un proyecto preexistente: propiedad acreditada únicamente después de comprobar inventario vacío.
 - Primer benchmark bloqueado por proxy y prueba con timeout fuera de contrato: overrides sólo del entorno de benchmark y contrato de conexión válido.
+- Backup que pasaba en Windows pero fallaba en el runner Linux por ownership del bind: transferencia tar por streaming host/contenedor, sin elevar el usuario, con directorios 0700 y archivos 0600 en POSIX.
 - Tipo EXCEPTION omitido en el verificador de linaje: soporte del vínculo EXCEPTION_EVIDENCE, regresiones de destino inexistente y cruce de organización; restore con adjunto real.
 - Selector E2E ambiguo al aparecer la nueva tabla de métricas: verificación del código en la tabla de hallazgos correspondiente.
 
@@ -85,3 +86,10 @@ Vault, Kubernetes, Terraform, Helm y observabilidad distribuida).
 No se incorpora ninguna de esas capacidades objetivo en este ciclo. El detalle
 de archivos está en [archivos modificados](changed-files.md); las decisiones se
 documentan en ADR 0007–0014 y la especificación editable/PDF versionada.
+
+## Ejemplos locales y capturas
+
+Los informes reales descargados por Playwright están en `outputs/0.4.0/intake.xlsx`,
+`recon.xlsx` y `sentinel.xlsx`. La misma carpeta contiene capturas de exportación,
+programación/histórico Sentinel, caso con SLA/adjunto y Centro de Control. Son
+evidencia local de fixtures aislados; los archivos de runtime no se incluyen en Git.

@@ -70,3 +70,13 @@ backup antes es recomendable, no un requisito impuesto por el comando.
 - Los recibos de restore/reset quedan fuera de los volúmenes afectados.
 - La consistencia depende de una ventana corta sin ingreso ni ejecución. Una futura
   operación sin pausa requerirá snapshots coordinados del motor y del object store.
+
+## Portabilidad Windows/Linux
+
+El helper usa el usuario no privilegiado de la imagen API. El tar se transmite
+por stdout a un archivo abierto por el proceso host y se restaura por stdin,
+sin un bind escribible que dependa de que los UID de ambos lados coincidan.
+La transferencia usa streams de archivo y no mantiene el backup completo en RAM.
+En POSIX, el directorio de backup es 0700 y los archivos son 0600. Un fallo no
+expone stderr ni contenido de credenciales. La primera ejecución CI 0.4.0
+permitió reproducir y corregir PermissionError del enfoque previo con bind.

@@ -170,7 +170,7 @@ Sin `--start` deja el destino verificado y detenido.
 
 ```powershell
 python scripts/docker_state.py restore --source backups/docker-20260919 `
-  --target-project trackvance-recovery-20260919
+  --target-project trackvance-recovery-20260919 --start --web-port 3200
 python scripts/doctor.py --base-url http://localhost:3200 --docker `
   --project trackvance-recovery-20260919 --recovery-ready
 ```

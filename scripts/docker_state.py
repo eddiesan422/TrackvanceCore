@@ -20,7 +20,7 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +83,23 @@ def execute(
     if result.returncode:
         raise OperationError(f"Falló {arguments[0]} {arguments[1] if len(arguments) > 1 else ''}.")
     return result.stdout
+
+
+def execute_stream(
+    arguments: Sequence[str], *, stdin: BinaryIO | None = None,
+    stdout: BinaryIO | None = None, timeout: int = 1800,
+) -> None:
+    """Transfer archives through files without buffering secrets or payloads in RAM."""
+    try:
+        result = subprocess.run(
+            list(arguments), cwd=ROOT, stdin=stdin or subprocess.DEVNULL,
+            stdout=stdout or subprocess.DEVNULL, stderr=subprocess.PIPE,
+            check=False, timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        raise OperationError(f"No fue posible transferir el archivo ({type(error).__name__}).") from error
+    if result.returncode:
+        raise OperationError("Falló la transferencia del archivo Docker; salida suprimida.")
 
 
 def docker_json(arguments: Sequence[str]) -> Any:
@@ -211,7 +228,7 @@ def _new_directory(path: Path) -> Path:
         current = current.parent
     if current.is_symlink():
         raise OperationError("El destino no puede atravesar enlaces simbólicos.")
-    path.mkdir(parents=True)
+    path.mkdir(parents=True, mode=0o700)
     return path.resolve(strict=True)
 
 
@@ -240,9 +257,9 @@ def _volume_for(state: Mapping[str, Any], logical: str) -> str:
 
 
 ARCHIVE_PROGRAM = r"""
-import os, stat, tarfile
+import os, stat, sys, tarfile
 root = '/source'
-with tarfile.open('/backup/' + os.environ['ARCHIVE_NAME'], 'w:gz', format=tarfile.PAX_FORMAT) as archive:
+with tarfile.open(fileobj=sys.stdout.buffer, mode='w|gz', format=tarfile.PAX_FORMAT) as archive:
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
         directories.sort(); files.sort()
         for name in directories + files:
@@ -254,10 +271,10 @@ with tarfile.open('/backup/' + os.environ['ARCHIVE_NAME'], 'w:gz', format=tarfil
 """
 
 EXTRACT_PROGRAM = r"""
-import os, shutil, stat, tarfile
+import os, shutil, sys, tarfile
 root = '/target'
-with tarfile.open('/backup/' + os.environ['ARCHIVE_NAME'], 'r:gz') as archive:
-    for member in archive.getmembers():
+with tarfile.open(fileobj=sys.stdin.buffer, mode='r|gz') as archive:
+    for member in archive:
         parts = member.name.replace('\\', '/').split('/')
         if not member.name or member.name.startswith('/') or '..' in parts:
             raise SystemExit('unsafe archive path')
@@ -311,8 +328,11 @@ def _archive_volume(
     volume: str, logical: str, image_id: str, destination: Path
 ) -> dict[str, Any]:
     relative = f"volumes/{logical}.tar.gz"
-    execute(
-        [
+    target = destination / relative
+    # Host ownership is independent of the non-root UID in the API image.
+    # No bind mount, permission escalation or complete in-memory archive is needed.
+    with os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as output:
+        execute_stream([
             "docker",
             "run",
             "--rm",
@@ -321,18 +341,11 @@ def _archive_volume(
             "--read-only",
             "--mount",
             f"type=volume,src={volume},dst=/source,readonly",
-            "--mount",
-            f"type=bind,src={destination},dst=/backup",
-            "--env",
-            f"ARCHIVE_NAME={relative}",
             image_id,
             "python",
             "-c",
             _python_payload(ARCHIVE_PROGRAM),
-        ],
-        timeout=1800,
-    )
-    target = destination / relative
+        ], stdout=output)
     return {
         "path": relative,
         "sha256": digest(target),
@@ -380,7 +393,7 @@ def backup(project: str, destination: Path) -> Path:
     state = inventory(project)
     require_backup_inventory(state)
     destination = _new_directory(destination)
-    (destination / "volumes").mkdir()
+    (destination / "volumes").mkdir(mode=0o700)
     initially_running = {item["id"] for item in state["containers"] if item["running"]}
     postgres = _container_for(state, "postgres")
     api = _container_for(state, "api")
@@ -415,6 +428,7 @@ def backup(project: str, destination: Path) -> Path:
         components: dict[str, Any] = {}
         for relative in ("state.json", "postgres.dump"):
             path = destination / relative
+            path.chmod(0o600)
             components[relative] = {
                 "path": relative,
                 "sha256": digest(path),
@@ -454,6 +468,7 @@ def backup(project: str, destination: Path) -> Path:
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
         )
+        manifest_path.chmod(0o600)
         verify_backup(destination)
         return manifest_path
     finally:
@@ -586,27 +601,22 @@ def compose_services(project: str, environment: Mapping[str, str] | None = None)
 def _extract_volume(
     backup_root: Path, archive: str, volume: str, image_id: str
 ) -> None:
-    execute(
-        [
+    with (backup_root / archive).open("rb") as source:
+        execute_stream([
             "docker",
             "run",
             "--rm",
+            "--interactive",
             "--network",
             "none",
             "--read-only",
             "--mount",
             f"type=volume,src={volume},dst=/target",
-            "--mount",
-            f"type=bind,src={backup_root},dst=/backup,readonly",
-            "--env",
-            f"ARCHIVE_NAME={archive}",
             image_id,
             "python",
             "-c",
             _python_payload(EXTRACT_PROGRAM),
-        ],
-        timeout=1800,
-    )
+        ], stdin=source)
 
 
 def restore(

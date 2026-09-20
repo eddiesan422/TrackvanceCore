@@ -1,5 +1,5 @@
 {
-  "pytest backend + scripts": "524 aprobadas en 39,77 s. Dos avisos de deprecación Starlette/AnyIO.",
+  "pytest backend + scripts": "533 aprobadas en 41,66 s. Dos avisos de deprecación Starlette/AnyIO.",
   "Ruff / Mypy": "PASS; 33 archivos fuente revisados por Mypy.",
   "ESLint / TypeScript / build": "PASS; bundle JS 535,26 kB / 160,00 kB gzip, advertencia no bloqueante de tamaño.",
   "Vitest": "109 aprobadas en 12 archivos.",
@@ -14,5 +14,6 @@
   "Volúmenes no ejecutados": "500 MiB, 1 GiB, 2 GiB y 5 GiB: NOT_RUN_RESOURCE_LIMIT por preflight. No se afirma capacidad medida de esos tamaños.",
   "Benchmark smoke CI": "PASS local con 1.074.923 bytes y 1.000 filas, 37,71 s; no certifica volumen.",
   "GitHub Actions": "Pendiente del workflow del commit 0.4.0; los resultados anteriores no certifican esta revisión.",
-  "Instalación principal": "Preservada, aún en migración 0005 mientras se completa la certificación; actualización pendiente. Sin borrados de datos reales."
+  "Instalación principal": "0.4.0 / Alembic 0007 en localhost:3100. Backup integral previo verificado, registros históricos e identidad conservados, cuatro servicios healthy, doctor recovery 10/10, restart=no. Sin datos de prueba insertados.",
+  "Backup Windows/Linux": "Helper sin privilegios: tar por streams, sin bind escribible, archivos privados POSIX. PermissionError Linux inicial reproducido y corregido; 9 regresiones añadidas."
 }

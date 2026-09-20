@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "version": "0.4.0",
+  "project": "trackvance-certification",
+  "url": "http://localhost:3100",
+  "migration_before": "0005_external_connections",
+  "migration_after": "0007_monitor_scheduling",
+  "existing_rows_preserved": true,
+  "user_identity_preserved": true,
+  "user_schema_extended_by_migration": true,
+  "table_counts": {
+    "artifact_links": 0,
+    "artifacts": 0,
+    "audit_events": 3,
+    "configurations": 0,
+    "dataset_source_bindings": 0,
+    "dataset_versions": 0,
+    "datasets": 0,
+    "exception_attachments": 0,
+    "exceptions": 0,
+    "external_connection_versions": 0,
+    "external_connections": 0,
+    "findings": 0,
+    "idempotency_keys": 0,
+    "jobs": 0,
+    "metric_history": 0,
+    "monitor_occurrences": 0,
+    "monitor_schedule_versions": 0,
+    "monitor_schedules": 0,
+    "runs": 0,
+    "sessions": 3,
+    "users": 1
+  },
+  "service_health": [
+    "healthy",
+    "healthy",
+    "healthy",
+    "healthy"
+  ],
+  "restart_policies": [
+    "no",
+    "no",
+    "no",
+    "no"
+  ],
+  "backup_manifest_sha256": "da2ddfc8e82c01ab9c44040dacf854897e8d45ec9be89f91c7bdd22eaf82f393",
+  "doctor_recovery_checks": 10,
+  "test_data_inserted": false
+}

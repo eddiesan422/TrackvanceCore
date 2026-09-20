@@ -10,10 +10,11 @@ en bases externas. `SecretStore` mantiene credenciales fuera de metadata y el
 worker continúa sin acceso a sus volúmenes.
 
 El grafo de migraciones del código llega a `0007_monitor_scheduling` y define
-**21 tablas de aplicación**. La instalación principal sigue en
-`0005_external_connections` mientras se prepara el upgrade final; este documento
-no la presenta como migrada todavía. Sus datos, proyecto, puerto web 3100 y puertos
-internos se conservan. Solo la web permanece publicada en localhost; API y
+**21 tablas de aplicación**. La instalación principal se actualizó de
+`0005_external_connections` a `0007_monitor_scheduling` después de verificar un
+backup integral. Sus registros históricos e identidad de usuario se conservaron;
+los cuatro servicios están healthy y usan `restart=no`. El puerto web 3100 y los
+puertos internos se conservan. Solo la web permanece publicada en localhost; API y
 PostgreSQL continúan dentro de la red Compose.
 
 ## Cambios de arquitectura en 0.4.0
