@@ -1,4 +1,4 @@
-# Contrato prototipo local 0.4.0
+# Contrato prototipo local 0.4.1
 
 El esquema ejecutable versionado está en [openapi.json](openapi.json). Se
 genera desde la aplicación y documenta sesión cookie, CSRF, MIME XLSX,
@@ -8,7 +8,7 @@ Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.4.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.4.1',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `{user:{id,name,email,role,permissions:[]},organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
 - `POST /auth/login` `{email,password}` → mismo.
@@ -215,6 +215,10 @@ estable. Las colecciones se limitan a la organización y las acciones se
 validan por permiso del rol. Más detalles en
 [ADR de evidencia](../docs/adr/0002-evidence-and-artifacts.md).
 
+
+## Ajustes de interfaz 0.4.1
+
+Esta revisión no añade endpoints ni modifica DTOs persistidos. La interfaz conserva los valores internos de transformaciones y normalización de claves, pero presenta etiquetas funcionales, ejemplos y vistas previas construidas con la muestra acotada de `GET /dataset-versions/{version_id}/profile`. El catálogo de responsables continúa enviando `owner: string`; Sentinel continúa publicando listas de columnas en su configuración declarativa. El cierre de sesión mantiene `POST /auth/logout` y, al completarse, el cliente vuelve a la pantalla de acceso.
 
 ## Evolución funcional 0.4.0
 

@@ -82,10 +82,6 @@ const logicalTypes: { value: LogicalType; label: string }[] = [
 const defaultDomains = ['Operaciones', 'Finanzas', 'Logística', 'Ventas']
 const newDomainOption = '__new_domain__'
 
-function splitColumnNames(value: string) {
-  return [...new Set(value.split(',').map(column => column.trim()).filter(Boolean))]
-}
-
 function candidateFileFormat(file: File): DatasetFileFormat | null {
   const extension = file.name.split('.').pop()?.toLowerCase() || ''
   return extensionFormats[extension] || mimeFormats[file.type.toLowerCase()] || null
@@ -179,13 +175,12 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
   const [sheetName, setSheetName] = useState('')
   const [delimiter, setDelimiter] = useState('')
   const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([])
-  const [manualIdentifiers, setManualIdentifiers] = useState('')
   const [columnTypeOverrides, setColumnTypeOverrides] = useState<Record<string, LogicalType>>({})
   const matchingDataset = !datasetId && name.trim() ? existingDatasets.find(dataset => normalizedDatasetName(String(dataset.name || '')) === normalizedDatasetName(name)) : undefined
   const guessedFormat = file ? candidateFileFormat(file) : null
   const inspectedFormat = normalizedFileFormat(inspection?.format, guessedFormat)
   const inspectedColumns = inspection?.columns || []
-  const identifierNames = new Set([...selectedIdentifiers, ...splitColumnNames(manualIdentifiers)])
+  const identifierNames = new Set(selectedIdentifiers)
   const selectedDomain = addingDomain ? customDomain.trim() : domain.trim()
   const availableDomains = [...new Set([
     ...defaultDomains,
@@ -205,7 +200,6 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
       setInspection(result)
       setSheetName(result.selected_sheet || variables.options.sheet_name || result.sheets?.[0] || '')
       setSelectedIdentifiers([])
-      setManualIdentifiers('')
       setColumnTypeOverrides({})
     },
   })
@@ -240,7 +234,6 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
     setSheetName('')
     setDelimiter('')
     setSelectedIdentifiers([])
-    setManualIdentifiers('')
     setColumnTypeOverrides({})
     inspect.reset()
     if (!name) setName(candidate.name.replace(/\.[^.]+$/, '').replaceAll('_', ' '))
@@ -273,8 +266,7 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
     Object.entries(columnTypeOverrides).forEach(([column, logicalType]) => {
       overrides[column] = { logical_type: logicalType }
     })
-    const identifiers = [...new Set([...selectedIdentifiers, ...splitColumnNames(manualIdentifiers)])]
-    identifiers.forEach(column => {
+    selectedIdentifiers.forEach(column => {
       overrides[column] = { ...overrides[column], logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }
     })
     return overrides
@@ -398,9 +390,6 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
           onChange={setSelectedIdentifiers}
           disabled={upload.isPending}
         />
-        <Field label="Otros identificadores por nombre" hint="También puedes escribir nombres separados por coma. Todo identificador se guarda como texto para conservar ceros iniciales.">
-          <input value={manualIdentifiers} disabled={upload.isPending} onChange={event => setManualIdentifiers(event.target.value)} placeholder="document_id, número_documento"/>
-        </Field>
       </div>}
 
       {!datasetId && <div className="form-stack dataset-metadata-fields">

@@ -1,0 +1,15 @@
+{
+  "Alcance 0.4.1": "Configuración guiada por esquema y mejora de UX. Sin migraciones ni cambios de semántica backend; compatibilidad histórica obligatoria.",
+  "Vitest": "119 aprobadas en 13 archivos. Focales App + Datasets 16/16 y ConfigDialog + RuleBuilder + AdvancedRules 34/34 también aprobados durante el desarrollo.",
+  "ESLint / TypeScript": "PASS.",
+  "Build frontend": "PASS; bundle JavaScript principal 550,78 kB / 164,59 kB gzip. Advertencia informativa de tamaño, no bloqueante.",
+  "Playwright": "23 aprobadas con fuentes reales y 1 opt-in limpio aprobado por separado: 24 escenarios distintos. Compose: 19 aprobadas y cinco opt-in cubiertos en sus runners.",
+  "Compose / smoke / doctor": "PASS: doctor 7/7, smoke API 84/84, migraciones upgrade/downgrade/upgrade y persistencia tras restart.",
+  "Conexiones reales": "PASS: 62 comprobaciones PostgreSQL/SQL Server, 23 escenarios de navegador, credenciales y logs sin secretos, y restart.",
+  "Logout limpio": "PASS 1/1: demo sin seed, cierre de sesión, redirección a / y pantalla inicial visible.",
+  "GitHub Actions": "PENDIENTE DEL WORKFLOW DEL COMMIT DE ENTREGA 0.4.1; no se hereda el resultado remoto 0.4.0.",
+  "pytest backend + scripts": "533 aprobadas en 37,36 s. Dos avisos de deprecación Starlette/AnyIO; sin fallos.",
+  "Ruff / Mypy": "PASS; Mypy revisó 33 archivos fuente.",
+  "Contrato y persistencia": "OpenAPI y lock actualizados a 0.4.1. Sin endpoints, DTOs o migraciones nuevos; semántica backend sin cambios.",
+  "Base 0.4.0": "Certificación histórica conservada: 533 tests backend/scripts, 109 Vitest y 24 escenarios Playwright distintos; no sustituye los resultados incrementales 0.4.1."
+}

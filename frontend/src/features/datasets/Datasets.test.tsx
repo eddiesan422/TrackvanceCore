@@ -10,7 +10,7 @@ vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<t
 beforeEach(() => vi.clearAllMocks())
 
 describe('Identifier override during upload', () => {
-  it('sends explicit identifier tags with the untouched CSV bytes', async () => {
+  it('sends selected identifier tags with the untouched CSV bytes and no manual-name field', async () => {
     vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV', format_label: 'CSV delimitado', filename: 'customers.csv', columns: [{ name: 'document_id', logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }], row_count: 2,
     } : { id: 'version' })
@@ -19,14 +19,16 @@ describe('Identifier override during upload', () => {
     const file = new File(['document_id,name\n001234567,Cliente\n1234567,Otro\n'], 'customers.csv', { type: 'text/csv' })
     await user.upload(screen.getByLabelText('Seleccionar archivo de datos'), file)
     await screen.findByText('CSV delimitado')
-    await user.type(screen.getByLabelText('Otros identificadores por nombre'), 'document_id, codigo')
+    expect(screen.queryByLabelText('Otros identificadores por nombre')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Columnas identificadoras (opcional): abrir selector' }))
+    await user.click(screen.getByRole('checkbox', { name: 'document_id (STRING)' }))
     await user.click(screen.getByRole('button', { name: 'Cargar y analizar' }))
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/customers/versions/upload')).toBe(true))
     const [path, options] = vi.mocked(api).mock.calls.find(([candidate]) => candidate === '/datasets/customers/versions/upload')!
     expect(path).toBe('/datasets/customers/versions/upload')
     const body = options?.body as FormData
     expect(body.get('file')).toBe(file)
-    expect(JSON.parse(String(body.get('column_overrides')))).toEqual({ document_id: { logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }, codigo: { logical_type: 'STRING', semantic_tag: 'IDENTIFIER' } })
+    expect(JSON.parse(String(body.get('column_overrides')))).toEqual({ document_id: { logical_type: 'STRING', semantic_tag: 'IDENTIFIER' } })
     expect(JSON.parse(String(body.get('reader_options')))).toEqual({})
   })
 

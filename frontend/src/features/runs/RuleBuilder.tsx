@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { Field, Notice } from '../../components/ui'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api/client'
@@ -14,6 +14,8 @@ export interface Rule { type: string; rule_id?: string; code?: string; column?: 
 export interface Transform { type: string; column: string; parameters: Parameters }
 export interface Comparison { type: string; source_column: string; target_column: string; parameters: Parameters }
 export const noNormalization: Normalization = { trim: false, case: 'NONE', unicode_normalization: 'NONE' }
+export type SampleRow = Record<string, unknown>
+type SampleState = 'loading' | 'error' | 'ready'
 const names: Record<string, string> = { required: 'Obligatorio', not_null: 'No nulo', unique: 'Unicidad', compound_unique: 'Unicidad compuesta', numeric: 'Numérico', positive: 'Positivo', type: 'Tipo de dato', length: 'Longitud del texto', column_compare: 'Comparación entre columnas', reference: 'Integridad referencial', range: 'Rango numérico', allowed_values: 'Valores permitidos', regex: 'Patrón de texto', date_rule: 'Regla de fecha', distinct_count: 'Cantidad de valores distintos', distinct_rate: 'Proporción de valores distintos', uniqueness_ratio: 'Proporción de registros únicos', schema_type: 'Tipo esperado de columna', metric_threshold: 'Umbral de métrica', historical_band: 'Banda histórica (mediana + IQR)' }
 const defaults: Record<string, Parameters> = { range: { gte: '0', null_policy: 'ALLOW' }, allowed_values: { values: [], null_policy: 'ALLOW' }, regex: { pattern: '', flags: '', null_policy: 'ALLOW' }, date_rule: { not_future: true, timezone: 'UTC', null_policy: 'ALLOW' }, distinct_count: { min: '1' }, distinct_rate: { min: '0.9' }, uniqueness_ratio: { min: '1' }, schema_type: { expected_type: 'STRING' }, historical_band: { metric: 'row_count', window: 10, min_history: 4, iqr_multiplier: '1.5' } }
 Object.assign(defaults, { required: {}, not_null: {}, unique: { null_policy: 'ALLOW' }, compound_unique: { columns: [], null_policy: 'FAIL' }, numeric: { null_policy: 'FAIL' }, positive: { null_policy: 'FAIL' }, type: { logical_type: 'STRING', null_policy: 'FAIL' }, length: { min: 1, null_policy: 'ALLOW' }, column_compare: { other_column: '', operator: 'eq', logical_type: 'DECIMAL', null_policy: 'FAIL' }, reference: { columns: [], reference_columns: [], dataset_version_id: '', null_policy: 'FAIL' }, metric_threshold: { metric: 'row_count', operator: 'gte', threshold: '1' } })
@@ -36,10 +38,11 @@ function ReferenceFields({ parameters, onChange }: { parameters: Parameters; onC
 }
 
 export function NormalizationFields({ value, onChange, prefix = 'Claves' }: { value: Normalization; onChange: (value: Normalization) => void; prefix?: string }) {
+  const functionalLabel = (label: string) => prefix === 'Claves' ? label : `${prefix}: ${label.toLowerCase()}`
   return <div className="form-grid normalization-fields">
-    <Field label={`${prefix}: espacios externos`}><select value={value.trim ? 'TRIM' : 'NONE'} onChange={e => onChange({ ...value, trim: e.target.value === 'TRIM' })}><option value="NONE">Conservar (NONE)</option><option value="TRIM">Eliminar (TRIM)</option></select></Field>
-    <Field label={`${prefix}: mayúsculas y minúsculas`}><select value={value.case} onChange={e => onChange({ ...value, case: e.target.value as Normalization['case'] })}><option value="NONE">Conservar (NONE)</option><option value="UPPER">Convertir a mayúsculas</option><option value="LOWER">Convertir a minúsculas</option></select></Field>
-    <Field label={`${prefix}: Unicode`}><select value={value.unicode_normalization} onChange={e => onChange({ ...value, unicode_normalization: e.target.value as Normalization['unicode_normalization'] })}><option value="NONE">Conservar (NONE)</option><option>NFC</option><option>NFKC</option></select></Field>
+    <Field label={functionalLabel('Espacios al inicio y al final')}><select value={value.trim ? 'TRIM' : 'NONE'} onChange={e => onChange({ ...value, trim: e.target.value === 'TRIM' })}><option value="NONE">Conservar como están</option><option value="TRIM">Eliminar espacios externos</option></select></Field>
+    <Field label={functionalLabel('Mayúsculas y minúsculas')}><select value={value.case} onChange={e => onChange({ ...value, case: e.target.value as Normalization['case'] })}><option value="NONE">Conservar como están</option><option value="UPPER">Convertir a MAYÚSCULAS</option><option value="LOWER">Convertir a minúsculas</option></select></Field>
+    <Field label={functionalLabel('Normalización de caracteres')} hint="Unifica caracteres que pueden verse iguales, pero tienen una representación interna diferente."><select value={value.unicode_normalization} onChange={e => onChange({ ...value, unicode_normalization: e.target.value as Normalization['unicode_normalization'] })}><option value="NONE">No normalizar</option><option value="NFC">Normalización estándar (NFC)</option><option value="NFKC">Normalización de compatibilidad (NFKC)</option></select></Field>
   </div>
 }
 
@@ -86,8 +89,234 @@ export function ComparisonBuilder({ value, onChange, sourceColumns, targetColumn
   })}<Notice>El texto vacío ("") se conserva como texto: no equivale a null. La igualdad exacta aplica únicamente la normalización declarada. Cada comparación queda registrada en la versión del control y en su manifiesto. Las claves duplicadas requieren revisión, salvo que declares una agregación.</Notice></section>
 }
 
-export function TransformBuilder({ value, onChange, columns, label = 'Transformaciones previas' }: { value: Transform[]; onChange: (value: Transform[]) => void; columns?: DatasetColumn[]; label?: string }) {
-  const update = (index: number, changes: Partial<Transform>) => onChange(value.map((item, i) => i === index ? { ...item, ...changes } : item))
-  const transformDefaults: Record<string, Parameters> = { trim: {}, case: { case: 'UPPER' }, unicode_normalization: { form: 'NFC' }, empty_to_null: {}, id_padding: { width: 8, fill: '0', side: 'left' }, remove_characters: { characters: '-' }, decimal_parse: { decimal_separator: '.', thousands_separator: ',' }, date_parse: { formats: ['%Y-%m-%d'] } }
-  return <section className="rule-builder" aria-label={label}><div className="builder-heading"><div><h3>{label}</h3><p>Se aplican en el orden mostrado; el snapshot recibido conserva sus valores.</p></div><button type="button" className="button secondary small" onClick={() => onChange([...value, { type: 'trim', column: '', parameters: {} }])}>Agregar transformación · {label}</button></div>{value.map((item, index) => <fieldset className="builder-card" key={index}><legend>Transformación {index + 1} · {label}</legend><div className="form-grid"><Field label="Columna de transformación"><ColumnPicker columns={columns} value={item.column} onChange={column => update(index, { column })}/></Field><Field label="Transformación"><select value={item.type} onChange={e => update(index, { type: e.target.value, parameters: { ...transformDefaults[e.target.value] } })}>{Object.keys(transformDefaults).map(kind => <option key={kind}>{kind}</option>)}</select></Field>{Object.entries(item.parameters).map(([key, value]) => <Field key={key} label={`Parámetro ${key}`} hint={key === 'formats' ? 'Un formato explícito por línea, por ejemplo %d/%m/%Y.' : undefined}>{Array.isArray(value) ? <textarea required value={value.join('\n')} onChange={e => update(index, { parameters: { ...item.parameters, [key]: e.target.value.split('\n') } })}/> : <input required={!['thousands_separator', 'characters'].includes(key)} type={key === 'width' ? 'number' : 'text'} min={key === 'width' ? 1 : undefined} max={key === 'width' ? 1000 : undefined} value={String(value ?? '')} onChange={e => update(index, { parameters: { ...item.parameters, [key]: key === 'width' ? Number(e.target.value) : e.target.value } })}/>}</Field>)}</div><button type="button" className="text-button" onClick={() => onChange(value.filter((_, i) => i !== index))}>Quitar transformación {index + 1}</button></fieldset>)}</section>
+const transformLabels: Record<string, string> = {
+  trim: 'Eliminar espacios externos',
+  case: 'Convertir mayúsculas/minúsculas',
+  unicode_normalization: 'Normalizar texto Unicode',
+  empty_to_null: 'Convertir texto vacío en nulo',
+  id_padding: 'Completar identificador',
+  remove_characters: 'Eliminar caracteres',
+  decimal_parse: 'Interpretar número decimal',
+  date_parse: 'Interpretar fecha',
+}
+
+const transformDefaults: Record<string, Parameters> = {
+  trim: {},
+  case: { case: 'UPPER' },
+  unicode_normalization: { form: 'NFC' },
+  empty_to_null: {},
+  id_padding: { width: 8, fill: '0', side: 'left' },
+  remove_characters: { characters: '-' },
+  decimal_parse: { decimal_separator: '.', thousands_separator: ',' },
+  date_parse: { formats: ['%Y-%m-%d'] },
+}
+
+const transformDescriptions: Record<string, string> = {
+  trim: 'Quita únicamente los espacios al inicio y al final del texto.',
+  case: 'Convierte todo el texto a una misma combinación de mayúsculas o minúsculas.',
+  unicode_normalization: 'Unifica caracteres equivalentes que pueden tener representaciones internas diferentes.',
+  empty_to_null: 'Convierte el texto de longitud cero en un valor nulo; no elimina espacios.',
+  id_padding: 'Completa el identificador hasta la longitud indicada sin convertirlo en número.',
+  remove_characters: 'Elimina del valor cada uno de los caracteres declarados.',
+  decimal_parse: 'Interpreta los separadores declarados y produce un decimal canónico.',
+  date_parse: 'Prueba los formatos declarados en orden y produce una fecha ISO.',
+}
+
+function textValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return value ? 'True' : 'False'
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value)
+  return String(value)
+}
+
+function displayValue(value: unknown): string {
+  if (value === null) return 'nulo'
+  if (value === undefined) return '—'
+  const text = textValue(value)
+  return text === '' ? 'texto vacío ("")' : JSON.stringify(text)
+}
+
+function canonicalDecimal(value: string): string | null {
+  if (!/^[+-]?[0-9]+(?:\.[0-9]+)?$/.test(value)) return null
+  const sign = value.startsWith('-') ? '-' : ''
+  const unsigned = value.replace(/^[+-]/, '')
+  const [integer, fraction] = unsigned.split('.')
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, '')
+  return `${sign}${normalizedInteger}${fraction === undefined ? '' : `.${fraction}`}`
+}
+
+type DatePart = 'year' | 'shortYear' | 'month' | 'day' | 'hour' | 'hour12' | 'minute' | 'second' | 'fraction' | 'period' | 'timezone'
+type DatePreview = { kind: 'parsed'; value: string } | { kind: 'invalid' } | { kind: 'unsupported' }
+const dateDirectives: Record<string, { pattern: string; part: DatePart }> = {
+  Y: { pattern: '(\\d{4})', part: 'year' }, y: { pattern: '(\\d{2})', part: 'shortYear' },
+  m: { pattern: '(\\d{1,2})', part: 'month' }, d: { pattern: '(\\d{1,2})', part: 'day' },
+  H: { pattern: '(\\d{1,2})', part: 'hour' }, I: { pattern: '(\\d{1,2})', part: 'hour12' },
+  M: { pattern: '(\\d{1,2})', part: 'minute' }, S: { pattern: '(\\d{1,2})', part: 'second' },
+  f: { pattern: '(\\d{1,6})', part: 'fraction' }, p: { pattern: '(AM|PM|am|pm)', part: 'period' },
+  z: { pattern: '(Z|[+-]\\d{2}:?\\d{2})', part: 'timezone' },
+}
+
+const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+function parseDate(value: string, format: string): DatePreview {
+  let pattern = '^'
+  const parts: DatePart[] = []
+  for (let index = 0; index < format.length; index += 1) {
+    if (format[index] !== '%') {
+      pattern += /\s/.test(format[index]) ? '\\s+' : escapePattern(format[index])
+      continue
+    }
+    const directive = format[index + 1]
+    index += 1
+    if (directive === '%') { pattern += '%'; continue }
+    const definition = dateDirectives[directive]
+    if (!definition) return { kind: 'unsupported' }
+    pattern += definition.pattern
+    parts.push(definition.part)
+  }
+  const match = new RegExp(`${pattern}$`).exec(value)
+  if (!match) return { kind: 'invalid' }
+  const parsed: Partial<Record<DatePart, string>> = {}
+  parts.forEach((part, index) => { parsed[part] = match[index + 1] })
+  const shortYear = Number(parsed.shortYear)
+  const year = parsed.year ? Number(parsed.year) : parsed.shortYear ? (shortYear <= 68 ? 2000 + shortYear : 1900 + shortYear) : 1900
+  const month = Number(parsed.month || 1), day = Number(parsed.day || 1)
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  const hour = Number(parsed.hour || 0), hour12 = Number(parsed.hour12 || 1)
+  const minute = Number(parsed.minute || 0), second = Number(parsed.second || 0)
+  const offset = parsed.timezone
+  const invalidOffset = offset && offset !== 'Z' && (() => {
+    const compact = offset.replace(':', '').slice(1)
+    return Number(compact.slice(0, 2)) > 23 || Number(compact.slice(2, 4)) > 59
+  })()
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || hour12 < 1 || hour12 > 12 || minute > 59 || second > 59 || invalidOffset) return { kind: 'invalid' }
+  return { kind: 'parsed', value: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` }
+}
+
+function applyTransform(value: unknown, transform: Transform): { value: unknown; error?: boolean; unsupported?: boolean } {
+  if (value === null || value === undefined) return { value: null }
+  const text = textValue(value), parameters = transform.parameters
+  if (transform.type === 'trim') return { value: text.trim() }
+  if (transform.type === 'empty_to_null') return { value: text === '' ? null : text }
+  if (transform.type === 'case') return { value: parameters.case === 'LOWER' ? text.toLowerCase() : text.toUpperCase() }
+  if (transform.type === 'unicode_normalization') return { value: text.normalize(String(parameters.form || 'NFC') as 'NFC' | 'NFKC') }
+  if (transform.type === 'id_padding') {
+    const width = Number(parameters.width), fill = String(parameters.fill || '0')
+    const padding = fill.repeat(Math.max(0, width - Array.from(text).length))
+    return { value: parameters.side === 'right' ? `${text}${padding}` : `${padding}${text}` }
+  }
+  if (transform.type === 'remove_characters') {
+    const characters = new Set(Array.from(String(parameters.characters || '')))
+    return { value: Array.from(text).filter(character => !characters.has(character)).join('') }
+  }
+  if (transform.type === 'decimal_parse') {
+    const decimal = String(parameters.decimal_separator ?? '.'), thousands = String(parameters.thousands_separator ?? ',')
+    const withoutThousands = thousands ? text.split(thousands).join('') : text
+    const parsed = canonicalDecimal(withoutThousands.split(decimal).join('.'))
+    return parsed === null ? { value: text, error: true } : { value: parsed }
+  }
+  if (transform.type === 'date_parse') {
+    const formats = Array.isArray(parameters.formats) ? parameters.formats : []
+    let unsupported = false
+    for (const format of formats) {
+      const parsed = parseDate(text, format)
+      if (parsed.kind === 'parsed') return { value: parsed.value }
+      if (parsed.kind === 'unsupported') unsupported = true
+    }
+    return unsupported ? { value: text, unsupported: true } : { value: text, error: true }
+  }
+  return { value: text }
+}
+
+function exampleInput(transform: Transform): string {
+  const parameters = transform.parameters
+  if (transform.type === 'trim') return ' Cliente 01 '
+  if (transform.type === 'case') return 'Cliente 01'
+  if (transform.type === 'unicode_normalization') return parameters.form === 'NFKC' ? 'Ｃｌｉｅｎｔｅ 01' : 'Cafe\u0301'
+  if (transform.type === 'empty_to_null') return ''
+  if (transform.type === 'id_padding') return '123'
+  if (transform.type === 'remove_characters') return `AB${String(parameters.characters || '-')[0] || '-'}123`
+  if (transform.type === 'decimal_parse') return `1${String(parameters.thousands_separator ?? ',')}234${String(parameters.decimal_separator ?? '.')}50`
+  if (transform.type === 'date_parse') {
+    const format = Array.isArray(parameters.formats) && parameters.formats[0] ? parameters.formats[0] : '%Y-%m-%d'
+    return format.replace(/%Y/g, '2026').replace(/%y/g, '26').replace(/%m/g, '12').replace(/%d/g, '31').replace(/%H/g, '14').replace(/%I/g, '02').replace(/%M/g, '30').replace(/%S/g, '45').replace(/%f/g, '123456').replace(/%p/g, 'PM').replace(/%z/g, '+0000').replace(/%Z/g, 'UTC').replace(/%%/g, '%')
+  }
+  return 'Cliente 01'
+}
+
+function TransformExplanation({ transform }: { transform: Transform }) {
+  const before = exampleInput(transform), result = applyTransform(before, transform)
+  return <div className="transform-explanation"><p>{transformDescriptions[transform.type]}</p><div><span>Ejemplo</span><code>{displayValue(before)}</code><b>→</b><code>{result.unsupported ? 'Vista previa no disponible para este formato' : result.error ? 'No se pudo interpretar' : displayValue(result.value)}</code></div></div>
+}
+
+function TransformParameters({ transform, onChange }: { transform: Transform; onChange: (parameters: Parameters) => void }) {
+  const parameters = transform.parameters
+  const set = (key: string, value: Parameters[string]) => onChange({ ...parameters, [key]: value })
+  if (transform.type === 'case') return <Field label="Resultado del texto"><select value={String(parameters.case || 'UPPER')} onChange={event => set('case', event.target.value)}><option value="UPPER">MAYÚSCULAS</option><option value="LOWER">minúsculas</option></select></Field>
+  if (transform.type === 'unicode_normalization') return <Field label="Forma de normalización"><select value={String(parameters.form || 'NFC')} onChange={event => set('form', event.target.value)}><option value="NFC">Estándar (NFC)</option><option value="NFKC">Compatibilidad (NFKC)</option></select></Field>
+  if (transform.type === 'id_padding') return <><Field label="Longitud total"><input required type="number" min="1" max="1000" value={Number(parameters.width)} onChange={event => set('width', Number(event.target.value))}/></Field><Field label="Carácter de relleno"><input required maxLength={1} value={String(parameters.fill || '')} onChange={event => set('fill', event.target.value)}/></Field><Field label="Posición del relleno"><select value={String(parameters.side || 'left')} onChange={event => set('side', event.target.value)}><option value="left">Antes del identificador</option><option value="right">Después del identificador</option></select></Field></>
+  if (transform.type === 'remove_characters') return <Field label="Caracteres a eliminar"><input value={String(parameters.characters || '')} onChange={event => set('characters', event.target.value)}/></Field>
+  if (transform.type === 'decimal_parse') return <><Field label="Separador decimal"><input required maxLength={1} value={String(parameters.decimal_separator ?? '.')} onChange={event => set('decimal_separator', event.target.value)}/></Field><Field label="Separador de miles"><input maxLength={1} value={String(parameters.thousands_separator ?? ',')} onChange={event => set('thousands_separator', event.target.value)}/></Field></>
+  if (transform.type === 'date_parse') return <Field label="Formatos de fecha" hint="Un formato explícito por línea; se prueban de arriba hacia abajo. Ejemplo: %d/%m/%Y."><textarea required rows={3} value={Array.isArray(parameters.formats) ? parameters.formats.join('\n') : ''} onChange={event => set('formats', event.target.value.split('\n'))}/></Field>
+  return null
+}
+
+function TransformPreview({ transforms, rows, sampleState, label }: { transforms: Transform[]; rows: SampleRow[]; sampleState: SampleState; label: string }) {
+  const configured = transforms.filter(transform => transform.column)
+  const selectedColumns = [...new Set(configured.map(transform => transform.column))]
+  if (!configured.length) return null
+  if (sampleState === 'loading') return <div className="transform-preview empty-preview"><h4>Vista previa Antes / Después</h4><p>Cargando una muestra acotada de la versión…</p></div>
+  if (sampleState === 'error') return <div className="transform-preview empty-preview"><h4>Vista previa Antes / Después</h4><p>No se pudo cargar la muestra. La configuración continúa disponible, pero no se presenta una vista previa.</p></div>
+  if (!rows.length) return <div className="transform-preview empty-preview"><h4>Vista previa Antes / Después</h4><p>La versión no contiene registros de muestra para las columnas seleccionadas.</p></div>
+  const previews = rows.slice(0, 8).map((row, rowIndex) => {
+    const after = { ...row }, errors = new Set<string>(), unsupported = new Set<string>()
+    for (const transform of configured) {
+      const result = applyTransform(after[transform.column], transform)
+      after[transform.column] = result.value
+      if (result.error) errors.add(transform.column)
+      if (result.unsupported) unsupported.add(transform.column)
+    }
+    return { row, after, errors, unsupported, rowIndex }
+  })
+  return <section className="transform-preview" aria-label={`Vista previa Antes / Después · ${label}`}><div className="preview-heading"><div><h4>Vista previa Antes / Después</h4><p>{previews.length} registros reales · las transformaciones se aplican en el orden mostrado</p></div></div><div className="table-scroll"><table><thead><tr><th>Registro</th><th>Columna</th><th>Antes</th><th>Después</th><th>Interpretación</th></tr></thead><tbody>{previews.flatMap(preview => selectedColumns.map(column => <tr key={`${preview.rowIndex}-${column}`}><td>{preview.rowIndex + 1}</td><td className="mono">{column}</td><td><code>{displayValue(preview.row[column])}</code></td><td><code>{displayValue(preview.after[column])}</code></td><td>{preview.errors.has(column) ? <span className="preview-error">No se pudo interpretar; la transformación conservó el valor que recibió.</span> : preview.unsupported.has(column) ? <span className="preview-warning">Vista previa no disponible para este formato; la ejecución usará el formato declarado.</span> : <span className="preview-success">Aplicada</span>}</td></tr>))}</tbody></table></div><p className="preview-disclaimer">Vista informativa: no modifica el dataset ni su versión.</p></section>
+}
+
+function normalizePreviewValue(value: unknown, normalization: Normalization): unknown {
+  if (value === null || value === undefined) return null
+  let result = textValue(value)
+  if (normalization.unicode_normalization !== 'NONE') result = result.normalize(normalization.unicode_normalization)
+  if (normalization.trim) result = result.trim()
+  if (normalization.case === 'UPPER') result = result.toUpperCase()
+  if (normalization.case === 'LOWER') result = result.toLowerCase()
+  return result
+}
+
+function keyValue(row: SampleRow, keys: string[], normalization?: Normalization): string {
+  return `{ ${keys.map(key => `${key}: ${displayValue(normalization ? normalizePreviewValue(row[key], normalization) : row[key])}`).join(' · ')} }`
+}
+
+export function KeyNormalizationPreview({ value, keys, sourceRows = [], targetRows = [], sampleState = 'ready' }: { value: Normalization; keys: string[]; sourceRows?: SampleRow[]; targetRows?: SampleRow[]; sampleState?: SampleState }) {
+  const sourceBefore = ' cliente01 ', targetBefore = 'CLIENTE01'
+  const sourceAfter = normalizePreviewValue(sourceBefore, value), targetAfter = normalizePreviewValue(targetBefore, value)
+  const actions = [value.trim && 'eliminar espacios externos', value.case === 'UPPER' && 'convertir a mayúsculas', value.case === 'LOWER' && 'convertir a minúsculas', value.unicode_normalization !== 'NONE' && `normalizar caracteres (${value.unicode_normalization})`].filter(Boolean)
+  const sourceLimit = targetRows.length ? 5 : 10, targetLimit = sourceRows.length ? 5 : 10
+  const samples = [
+    ...sourceRows.slice(0, sourceLimit).map((row, index) => ({ source: 'Origen', row, index })),
+    ...targetRows.slice(0, targetLimit).map((row, index) => ({ source: 'Destino', row, index })),
+  ]
+  return <section className="normalization-preview" aria-label="Ejemplo y vista previa de normalización de claves"><div className="normalization-example"><h4>Ejemplo con la configuración actual</h4><p>{actions.length ? `Después de ${actions.join(', ')}:` : 'Sin normalización declarada:'}</p><div><span>Origen</span><code>{displayValue(sourceBefore)}</code><b>→</b><code>{displayValue(sourceAfter)}</code></div><div><span>Destino</span><code>{displayValue(targetBefore)}</code><b>→</b><code>{displayValue(targetAfter)}</code></div><strong className={sourceAfter === targetAfter ? 'preview-success' : 'preview-error'}>Resultado → {sourceAfter === targetAfter ? 'Coincidencia' : 'Sin coincidencia'}</strong></div>
+    {!!keys.length && <div className="key-preview"><div className="preview-heading"><div><h4>Vista previa Antes / Después</h4><p>Claves reales usadas internamente para el cruce · hasta 10 registros entre ambas fuentes</p></div></div>{sampleState === 'loading' ? <p>Cargando muestras acotadas de ambas versiones…</p> : sampleState === 'error' ? <p>No se pudieron cargar una o ambas muestras. La normalización puede configurarse, pero no se presenta una vista previa real.</p> : samples.length ? <div className="table-scroll"><table><thead><tr><th>Fuente</th><th>Registro</th><th>Clave antes</th><th>Clave después</th></tr></thead><tbody>{samples.map(sample => <tr key={`${sample.source}-${sample.index}`}><td>{sample.source}</td><td>{sample.index + 1}</td><td><code>{keyValue(sample.row, keys)}</code></td><td><code>{keyValue(sample.row, keys, value)}</code></td></tr>)}</tbody></table></div> : <p>No hay registros de muestra disponibles para estas versiones.</p>}<p className="preview-disclaimer">Vista informativa: la normalización no modifica los datasets originales.</p></div>}
+  </section>
+}
+
+export function TransformBuilder({ value, onChange, columns, rows = [], sampleState = 'ready', label = 'Transformaciones previas' }: { value: Transform[]; onChange: (value: Transform[]) => void; columns?: DatasetColumn[]; rows?: SampleRow[]; sampleState?: SampleState; label?: string }) {
+  const update = (index: number, changes: Partial<Transform>) => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item))
+  const move = (index: number, direction: -1 | 1) => {
+    const reordered = [...value], destination = index + direction
+    ;[reordered[index], reordered[destination]] = [reordered[destination], reordered[index]]
+    onChange(reordered)
+  }
+  return <section className="rule-builder" aria-label={label}><div className="builder-heading"><div><h3>{label}</h3><p>Se aplican de arriba hacia abajo; la vista previa es informativa y el snapshot recibido conserva sus valores.</p></div><button type="button" className="button secondary small" onClick={() => onChange([...value, { type: 'trim', column: '', parameters: {} }])}>Agregar transformación · {label}</button></div>{value.map((item, index) => <fieldset className="builder-card" key={index}><legend>Transformación {index + 1} · {label}</legend><div className="form-grid"><Field label="Columna de transformación"><ColumnPicker columns={columns} value={item.column} onChange={column => update(index, { column })}/></Field><Field label="Transformación"><select value={item.type} onChange={event => update(index, { type: event.target.value, parameters: { ...transformDefaults[event.target.value] } })}>{Object.entries(transformLabels).map(([kind, functionalLabel]) => <option key={kind} value={kind}>{functionalLabel}</option>)}</select></Field><TransformParameters transform={item} onChange={parameters => update(index, { parameters })}/></div><TransformExplanation transform={item}/><div className="builder-card-actions"><button type="button" className="text-button" disabled={index === 0} aria-label={`Mover transformación ${index + 1} hacia arriba`} onClick={() => move(index, -1)}><ArrowUp size={14}/> Subir</button><button type="button" className="text-button" disabled={index === value.length - 1} aria-label={`Mover transformación ${index + 1} hacia abajo`} onClick={() => move(index, 1)}><ArrowDown size={14}/> Bajar</button><button type="button" className="text-button" onClick={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={14}/> Quitar transformación {index + 1}</button></div></fieldset>)}<TransformPreview transforms={value} rows={rows} sampleState={sampleState} label={label}/></section>
 }

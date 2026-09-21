@@ -206,6 +206,7 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   await dialog.getByLabel('Nombre del dataset', { exact: true }).fill(name)
   await dialog.locator('input[type=file]').setInputFiles({ name: 'editable.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
   await expect(dialog.getByLabel('Tipo de transaction_date')).toHaveValue('DATE')
+  await expect(dialog.getByLabel('Otros identificadores por nombre')).toHaveCount(0)
   await dialog.getByLabel('Tipo de transaction_date').selectOption('STRING')
   await dialog.getByRole('button', { name: 'Columnas identificadoras (opcional): abrir selector', exact: true }).click()
   const identifierOptions = dialog.getByRole('group', { name: 'Opciones de Columnas identificadoras (opcional)', exact: true })

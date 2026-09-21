@@ -77,9 +77,9 @@ describe('Declarative rule builders', () => {
     const user = userEvent.setup()
     render(<NormalizationHarness/>)
     expect(payload()).toEqual({ trim: false, case: 'NONE', unicode_normalization: 'NONE' })
-    await user.selectOptions(screen.getByLabelText('Claves: espacios externos'), 'TRIM')
-    await user.selectOptions(screen.getByLabelText('Claves: mayúsculas y minúsculas'), 'UPPER')
-    await user.selectOptions(screen.getByLabelText('Claves: Unicode'), 'NFC')
+    await user.selectOptions(screen.getByLabelText('Espacios al inicio y al final'), 'TRIM')
+    await user.selectOptions(screen.getByLabelText('Mayúsculas y minúsculas'), 'UPPER')
+    await user.selectOptions(screen.getByLabelText('Normalización de caracteres'), 'NFC')
     expect(payload()).toEqual({ trim: true, case: 'UPPER', unicode_normalization: 'NFC' })
   })
 
@@ -91,7 +91,7 @@ describe('Declarative rule builders', () => {
     expect(screen.getByRole('option', { name: 'Reportar diferencia' })).toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('Dos valores nulos'), 'EQUAL')
     expect(payload()[0].parameters).toEqual({ equal_nulls: true, normalization: noNormalization })
-    await user.selectOptions(screen.getByLabelText('Comparación 1: espacios externos'), 'TRIM')
+    await user.selectOptions(screen.getByLabelText('Comparación 1: espacios al inicio y al final'), 'TRIM')
     expect(payload()[0].parameters.normalization).toEqual({ ...noNormalization, trim: true })
   })
 

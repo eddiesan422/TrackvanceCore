@@ -1,6 +1,6 @@
 [project]
 name = "trackvance-core"
-version = "0.4.0"
+version = "0.4.1"
 description = "Trackvance Core local prototype API and processing worker"
 requires-python = ">=3.12,<3.14"
 dependencies = [

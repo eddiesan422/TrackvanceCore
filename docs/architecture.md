@@ -1,6 +1,6 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.4.0, evolución funcional local, 19 de septiembre de 2026.
+Revisión de implementación: 0.4.1, configuración guiada por esquema, 21 de septiembre de 2026.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y un
 worker que comparte los modelos y servicios del backend. Docker Compose con
@@ -115,11 +115,11 @@ inicialización SQLite pueden consultar el filesystem como infraestructura local
 
 | Módulo | Responsabilidad actual |
 | --- | --- |
-| Datasets | Inspección acotada, tipos corregibles, identificadores, áreas, versiones inmutables y linaje |
+| Datasets | Inspección acotada, tipos corregibles, identificadores elegidos desde el esquema, áreas, versiones inmutables y linaje |
 | Conexiones | Configuración versionada, prueba de acceso, descubrimiento SQL, preview acotado y snapshots de entrada |
-| Data Intake | Contratos, transforms, reglas simples/compuestas, tipo/longitud/rango/fecha, condiciones, comparaciones e integridad referencial contra snapshots |
-| ReconOps | Claves simples/compuestas, transforms por lado, comparación por columna, nulls, tolerancias y agregaciones 1:N/N:1 SUM/COUNT |
-| Sentinel | Schema, nulls, frescura, volumen, distinct/uniqueness, bandas median/IQR, programación local, alertas internas y series compatibles |
+| Data Intake | Contratos, catálogo de responsables, transforms con preview, reglas simples/compuestas, tipo/longitud/rango/fecha, condiciones, comparaciones e integridad referencial contra snapshots |
+| ReconOps | Claves simples/compuestas con preview, transforms por lado, comparación por columna, nulls, tolerancias y agregaciones 1:N/N:1 SUM/COUNT |
+| Sentinel | Selectores por esquema, schema/nulls, frescura, volumen, distinct/uniqueness, bandas median/IQR, programación local, alertas internas y series compatibles |
 | Excepciones | Hallazgo/configuración, responsable, prioridad, SLA, adjuntos, reapertura, validación posterior, resolución automática opcional y cierres administrativos |
 | Centro de Control | Filtros, salud, fallos, atención priorizada, tendencias y navegación a recursos |
 | Auditoría e identidad | Administración local de usuarios/roles, actor estable, eventos sanitizados, sesiones, CSRF y aislamiento por organización |
@@ -142,6 +142,48 @@ evaluadas no demuestra corrección. Una reapertura exige evidencia posterior nue
 En casos abiertos legacy, la identificación compatible por código/columna exige
 también contadores suficientes; ausencia de Finding sin evaluación demostrable
 no habilita un nuevo cierre. Los casos ya resueltos conservan su historia.
+
+### Configuración asistida por esquema
+
+La interfaz 0.4.1 utiliza el esquema y la muestra acotada de la DatasetVersion
+seleccionada para reducir entradas libres sin cambiar los contratos del motor.
+Al cargar o versionar un dataset, los identificadores se eligen desde las
+columnas inspeccionadas, con selección individual o **Todos**; se eliminó la
+entrada adicional de nombres que duplicaba esa decisión.
+
+Data Intake, ReconOps y Sentinel construyen el catálogo de **Responsable** a
+partir de valores ya conocidos en datasets y configuraciones del módulo. Al
+crear una configuración se puede seleccionar uno existente o registrar una
+etiqueta nueva. El backend continúa recibiendo y persistiendo el mismo campo
+`owner`; el catálogo es una ayuda de presentación y no una nueva entidad de
+identidad ni sustituye la asignación de usuarios en Excepciones.
+
+TransformBuilder conserva los tipos persistidos `trim`, `case`,
+`unicode_normalization`, `empty_to_null`, `id_padding`, `remove_characters`,
+`decimal_parse` y `date_parse`, pero presenta sus nombres funcionales. La UI
+calcula localmente un ejemplo y una tabla **Antes / Después** de hasta ocho
+valores de la muestra real de la columna. Las transformaciones se aplican al
+preview en el mismo orden visible y se pueden reordenar. Si un parseo decimal o
+de fecha falla, la muestra indica **No se pudo interpretar; la transformación
+conservó el valor que recibió.** Una transformación posterior de la misma cadena
+puede operar sobre él. La vista previa de fecha sólo interpreta el subconjunto
+determinístico que el navegador puede reproducir con certeza. Ante directivas
+Python no soportadas muestra **Vista previa no disponible para este formato; la
+ejecución usará el formato declarado**, sin marcar fallo ni predecir el resultado
+del backend. El preview no publica artifacts, no crea DatasetVersions y no
+modifica el archivo recibido.
+
+ReconOps explica que varias columnas forman una clave compuesta ordenada. La
+vista previa representa el conjunto completo de campos de origen y destino y
+muestra el efecto de `trim`, `case` y `unicode_normalization` antes del cruce.
+Los textos funcionales conservan `trim` como booleano, `case` como `NONE`,
+`UPPER` o `LOWER` y `unicode_normalization` como `NONE`, `NFC` o `NFKC`;
+configuraciones anteriores se leen sin reescritura.
+Sentinel usa selectores múltiples del esquema para columnas requeridas y columnas
+vigiladas por nulos. La validación final de todos estos nombres permanece en API.
+Al cerrar sesión, el cliente confirma `/auth/logout`, elimina el token CSRF y la
+caché de consultas, y reemplaza la ruta actual por `/`; la pantalla de inicio
+vuelve a resolver la ausencia de sesión sin dejar la vista autenticada activa.
 
 Las reglas referenciales fijan otra DatasetVersion de la organización; se cargan
 por StorageProvider y se añaden al plan y manifest con sus hashes. El motor recibe

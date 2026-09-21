@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1 — 2026-09-21 — configuración guiada por esquema
+
+- Simplifica la carga y el versionado de datasets: elimina la entrada redundante
+  de identificadores por nombre y conserva el selector basado en el esquema
+  inspeccionado, incluida la opción **Todos**.
+- Convierte **Responsable** en un catálogo reutilizable para Data Intake,
+  ReconOps y Sentinel. El usuario puede elegir un valor existente o agregar uno
+  nuevo al crear la configuración, sin cambiar el contrato persistido `owner`.
+- Presenta las transformaciones declarativas con nombres y ayudas funcionales,
+  ejemplo acorde con sus parámetros, orden explícito y una vista previa
+  **Antes / Después** sobre hasta ocho valores reales. La muestra es informativa;
+  no modifica la DatasetVersion ni cambia la semántica del backend.
+- Explica las claves simples y compuestas de ReconOps, traduce las opciones de
+  normalización a lenguaje de negocio y muestra su efecto sobre muestras reales
+  de origen y destino. Los valores persistidos `trim`, `case`,
+  `unicode_normalization`, `NONE`, `UPPER`, `LOWER`, `NFC` y `NFKC` permanecen
+  compatibles.
+- Sustituye la escritura manual de columnas requeridas y columnas observadas por
+  nulos de Sentinel por selectores múltiples del esquema real del dataset.
+- Al cerrar sesión limpia la caché de la sesión y devuelve a la pantalla inicial
+  de Trackvance.
+- Esta versión es una corrección de experiencia de usuario: no añade migraciones,
+  no modifica la ejecución de reglas y no reescribe configuraciones históricas.
+
 ## 0.4.0 — 2026-09-19 — madurez funcional local
 
 - Adopta el roadmap funcional hasta el punto 9; productización y Data Delivery

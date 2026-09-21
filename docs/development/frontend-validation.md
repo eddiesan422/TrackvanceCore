@@ -1,10 +1,38 @@
-# Validación del frontend 0.4.0
+# Validación del frontend 0.4.1
 
-Fecha de verificación: 19 de septiembre de 2026, America/Bogota.
+Fecha de verificación: 21 de septiembre de 2026, America/Bogota.
 Proyecto: `frontend/`. Entorno: Windows, Node.js y pnpm locales; navegador contra
 proyectos Docker aislados.
 
-## Resultado actual de 0.4.0
+## Resultado incremental de 0.4.1
+
+Esta revisión cubre configuración guiada por esquema y no modifica contratos de
+ejecución ni persistencia. Las pruebas se ejecutaron sobre el corte 0.4.1.
+
+| Comprobación | Resultado |
+| --- | --- |
+| `pnpm lint` | PASS. |
+| `pnpm typecheck` | PASS. |
+| `pnpm test -- --run` | **119 pruebas correctas en 13 archivos**. Los focales App + Datasets 16/16 y ConfigDialog + RuleBuilder + AdvancedRules 34/34 también pasaron durante el desarrollo. |
+| `pnpm build` | Correcto. El bundle JavaScript principal mide 550,78 kB (164,59 kB gzip); la advertencia de tamaño no es bloqueante. |
+| Playwright con fuentes reales | **23 escenarios correctos y 1 omitido**. El omitido es el escenario limpio opt-in, ejecutado por separado. |
+| Playwright limpio separado | **1 escenario correcto**: acceso sin seed, logout, regreso a `/` y reaparición del inicio. |
+| Compose integral | **19 escenarios correctos y 5 omitidos**; los cinco opt-in están cubiertos por los ciclos especializados. |
+
+La cobertura incremental ejecutada
+incluye: ausencia del campo libre de otros identificadores; catálogo y alta de
+Responsable; labels, ayudas, orden y preview Antes / Después de transforms;
+claves simples/compuestas y su normalización visible en ReconOps; multiselect de
+Sentinel basado en esquema; y regreso al inicio después de cerrar sesión.
+La suite distingue una fecha inválida de un formato Python que la vista previa no
+puede reproducir: el segundo conserva el valor y delega la ejecución al backend,
+sin presentar un falso error de interpretación.
+
+Son **24 escenarios Playwright distintos aprobados** entre el ciclo con fuentes
+reales y el recorrido limpio separado. Los casos omitidos en un runner se
+ejecutan en el runner correspondiente y no se suman dos veces.
+
+## Base certificada de 0.4.0
 
 | Comprobación | Resultado |
 | --- | --- |
@@ -24,13 +52,14 @@ API; la suite Playwright usa el stack local y valida por separado el navegador.
 
 | Archivo | Alcance comprobado |
 | --- | --- |
+| `src/app/App.test.tsx` | Logout confirmado, limpieza de sesión/caché y regreso a la pantalla inicial. |
 | `src/api/client.test.ts` | Sesión, CSRF, descargas seguras y propagación de errores. |
 | `src/features/connections/Connections.test.tsx` | Prueba previa al guardado, edición optimista, cambio de endpoint, permisos, baja lógica, exploración, registro y refresh. |
-| `src/features/datasets/Datasets.test.tsx` | Formatos, inspección, esquema, identificadores, versiones y ordenamiento. |
+| `src/features/datasets/Datasets.test.tsx` | Formatos, inspección, esquema, identificadores seleccionados/Todos sin entrada libre redundante, versiones y ordenamiento. |
 | `src/features/datasets/VersionIdentity.test.tsx` | Procedencia, snapshots, artifacts, permisos y compatibilidad histórica. |
 | `src/features/identity/UsersPanel.test.tsx` | Alta y edición local, roles, activación, reset de contraseña, permisos y errores. |
-| `src/features/runs/AdvancedRules.test.tsx` | Condiciones, claves compuestas, referencias inmutables, tipo/longitud, comparación de columnas, transforms y null policies. |
-| `src/features/runs/ConfigDialog.test.tsx` | Esquema detectado, reglas Intake, Recon y Sentinel, publicación y errores del servicio. |
+| `src/features/runs/AdvancedRules.test.tsx` | Condiciones, claves compuestas, referencias, transforms con labels/ayuda/preview ordenado, normalización visible y null policies. |
+| `src/features/runs/ConfigDialog.test.tsx` | Catálogo de responsables, esquema detectado, multiselect Sentinel, reglas Intake/Recon, publicación y errores del servicio. |
 | `src/features/runs/MonitorSchedulePanel.test.tsx` | Carga, cadencia, pausa, revisión optimista, permisos, ocurrencias, alertas y series. |
 | `src/features/runs/RuleBuilder.test.tsx` | Reglas declarativas, normalización y comparaciones. |
 | `src/features/runs/Runs.test.tsx` | Estados, descargas, permisos, métricas, códigos y numeración de resultados. |

@@ -1,6 +1,6 @@
 # Trackvance Core
 
-## Evolución funcional local 0.4.0
+## Evolución funcional local 0.4.1
 
 El prototipo conserva el monolito modular FastAPI/React, PostgreSQL, worker
 y almacenamiento local. Incluye perfiles observados sin trim implícito,
@@ -17,6 +17,10 @@ independientes por columna, políticas de null, transforms y agregaciones 1:N/N:
 Sentinel incorpora programación local e historia compatible; Excepciones añade
 asignación, SLA, adjuntos, reapertura y resolución automática opcional con evidencia
 técnica. Configuración permite administrar usuarios locales y sus cinco roles.
+La revisión 0.4.1 guía la configuración con el esquema real: simplifica la
+selección de identificadores, incorpora un catálogo de responsables, ofrece
+previews informativos de transforms y claves, y usa selectores de columnas en
+Sentinel. Los contratos de ejecución y las configuraciones históricas se conservan.
 La [línea oficial de evolución](docs/roadmap.md) conserva los puntos 1–2 y madura
 los puntos 3–9 antes de productizar. Las pruebas de operación y volumen se informan
 con resultados medidos; no se habilita infraestructura cloud.
@@ -40,8 +44,8 @@ Documentación del ciclo:
 - [Operación, Docker y respaldo](docs/development/operations.md).
 - [Backup, restore y reset verificados](docs/adr/0013-local-backup-restore.md).
 - [Benchmarks medidos y límites](docs/development/volume-benchmark.md).
-- [OpenAPI 0.4.0](backend/openapi.json) y [contrato HTTP](backend/API_CONTRACT.md).
-- [Especificación técnica v1.1 — implementación 0.4.0](docs/specification/README.md).
+- [OpenAPI 0.4.1](backend/openapi.json) y [contrato HTTP](backend/API_CONTRACT.md).
+- [Especificación técnica v1.1 — implementación 0.4.1](docs/specification/README.md).
 
 La instalación local `trackvance-certification` utiliza `http://localhost:3100`.
 El puerto por defecto de una instalación nueva es 3000; `WEB_PORT` y
@@ -57,7 +61,7 @@ funcional no representa la implementación de la
 arquitectura objetivo del documento. Consulta [el estado de arquitectura](docs/architecture.md)
 y [el alcance vigente](docs/development/prototype-scope.md).
 Los resultados de las pruebas están en [verificación local](docs/development/validation.md).
-La especificación oficial v1.1 tiene una [revisión de implementación 0.4.0](docs/specification/README.md)
+La especificación oficial v1.1 tiene una [revisión de implementación 0.4.1](docs/specification/README.md)
 y conserva su [fuente editable](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md) en el repositorio.
 
 ## Inicio recomendado: Docker Compose y PostgreSQL
@@ -125,9 +129,10 @@ volumen nuevos; la autenticación local y RBAC no cambian.
 2. **Datasets:** abre un ejemplo y revisa versiones, esquema y perfil, o crea
    un dataset y carga CSV, Excel XLSX, JSON tabular, Parquet o TXT delimitado.
    El formulario detecta formato, columnas y tipos antes de cargar; permite
-   corregir el tipo lógico, seleccionar todas o algunas columnas identificadoras,
-   elegir hoja de Excel o delimitador TXT y agregar un área de negocio. Estas
-   opciones también están disponibles al crear una versión nueva. El listado
+   corregir el tipo lógico, seleccionar todas o algunas columnas identificadoras
+   desde el esquema, elegir hoja de Excel o delimitador TXT y agregar un área de
+   negocio. No se mantiene una segunda entrada libre de identificadores por
+   nombre. Estas opciones también están disponibles al crear una versión nueva. El listado
    muestra el origen de la última versión, por ejemplo Manual o Data Intake.
    Si el nombre ya existe, agrega el archivo como una versión nueva.
 3. **Intake:** al crear un contrato, selecciona un dataset para cargar su
@@ -137,11 +142,17 @@ volumen nuevos; la autenticación local y RBAC no cambian.
    validación y revisa decisión, errores y salida válida. Agrega reglas avanzadas
    sobre columnas reales: unicidad compuesta, tipo, rango, longitud, lista, regex,
    fecha, comparación entre columnas, condición o referencia a otra versión.
-   Las métricas separan filas evaluadas, incumplidas y excluidas.
+   Las métricas separan filas evaluadas, incumplidas y excluidas. El campo
+   Responsable permite reutilizar un valor del catálogo o agregar uno nuevo.
+   Las transformaciones previas usan nombres funcionales, explican sus parámetros
+   y muestran hasta ocho valores reales Antes / Después en el orden configurado;
+   esa muestra nunca modifica la versión del dataset.
 4. **ReconOps:** selecciona ambas fuentes, claves simples o compuestas, transforms
    explícitos y comparación exacta, tolerancia absoluta, porcentual o temporal por
-   columna. Configura nulls y, si corresponde, SUM/COUNT sobre origen o destino.
-   Revisa cada comparación, líneas del grupo y los siete tipos de resultado.
+   columna. El editor explica cómo se forma la clave y cómo se normaliza, y muestra
+   una vista previa de las claves simples o compuestas de origen y destino. Configura
+   nulls y, si corresponde, SUM/COUNT sobre origen o destino. Revisa cada comparación,
+   líneas del grupo y los siete tipos de resultado.
 5. **Excepciones:** convierte un hallazgo en caso, investígalo y envíalo a
    validación. Solo una ejecución posterior del mismo snapshot de configuración
    que confirme la corrección habilita **Resolver**. Los cierres administrativos
@@ -153,11 +164,14 @@ volumen nuevos; la autenticación local y RBAC no cambian.
    la misma comprobación técnica. Una reapertura requiere comentario.
 6. **Sentinel:** ejecuta o programa un monitor con intervalo e inicio. El worker
    evalúa la última versión ya registrada, conserva fecha prevista/real y evita
-   solapamientos. Revisa controles, tendencias, bandas históricas y alertas internas.
+   solapamientos. Las columnas requeridas y las vigiladas por nulos se seleccionan
+   desde el esquema real. Revisa controles, tendencias, bandas históricas y
+   alertas internas.
    Actualizar datos desde una conexión sigue siendo una operación separada.
 7. **Usuarios:** como Administrator, abre Configuración para crear/editar cuentas,
    asignar roles, activar/desactivar, consultar permisos y restablecer contraseñas.
    Los cambios sensibles revocan sesiones; el último administrador queda protegido.
+   **Cerrar sesión** limpia los datos de sesión del navegador y vuelve al inicio.
 
 Cada ejecución completada ofrece un informe Excel y manifiesto JSON. `SUCCESS`
 indica que el procesamiento terminó: los datos pueden contener diferencias o

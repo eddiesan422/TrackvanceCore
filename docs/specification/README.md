@@ -1,8 +1,8 @@
 # Especificación técnica
 
 Esta carpeta versiona la **Especificación Técnica v1.1** y su fuente editable para
-la evolución funcional local `0.4.0`. El nombre v1.1 identifica el documento;
-0.4.0 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
+la evolución funcional local `0.4.1`. El nombre v1.1 identifica el documento;
+0.4.1 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
 en el texto; la productización permanece fuera del roadmap local 1–9.
 
 - `Trackvance_Core_Especificacion_Tecnica_v1.1.md`: fuente editable oficial.
@@ -10,8 +10,9 @@ en el texto; la productización permanece fuera del roadmap local 1–9.
   generar candidato y revisar renderizado.
 - `build_specification.py`: generador portable reportlab/pypdf, separado de las
   dependencias de ejecución del producto.
-- `validation_results_0.4.0.json`: resultados del ciclo usados en la sección de
+- `validation_results_0.4.1.json`: resultados del ciclo usados en la sección de
   aceptación; no se sustituyen con datos de la revisión anterior.
+- `validation_results_0.4.0.json`: evidencia histórica de la entrega anterior.
 - `validation_results_0.3.0.json`: evidencia histórica de la entrega anterior.
 
 ## Generación y publicación
@@ -48,9 +49,9 @@ Cuando ese archivo archivado está junto al generador, su hash se valida sin
 sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
-[validación](../development/validation.md). La publicación 0.4.0 tiene **31 páginas
-y 25 marcadores**, todas renderizadas y revisadas, sin texto fuera de márgenes.
-La copia oficial y la versionada son idénticas. SHA-256 del PDF publicado:
+[validación](../development/validation.md). La fuente 0.4.1 y su archivo de
+resultados permanecen en preparación hasta completar las comprobaciones del
+cambio; el PDF 0.4.1 sólo se publica después de renderizar y revisar todas sus
+páginas. El PDF actualmente versionado sigue siendo la publicación 0.4.0 de 31
+páginas y 25 marcadores, SHA-256
 `62f04c3b3bc8a4e24bd3d22cc0f8f9c9212600d4b0215a82deaafa3e073bd64c`.
-La sección de aceptación registra los seis jobs de CI aprobados y conserva la
-incidencia Linux inicial junto con su corrección y recertificación.

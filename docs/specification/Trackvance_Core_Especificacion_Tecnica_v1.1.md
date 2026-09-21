@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-Revisión de implementación 0.4.0 | 19 de septiembre de 2026
+Revisión de implementación 0.4.1 | 21 de septiembre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -10,7 +10,7 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps y Sentinel con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles y conserva evidencia verificable del resultado.
 
-Esta especificación describe la evolución funcional local 0.4.0: conserva Conexiones PostgreSQL/SQL Server e incorpora reglas avanzadas, conciliación configurable, programación Sentinel, gestión de excepciones y administración de usuarios. Operación, recuperación y benchmarks se describen según su evidencia real. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. Los resultados de certificación de esta revisión se registran en la sección de aceptación; no se extrapolan los de 0.3.0.
+Esta especificación describe la evolución funcional local 0.4.1: conserva las capacidades 0.4.0 y mejora la configuración guiada por el esquema en Datasets, Data Intake, ReconOps y Sentinel, además del cierre de sesión. Conexiones PostgreSQL/SQL Server, reglas avanzadas, conciliación, programación Sentinel, excepciones, identidad, operación, recuperación y benchmarks mantienen su semántica certificada. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. Los resultados incrementales de esta revisión se registran en la sección de aceptación; no se extrapolan los de versiones anteriores.
 
 | Estado | Significado normativo |
 | --- | --- |
@@ -190,7 +190,7 @@ Un nuevo adaptador implementa DatasetSource y su normalización, registra opcion
 
 El flujo previo a guardar una versión detecta formato, hoja/delimitador, columnas y tipos. El usuario puede corregir el tipo lógico o marcar identificadores. Los mismos controles se ofrecen al crear una versión de un dataset existente.
 
-- Columnas identificadoras permite escribir nombres o seleccionarlos del esquema, con opción Todos.
+- Columnas identificadoras se selecciona únicamente desde el esquema inspeccionado, con opción Todos. Se eliminó la entrada redundante de nombres libres; cada selección conserva el override STRING + IDENTIFIER.
 - Los tipos disponibles son STRING, INT64, DECIMAL, DATE, TIMESTAMP y BOOLEAN; un override explícito se valida contra los valores del archivo.
 - El campo Área de negocio permite agregar un área nueva. El listado muestra origen entre Dataset y Área: Manual para carga, Data Intake para salida derivada.
 - El listado combina búsqueda/filtro y orden ascendente/descendente por Área, Registros, Versiones, Estado y Última actualización.
@@ -220,11 +220,33 @@ DATE se infiere cuando los valores no nulos válidos cumplen YYYY-MM-DD y repres
 
 IDENTIFIER tiene prioridad sobre la interpretación como magnitud. Los nombres id y *_id activan una heurística documentada; el usuario puede confirmar/override el esquema. "001234567" conserva su cero inicial frente a "1234567". No se convierten universalmente todas las columnas numéricas a identificadores. El esquema nativo Parquet ayuda a inferir tipos, incluso con columnas nulas, pero no invalida el override explícito.
 
+En la carga inicial y al crear una versión, el selector de identificadores muestra
+las columnas realmente inspeccionadas y permite elegir algunas o todas. La API
+continúa recibiendo los mismos overrides; no se crea una segunda fuente de nombres
+ni se reescriben los esquemas de versiones históricas.
+
 Los perfiles incluyen conteos de nulos y distintos, tasas y razón de unicidad, además de método/versión. Las series históricas LEGACY_NORMALIZED/1 se mantienen separadas de EXACT_OBSERVED/2 para no comparar métricas semánticamente incompatibles.
 
 ### Transformaciones funcionales
 
 Intake y ReconOps admiten listas ordenadas de transforms {column,type,parameters}: trim, case, unicode_normalization, empty_to_null, id_padding, remove_characters, decimal_parse y date_parse. Recon mantiene listas independientes para origen y destino. Sólo se ejecutan cuando el contrato las declara. El upload original, Parquet de entrada y perfil histórico no se reescriben; los resultados conservan los parámetros efectivos.
+
+La interfaz presenta esos mismos tipos con nombres funcionales: Eliminar espacios
+externos, Convertir mayúsculas/minúsculas, Normalizar texto Unicode, Convertir
+texto vacío en nulo, Completar identificador, Eliminar caracteres, Interpretar
+número decimal e Interpretar fecha. Cada elemento muestra una explicación y un
+ejemplo recalculado con sus parámetros. Un preview de hasta ocho valores reales
+aplica las transformaciones de la columna en el mismo orden del contrato y muestra
+Antes / Después. Los controles permiten hacer explícito ese orden. Un parseo
+decimal o de fecha inválido muestra **No se pudo interpretar; la transformación
+conservó el valor que recibió.** Los pasos posteriores siguen ejecutándose
+en el orden declarado. La vista previa de fechas cubre únicamente las directivas
+determinísticas que el navegador reproduce con certeza. Para formatos Python no
+soportados —por ejemplo `%b`, `%j` o `%Z`— muestra **Vista previa no disponible
+para este formato; la ejecución usará el formato declarado**, sin convertir esa
+limitación en un fallo. `datetime.strptime` del backend conserva la autoridad
+sobre la ejecución. La vista previa se calcula sólo para informar: no crea artifacts, no modifica el
+DatasetVersion y no forma parte del resultado ni del hash de configuración.
 
 Las configuraciones nuevas se validan y normalizan a schema_version=2. configuration_hash usa JSON determinista con claves ordenadas y SHA-256; stored_config_hash conserva además la identidad de la configuración almacenada. La adaptación legacy se centraliza en config_semantics y manifests, evitando condiciones de versión dispersas en módulos.
 
@@ -261,7 +283,7 @@ REFERENCE fija dataset_version_id y correspondencia de columnas en el contrato. 
 
 ### Editor y resultados
 
-Al elegir dataset, el editor carga su esquema. Columnas obligatorias, sin duplicados, numéricas y positivas usan multiselect con Todos; las positivas sólo permiten columnas numéricas. Las reglas avanzadas seleccionan columnas reales y muestran parámetros por tipo. Las referencias permiten elegir dataset, versión y columnas con su esquema persistido. El sistema detecta candidatos, pero el usuario decide las reglas. Actualizar esquema no obliga a escanear datasets completos.
+Al elegir dataset, el editor carga su esquema. Columnas obligatorias, sin duplicados, numéricas y positivas usan multiselect con Todos; las positivas sólo permiten columnas numéricas. Las reglas avanzadas seleccionan columnas reales y muestran parámetros por tipo. Las referencias permiten elegir dataset, versión y columnas con su esquema persistido. El sistema detecta candidatos, pero el usuario decide las reglas. Actualizar esquema no obliga a escanear datasets completos. Responsable funciona como un catálogo deduplicado de owners de datasets y configuraciones del módulo; el usuario puede seleccionar uno o agregar una etiqueta nueva de hasta 120 caracteres. El contrato sigue persistiendo el mismo string `owner`: no es una cuenta, rol ni asignación de Excepciones.
 
 Intake devuelve total_rows, valid_rows, error_rows, warning_rows, acceptance_rate y decisión APPROVED/APPROVED_WITH_WARNINGS/REJECTED según severidad y max_error_rate. Cada regla conserva rule_id cuando existe, code, columnas, severity, status, evaluated_count, failed_count, skipped_count, parámetros y condición. La evidencia identifica valor recibido y motivo. Una fila puede producir varios errores; error_rows cuenta registros afectados, no la suma de mensajes. WARNING conserva la fila aceptada y su advertencia. Una regla sin filas evaluadas no demuestra corrección técnica de una excepción.
 
@@ -271,11 +293,27 @@ El output reutilizable se guarda como Parquet INTAKE_ACCEPTED, con source_type=I
 
 ReconOps compara versiones inmutables de origen y destino. key_columns admite una o varias columnas. El control conserva key_normalization en su versión, config hash, manifest, plan y diagnostics.
 
+El editor explica que las columnas clave identifican el mismo registro en ambos
+lados y que, al seleccionar varias, forman una clave compuesta cuyo orden se
+respeta. También aclara que la normalización se aplica antes de buscar
+coincidencias y no modifica los datasets originales. Las opciones visibles son
+**Conservar como están / Eliminar espacios externos**, **Conservar como están /
+Convertir a MAYÚSCULAS / Convertir a minúsculas** y **No normalizar /
+Normalización estándar (NFC) / Normalización de compatibilidad (NFKC)**. La ayuda
+Unicode explica la diferencia entre representación visual e interna.
+
 ```json
 {"trim": false, "case": "NONE", "unicode_normalization": "NONE"}
 ```
 
 case admite NONE/UPPER/LOWER y unicode_normalization NONE/NFC/NFKC. Los controles nuevos usan NONE por defecto. Los históricos sin el campo conservan el comportamiento legacy de trim mediante adaptación versionada; no se cambia silenciosamente el resultado de runs anteriores.
+
+Una vista previa Antes / Después utiliza hasta diez registros reales de origen y
+destino para mostrar la clave interna tras la normalización. En claves compuestas
+representa todas las columnas como conjunto ordenado y permite contrastar ambos
+lados. La muestra y el ejemplo dinámico se calculan en UI; no escriben datos ni
+alteran `trim` booleano, `case` (`NONE`, `UPPER`, `LOWER`) ni
+`unicode_normalization` (`NONE`, `NFC`, `NFKC`) persistidos.
 
 | Regla | Semántica |
 | --- | --- |
@@ -305,6 +343,11 @@ La precisión monetaria se implementa con Decimal y contexto suficiente para sum
 ## 10. Sentinel y métricas históricas
 
 Sentinel ejecuta monitores sobre una DatasetVersion y produce checks explicables. Los controles legacy SCHEMA_REQUIRED, NULL_RATE, FRESHNESS y VOLUME_CHANGE permanecen compatibles. Una columna ausente se distingue de una columna presente con nulls.
+
+En el editor, **Columnas requeridas** y **Columnas a revisar por nulos** son
+selectores múltiples alimentados por el esquema de la DatasetVersion elegida.
+Pueden conservar selecciones históricas mientras se publica una versión nueva;
+backend sigue validando que los nombres y la organización sean correctos.
 
 | Control | Parámetros / cálculo |
 | --- | --- |
@@ -401,6 +444,11 @@ health_score se pondera por unidades evaluadas según la agregación del backend
 ### Rutas SPA
 
 /; /datasets; /datasets/:id; /connections; /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /exceptions; /rules; /audit; /settings/*. La administración de usuarios está integrada en Configuración. El menú conserva los módulos y el diseño navy/teal. Estados de carga, vacío y error tienen tratamiento específico; se conserva request_id en errores para diagnóstico.
+
+Cerrar sesión confirma `/auth/logout`, limpia token CSRF, caché de consultas y
+estado de sesión, y navega con reemplazo a `/`. El usuario vuelve a la pantalla
+inicial de Trackvance —incluido **Entrar al entorno demo** cuando esté habilitado—
+sin mantener una pantalla autenticada en el historial inmediato.
 
 Los detalles de dataset separan archivo original, fuente derivada, esquema/perfil y linaje. Los detalles de run separan Completada de Rechazado/Con hallazgos/Alerta. Los labels de negocio acompañan reason codes técnicos en resultados y evidencia. La numeración se muestra como Línea del archivo cuando representa línea física o Registro de la versión cuando corresponde.
 
@@ -721,7 +769,23 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 @validation
 
-### Certificación local de esta revisión
+### Certificación incremental 0.4.1
+
+La tabla anterior es la fuente explícita de resultados de esta revisión; ningún
+éxito se hereda de 0.4.0. En local aprobaron 533 tests backend/scripts, Ruff,
+Mypy sobre 33 archivos, ESLint, TypeScript, build y 119 tests Vitest en 13
+archivos. El bundle principal fue de 550,78 kB / 164,59 kB gzip y conserva un
+aviso informativo de tamaño.
+
+El ciclo Compose aislado aprobó doctor 7/7, smoke API 84/84, migraciones
+upgrade/downgrade/upgrade, persistencia tras restart y 19 escenarios Playwright;
+cinco opt-in se cubrieron en ciclos especializados. El ciclo real de Conexiones
+aprobó 62 comprobaciones PostgreSQL/SQL Server y 23 escenarios de navegador; el
+recorrido limpio separado aprobó 1/1, incluido logout, redirección a `/` e inicio
+visible. Son 24 escenarios Playwright distintos aprobados; las omisiones no se
+cuentan dos veces. No se añadió migración, endpoint ni DTO.
+
+### Base certificada de 0.4.0
 
 La ejecución consolidada local aprobó 533 tests pytest en 41,66 s, con dos warnings de deprecación de las dependencias de pruebas. Incluye nueve regresiones nuevas del respaldo/restauración por streaming. Ruff pasó; Mypy comprobó 33 archivos. ESLint, TypeScript y build frontend pasaron; Vitest aprobó 109 tests en 12 archivos. El bundle principal compilado fue de 535,26 kB; su aviso de tamaño no se presenta como fallo de compilación.
 
@@ -741,7 +805,7 @@ El ciclo Compose también aprobó smoke API, doctor, migraciones PostgreSQL e in
 | Sentinel v3 | 90 filas, source_system ausente, cambio 0 %, 1 fallo, salud 88,89 %. |
 | Excepciones | Bloqueo sin validación; Run posterior correcto habilita RESOLVED; cierre administrativo separado. |
 
-La cobertura nueva incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage.
+La base 0.4.0 incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage. La cobertura incremental 0.4.1 comprueba el selector único de identificadores, catálogo de responsables, labels/ayudas/orden/preview de transforms, preview de claves simples y compuestas, multiselect de Sentinel por esquema y regreso al inicio tras logout.
 
 El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones se prueba con motores reales PostgreSQL y SQL Server, usuarios SELECT, caída/reconexión, versiones, Intake y búsqueda de secretos en logs/metadata. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
 
@@ -790,5 +854,6 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | 16-09-2026 | v1.1, implementación 0.3.0 | Consolidación del estado real, fronteras de infraestructura y validación local. |
 | 19-09-2026 | v1.1, evolución Conexiones | PostgreSQL, SQL Server, secretos cifrados, snapshots y pruebas con motores reales. |
 | 19-09-2026 | v1.1, implementación 0.4.0 | Maduración funcional del roadmap local; resultados y límites según evidencia de esta revisión. |
+| 21-09-2026 | v1.1, implementación 0.4.1 | Configuración guiada por esquema, previews informativos, catálogo de responsables y cierre de sesión corregido; contratos del motor sin cambios. |
 
-La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. Los resultados de validación son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.4.0.
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. Los resultados de validación son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.4.1.

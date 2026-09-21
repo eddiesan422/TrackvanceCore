@@ -39,4 +39,13 @@ test('el acceso demo funciona sin sembrar datos sintéticos', async ({ page }) =
     expect(response.status(), endpoint).toBe(200)
     expect(await response.json(), endpoint).toEqual({ items: [], total: 0 })
   }
+
+  const logoutResponsePromise = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/v1/auth/logout'
+      && response.request().method() === 'POST',
+  )
+  await page.getByLabel('Cerrar sesión', { exact: true }).click()
+  expect((await logoutResponsePromise).status()).toBe(200)
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('button', { name: 'Entrar al entorno demo', exact: true })).toBeVisible()
 })

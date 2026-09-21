@@ -1,4 +1,29 @@
-# Validación de Trackvance Core 0.4.0
+# Validación de Trackvance Core 0.4.1
+
+Corte incremental del 21 de septiembre de 2026 (America/Bogota). La revisión
+0.4.1 cambia la experiencia de configuración y conserva contratos, datos y
+semántica backend. Ningún éxito se hereda de la entrega anterior.
+
+| Comprobación 0.4.1 | Resultado ejecutado |
+| --- | --- |
+| pytest backend y scripts | 533 aprobadas en 37,36 s; dos avisos de deprecación. |
+| Ruff | PASS. |
+| Mypy | PASS: 33 archivos fuente. |
+| ESLint / TypeScript | PASS. |
+| Vitest | 119 aprobadas en 13 archivos. Focales 16/16 y 34/34 aprobados durante el desarrollo. |
+| Build frontend | PASS; bundle JavaScript principal 550,78 kB / 164,59 kB gzip, con advertencia informativa de tamaño. |
+| Playwright con fuentes reales | 23 aprobadas y 1 opt-in omitida; 62 comprobaciones PostgreSQL/SQL Server, credenciales/logs y restart: PASS. |
+| Playwright instalación limpia | 1 aprobada: acceso sin seed, logout, redirección a `/` e inicio visible. Total: 24 escenarios distintos aprobados. |
+| Compose integral | 19 aprobadas y cinco opt-in cubiertas por otros ciclos; doctor 7/7, smoke 84/84, migraciones y persistencia tras restart: PASS. |
+| GitHub Actions 0.4.1 | **PENDIENTE DEL WORKFLOW DEL COMMIT DE ENTREGA.** |
+
+OpenAPI, paquetes y lock declaran 0.4.1. Esta revisión no crea endpoints, DTOs ni
+migraciones; la API y Alembic permanecen compatibles. La cobertura incremental
+incluye identificadores desde esquema, catálogo de responsables, transforms y
+normalización de claves con preview, selectores Sentinel y logout con regreso al
+inicio.
+
+## Base certificada de 0.4.0
 
 Certificación local del 19 de septiembre de 2026 (America/Bogota). Los resultados
 de 0.3.0 quedan en [el informe histórico](validation-history-0.3.0.md).
