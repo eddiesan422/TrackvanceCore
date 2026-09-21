@@ -23,6 +23,8 @@
   de Trackvance.
 - Esta versión es una corrección de experiencia de usuario: no añade migraciones,
   no modifica la ejecución de reglas y no reescribe configuraciones históricas.
+- Certifica 533 pruebas backend/scripts, 119 pruebas frontend en 13 archivos,
+  24 escenarios Playwright distintos y seis de seis jobs de GitHub Actions.
 
 ## 0.4.0 — 2026-09-19 — madurez funcional local
 

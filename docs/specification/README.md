@@ -49,9 +49,8 @@ Cuando ese archivo archivado está junto al generador, su hash se valida sin
 sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
-[validación](../development/validation.md). La fuente 0.4.1 y su archivo de
-resultados permanecen en preparación hasta completar las comprobaciones del
-cambio; el PDF 0.4.1 sólo se publica después de renderizar y revisar todas sus
-páginas. El PDF actualmente versionado sigue siendo la publicación 0.4.0 de 31
-páginas y 25 marcadores, SHA-256
-`62f04c3b3bc8a4e24bd3d22cc0f8f9c9212600d4b0215a82deaafa3e073bd64c`.
+[validación](../development/validation.md). La publicación 0.4.1 se generó con
+los resultados cerrados, se renderizó y se revisó visualmente completa: 33
+páginas y 25 marcadores. El PDF versionado y su copia oficial son idénticos;
+su SHA-256 es
+`84950486bb046c97c8184a88c1bc6a2ba1967962a52b4643acf9b349134d57ac`.

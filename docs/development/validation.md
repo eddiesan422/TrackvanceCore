@@ -15,7 +15,7 @@ semántica backend. Ningún éxito se hereda de la entrega anterior.
 | Playwright con fuentes reales | 23 aprobadas y 1 opt-in omitida; 62 comprobaciones PostgreSQL/SQL Server, credenciales/logs y restart: PASS. |
 | Playwright instalación limpia | 1 aprobada: acceso sin seed, logout, redirección a `/` e inicio visible. Total: 24 escenarios distintos aprobados. |
 | Compose integral | 19 aprobadas y cinco opt-in cubiertas por otros ciclos; doctor 7/7, smoke 84/84, migraciones y persistencia tras restart: PASS. |
-| GitHub Actions 0.4.1 | **PENDIENTE DEL WORKFLOW DEL COMMIT DE ENTREGA.** |
+| GitHub Actions 0.4.1 | [PASS: seis jobs](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35638817011) sobre `38a8c7a3`: backend, frontend, connections-e2e, compose-e2e, benchmark-smoke y backup-restore-e2e. |
 
 OpenAPI, paquetes y lock declaran 0.4.1. Esta revisión no crea endpoints, DTOs ni
 migraciones; la API y Alembic permanecen compatibles. La cobertura incremental

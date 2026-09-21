@@ -238,12 +238,12 @@ número decimal e Interpretar fecha. Cada elemento muestra una explicación y un
 ejemplo recalculado con sus parámetros. Un preview de hasta ocho valores reales
 aplica las transformaciones de la columna en el mismo orden del contrato y muestra
 Antes / Después. Los controles permiten hacer explícito ese orden. Un parseo
-decimal o de fecha inválido muestra **No se pudo interpretar; la transformación
-conservó el valor que recibió.** Los pasos posteriores siguen ejecutándose
+decimal o de fecha inválido muestra “No se pudo interpretar; la transformación
+conservó el valor que recibió”. Los pasos posteriores siguen ejecutándose
 en el orden declarado. La vista previa de fechas cubre únicamente las directivas
 determinísticas que el navegador reproduce con certeza. Para formatos Python no
-soportados —por ejemplo `%b`, `%j` o `%Z`— muestra **Vista previa no disponible
-para este formato; la ejecución usará el formato declarado**, sin convertir esa
+soportados —por ejemplo `%b`, `%j` o `%Z`— muestra “Vista previa no disponible
+para este formato; la ejecución usará el formato declarado”, sin convertir esa
 limitación en un fallo. `datetime.strptime` del backend conserva la autoridad
 sobre la ejecución. La vista previa se calcula sólo para informar: no crea artifacts, no modifica el
 DatasetVersion y no forma parte del resultado ni del hash de configuración.
@@ -297,9 +297,9 @@ El editor explica que las columnas clave identifican el mismo registro en ambos
 lados y que, al seleccionar varias, forman una clave compuesta cuyo orden se
 respeta. También aclara que la normalización se aplica antes de buscar
 coincidencias y no modifica los datasets originales. Las opciones visibles son
-**Conservar como están / Eliminar espacios externos**, **Conservar como están /
-Convertir a MAYÚSCULAS / Convertir a minúsculas** y **No normalizar /
-Normalización estándar (NFC) / Normalización de compatibilidad (NFKC)**. La ayuda
+“Conservar como están / Eliminar espacios externos”, “Conservar como están /
+Convertir a MAYÚSCULAS / Convertir a minúsculas” y “No normalizar /
+Normalización estándar (NFC) / Normalización de compatibilidad (NFKC)”. La ayuda
 Unicode explica la diferencia entre representación visual e interna.
 
 ```json
@@ -344,7 +344,7 @@ La precisión monetaria se implementa con Decimal y contexto suficiente para sum
 
 Sentinel ejecuta monitores sobre una DatasetVersion y produce checks explicables. Los controles legacy SCHEMA_REQUIRED, NULL_RATE, FRESHNESS y VOLUME_CHANGE permanecen compatibles. Una columna ausente se distingue de una columna presente con nulls.
 
-En el editor, **Columnas requeridas** y **Columnas a revisar por nulos** son
+En el editor, “Columnas requeridas” y “Columnas a revisar por nulos” son
 selectores múltiples alimentados por el esquema de la DatasetVersion elegida.
 Pueden conservar selecciones históricas mientras se publica una versión nueva;
 backend sigue validando que los nombres y la organización sean correctos.
@@ -447,7 +447,7 @@ health_score se pondera por unidades evaluadas según la agregación del backend
 
 Cerrar sesión confirma `/auth/logout`, limpia token CSRF, caché de consultas y
 estado de sesión, y navega con reemplazo a `/`. El usuario vuelve a la pantalla
-inicial de Trackvance —incluido **Entrar al entorno demo** cuando esté habilitado—
+inicial de Trackvance —incluido “Entrar al entorno demo” cuando esté habilitado—
 sin mantener una pantalla autenticada en el historial inmediato.
 
 Los detalles de dataset separan archivo original, fuente derivada, esquema/perfil y linaje. Los detalles de run separan Completada de Rechazado/Con hallazgos/Alerta. Los labels de negocio acompañan reason codes técnicos en resultados y evidencia. La numeración se muestra como Línea del archivo cuando representa línea física o Registro de la versión cuando corresponde.
@@ -808,6 +808,13 @@ El ciclo Compose también aprobó smoke API, doctor, migraciones PostgreSQL e in
 La base 0.4.0 incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage. La cobertura incremental 0.4.1 comprueba el selector único de identificadores, catálogo de responsables, labels/ayudas/orden/preview de transforms, preview de claves simples y compuestas, multiselect de Sentinel por esquema y regreso al inicio tras logout.
 
 El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones se prueba con motores reales PostgreSQL y SQL Server, usuarios SELECT, caída/reconexión, versiones, Intake y búsqueda de secretos en logs/metadata. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
+
+La revisión 0.4.1 quedó certificada en GitHub Actions por el workflow
+`35638817011`, commit `38a8c7a3dd14ecc1c6b730f2a4a98e419707281e`:
+seis de seis jobs terminaron SUCCESS —backend, frontend, connections-e2e,
+compose-e2e, benchmark-smoke y backup-restore-e2e—. Este resultado corresponde
+al mismo código de producto y fuentes documentales usados para la publicación;
+la incorporación posterior del PDF y del dato de CI es un cierre documental.
 
 ### Incidencia CI identificada y corrección
 

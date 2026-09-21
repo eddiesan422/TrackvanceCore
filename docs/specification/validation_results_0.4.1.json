@@ -7,7 +7,7 @@
   "Compose / smoke / doctor": "PASS: doctor 7/7, smoke API 84/84, migraciones upgrade/downgrade/upgrade y persistencia tras restart.",
   "Conexiones reales": "PASS: 62 comprobaciones PostgreSQL/SQL Server, 23 escenarios de navegador, credenciales y logs sin secretos, y restart.",
   "Logout limpio": "PASS 1/1: demo sin seed, cierre de sesión, redirección a / y pantalla inicial visible.",
-  "GitHub Actions": "PENDIENTE DEL WORKFLOW DEL COMMIT DE ENTREGA 0.4.1; no se hereda el resultado remoto 0.4.0.",
+  "GitHub Actions": "PASS 6/6 jobs sobre 38a8c7a3: backend, frontend, connections-e2e, compose-e2e, benchmark-smoke y backup-restore-e2e. Workflow https://github.com/eddiesan422/TrackvanceCore/actions/runs/35638817011",
   "pytest backend + scripts": "533 aprobadas en 37,36 s. Dos avisos de deprecación Starlette/AnyIO; sin fallos.",
   "Ruff / Mypy": "PASS; Mypy revisó 33 archivos fuente.",
   "Contrato y persistencia": "OpenAPI y lock actualizados a 0.4.1. Sin endpoints, DTOs o migraciones nuevos; semántica backend sin cambios.",
