@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.4.1"
-EDITION_DATE = "21 septiembre 2026"
+VERSION = "0.5.0"
+EDITION_DATE = "23 septiembre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -146,22 +146,24 @@ class Diagram(Flowable):
         if self.kind == "logical":
             self.box(0, 139, w, 43, "React / API / RBAC", "Interacción, identidad y contratos HTTP")
             self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Excepciones · Audit")
-            for i, title in enumerate(["DatasetSource", "StorageProvider", "ExecutionEngine", "JobQueue"]):
-                x = i * (w + 8) / 4
-                self.box(x, 8, (w - 24) / 4, 46, title, "Contrato + adaptador")
-                self.arrow(x + (w - 24) / 8, 74, x + (w - 24) / 8, 56)
+            boundaries = ["DatasetSource", "DataSink", "StorageProvider", "ExecutionEngine", "JobQueue"]
+            for i, title in enumerate(boundaries):
+                x = i * (w + 8) / 5
+                self.box(x, 8, (w - 32) / 5, 46, title, "Contrato + adaptador")
+                self.arrow(x + (w - 32) / 10, 74, x + (w - 32) / 10, 56)
             self.arrow(w / 2, 139, w / 2, 121)
         elif self.kind == "local":
-            self.box(0, 124, 122, 48, "Navegador / web", "React + nginx")
-            self.box(162, 124, 140, 48, "API FastAPI", "Mismo monolito")
-            self.box(346, 124, 180, 48, "Worker local", "Scheduler + Polars / Python")
-            self.box(162, 34, 140, 51, "PostgreSQL 16", "Metadata + jobs")
-            self.box(346, 34, 180, 51, "FileArtifactStore", "Volumen trackvance_data")
-            self.arrow(123, 149, 160, 149)
-            self.arrow(232, 124, 232, 87)
-            self.arrow(436, 123, 436, 87)
-            self.arrow(370, 123, 280, 87)
-            self.arrow(280, 123, 370, 87)
+            self.box(0, 124, 103, 48, "Navegador / web", "React + nginx")
+            self.box(122, 124, 108, 48, "API FastAPI", "Mismo monolito")
+            self.box(249, 124, 126, 48, "Worker DEFAULT", "Scheduler + módulos")
+            self.box(394, 124, 132, 48, "Worker DELIVERY", "Preflight + DataSink")
+            self.box(122, 34, 151, 51, "PostgreSQL 16", "Metadata + jobs")
+            self.box(322, 34, 153, 51, "FileArtifactStore", "Volumen trackvance_data")
+            self.arrow(104, 149, 120, 149)
+            self.arrow(176, 124, 176, 87)
+            self.arrow(312, 123, 250, 87)
+            self.arrow(460, 123, 449, 87)
+            self.arrow(376, 123, 398, 87)
         elif self.kind == "exceptions":
             names = ["ABIERTA / ASIGNADA", "EN GESTIÓN", "PENDIENTE DE VALIDACIÓN", "RESUELTA"]
             for i, title in enumerate(names):

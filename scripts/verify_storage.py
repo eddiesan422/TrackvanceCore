@@ -15,14 +15,34 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+LEGACY_SCHEMA_VERSION = 2
+LEGACY_MIGRATION = "0007_monitor_scheduling"
+CURRENT_MIGRATION = "0008_data_delivery"
 ACTIVE_STATUSES = frozenset({"QUEUED", "RUNNING"})
+JOB_LANES = frozenset({"DEFAULT", "DELIVERY"})
+DELIVERY_ATTEMPT_STATUSES = frozenset({"STARTED", "COMMITTED", "FAILED", "UNKNOWN"})
+DELIVERY_TABLES = frozenset(
+    {
+        "delivery_destinations",
+        "delivery_destination_versions",
+        "delivery_attempts",
+    }
+)
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
     "DATASET_VERSION": "dataset_versions",
     "RUN": "runs",
     "CONNECTION_VERSION": "external_connection_versions",
     "EXCEPTION": "exceptions",
+    "DELIVERY_DESTINATION": "delivery_destinations",
+    "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions",
+    "DELIVERY_ATTEMPT": "delivery_attempts",
+}
+LEGACY_POLYMORPHIC_TABLES = {
+    key: value
+    for key, value in POLYMORPHIC_TABLES.items()
+    if not key.startswith("DELIVERY_")
 }
 
 
@@ -54,6 +74,8 @@ def _require_same_organization(
 def validate_relationships(
     rows: Mapping[str, list[Mapping[str, Any]]],
     foreign_keys: Iterable[tuple[str, str, str, str]],
+    *,
+    compatibility_v2: bool = False,
 ) -> int:
     """Validate every declared FK plus application-level polymorphic lineage."""
 
@@ -96,7 +118,10 @@ def validate_relationships(
     for link in rows.get("artifact_links", []):
         for side in ("source", "target"):
             entity_type = str(link[f"{side}_type"])
-            table = POLYMORPHIC_TABLES.get(entity_type)
+            polymorphic_tables = (
+                LEGACY_POLYMORPHIC_TABLES if compatibility_v2 else POLYMORPHIC_TABLES
+            )
+            table = polymorphic_tables.get(entity_type)
             if table is None:
                 raise ValueError(f"Tipo de linaje no reconocido: {entity_type}.")
             entity = index.get(table, {}).get(str(link[f"{side}_id"]))
@@ -126,60 +151,203 @@ def validate_relationships(
             version, connection_version, "dataset_versions.source.connection_version_id"
         )
         checks += 2
+
+    if not compatibility_v2:
+        for job in rows.get("jobs", []):
+            lane = str(job.get("lane", ""))
+            if lane not in JOB_LANES:
+                raise ValueError("Lane persistido no reconocido en jobs.")
+            run = index.get("runs", {}).get(str(job.get("run_id")))
+            if run is None:
+                # The declared SQL FK reports the same corruption with a more precise field.
+                continue
+            expected_lane = (
+                "DELIVERY"
+                if str(run.get("module", "")).upper() == "DELIVERY"
+                else "DEFAULT"
+            )
+            if lane != expected_lane:
+                raise ValueError("La lane del job no coincide con el módulo del Run.")
+            checks += 1
+
+        for attempt in rows.get("delivery_attempts", []):
+            if str(attempt.get("status", "")) not in DELIVERY_ATTEMPT_STATUSES:
+                raise ValueError("Estado persistido no reconocido en delivery_attempts.")
+            run = index.get("runs", {}).get(str(attempt.get("run_id")))
+            if run is not None and str(run.get("module", "")).upper() != "DELIVERY":
+                raise ValueError("Un DeliveryAttempt debe pertenecer a un Run DELIVERY.")
+            checks += 1
     return checks
 
 
-def snapshot() -> dict[str, Any]:
+def _table_hashes(
+    rows: Mapping[str, list[Mapping[str, Any]]],
+) -> dict[str, dict[str, str]]:
+    return {
+        name: dict(sorted((str(row["id"]), _canonical_hash(row)) for row in table_rows))
+        for name, table_rows in sorted(rows.items())
+    }
+
+
+def legacy_v2_report(
+    rows: Mapping[str, list[Mapping[str, Any]]],
+    foreign_keys: Iterable[tuple[str, str, str, str]],
+    *,
+    current_migration: str | None,
+    verified_artifacts: int,
+    verified_source_secrets: int,
+) -> dict[str, Any]:
+    """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
+
+    foreign_keys = list(foreign_keys)
+    if current_migration != CURRENT_MIGRATION:
+        raise ValueError("La compatibilidad 0.4.1 requiere la migración 0008 aplicada.")
+    if any(rows.get(table) for table in DELIVERY_TABLES):
+        raise ValueError("Un backup 0.4.1 no puede contener registros de Data Delivery.")
+    if any(str(run.get("module", "")).upper() == "DELIVERY" for run in rows.get("runs", [])):
+        raise ValueError("Un backup 0.4.1 no puede contener Runs DELIVERY.")
+    if any(str(job.get("lane", "")) != "DEFAULT" for job in rows.get("jobs", [])):
+        raise ValueError("La migración 0008 debe asignar lane DEFAULT a todos los Jobs 0.4.1.")
+
+    # Validate the upgraded database before projecting it back to the legacy schema.
+    validate_relationships(rows, foreign_keys)
+
+    legacy_rows: dict[str, list[Mapping[str, Any]]] = {}
+    for name, table_rows in rows.items():
+        if name in DELIVERY_TABLES:
+            continue
+        if name == "jobs":
+            legacy_rows[name] = [
+                {key: value for key, value in dict(row).items() if key != "lane"}
+                for row in table_rows
+            ]
+        else:
+            legacy_rows[name] = table_rows
+    legacy_foreign_keys = [
+        foreign_key
+        for foreign_key in foreign_keys
+        if foreign_key[0] not in DELIVERY_TABLES
+        and foreign_key[2] not in DELIVERY_TABLES
+    ]
+    return {
+        "schema_version": LEGACY_SCHEMA_VERSION,
+        "tables": _table_hashes(legacy_rows),
+        "verified_artifacts": verified_artifacts,
+        "verified_secrets": verified_source_secrets,
+        "validated_relationships": validate_relationships(
+            legacy_rows,
+            legacy_foreign_keys,
+            compatibility_v2=True,
+        ),
+        "migration": LEGACY_MIGRATION,
+    }
+
+
+def _snapshot_inputs() -> tuple[
+    str | None,
+    dict[str, list[Mapping[str, Any]]],
+    list[tuple[str, str, str, str]],
+    int,
+    int,
+    int,
+]:
     from sqlalchemy import select, text
 
     from trackvance.artifactstore import artifact_store
     from trackvance.credential_store import secret_store
     from trackvance.db import Base, SessionLocal
-    from trackvance.models import Artifact, ExternalConnectionVersion, Job, Run
+    from trackvance.delivery_credential_store import destination_secret_store
+    from trackvance.models import (
+        Artifact,
+        DeliveryDestinationVersion,
+        ExternalConnectionVersion,
+        Job,
+        Run,
+    )
 
-    report: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "tables": {},
-        "verified_artifacts": 0,
-        "verified_secrets": 0,
-        "validated_relationships": 0,
-    }
     with SessionLocal() as session:
         active_run = session.scalar(select(Run.id).where(Run.status.in_(ACTIVE_STATUSES)))
         active_job = session.scalar(select(Job.id).where(Job.status.in_(ACTIVE_STATUSES)))
         if active_run or active_job:
             raise ValueError("Finaliza las ejecuciones pendientes antes de tomar la huella.")
 
-        report["migration"] = session.scalar(text("SELECT version_num FROM alembic_version"))
-        rows: dict[str, list[Mapping[str, Any]]] = {}
-        for name, table in sorted(Base.metadata.tables.items()):
-            table_rows = list(session.execute(select(table)).mappings())
-            rows[name] = table_rows
-            report["tables"][name] = dict(
-                sorted((str(row["id"]), _canonical_hash(row)) for row in table_rows)
+        migration = session.scalar(text("SELECT version_num FROM alembic_version"))
+        rows: dict[str, list[Mapping[str, Any]]] = {
+            name: list(session.execute(select(table)).mappings())
+            for name, table in sorted(Base.metadata.tables.items())
+        }
+        foreign_keys = [
+            (
+                name,
+                foreign_key.parent.name,
+                foreign_key.column.table.name,
+                foreign_key.column.name,
             )
+            for name, table in Base.metadata.tables.items()
+            for foreign_key in table.foreign_keys
+        ]
 
-        foreign_keys = []
-        for name, table in Base.metadata.tables.items():
-            for foreign_key in table.foreign_keys:
-                foreign_keys.append(
-                    (
-                        name,
-                        foreign_key.parent.name,
-                        foreign_key.column.table.name,
-                        foreign_key.column.name,
-                    )
-                )
-        report["validated_relationships"] = validate_relationships(rows, foreign_keys)
-
+        verified_artifacts = 0
         for artifact in session.scalars(select(Artifact)):
             artifact_store.verify(artifact)
-            report["verified_artifacts"] += 1
+            verified_artifacts += 1
+        verified_source_secrets = 0
         for version in session.scalars(select(ExternalConnectionVersion)):
-            # Materialize and immediately discard; neither value nor reference reaches the report.
             secret_store.get(version.organization_id, version.secret_reference)
-            report["verified_secrets"] += 1
-    return report
+            verified_source_secrets += 1
+        verified_delivery_secrets = 0
+        for version in session.scalars(select(DeliveryDestinationVersion)):
+            destination_secret_store.get(version.organization_id, version.secret_reference)
+            verified_delivery_secrets += 1
+    return (
+        migration,
+        rows,
+        foreign_keys,
+        verified_artifacts,
+        verified_source_secrets,
+        verified_delivery_secrets,
+    )
+
+
+def snapshot() -> dict[str, Any]:
+    (
+        migration,
+        rows,
+        foreign_keys,
+        verified_artifacts,
+        verified_source_secrets,
+        verified_delivery_secrets,
+    ) = _snapshot_inputs()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "tables": _table_hashes(rows),
+        "verified_artifacts": verified_artifacts,
+        "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets,
+        "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(rows, foreign_keys),
+        "migration": migration,
+    }
+
+
+def snapshot_legacy_v2() -> dict[str, Any]:
+    (
+        migration,
+        rows,
+        foreign_keys,
+        verified_artifacts,
+        verified_source_secrets,
+        verified_delivery_secrets,
+    ) = _snapshot_inputs()
+    if verified_delivery_secrets:
+        raise ValueError("Un backup 0.4.1 no puede contener secretos de Data Delivery.")
+    return legacy_v2_report(
+        rows,
+        foreign_keys,
+        current_migration=migration,
+        verified_artifacts=verified_artifacts,
+        verified_source_secrets=verified_source_secrets,
+    )
 
 
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
@@ -203,6 +371,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("snapshot")
+    commands.add_parser("snapshot-legacy-v2")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -210,6 +379,8 @@ def main() -> int:
     try:
         if args.command == "snapshot":
             print(json.dumps(snapshot(), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v2":
+            print(json.dumps(snapshot_legacy_v2(), indent=2, sort_keys=True))
         else:
             compare(
                 json.loads(args.before.read_text(encoding="utf-8-sig")),

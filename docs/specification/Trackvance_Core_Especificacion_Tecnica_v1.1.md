@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-Revisión de implementación 0.4.1 | 21 de septiembre de 2026
+Revisión de implementación 0.5.0 | 23 de septiembre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -8,9 +8,9 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 ## 1. Alcance, estados e invariantes
 
-Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps y Sentinel con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles y conserva evidencia verificable del resultado.
+Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps, Sentinel y Data Delivery con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles o entregas y conserva evidencia verificable del resultado.
 
-Esta especificación describe la evolución funcional local 0.4.1: conserva las capacidades 0.4.0 y mejora la configuración guiada por el esquema en Datasets, Data Intake, ReconOps y Sentinel, además del cierre de sesión. Conexiones PostgreSQL/SQL Server, reglas avanzadas, conciliación, programación Sentinel, excepciones, identidad, operación, recuperación y benchmarks mantienen su semántica certificada. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. Los resultados incrementales de esta revisión se registran en la sección de aceptación; no se extrapolan los de versiones anteriores.
+Esta especificación describe la evolución funcional local 0.5.0: conserva las capacidades anteriores e incorpora Data Delivery controlado hacia PostgreSQL y SQL Server, con destinos/configuraciones versionados, mapping tipado, preflight, transacciones remotas, intentos, estado UNKNOWN y evidencia. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. La certificación local está cerrada y el resultado del commit de publicación se registra separadamente; no se extrapolan resultados de versiones anteriores.
 
 | Estado | Significado normativo |
 | --- | --- |
@@ -24,6 +24,7 @@ Esta especificación describe la evolución funcional local 0.4.1: conserva las 
 - PostgreSQL guarda metadata y relaciones. Los archivos recibidos, Parquet canónicos, resultados, manifiestos y exports se guardan fuera de PostgreSQL.
 - DatasetVersion, configuración publicada y Run conservan identidades estables. Una modificación funcional crea una versión o ejecución nueva.
 - SUCCESS significa que terminó el procesamiento. REJECTED, WITH_FINDINGS y ALERT son decisiones de negocio y no errores técnicos.
+- En Data Delivery, COMMITTED exige confirmación remota. UNKNOWN preserva una confirmación incierta; no equivale a FAILED ni COMMITTED y no habilita reintento automático.
 - Profiling observa los valores recibidos sin trim, case o normalización Unicode funcional implícita. Las transformaciones de negocio deben estar declaradas.
 - Toda modificación del esquema persistente se realiza mediante una migración Alembic nueva. No se editan migraciones ya aplicadas.
 - La autorización por rol, permiso y organización se verifica en backend; ocultar un botón no sustituye la autorización.
@@ -31,7 +32,7 @@ Esta especificación describe la evolución funcional local 0.4.1: conserva las 
 
 ### Qué no se certifica como implementado
 
-PySpark operativo, Redis/Celery productivo, conectores distintos de PostgreSQL/SQL Server, object storage remoto, OIDC/SSO, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Data Delivery/DataSink es una responsabilidad futura independiente de las entradas. El roadmap oficial completa primero los puntos funcionales 1 a 9; la productización del punto 10 requiere una evolución posterior y no forma parte de este ciclo.
+PySpark operativo, Redis/Celery productivo, fuentes o destinos distintos de PostgreSQL/SQL Server, object storage remoto, OIDC/SSO, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Data Delivery SQL está implementado, pero no incluye scheduler, transforms de negocio, 2PC, reintento ciego tras UNKNOWN ni RBAC granular propio. El roadmap completa los puntos funcionales 1 a 10; la productización del punto 11 requiere una evolución posterior.
 
 ## 2. Arquitectura lógica estable
 
@@ -42,7 +43,8 @@ La separación principal es entre adquisición de datos, almacenamiento interno 
 | Puerto / componente | Responsabilidad | Adaptador local |
 | --- | --- | --- |
 | DatasetSource | Adquirir datos desde una fuente y devolver el modelo común. | Archivos locales, PostgreSQL y SQL Server |
-| SecretStore | Gestionar credenciales por organización, fuera de artifacts. | Cifrado Fernet local, clave separada |
+| DataSink | Descubrir, validar y escribir una DatasetVersion en un destino externo. | PostgreSQL y SQL Server |
+| SecretStore | Gestionar credenciales por organización/recurso, fuera de artifacts. | Stores y claves Fernet separados para fuentes y destinos |
 | DatasetReader | Interpretar un formato de archivo y sus opciones de lectura. | CSV, XLSX, JSON, Parquet, TXT |
 | StorageProvider | Publicar bytes inmutables, materializar un artefacto y asignar staging temporal. | FileArtifactStore |
 | ExecutionEngine | Ejecutar un Run completo con evidencia y linaje. | LocalExecutionEngine |
@@ -69,12 +71,13 @@ IMPLEMENTADO. Docker Compose es el entorno de referencia para operación y certi
 | --- | --- | --- |
 | web | React compilado servido por nginx y proxy a /api. | Publicado solo en 127.0.0.1; puerto configurable. |
 | api | FastAPI, sesión/RBAC, carga, configuración, consulta y downloads. | Red interna Compose; comparte trackvance_data. |
-| worker | Despacha programación Sentinel y procesa jobs, leases y heartbeat del mismo monolito. | Red interna; comparte metadata y trackvance_data. |
+| worker | Lane DEFAULT: despacha programación Sentinel y procesa Intake/ReconOps/Sentinel, leases y heartbeat. | Red interna; comparte metadata y trackvance_data; no monta secretos. |
+| delivery-worker | Lane DELIVERY: ejecuta preflight final y transacciones Data Delivery; no despacha scheduler. | Red interna; comparte metadata, trackvance_data y secretos de destino. |
 | postgres | PostgreSQL 16 para metadata. | Volumen postgres_data; sin puerto publicado al host. |
 
-El volumen trackvance_data se monta en /var/lib/trackvance para API y worker. FileArtifactStore administra artifacts/<id>/data.<ext> y staging tmp; las rutas históricas permanecen legibles. No se guardan datasets como blobs SQL. Los volúmenes sobreviven a stop, restart, recreación de contenedores y docker compose down. down -v elimina volúmenes y no es un comando de actualización.
+El volumen trackvance_data se monta en /var/lib/trackvance para API y ambos workers. FileArtifactStore administra artifacts/<id>/data.<ext> y staging tmp; las rutas históricas permanecen legibles. No se guardan datasets como blobs SQL. Los volúmenes sobreviven a stop, restart, recreación de contenedores y docker compose down. down -v elimina volúmenes y no es un comando de actualización.
 
-Solo API monta connection_credentials y connection_keys para adquirir fuentes externas. El worker monta únicamente trackvance_data: consume snapshots canónicos sin recuperar credenciales de conexión. La copia de recuperación debe conservar metadata, artifacts, credenciales cifradas y clave de forma coordinada.
+API monta connection_credentials/connection_keys para fuentes y delivery_credentials/delivery_keys para destinos. El worker DEFAULT monta únicamente trackvance_data. El delivery-worker monta trackvance_data y los dos volúmenes de destino, nunca los de fuente. La copia de recuperación debe conservar metadata, artifacts y ambos pares secreto/clave de forma coordinada.
 
 Todos los servicios declaran restart: "no". Trackvance permanece detenido al iniciar Docker Desktop hasta que el usuario ejecute el arranque. La instancia del equipo usa trackvance-certification y http://localhost:3100; el valor por defecto del repositorio es 3000.
 
@@ -85,7 +88,11 @@ docker compose up -d --wait
 docker compose ps
 ```
 
-La preparación descarga imágenes y dependencias. Una vez construidas, la operación no requiere fuentes, storage, identidad ni procesamiento externos. El override de red interna aísla API/worker/PostgreSQL; la salida de nginx depende de Docker Desktop/firewall y no se presenta como aislamiento total del host.
+La preparación descarga imágenes y dependencias. Una vez construidas, los flujos
+sobre snapshots locales no requieren storage, identidad ni procesamiento cloud.
+Conexiones y Data Delivery sí requieren red hacia la fuente/destino seleccionado.
+El override de red interna bloquea esas integraciones externas; la salida de nginx
+depende de Docker Desktop/firewall y no se presenta como aislamiento total del host.
 
 ## 4. Código, stack y dependencias
 
@@ -110,6 +117,8 @@ La preparación descarga imágenes y dependencias. Una vez construidas, la opera
 | dataset_readers.py | DatasetSource, registry y lectores por formato. |
 | connections_api.py / connections_service.py | Contratos HTTP, configuración versionada, bindings y adquisición de fuentes. |
 | dataset_sources.py / credential_store.py | Adaptadores SQL de solo lectura y contrato/proveedor de secretos. |
+| delivery_api.py / delivery_schemas.py | Contratos HTTP de destinos, preview, preflight, configuraciones, runs, intentos y receipt. |
+| delivery_service.py / data_sinks.py / delivery_credential_store.py | Orquestación, adaptadores SQL de escritura, transacciones, evidencia y secretos de destino. |
 | artifactstore.py | StorageProvider y adaptador local inmutable. |
 | execution.py / jobqueue.py / worker.py | Puerto de ejecución, publicación, consumo y recuperación local. |
 | manifests.py / exports.py | Compatibilidad de evidencia y reportes Excel. |
@@ -120,7 +129,7 @@ La preparación descarga imágenes y dependencias. Una vez construidas, la opera
 | identity_api.py | Usuarios locales, roles, permisos efectivos, contraseñas y revocación de sesiones. |
 | operations_common.py | Inventario e integridad compartidos por las herramientas de mantenimiento. |
 
-El frontend se organiza en app, components, features/datasets, features/connections, features/runs, features/identity y routes; comparte cliente HTTP, componentes visuales y queries. RuleBuilder, ComparisonBuilder y TransformBuilder utilizan esquema real; MonitorSchedulePanel gestiona programación e historia. La organización por bounded contexts/domain/application/infrastructure podrá profundizarse cuando el tamaño lo justifique. No se mueve código sin un beneficio funcional o de frontera concreto.
+El frontend se organiza en app, components, features/datasets, features/connections, features/delivery, features/runs, features/identity y routes; comparte cliente HTTP, componentes visuales y queries. RuleBuilder, ComparisonBuilder y TransformBuilder utilizan esquema real; MonitorSchedulePanel gestiona programación e historia; Delivery guía destino, mapping, preview, preflight, publicación y evidencia. La organización por bounded contexts/domain/application/infrastructure podrá profundizarse cuando el tamaño lo justifique.
 
 No forman parte del stack instalado React Hook Form, Zod, Tailwind, TanStack Table, Recharts, PyArrow ni PySpark. La documentación inicial que los proponía se interpreta como antecedente de diseño, no como inventario actual.
 
@@ -164,7 +173,7 @@ Las fuentes externas requieren acceso de red desde API. El overlay offline restr
 
 El preview aplica LIMIT/TOP en origen; el snapshot lee por lotes de 100 hasta 100.000 filas, 100 columnas y 64 MiB de valores normalizados. Cada celda tiene límite de 64 KiB. Una fila adicional detecta el exceso y se rechaza la importación completa: nunca se guarda una muestra parcial como si fuera un dataset completo. Timeout configurable de conexión 1..15 segundos; consulta 1..60 segundos. La adquisición sigue siendo síncrona y acotada.
 
-Los valores se conservan como texto/null: Decimal sin redondeo float, fechas ISO, Unicode y espacios originales. Los identificadores siguen la política id/*_id y permiten override. Los binarios son Base64. SQL Server timestamp se interpreta como rowversion; datetimeoffset se conserva como ISO con offset. El orden DATABASE_UNSPECIFIED depende del motor; SNAPSHOT_ROW es posición en el snapshot, no un número físico en la tabla externa.
+Los valores se conservan como texto/null: Decimal sin redondeo float, fechas ISO, Unicode y espacios originales. Los identificadores siguen la política id/*_id y permiten override. Los binarios son Base64. SQL Server timestamp se interpreta como rowversion; `datetimeoffset` (hasta escala 6) y PostgreSQL `timestamptz` conservan `TIMESTAMP` con offset. `timestamp without time zone`, `datetime`, `datetime2` y `smalldatetime` se adquieren como `STRING`: no se inventa una zona horaria y Delivery conserva el texto exacto. `datetimeoffset(7)` también se adquiere como `STRING` para conservar el séptimo dígito. El orden DATABASE_UNSPECIFIED depende del motor; SNAPSHOT_ROW es posición en el snapshot, no un número físico en la tabla externa.
 
 ### Versiones y evidencia
 
@@ -182,9 +191,108 @@ Transporte cifrado por defecto: PostgreSQL sslmode=require y SQL Server encrypti
 
 RBAC separa connections:read, connections:use y connections:manage. Administradores y responsables de datos administran; Analista puede usar. Los roles de consulta solo ven metadata. Todas las rutas verifican organización. La auditoría registra creación, edición, prueba, preview, baja y adquisición con actor estable; nunca password, DSN ni filas de preview. Los errores de drivers se convierten a códigos controlados y mensajes constantes.
 
-### Fuentes futuras y Data Delivery
+### Fuentes futuras y frontera de salida
 
-Un nuevo adaptador implementa DatasetSource y su normalización, registra opciones permitidas y aporta pruebas de permisos, límites, tipos y trazabilidad. Fuentes no SQL tendrán DTOs específicos, sin forzar el concepto de schema/tabla sobre buckets o APIs. El motor de calidad no cambia. Un futuro módulo Destinos / Data Delivery tendrá un puerto independiente de escritura, RBAC e idempotencia propios. DatasetSource no incorpora write ni entrega hacia sistemas externos.
+Un nuevo adaptador implementa DatasetSource y su normalización, registra opciones permitidas y aporta pruebas de permisos, límites, tipos y trazabilidad. Fuentes no SQL tendrán DTOs específicos, sin forzar el concepto de schema/tabla sobre buckets o APIs. El motor de calidad no cambia. Data Delivery implementa su puerto DataSink independiente; DatasetSource continúa sin incorporar write ni entrega hacia sistemas externos.
+
+## 5B. Data Delivery
+
+IMPLEMENTADO para destinos PostgreSQL y SQL Server. Un destino tiene identidad
+estable, revisión optimista y versiones inmutables. Registra motor, endpoint,
+usuario y opciones permitidas; la contraseña se cifra en `delivery_credentials`
+con clave en `delivery_keys` y sólo se representa mediante referencia opaca. La
+API no devuelve password ni referencia. Editar/deshabilitar un destino no cambia
+configuraciones o runs históricos que fijaron otra DestinationVersion.
+
+La UI `/delivery` permite administrar/probar destinos, descubrir schemas/tablas y
+metadata, seleccionar una DatasetVersion, declarar target/mapping, revisar preview
+y preflight, publicar una configuración y ejecutar/consultar intentos/receipt. El
+mapping admite STRING, INT64, DECIMAL, DATE, TIMESTAMP y BOOLEAN; puede
+seleccionar, ordenar y renombrar columnas, pero el tipo lógico destino debe
+coincidir con el tipo lógico inmutable de la DatasetVersion. El sink sólo adapta
+su representación técnica: STRING no se interpreta como número, fecha, timestamp
+o booleano. No ejecuta transforms de negocio ni SQL arbitrario. DECIMAL viaja como valor exacto del driver; el
+preflight valida escala y dígitos enteros contra numeric/decimal o money con
+escala inspeccionable, y rechaza real/float aproximados. Los identificadores se
+validan y citan por dialecto.
+
+STRING admite únicamente almacenamiento Unicode variable exacto: text/varchar en
+PostgreSQL y nvarchar en SQL Server. La longitud se mide en unidades UTF-16; NUL,
+surrogates no emparejados y familias fixed/no Unicode se rechazan. Caracteres
+suplementarios exigen collation `_SC`/`_UTF8`; las tablas SQL Server nuevas usan
+`Latin1_General_100_CI_AS_SC`. TIMESTAMP exige offset explícito,
+conserva el instante y admite hasta seis microsegundos; las tablas nuevas usan
+timestamptz(6) y datetimeoffset(6). Un datetimeoffset(7) se mapea a STRING si
+se necesita conservar el séptimo dígito.
+
+La API `/api/v1/delivery` expone: `GET/POST /destinations`, detalle
+`GET/PATCH/DELETE /destinations/{id}`, pruebas de borrador/guardado, y
+`/schemas`, `/tables`, `/table-metadata`; `POST /preview` y `/preflight`;
+`GET/POST /configurations` y publicación de
+`/configurations/{id}/versions`; `GET/POST /runs`,
+`/runs/{id}/attempts` y `/runs/{id}/receipt`. El detalle/evidencia genéricos del
+Run continúan en `/api/v1/runs/{id}` y `/runs/{id}/evidence`. Los DTOs completos
+y permisos están en `backend/API_CONTRACT.md`.
+
+### Target, estrategias y preflight
+
+`EXISTING_TABLE` exige una tabla existente compatible. `CREATE_TABLE` se usa sólo
+con `CREATE_AND_LOAD` y puede crear schema si se declaró; una tabla/schema que
+aparece durante la carrera produce fallo controlado. `APPEND` inserta;
+`OVERWRITE` ejecuta DELETE e inserción en la misma transacción; `UPSERT` exige
+claves explícitas del mapping, sin nulls/duplicados en la fuente y respaldadas por
+PK/unique compatible. El preflight valida artifact/hash, versión exacta de
+destino, target, tipos, nullability, permisos y recursos al publicar y nuevamente
+inmediatamente antes de escribir.
+
+Las tablas existentes se bloquean dentro de la transacción incluso con cero
+filas. PostgreSQL revalida nombre/columnas de la constraint UPSERT después de
+tomar el lock, exige una PK/UNIQUE nombrada no diferible, ejecuta
+`ON CONFLICT ON CONSTRAINT` y usa claves temporales con tipos/collation nativos;
+OVERWRITE rechaza RLS activa. PostgreSQL requiere INSERT para APPEND,
+INSERT+DELETE para OVERWRITE y INSERT+UPDATE+SELECT más TEMPORARY en la base para
+UPSERT. SQL Server exige SELECT para todo target existente, usa `#temp` con
+tipos/collation nativos, rechaza cualquier índice unique con IGNORE_DUP_KEY,
+evita MERGE y verifica cada clave con `SELECT @@ROWCOUNT`, abortando si afecta
+más de una fila. OVERWRITE requiere además INSERT+DELETE+VIEW DEFINITION y
+rechaza FILTER security policies; la creación de `#temp` depende de la política
+de tempdb. El preflight informa; estas comprobaciones transaccionales son la
+autoridad frente a drift.
+
+Cada ejecución se publica en lane DELIVERY. El delivery-worker no ejecuta el
+scheduler y nunca monta secretos de fuente. Un DeliveryAttempt pasa por STARTED y
+termina COMMITTED, FAILED o UNKNOWN. COMMITTED requiere confirmación del commit;
+FAILED representa un fallo comprobado; UNKNOWN conserva pérdida de confirmación,
+lease/worker perdido o recuperación de un STARTED sin prueba concluyente. UNKNOWN
+no se reintenta automáticamente. `PreparedDelivery` completa identificadores,
+tipos, valores y tamaño local antes de STARTED;
+constraints, serialización o deadlock explícitamente revertidos quedan FAILED,
+no UNKNOWN. El operador debe verificar el destino antes de
+crear deliberadamente otro Run.
+
+El worker reclama condicionalmente el job antes de reconciliar y conserva el
+orden de locks Run→Job frente a cancelación. Una cancelación anterior a STARTED
+impide iniciar la transacción o escritura remota; un COMMITTED/FAILED conocido
+después de STARTED prevalece sobre cancelación tardía. Lease perdido o STARTED
+recuperado sin prueba concluyente queda UNKNOWN y nunca provoca replay ciego.
+
+La transacción es atómica dentro del motor remoto, no una 2PC con metadata
+Trackvance. Un commit confirmado se persiste antes de autorizar evidencia local.
+El artifact DELIVERY_RECEIPT y la sección `delivery` del manifest schema 2 fijan
+Run, DatasetVersion/hash, DestinationVersion, target, estrategia, intento y
+métricas sin secretos ni filas completas. El linaje y auditoría conectan todos
+esos recursos.
+
+0.5.0 reutiliza `connections:read/manage/use`, `configurations:write`,
+`runs:read/execute` y `artifacts:download`. Mantiene autorización backend y scope
+de organización, pero el RBAC granular por destino, estrategia o aprobación tras
+UNKNOWN permanece pendiente. Tampoco se implementan sinks S3/Blob/REST,
+scheduler, ejecución masiva, aprobación de cuatro ojos, transformación funcional
+ni garantías de alta disponibilidad/volumen productivo. Triggers/rules del
+destino pueden transformar o suprimir DML y `rows_written` representa filas
+intentadas; `PENDING_REPAIR` requiere reparación explícita de evidencia y no
+repite la escritura. Un MONEY extremo que exceda el tipo remoto falla mediante
+rollback. Ver ADR 0015.
 
 ## 6. Carga, esquema y versionado
 
@@ -242,7 +350,7 @@ decimal o de fecha inválido muestra “No se pudo interpretar; la transformaci�
 conservó el valor que recibió”. Los pasos posteriores siguen ejecutándose
 en el orden declarado. La vista previa de fechas cubre únicamente las directivas
 determinísticas que el navegador reproduce con certeza. Para formatos Python no
-soportados —por ejemplo `%b`, `%j` o `%Z`— muestra “Vista previa no disponible
+soportados (por ejemplo `%b`, `%j` o `%Z`) muestra “Vista previa no disponible
 para este formato; la ejecución usará el formato declarado”, sin convertir esa
 limitación en un fallo. `datetime.strptime` del backend conserva la autoridad
 sobre la ejecución. La vista previa se calcula sólo para informar: no crea artifacts, no modifica el
@@ -443,11 +551,11 @@ health_score se pondera por unidades evaluadas según la agregación del backend
 
 ### Rutas SPA
 
-/; /datasets; /datasets/:id; /connections; /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /exceptions; /rules; /audit; /settings/*. La administración de usuarios está integrada en Configuración. El menú conserva los módulos y el diseño navy/teal. Estados de carga, vacío y error tienen tratamiento específico; se conserva request_id en errores para diagnóstico.
+/; /datasets; /datasets/:id; /connections; /delivery/*; /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /exceptions; /rules; /audit; /settings/*. Delivery incluye listado, `/delivery/new`, destinos y detalle de destino. La administración de usuarios está integrada en Configuración. El menú conserva los módulos y el diseño navy/teal. Estados de carga, vacío y error tienen tratamiento específico; se conserva request_id en errores para diagnóstico.
 
 Cerrar sesión confirma `/auth/logout`, limpia token CSRF, caché de consultas y
 estado de sesión, y navega con reemplazo a `/`. El usuario vuelve a la pantalla
-inicial de Trackvance —incluido “Entrar al entorno demo” cuando esté habilitado—
+inicial de Trackvance (incluido “Entrar al entorno demo” cuando esté habilitado)
 sin mantener una pantalla autenticada en el historial inmediato.
 
 Los detalles de dataset separan archivo original, fuente derivada, esquema/perfil y linaje. Los detalles de run separan Completada de Rechazado/Con hallazgos/Alerta. Los labels de negocio acompañan reason codes técnicos en resultados y evidencia. La numeración se muestra como Línea del archivo cuando representa línea física o Registro de la versión cuando corresponde.
@@ -467,11 +575,12 @@ FileArtifactStore confina las rutas al root configurado, verifica tamaño/SHA-25
 | RECON_RESULTS | Resultados detallados de conciliación. |
 | SENTINEL_PROFILE | Checks/resultados del monitor. |
 | RUN_MANIFEST | Evidencia JSON de ejecución. |
+| DELIVERY_RECEIPT | Recibo de commit remoto confirmado, sin secretos ni filas completas. |
 | EXPORT_XLSX | Reporte estructurado generado bajo demanda. |
 | EXCEPTION_ATTACHMENT | Evidencia documental adjunta a un caso, inmutable y con hash. |
 | GENERATED_DEMO / legacy | Datos ficticios o artefactos históricos identificados explícitamente. |
 
-Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM, RUN_REFERENCE, EXCEPTION_EVIDENCE, SOURCE_SNAPSHOT, REFRESH_OF y EXPORT_OF entre versiones, runs, fuentes y artefactos.
+Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM, RUN_REFERENCE, EXCEPTION_EVIDENCE, SOURCE_SNAPSHOT, REFRESH_OF, DELIVERY_INPUT, DELIVERY_DESTINATION_VERSION, DELIVERY_RECEIPT, EVIDENCE_OF y EXPORT_OF entre versiones, runs, fuentes, destinos, intentos y artefactos.
 
 Antes de procesar o descargar, se comprueba la identidad registrada y su integridad. ARTIFACT_HASH_MISMATCH/ARTIFACT_INTEGRITY_ERROR impide usar bytes corruptos; no recalcula silenciosamente el hash histórico. El backfill aditivo registra archivos legacy verificables, cuenta ausentes/corruptos y conserva historia.
 
@@ -479,7 +588,12 @@ Una publicación interrumpida puede dejar bytes huérfanos no referenciados desp
 
 ## 14. Manifest schema 2 y auditoría
 
-Cada Run completado publica un manifest inmutable con schema_version=2. read_manifest/adapt_manifest centraliza la lectura de v1 histórico; la adaptación se realiza en memoria, sin sobrescribir archivos anteriores.
+Cada Run completado publica un manifest inmutable con schema_version=2.
+Excepción operativa explícita: si una entrega ya COMMITTED pierde la publicación
+local, conserva el commit y marca `evidence_status=PENDING_REPAIR`; nunca repite la
+transacción para fabricar la evidencia. read_manifest/adapt_manifest centraliza la
+lectura de v1 histórico; la adaptación se realiza en memoria, sin sobrescribir
+archivos anteriores.
 
 ```json
 {
@@ -498,7 +612,7 @@ Cada Run completado publica un manifest inmutable con schema_version=2. read_man
 }
 ```
 
-El contrato completo incluye started_at/finished_at, identidad/legacy, versión de Trackvance, plan processing con engine/version y schedule cuando corresponde, inputs con DatasetVersion/SHA/schema hash/origen/ingestion_metadata, configuración efectiva/id/version/config_hash/stored_config_hash, métricas, output_version_id y result_artifacts. references añade identidad y hashes de DatasetVersions usadas para integridad referencial; es una extensión aditiva de schema 2. Los snapshots anteriores no se reescriben.
+El contrato completo incluye started_at/finished_at, identidad/legacy, versión de Trackvance, plan processing con engine/version y schedule cuando corresponde, inputs con DatasetVersion/SHA/schema hash/origen/ingestion_metadata, configuración efectiva/id/version/config_hash/stored_config_hash, métricas, output_version_id y result_artifacts. references añade identidad y hashes de DatasetVersions usadas para integridad referencial. Delivery añade una sección `delivery` con DestinationVersion, target, estrategia, intento, resultado y receipt; es una extensión aditiva de schema 2. Los snapshots anteriores no se reescriben.
 
 La versión del producto y la del motor se distinguen: engine_version de nivel superior identifica Trackvance en el manifest actual; processing.engine_version identifica la versión real de Polars. La UI y exports muestran ambas con su contexto.
 
@@ -508,7 +622,7 @@ AuditEvent conserva actor_type, actor_id estable, actor visible, actor_legacy, e
 
 DATASET_UPLOADED, DATASET_DERIVED, CONFIGURATION_PUBLISHED, RUN_QUEUED, RUN_COMPLETED, EXCEPTION_CREATED, EXCEPTION_UPDATED y EXCEPTION_VALIDATION_CHECKED documentan el ciclo. EXPORT_DOWNLOADED, EVIDENCE_DOWNLOADED y ARTIFACT_DOWNLOADED registran el acceso relevante a evidencia. La UI enlaza recursos desde los eventos.
 
-La administración añade USER_CREATED, USER_UPDATED y USER_PASSWORD_RESET. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos eventos.
+La administración añade USER_CREATED, USER_UPDATED y USER_PASSWORD_RESET. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Delivery registra publicación, encolado, STARTED, COMMITTED, FAILED o UNKNOWN con actor estable y referencias, nunca contraseña ni filas. Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos eventos.
 
 Se excluyen claves de passwords, tokens y secretos de metadata/evidencia. Los casos legacy sin identidad demostrable se marcan como legacy; no se atribuyen a un UUID de usuario inventado. Las auditorías de exportación agregan evidencia sin alterar el manifest original del Run.
 
@@ -540,12 +654,13 @@ POST de ejecución valida configuración/versions, fija actor e inputs inmutable
 | --- | --- |
 | QUEUED | Trabajo persistido esperando worker. |
 | RUNNING | Worker posee lease y procesa la ejecución. |
-| SUCCESS | Procesamiento terminado y evidencia publicada; decisión de negocio separada. |
+| SUCCESS | Procesamiento terminado; en Delivery, commit remoto confirmado. La evidencia local se publica después y puede quedar marcada PENDING_REPAIR sin repetir la transacción. |
 | FAILED | Error técnico durante ejecución. |
+| UNKNOWN | Sólo Delivery: resultado remoto no confirmable; no equivale a fallo/commit y bloquea reintento automático. |
 | FAILED_PRECONDITION | Preflight no permite ejecutar; no se simula resultado. |
 | CANCELLED | Cancelación atendida por el worker. |
 
-DatabaseJobQueue publica Jobs con run_id único. El worker reclama trabajos elegibles con actualización condicional, identifica propietario y lease_until, registra intentos y recupera leases vencidos. Heartbeat informa actividad local y salud. Antes de publicar resultados se revalida lease; los intentos no sobrescriben evidencia histórica.
+DatabaseJobQueue publica Jobs con run_id único y lane DEFAULT o DELIVERY. Cada worker reclama únicamente su lane con actualización condicional, identifica propietario y lease_until, registra intentos y recupera leases vencidos. Heartbeats separados informan actividad local y salud. El scheduler sólo corre en DEFAULT. Delivery adquiere primero el Run y después el Job, reclama el lease antes de reconciliar y vuelve a validarlo antes de cambiar estados o publicar. PreparedDelivery completa validación y materialización local antes de STARTED. La cancelación que gana antes de STARTED impide la escritura; después de STARTED prevalece un resultado remoto conocido. Un STARTED recuperado o lease perdido sin confirmación queda UNKNOWN, no se reejecuta y no sobrescribe evidencia histórica.
 
 ### ExecutionPlanner
 
@@ -553,11 +668,11 @@ Estima memoria de trabajo desde bytes/filas/columnas y un factor mayor para Reco
 
 El pipeline real es Polars/Python. Si la estimación requiere PySpark, el plan rechaza con ENGINE_UNAVAILABLE; disco insuficiente produce RESOURCE_DISK_INSUFFICIENT. No hay fallback silencioso ni adapter Spark instalado. DuckDB se usa en metadata y paridad de expresiones, no como pipeline completo seleccionable.
 
-La presencia de timeout_seconds en el plan no equivale a un límite duro por proceso. La interrupción bajo carga, kill/restart de procesos y el presupuesto real de memoria requieren certificación de estrés adicional. La cancelación es cooperativa; Redis/Celery, prioridades/lanes y workers distribuidos son futuros.
+La presencia de timeout_seconds en el plan no equivale a un límite duro por proceso. La interrupción bajo carga, kill/restart de procesos y el presupuesto real de memoria requieren certificación de estrés adicional. La cancelación es cooperativa; las lanes DEFAULT/DELIVERY están implementadas, mientras Redis/Celery, prioridades generales y workers distribuidos son futuros.
 
 ## 17. Modelo persistente y migraciones
 
-PostgreSQL mantiene 21 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
+PostgreSQL mantiene 24 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
 
 | Tabla | Identidad / relación principal |
 | --- | --- |
@@ -567,7 +682,10 @@ PostgreSQL mantiene 21 tablas de aplicación, además del control de revisión d
 | dataset_versions | Versión única por dataset, schema/profile, artifacts y lineage. |
 | configurations | Snapshot por módulo; previous_version_id y datasets. |
 | runs | Snapshot de inputs/config, actor, plan, métricas, decisión y evidencia. |
-| jobs | Run único, estado, intentos y lease. |
+| jobs | Run único, lane DEFAULT/DELIVERY, estado, intentos y lease. |
+| delivery_destinations | Identidad de destino, organización, motor, revisión vigente, estado y última prueba. |
+| delivery_destination_versions | Configuración inmutable, referencia de secreto y config_hash. |
+| delivery_attempts | Run/destino, número/clave idempotente, estado remoto, target, métricas, referencia/error y fechas. |
 | findings | Run, código, fingerprint único por Run y detalles. |
 | exceptions | Finding único, configuración, origen, validación, asignación, prioridad, SLA, reapertura, política automática y timeline/version. |
 | exception_attachments | Caso, artifact inmutable, autor y descripción. |
@@ -585,7 +703,7 @@ PostgreSQL mantiene 21 tablas de aplicación, además del control de revisión d
 
 ### Cadena de trazabilidad
 
-Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Finding -> Exception. La excepción añade Validation Run de la misma Configuration y artifacts adjuntos. La programación vincula su revisión y fecha prevista al Run; las reglas referenciales añaden snapshots de consulta. ArtifactLink conecta originales, canónicos, outputs, manifests y exports. Las claves de organización y comprobaciones del servicio acotan todos los accesos.
+Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Finding -> Exception. En Delivery, DatasetVersion + DestinationVersion -> Configuration DELIVERY -> Run -> DeliveryAttempt -> receipt/manifest. La excepción añade Validation Run de la misma Configuration y artifacts adjuntos. La programación vincula su revisión y fecha prevista al Run; las reglas referenciales añaden snapshots de consulta. ArtifactLink conecta originales, canónicos, outputs, manifests, receipts y exports. Las claves de organización y comprobaciones del servicio acotan todos los accesos.
 
 | Migración | Cambio |
 | --- | --- |
@@ -596,12 +714,17 @@ Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Find
 | 0005_external_connections | Conexiones externas, configuraciones versionadas y bindings de datasets. |
 | 0006_local_identity_exceptions | Versionado de usuarios, fechas, campos operativos de excepciones y exception_attachments. |
 | 0007_monitor_scheduling | Programaciones, revisiones inmutables y ocurrencias Sentinel; unicidad e índices de despacho. |
+| 0008_data_delivery | Destinos/revisiones/intentos de entrega, lane persistida e índices/constraints de Data Delivery. |
 
-La revisión vigente es 0007_monitor_scheduling. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
+La revisión vigente es 0008_data_delivery. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
 
 ## 18. API y errores
 
-La base es /api/v1. OpenAPI generado desde FastAPI y backend/API_CONTRACT.md son las referencias de campos exactos. El inventario siguiente se genera desde backend/openapi.json y conserva rutas reales, incluidos alias y compatibilidad deprecated.
+La base es /api/v1. El runtime FastAPI y backend/API_CONTRACT.md describen los
+campos exactos implementados. El inventario siguiente se genera desde
+backend/openapi.json; el snapshot regenerado declara 0.5.0, 81 paths y 14 paths
+de Data Delivery. La tabla siguiente forma parte del inventario ejecutable
+revisado antes de construir el PDF.
 
 @openapi
 
@@ -620,6 +743,8 @@ Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticad
 | Auditor | Lectura/exports/auditoría/usuarios/sistema y metadata de conexiones; sin mutaciones operativas. |
 
 permissions.py es la política central; roles desconocidos no reciben permisos. Se distinguen datasets:read/write, configurations:write, runs:read/execute, exceptions:read/write/close, connections:read/use/manage, exports:download, artifacts:download, audit:read, users:read/write y system:read. connections:read permite consultar metadata; use permite probar una conexión guardada, explorar y adquirir snapshots; manage permite crear, editar, deshabilitar, eliminar y probar borradores. Los cierres técnicos y administrativos requieren exceptions:close además del permiso de gestión.
+
+Data Delivery reutiliza provisionalmente esos permisos: destinos usan connections:read/manage/use; preview/preflight y publicación usan configurations:write; consulta/ejecución usan runs:read/execute; receipt usa artifacts:download. No existen aún permisos delivery:* ni gobierno por destino/estrategia. Ese RBAC granular permanece explícitamente pendiente.
 
 ### Administración local implementada
 
@@ -650,6 +775,9 @@ La configuración es por entorno y defaults locales. .env.example es una plantil
 | POSTGRES_DB/USER/PASSWORD | Acceso local a metadata; password sólo en entorno. |
 | TRACKVANCE_SECRETS_DIR | Volumen de credenciales cifradas externas. |
 | TRACKVANCE_SECRET_KEY_FILE | Clave maestra local en volumen independiente. |
+| TRACKVANCE_DESTINATION_SECRETS_DIR | Volumen independiente de credenciales cifradas de destinos. |
+| TRACKVANCE_DESTINATION_SECRET_KEY_FILE | Clave maestra independiente de secretos de destino. |
+| TRACKVANCE_WORKER_LANE | DEFAULT o DELIVERY; selecciona la cola y heartbeat del proceso. |
 | DEMO_ACCESS_ENABLED | Habilita únicamente el login demo explícito; garantiza la identidad y organización mínimas, no datos sintéticos. |
 | DEMO_SEED_ENABLED | Habilita únicamente el seed idempotente de datasets, configuraciones, ejecuciones, hallazgos y excepciones demo. |
 | MAX_UPLOAD_BYTES / TRACKVANCE_MAX_ROWS | 10 MiB y 100.000 filas por defecto. |
@@ -663,15 +791,22 @@ TRACKVANCE_ENV aparece como etiqueta en la plantilla; no selecciona por sí sola
 
 Readiness comprueba SQL, Alembic head y escritura temporal. doctor.py comprueba HTTP, servicios, migraciones y heartbeat, sin imprimir DSN ni secretos. verify_storage.py snapshot calcula hashes de registros de negocio, valida todos los artifacts y verifica referencias/credenciales cuando corresponde; compare exige igualdad antes/después de un reinicio en reposo. Entre capturas no deben ejecutarse login/exports/tests que agregan auditoría legítima.
 
-El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y restaura en destino nuevo con rutas reubicadas. Incluye credenciales cifradas y clave maestra; una referencia de conexión sin su secreto o clave invalida el respaldo. La restauración conserva estos archivos en credentials/ y keys/ del destino con acceso restringido y mantiene compatibilidad con backups históricos sin conexiones.
+El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y restaura en destino nuevo con rutas reubicadas. Incluye credenciales/clave de fuentes y credenciales/clave de destinos; una referencia sin su secreto o clave invalida el respaldo. La restauración conserva esos stores con acceso restringido y mantiene compatibilidad con backups históricos anteriores a las capacidades correspondientes.
 
 ### Respaldo Docker consistente
 
-scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiquetas Compose verificables y los cuatro volúmenes esperados. Detiene temporalmente web y worker, captura el estado consistente, detiene API y produce pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials y connection_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que estaban activos al comenzar.
+scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiquetas Compose verificables y los seis volúmenes esperados. Detiene temporalmente web, scheduler y ambos workers, captura el estado consistente, detiene API y produce pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials, connection_keys, delivery_credentials y delivery_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que estaban activos al comenzar.
 
-backup-manifest.json registra schema_version, consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
+El formato actual usa `backup-manifest.json` schema 2 y `state.json` schema 3. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
 
 La transferencia de archivos usa streaming: el helper escribe el tar por stdout hacia un archivo abierto por el proceso del host; la restauración envía ese archivo por stdin. No carga el archivo completo en RAM ni necesita un bind mount del directorio del host o elevar el helper a root. En POSIX se crean directorios de backup 0700 y archivos 0600; los contenidos restaurados conservan los modos verificados. El helper sólo monta el volumen necesario y permanece sin red.
+
+Cada componente Docker se copia primero con creación exclusiva (`O_EXCL`) a un
+staging privado, se sincroniza con `fsync`, se vuelve read-only y se revalida por
+tamaño, hash e inventario antes de restaurar o inspeccionar. Todos los consumidores
+usan ese staging. El backup SQLite copia a un destino nuevo y verifica tamaño/hash
+antes de abrir o mutar la base. Esto evita consumir bytes sustituidos por una
+carrera TOCTOU entre inventario y uso.
 
 ```text
 python scripts/docker_state.py backup --project trackvance-local --destination backups/local
@@ -680,7 +815,7 @@ python scripts/docker_state.py verify --source backups/local
 
 ### Restauración en proyecto nuevo
 
-restore exige nombre distinto del origen y ningún recurso preexistente. Reconstruye volúmenes nuevos, restaura el dump en una transacción, repone artifacts/credenciales/clave, inicia API y valida Alembic y la igualdad de la huella. Sólo inicia el resto del sistema con --start; sin esa opción deja el destino detenido tras verificarlo. --smoke requiere --start y está reservado para un ensayo aislado con identidad demo disponible. La salida es un recibo de restauración con hash del manifest y estado de verificación, sin secretos.
+restore exige nombre distinto del origen y ningún recurso preexistente. Reconstruye volúmenes nuevos, restaura el dump en una transacción, repone artifacts y ambos pares credenciales/clave, inicia API y valida Alembic y la igualdad de la huella. Sólo inicia el resto del sistema con --start; sin esa opción deja el destino detenido tras verificarlo. --smoke requiere --start y está reservado para un ensayo aislado con identidad demo disponible. La salida es un recibo de restauración con hash del manifest y estado de verificación, sin secretos.
 
 ```powershell
 python scripts/docker_state.py restore --source backups/local `
@@ -688,6 +823,18 @@ python scripts/docker_state.py restore --source backups/local `
 ```
 
 La instalación destino debe disponer del código/imágenes y configuración de entorno compatibles. Una restauración fallida detiene el proyecto nuevo para diagnóstico; no borra el origen ni lo reemplaza. La prueba E2E destruye sólo su entorno temporal, restaura y comprueba hashes y funcionalidad, incluidos secretos y reconexión a motores de prueba. La evidencia ejecutada se registra en aceptación.
+
+La compatibilidad 0.4.1→0.5.0 se certificó desde la baseline exacta
+`92c58eae9a1ddef653c0c9c888cfd7698ee1af3a`: manifest 1/state 2/0007, 21
+tablas y SHA canónico legacy idénticos; restore actual en 0008/24 tablas, tres
+tablas Delivery vacías y 19 jobs históricos en lane DEFAULT. State 2 no guardaba
+un hash estructural del catálogo, por lo que no se atribuye esa garantía histórica.
+
+El drill nativo 0.5.0 restauró el formato actual en un proyecto nuevo después de
+destruir la fuente. Verificó siete artifacts, dos secretos, 127 relaciones y
+Alembic 0008; la credencial de destino restaurada permitió una entrega posterior
+COMMITTED de cuatro filas. Doctor, hashes, linaje, stores separados y búsqueda de
+fugas de secretos aprobaron.
 
 El drill ampliado trackvance-recovery-src-stream-e20a -> trackvance-recovery-dst-stream-e20a terminó PASS utilizando la transferencia por streaming: eliminó el proyecto fuente antes de restaurar y verificó siete artifacts, un secreto, 124 relaciones y Alembic 0007_monitor_scheduling. La credencial PostgreSQL restaurada permitió conectar, refrescar a DatasetVersion v2 y ejecutar el mismo contrato: el nuevo Run fue APPROVED y el original permaneció REJECTED. Se conservaron hashes, linaje e historia y pasaron doctor, smoke API y búsqueda de secretos en logs. El resultado saneado se versiona en docs/development/evidence/0.4.0/recovery.json.
 
@@ -699,7 +846,7 @@ El reset destruye metadata, datasets, runs, artifacts y secretos del proyecto se
 
 Para actualizar: terminar runs, respaldar, reconstruir imágenes, aplicar Alembic al iniciar, esperar healthchecks y comparar almacenamiento. Nunca ejecutar down -v sobre la instalación del usuario como parte de un upgrade.
 
-La instalación principal se actualizó a 0.4.0 y Alembic 0007 después de un backup integral verificado. API, worker, web y PostgreSQL quedaron saludables con restart=no; la comprobación conservó los registros previos. Esta actualización no utilizó la instalación principal para pruebas destructivas.
+Como antecedente operativo de 0.4.0, la instalación principal se actualizó entonces a Alembic 0007 después de un backup integral verificado. API, worker, web y PostgreSQL quedaron saludables con restart=no; la comprobación conservó los registros previos. Esa actualización histórica no utilizó la instalación principal para pruebas destructivas y no se presenta como estado actual de 0.5.0.
 
 ## 20A. Benchmark reproducible y límites comprobados
 
@@ -734,7 +881,7 @@ Se conservan los límites operativos por defecto de 10 MiB/upload, 100.000 filas
 
 ## 21. Arquitectura final de producto
 
-OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales. Evoluciona la entrega de jobs, almacenamiento, fuentes, identidad, observabilidad e infraestructura. No divide Intake, ReconOps o Sentinel en microservicios.
+OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales. Evoluciona la entrega de jobs, almacenamiento, fuentes/destinos, identidad, observabilidad e infraestructura. No divide Intake, ReconOps, Sentinel o Data Delivery en microservicios.
 
 @diagram product
 
@@ -744,6 +891,7 @@ OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales
 | Metadata | PostgreSQL administrado, backups y recuperación verificados. |
 | Storage interno | S3 o Azure Blob mediante StorageProvider, locators, hashes y retención. |
 | Fuentes | PostgreSQL y SQL Server implementados; S3, Azure Blob, APIs y otros motores futuros mediante DatasetSource. |
+| Destinos | PostgreSQL y SQL Server implementados mediante DataSink; otros sinks, aprobación y políticas granulares futuros. |
 | Jobs | Redis + Celery, reintentos/leases e idempotencia; entrega transaccional definida. |
 | Compute | Polars para cargas estándar, PySpark para grandes volúmenes con paridad certificada. |
 | Identidad | OAuth2/OIDC + SSO con Entra ID, Keycloak u otro IdP; RBAC/org scope propios. |
@@ -755,7 +903,7 @@ OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales
 ### Pasos de evolución sin cambiar reglas
 
 1. Introducir locator remoto y materialización acotada en un StorageProvider, migrando referencias y validando hashes históricos.
-2. Ampliar PostgreSQL/SQL Server con otros conectores DatasetSource, límites, credenciales externas y snapshots reproducibles.
+2. Ampliar PostgreSQL/SQL Server con otros conectores DatasetSource/DataSink, límites, credenciales externas, snapshots y receipts reproducibles.
 3. Implementar JobQueue Redis/Celery con patrón transaccional/outbox o garantía equivalente; conservar Run y evidencia idempotentes.
 4. Añadir ExecutionEngine PySpark, capacidades del planner y pruebas de paridad antes de habilitarlo.
 5. Integrar IdP, secretos y observabilidad; aplicar tests de aislamiento y recuperación.
@@ -769,9 +917,21 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 @validation
 
-### Certificación incremental 0.4.1
+### Certificación incremental 0.5.0
 
-La tabla anterior es la fuente explícita de resultados de esta revisión; ningún
+Ningún éxito de 0.4.1 se hereda como certificación de 0.5.0. La aceptación debe
+cubrir suite backend/scripts, calidad estática, frontend, migración 0008,
+Compose/persistencia, Conexiones, Data Delivery con ambos motores, UI, estado
+UNKNOWN, secretos/linaje y backup/restore con entrega posterior. Resultado final:
+869 pruebas Python y 128 Vitest aprobadas; calidad estática y build PASS;
+Playwright 20 aprobadas/5 opt-in omitidas; smoke 84/84, Conexiones 62/62,
+Delivery real 92/92 y Playwright Delivery 1/1; recovery y compatibilidad real
+0.4.1→0.5.0 PASS. GitHub Actions:
+`[PENDIENTE: incorporar URL, commit y resultado de los siete jobs]`.
+
+### Base certificada de 0.4.1
+
+La tabla histórica de 0.4.1 fue la fuente explícita de esa revisión; ningún
 éxito se hereda de 0.4.0. En local aprobaron 533 tests backend/scripts, Ruff,
 Mypy sobre 33 archivos, ESLint, TypeScript, build y 119 tests Vitest en 13
 archivos. El bundle principal fue de 550,78 kB / 164,59 kB gzip y conserva un
@@ -807,12 +967,12 @@ El ciclo Compose también aprobó smoke API, doctor, migraciones PostgreSQL e in
 
 La base 0.4.0 incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides, identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift, XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage. La cobertura incremental 0.4.1 comprueba el selector único de identificadores, catálogo de responsables, labels/ayudas/orden/preview de transforms, preview de claves simples y compuestas, multiselect de Sentinel por esquema y regreso al inicio tras logout.
 
-El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones se prueba con motores reales PostgreSQL y SQL Server, usuarios SELECT, caída/reconexión, versiones, Intake y búsqueda de secretos en logs/metadata. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
+El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/delivery/recuperación con entornos temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación. Conexiones usa usuarios SELECT; Delivery usa destinos PostgreSQL/SQL Server aislados. Ambos buscan fugas de secretos y no apuntan a la instalación principal. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security scanning/SBOM y gates de producción permanecen en el objetivo final.
 
 La revisión 0.4.1 quedó certificada en GitHub Actions por el workflow
 `35638817011`, commit `38a8c7a3dd14ecc1c6b730f2a4a98e419707281e`:
-seis de seis jobs terminaron SUCCESS —backend, frontend, connections-e2e,
-compose-e2e, benchmark-smoke y backup-restore-e2e—. Este resultado corresponde
+seis de seis jobs terminaron SUCCESS (backend, frontend, connections-e2e,
+compose-e2e, benchmark-smoke y backup-restore-e2e). Este resultado corresponde
 al mismo código de producto y fuentes documentales usados para la publicación;
 la incorporación posterior del PDF y del dato de CI es un cierre documental.
 
@@ -824,7 +984,7 @@ La corrección quedó certificada en GitHub Actions: workflow 35488848150, commi
 
 ### Pendientes explícitos
 
-PySpark, conectores adicionales, Data Delivery, rotación automática de clave maestra, Redis/Celery productivo, OIDC/SSO, Kubernetes/Helm/Terraform, observabilidad distribuida y masking/sensibilidad permanecen fuera de este ciclo. La adquisición asíncrona de grandes volúmenes, timeout duro y agrupación multi-finding no se simulan. Los volúmenes no ejecutados, fallos o gates sin certificar se identifican explícitamente en validación y benchmarks; no se reclasifican como éxitos.
+PySpark, conectores/fuentes/sinks adicionales, scheduler y RBAC granular de Delivery, rotación automática de claves maestras, Redis/Celery productivo, OIDC/SSO, Kubernetes/Helm/Terraform, observabilidad distribuida y masking/sensibilidad permanecen fuera de este ciclo. La adquisición asíncrona de grandes volúmenes, timeout duro y agrupación multi-finding no se simulan. Los volúmenes no ejecutados, fallos o gates sin certificar se identifican explícitamente en validación y benchmarks; no se reclasifican como éxitos.
 
 ## 23. Decisiones vigentes y control documental
 
@@ -844,12 +1004,13 @@ PySpark, conectores adicionales, Data Delivery, rotación automática de clave m
 | Administración local de usuarios y sesiones | docs/adr/0012-local-identity-administration.md. |
 | Backup, restore y reset verificables | docs/adr/0013-local-backup-restore.md. |
 | Benchmark y política de escalado con evidencia | docs/adr/0014-volume-benchmark-policy.md. |
+| Data Delivery, transacciones, UNKNOWN, lanes y secretos de destino | docs/adr/0015-data-delivery.md. |
 
 ### Precedencia y cambios de esta revisión
 
 Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones/roles, librerías no instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa.
 
-Se actualizan arquitectura local/final, esquema real de 21 tablas, API generada, cinco lectores, Conexiones PostgreSQL/SQL Server, SecretStore, snapshots, profiling exacto, reglas avanzadas, referencias, ReconOps configurable, Sentinel programado, excepciones con SLA y cierre verificado, usuarios/RBAC, operación, benchmarks y límites comprobados. Se preservan Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
+Se actualizan arquitectura local/final, esquema real de 24 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
 
 El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de semántica requiere ADR, pruebas, actualización de esta fuente y del PDF; un cambio de base de datos requiere Alembic nuevo. Las versiones de configs/manifests/métricas se gestionan separadas de la versión del producto.
 
@@ -862,5 +1023,6 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | 19-09-2026 | v1.1, evolución Conexiones | PostgreSQL, SQL Server, secretos cifrados, snapshots y pruebas con motores reales. |
 | 19-09-2026 | v1.1, implementación 0.4.0 | Maduración funcional del roadmap local; resultados y límites según evidencia de esta revisión. |
 | 21-09-2026 | v1.1, implementación 0.4.1 | Configuración guiada por esquema, previews informativos, catálogo de responsables y cierre de sesión corregido; contratos del motor sin cambios. |
+| 23-09-2026 | v1.1, implementación 0.5.0 | Data Delivery PostgreSQL/SQL Server, destinos/configuraciones versionados, lanes, UNKNOWN, exactitud de tipos, locks/guardias transaccionales, secretos/evidencia/backup compatible y UI; validación local cerrada y CI informado por separado. |
 
-La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. Los resultados de validación son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.4.1.
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.0 ya fue regenerado; el PDF se publicará sólo después de cerrar GitHub Actions y revisar visualmente el candidato completo. Los resultados 0.5.0 son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.5.0.

@@ -164,9 +164,9 @@ def certify_source(api, checks, source_type: str, password: str, credentials: li
                                   "happened_on", "updated_at", "is_active", "optional_note"},
                   f"{source_type}: metadata de columnas completa")
     checks.verify(columns["happened_on"]["logical_type"] == "DATE"
-                  and columns["updated_at"]["logical_type"] == "TIMESTAMP"
+                  and columns["updated_at"]["logical_type"] == "STRING"
                   and columns["quantity"]["numeric"] and columns["amount"]["numeric"],
-                  f"{source_type}: tipos nativos normalizados para reglas portables")
+                  f"{source_type}: temporales sin zona preservados como texto exacto")
     checks.verify(len(preview["rows"]) == 3 and preview["sampled_rows"] == 3,
                   f"{source_type}: preview limitado a la muestra solicitada")
     for object_name in ["transactions_view", "private_records"]:
@@ -362,14 +362,14 @@ def main() -> int:
                 source = ROOT / "frontend" / directory
                 if source.exists():
                     shutil.copytree(source, evidence / directory, dirs_exist_ok=True)
-        run(["restart", "postgres", "api", "worker", "web"])
+        run(["restart", "postgres", "api", "worker", "delivery-worker", "web"])
         run(["up", "-d", "--wait", "--wait-timeout", "180"])
         for result in results:
             tested = api.post(f"/api/v1/connections/{result['connection_id']}/test", {}, expected=(200,))
             preserved = api.get(f"/api/v1/runs/{result['run_id']}")
             checks.verify(tested["status"] == "SUCCESS" and preserved["status"] == "SUCCESS",
                           f"{result['source_type']}: conserva credenciales cifradas y runs tras reinicio")
-        logs = run(["logs", "--no-color", "api", "worker"], capture=True)
+        logs = run(["logs", "--no-color", "api", "worker", "delivery-worker"], capture=True)
         assert_no_credentials(logs, credentials, "Secreto en logs de la aplicación")
         database_dump = run(["exec", "-T", "postgres", "pg_dump", "-U", "trackvance",
                              "-d", "trackvance", "--data-only"], capture=True)
@@ -391,7 +391,11 @@ def main() -> int:
                                                        indent=2), encoding="utf-8")
         if started:
             try:
-                logs = run(["logs", "--no-color", "--tail", "150", "api", "worker"], capture=True)
+                logs = run(
+                    ["logs", "--no-color", "--tail", "150", "api", "worker",
+                     "delivery-worker"],
+                    capture=True,
+                )
                 (evidence / "application.log").write_text(redact(logs, credentials), encoding="utf-8")
                 for directory in ("test-results", "playwright-report"):
                     source = ROOT / "frontend" / directory

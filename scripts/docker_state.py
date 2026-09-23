@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -25,15 +26,88 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = ROOT / "scripts" / "verify_storage.py"
-BACKUP_SCHEMA_VERSION = 1
+BACKUP_SCHEMA_VERSION = 2
+LEGACY_BACKUP_SCHEMA_VERSION = 1
+SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
+    LEGACY_BACKUP_SCHEMA_VERSION,
+    BACKUP_SCHEMA_VERSION,
+}
+VERIFY_SCHEMA_VERSION = 3
+LEGACY_VERIFY_SCHEMA_VERSION = 2
+LEGACY_MIGRATION = "0007_monitor_scheduling"
+CURRENT_MIGRATION = "0008_data_delivery"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
-PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "web"})
+PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
 OPTIONAL_SERVICES = frozenset({"scheduler"})
 PRIMARY_VOLUMES = frozenset(
-    {"postgres_data", "trackvance_data", "connection_credentials", "connection_keys"}
+    {
+        "postgres_data",
+        "trackvance_data",
+        "connection_credentials",
+        "connection_keys",
+        "delivery_credentials",
+        "delivery_keys",
+    }
 )
-ARCHIVED_VOLUMES = ("trackvance_data", "connection_credentials", "connection_keys")
+ARCHIVED_VOLUMES = (
+    "trackvance_data",
+    "connection_credentials",
+    "connection_keys",
+    "delivery_credentials",
+    "delivery_keys",
+)
+LEGACY_ARCHIVED_VOLUMES = (
+    "trackvance_data",
+    "connection_credentials",
+    "connection_keys",
+)
+DELIVERY_TABLES = frozenset(
+    {
+        "delivery_destinations",
+        "delivery_destination_versions",
+        "delivery_attempts",
+    }
+)
+# Frozen from ``Base.metadata.tables`` at the certified v0.4.1 revision.  Do not
+# derive this compatibility contract from the current model: future tables must
+# not make an authentic 0.4.1 fingerprint appear complete.
+LEGACY_STATE_TABLES = frozenset(
+    {
+        "artifact_links",
+        "artifacts",
+        "audit_events",
+        "configurations",
+        "dataset_source_bindings",
+        "dataset_versions",
+        "datasets",
+        "exception_attachments",
+        "exceptions",
+        "external_connection_versions",
+        "external_connections",
+        "findings",
+        "idempotency_keys",
+        "jobs",
+        "metric_history",
+        "monitor_occurrences",
+        "monitor_schedule_versions",
+        "monitor_schedules",
+        "runs",
+        "sessions",
+        "users",
+    }
+)
+LEGACY_STATE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "tables",
+        "verified_artifacts",
+        "verified_secrets",
+        "validated_relationships",
+        "migration",
+    }
+)
+SHA256_PATTERN = re.compile(r"[a-f0-9]{64}")
 PROJECT_LABEL = "com.docker.compose.project"
 SERVICE_LABEL = "com.docker.compose.service"
 VOLUME_LABEL = "com.docker.compose.volume"
@@ -368,17 +442,21 @@ def _stop_services(state: Mapping[str, Any], services: Iterable[str]) -> list[st
 
 
 def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None:
-    order = ("postgres", "api", "worker", "scheduler", "web")
+    order = ("postgres", "api", "worker", "delivery-worker", "scheduler", "web")
     for service in order:
         for container in state["containers"]:
             if container["service"] == service and container["id"] in identifiers:
                 execute(["docker", "start", str(container["id"])], timeout=180)
 
 
-def _copy_snapshot(api_id: str, destination: Path) -> dict[str, Any]:
+def _copy_snapshot(
+    api_id: str, destination: Path, *, command: str = "snapshot"
+) -> dict[str, Any]:
+    if command not in {"snapshot", "snapshot-legacy-v2"}:
+        raise OperationError("Comando de huella persistente no reconocido.")
     execute(["docker", "cp", str(VERIFY_SCRIPT), f"{api_id}:/tmp/verify_storage.py"])
     output = execute(
-        ["docker", "exec", api_id, "python", "/tmp/verify_storage.py", "snapshot"],
+        ["docker", "exec", api_id, "python", "/tmp/verify_storage.py", command],
         timeout=600,
     )
     try:
@@ -400,7 +478,7 @@ def backup(project: str, destination: Path) -> Path:
     if not postgres["running"] or not api["running"]:
         raise OperationError("PostgreSQL y API deben estar activos para tomar el respaldo.")
     try:
-        _stop_services(state, ("web", "scheduler", "worker"))
+        _stop_services(state, ("web", "scheduler", "delivery-worker", "worker"))
         snapshot_state = _copy_snapshot(str(api["id"]), destination / "state.json")
         _stop_services(state, ("api",))
 
@@ -489,6 +567,49 @@ def _safe_component_path(root: Path, relative: str) -> Path:
     return resolved
 
 
+def archived_volumes_for_backup(schema_version: int) -> tuple[str, ...]:
+    if type(schema_version) is not int:
+        raise OperationError("Versión de manifest no reconocida.")
+    if schema_version == BACKUP_SCHEMA_VERSION:
+        return ARCHIVED_VOLUMES
+    if schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
+        return LEGACY_ARCHIVED_VOLUMES
+    raise OperationError("Versión de manifest no reconocida.")
+
+
+def validate_legacy_state(state: Mapping[str, Any]) -> None:
+    """Require the complete, frozen fingerprint contract emitted by v0.4.1."""
+
+    if set(state) != LEGACY_STATE_FIELDS:
+        raise OperationError("La huella 0.4.1 no tiene el inventario esperado.")
+    tables = state.get("tables")
+    if not isinstance(tables, Mapping) or set(tables) != LEGACY_STATE_TABLES:
+        raise OperationError("La huella 0.4.1 no tiene el inventario esperado.")
+    for table_hashes in tables.values():
+        if not isinstance(table_hashes, Mapping):
+            raise OperationError("La huella 0.4.1 contiene hashes inválidos.")
+        for identifier, row_hash in table_hashes.items():
+            if (
+                not isinstance(identifier, str)
+                or not identifier
+                or not isinstance(row_hash, str)
+                or SHA256_PATTERN.fullmatch(row_hash) is None
+            ):
+                raise OperationError("La huella 0.4.1 contiene hashes inválidos.")
+    for field in (
+        "verified_artifacts",
+        "verified_secrets",
+        "validated_relationships",
+    ):
+        value = state.get(field)
+        if type(value) is not int or value < 0:
+            raise OperationError("La huella 0.4.1 contiene contadores inválidos.")
+    if state["verified_artifacts"] != len(tables["artifacts"]):
+        raise OperationError("La huella 0.4.1 contiene contadores inválidos.")
+    if state["verified_secrets"] != len(tables["external_connection_versions"]):
+        raise OperationError("La huella 0.4.1 contiene contadores inválidos.")
+
+
 def verify_backup(source: Path) -> dict[str, Any]:
     try:
         if source.is_symlink():
@@ -502,17 +623,24 @@ def verify_backup(source: Path) -> dict[str, Any]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as error:
         raise OperationError("No fue posible leer el manifest del respaldo.") from error
-    if manifest.get("schema_version") != BACKUP_SCHEMA_VERSION:
+    if not isinstance(manifest, Mapping):
+        raise OperationError("El manifest del respaldo no tiene una estructura válida.")
+    schema_version = manifest.get("schema_version")
+    if (
+        type(schema_version) is not int
+        or schema_version not in SUPPORTED_BACKUP_SCHEMA_VERSIONS
+    ):
         raise OperationError("Versión de manifest no reconocida.")
     if manifest.get("consistency") != "quiesced":
         raise OperationError("El respaldo no declara una captura quiescente.")
     components = manifest.get("components")
     if not isinstance(components, dict):
         raise OperationError("El manifest no enumera sus componentes.")
+    archived_volumes = archived_volumes_for_backup(schema_version)
     expected = {
         "state.json",
         "postgres.dump",
-        *(f"volumes/{name}.tar.gz" for name in ARCHIVED_VOLUMES),
+        *(f"volumes/{name}.tar.gz" for name in archived_volumes),
     }
     if set(components) != expected:
         raise OperationError("El conjunto de componentes del respaldo está incompleto.")
@@ -526,6 +654,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
     if actual_files != expected | {"backup-manifest.json"}:
         raise OperationError("El respaldo contiene archivos no declarados.")
     for relative, record in components.items():
+        if not isinstance(record, Mapping) or record.get("path") != relative:
+            raise OperationError("El manifest contiene un componente inválido.")
         path = _safe_component_path(root, relative)
         if (
             record.get("sha256") != digest(path)
@@ -543,9 +673,91 @@ def verify_backup(source: Path) -> dict[str, Any]:
         state = json.loads((root / "state.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise OperationError("La huella persistente no es JSON válido.") from error
-    if state.get("schema_version") != 2 or state.get("migration") != manifest.get("migration"):
+    expected_state_schema = (
+        VERIFY_SCHEMA_VERSION
+        if schema_version == BACKUP_SCHEMA_VERSION
+        else LEGACY_VERIFY_SCHEMA_VERSION
+    )
+    if not isinstance(state, Mapping):
+        raise OperationError("La huella persistente no tiene una estructura válida.")
+    if state.get("schema_version") != expected_state_schema or state.get(
+        "migration"
+    ) != manifest.get("migration"):
         raise OperationError("La huella persistente no coincide con el manifest.")
+    if (
+        schema_version == LEGACY_BACKUP_SCHEMA_VERSION
+        and manifest.get("migration") != LEGACY_MIGRATION
+    ):
+        raise OperationError("El backup v1 no corresponde a la baseline 0.4.1 soportada.")
+    if schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
+        validate_legacy_state(state)
     return manifest
+
+
+def stage_verified_backup(source: Path, destination: Path) -> dict[str, Any]:
+    """Copy one verified backup into a private root and bind all later reads to it."""
+
+    manifest = verify_backup(source)
+    root = source.resolve(strict=True)
+    try:
+        destination.mkdir(mode=0o700)
+        relative_files = ["backup-manifest.json", *sorted(manifest["components"])]
+        for relative in relative_files:
+            source_path = _safe_component_path(root, relative)
+            pure = PurePosixPath(relative)
+            target = destination.joinpath(*pure.parts)
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with source_path.open("rb") as input_stream, os.fdopen(
+                os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb"
+            ) as output_stream:
+                shutil.copyfileobj(input_stream, output_stream)
+                output_stream.flush()
+                os.fsync(output_stream.fileno())
+    except (OSError, KeyError, TypeError) as error:
+        raise OperationError("No fue posible preparar una copia privada del respaldo.") from error
+
+    staged_manifest = verify_backup(destination)
+    if staged_manifest != manifest:
+        raise OperationError("El respaldo cambió mientras se preparaba la restauración.")
+    for path in destination.rglob("*"):
+        if path.is_file():
+            path.chmod(0o400)
+    return staged_manifest
+
+
+def validate_restored_state(
+    manifest: Mapping[str, Any],
+    expected_state: Mapping[str, Any],
+    restored_state: Mapping[str, Any],
+    normalized_legacy_state: Mapping[str, Any] | None = None,
+) -> None:
+    schema_version = manifest.get("schema_version")
+    if schema_version == BACKUP_SCHEMA_VERSION:
+        if restored_state != expected_state:
+            raise OperationError("La huella restaurada no coincide con el respaldo.")
+        return
+    if schema_version != LEGACY_BACKUP_SCHEMA_VERSION:
+        raise OperationError("Versión de manifest no reconocida.")
+
+    # state schema 2 never recorded the live PostgreSQL catalog.  The only
+    # backwards-compatible proof is therefore the exact v0.4.1 row fingerprint
+    # reconstructed below; inventing a catalog hash here would reject authentic
+    # backups.  A future backup schema must record that evidence at backup time.
+    tables = restored_state.get("tables")
+    delivery_empty = isinstance(tables, Mapping) and all(
+        tables.get(table) == {} for table in DELIVERY_TABLES
+    )
+    if (
+        restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+        or restored_state.get("migration") != CURRENT_MIGRATION
+        or restored_state.get("verified_delivery_secrets") != 0
+        or restored_state.get("verified_secrets")
+        != restored_state.get("verified_source_secrets")
+        or not delivery_empty
+    ):
+        raise OperationError("La migración segura del backup 0.4.1 no quedó verificada.")
+    if normalized_legacy_state != expected_state:
+        raise OperationError("La huella 0.4.1 normalizada no coincide con el respaldo.")
 
 
 def ensure_fresh_project(project: str) -> None:
@@ -619,15 +831,18 @@ def _extract_volume(
         ], stdin=source)
 
 
-def restore(
+def _restore_verified(
     source: Path,
+    manifest: Mapping[str, Any],
+    receipt_directory: Path,
     target_project: str,
     *,
     start: bool = False,
     web_port: int = 3000,
     smoke: bool = False,
 ) -> dict[str, Any]:
-    manifest = verify_backup(source)
+    backup_schema_version = int(manifest["schema_version"])
+    archived_volumes = archived_volumes_for_backup(backup_schema_version)
     target_project = validate_project(target_project)
     if target_project == manifest.get("source_project"):
         raise OperationError("La restauración requiere un proyecto diferente del origen.")
@@ -642,9 +857,7 @@ def restore(
         "WEB_PORT": str(web_port),
         "TRACKVANCE_WEB_ORIGIN": f"http://localhost:{web_port}",
     }
-    receipt_path = _new_file(
-        source.resolve().parent / f"restore-{target_project}.json"
-    )
+    receipt_path = _new_file(receipt_directory / f"restore-{target_project}.json")
     created = False
     try:
         available_services = compose_services(target_project, environment)
@@ -666,7 +879,7 @@ def restore(
             raise OperationError("Compose no creó el conjunto de volúmenes esperado.")
         api = _container_for(state, "api")
         postgres = _container_for(state, "postgres")
-        for logical in ARCHIVED_VOLUMES:
+        for logical in archived_volumes:
             _extract_volume(
                 source.resolve(),
                 f"volumes/{logical}.tar.gz",
@@ -701,8 +914,22 @@ def restore(
                 str(api["id"]), Path(temporary) / "state.json"
             )
         expected_state = json.loads((source.resolve() / "state.json").read_text(encoding="utf-8"))
-        if restored_state != expected_state:
-            raise OperationError("La huella restaurada no coincide con el respaldo.")
+        normalized_legacy_state = None
+        if backup_schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
+            with tempfile.TemporaryDirectory(
+                prefix="trackvance-restored-legacy-state-"
+            ) as temporary:
+                normalized_legacy_state = _copy_snapshot(
+                    str(api["id"]),
+                    Path(temporary) / "state.json",
+                    command="snapshot-legacy-v2",
+                )
+        validate_restored_state(
+            manifest,
+            expected_state,
+            restored_state,
+            normalized_legacy_state,
+        )
 
         if start:
             services = [
@@ -756,6 +983,32 @@ def restore(
         raise OperationError(
             "La restauración falló; el proyecto nuevo quedó detenido para diagnóstico."
         ) from error
+
+
+def restore(
+    source: Path,
+    target_project: str,
+    *,
+    start: bool = False,
+    web_port: int = 3000,
+    smoke: bool = False,
+) -> dict[str, Any]:
+    try:
+        receipt_directory = source.resolve(strict=True).parent
+    except OSError as error:
+        raise OperationError("No fue posible leer el origen de respaldo.") from error
+    with tempfile.TemporaryDirectory(prefix="trackvance-verified-backup-") as temporary:
+        staged_source = Path(temporary) / "backup"
+        manifest = stage_verified_backup(source, staged_source)
+        return _restore_verified(
+            staged_source,
+            manifest,
+            receipt_directory,
+            target_project,
+            start=start,
+            web_port=web_port,
+            smoke=smoke,
+        )
 
 
 def create_reset_plan(project: str, output: Path, ttl_minutes: int = 15) -> dict[str, Any]:

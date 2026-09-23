@@ -964,7 +964,7 @@ def main() -> int:
             up.extend(
                 service
                 for service in available
-                if service in {"postgres", "api", "worker", "scheduler", "web"}
+                if service in {"postgres", "api", "worker", "delivery-worker", "scheduler", "web"}
             )
         execute(up, environment, credentials, timeout=1800, label="start isolated benchmark")
         memory_stop = max(

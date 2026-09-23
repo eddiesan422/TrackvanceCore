@@ -1,4 +1,58 @@
-# Validación de Trackvance Core 0.4.1
+# Validación de Trackvance Core 0.5.0
+
+Corte documental del 23 de septiembre de 2026 (America/Bogota). La implementación
+0.5.0 añade Data Delivery y cambia código, migración, topología Compose y contratos;
+por tanto, ningún resultado de 0.4.1 se hereda como certificación de esta entrega.
+Las cifras siguientes proceden de ejecuciones cerradas; los estados remotos se
+registran únicamente después de observar el workflow correspondiente.
+
+| Comprobación 0.5.0 | Resultado de publicación |
+| --- | --- |
+| pytest backend y scripts; Ruff; Mypy | 869 aprobadas en 54,78 s; dos avisos de deprecación Starlette/AnyIO. Ruff PASS. Mypy PASS sobre 38 archivos fuente. |
+| ESLint; TypeScript; Vitest; build frontend | PASS; 128 pruebas Vitest en 14 archivos. Bundle JavaScript principal 611,41 kB / 179,47 kB gzip, con advertencia informativa de tamaño. |
+| Playwright funcional | PASS: 20 pruebas aprobadas y 5 opt-in omitidas en el ciclo integral; las omisiones se cubren en runners especializados y no se cuentan como éxito. El flujo Delivery real aprobó builder, preview, preflight, publicación, ejecución y receipt. |
+| Compose integral y migración `0008_data_delivery` | PASS: doctor 8/8, smoke API 84/84, Alembic `check` y round trip upgrade/downgrade/upgrade, workers DEFAULT/DELIVERY y persistencia tras restart. |
+| `connections-e2e` | PASS: 62 comprobaciones reales PostgreSQL/SQL Server y 2/2 Playwright focales; incluye temporales sin zona, smoke 84/84, credenciales y persistencia tras restart. Se informa por separado del 20/5 integral. |
+| `delivery-e2e` | PASS: 92 comprobaciones reales PostgreSQL/SQL Server; cuatro estrategias, target nuevo/existente, preflight inválido, permisos, fallo remoto, reinicio, secretos, auditoría, receipt y manifest. Playwright focal: 1/1. La reproducción real de UNKNOWN quedó `NOT_RUN_NONDETERMINISTIC`; su semántica se certifica con pruebas deterministas. |
+| Backup/restore/reset | PASS: migración 0008, 7 artifacts, 2 secretos —1 fuente y 1 destino—, 127 relaciones y destrucción del origen antes del restore. La credencial destino restaurada produjo una Delivery COMMITTED de 4 filas; doctor, smoke y búsqueda de secretos también pasaron. |
+| Compatibilidad backup 0.4.1→0.5.0 | PASS desde `92c58eae9a1ddef653c0c9c888cfd7698ee1af3a`: manifest 1/state 2/0007, 21 tablas legacy y SHA canónico idénticos; restore actual en 0008 con 24 tablas, tres tablas Delivery vacías, 19 jobs históricos en lane DEFAULT, ambos workers y doctor recovery-ready. |
+| Benchmark smoke | PASS: 1.074.923 bytes, 1.000 filas y cuatro columnas, 40,31 s; peak total 379.941.026 bytes. Es una prueba acotada del harness, no una certificación de volumen. |
+| GitHub Actions | `[PENDIENTE — completar con URL, commit y estado de los siete jobs declarados]` |
+
+El código preparado para esta certificación usa proyectos y volúmenes aislados.
+`scripts/tests/delivery_cycle.py` levanta destinos reales, aplica fixtures, prueba
+API y puede ejecutar `frontend/tests-e2e/delivery.spec.ts`; no debe apuntar a la
+instalación principal. El workflow declara `backend`, `frontend`, `compose-e2e`,
+`connections-e2e`, `delivery-e2e`, `backup-restore-e2e` y `benchmark-smoke`.
+
+La aceptación funcional debe demostrar, sin inferirla sólo de unitarios: destino
+versionado y secreto no expuesto; metadata/preview/preflight; cada estrategia
+habilitada; lane y heartbeat DELIVERY; receipt/manifest/linaje; recuperación de
+los dos nuevos volúmenes; y que una confirmación ambigua queda `UNKNOWN` sin
+reintento automático. El RBAC granular de Delivery es un pendiente de producto;
+la certificación 0.5.0 verifica la reutilización de permisos documentada.
+`UNKNOWN` no se fuerza contra un motor real porque perder exactamente la
+confirmación posterior al commit no es reproducible de forma determinista; las
+pruebas backend inyectan esa frontera y verifican que no se traduzca a éxito,
+fallo ni reintento automático.
+
+La frontera `STARTED` quedó endurecida: toda conversión/serialización local ocurre
+en `PreparedDelivery`; el worker reclama lease con orden Run→Job antes de
+reconciliar; un resultado remoto conocido prevalece sobre cancelación posterior.
+Los targets existentes se bloquean incluso con cero filas. PostgreSQL revalida
+bajo lock la constraint UPSERT nombrada y rechaza RLS activa en OVERWRITE. SQL
+Server rechaza `IGNORE_DUP_KEY`; OVERWRITE exige `SELECT` y `VIEW DEFINITION` y
+rechaza FILTER security policies. Las pruebas cubren drift, collation nativa,
+cancelación y pérdida de lease sin repetir una escritura.
+
+El backup SQLite copia a un destino nuevo y verifica tamaño/hash antes de abrir o
+mutar la base; Docker usa staging temporal privado/read-only y reverifica cada
+componente antes de consumirlo. Ambos evitan carreras TOCTOU. El formato legacy state 2 no
+guardaba una huella estructural del catálogo: la compatibilidad se verifica por
+el contrato exacto de 21 tablas y la proyección canónica disponible, no por un hash
+histórico inexistente.
+
+## Base certificada de 0.4.1
 
 Corte incremental del 21 de septiembre de 2026 (America/Bogota). La revisión
 0.4.1 cambia la experiencia de configuración y conserva contratos, datos y
@@ -77,6 +131,7 @@ pnpm build
 # Desde la raíz; cada runner protege y limpia sólo su proyecto aislado
 python scripts/tests/docker_e2e_cycle.py
 python scripts/tests/connections_cycle.py --full-playwright
+python scripts/tests/delivery_cycle.py
 python scripts/tests/docker_backup_cycle.py
 python scripts/tests/benchmark_cycle.py
 ```

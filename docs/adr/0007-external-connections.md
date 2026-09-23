@@ -71,9 +71,13 @@ cambiar el contrato de los motores ni el schema 2 del manifest.
   su hash verificable y su evidencia propia.
 - Decimal se conserva sin conversión a float; fechas son ISO, Unicode y espacios
   se conservan, null y cadena vacía siguen separados. Binarios se codifican Base64.
-  SQL Server `timestamp` es rowversion binario, no fecha; `datetimeoffset` se lee
-  como ISO para conservar offset y precisión. Los nombres `id`/`*_id` aplican la
-  política de identificadores existente. Los tipos nativos permanecen en metadata.
+  SQL Server `timestamp` es rowversion binario, no fecha; `datetimeoffset(0..6)` y
+  PostgreSQL `timestamptz` se leen como `TIMESTAMP` ISO con offset. Los tipos
+  temporales sin zona (`timestamp without time zone`, `datetime`, `datetime2` y
+  `smalldatetime`) y `datetimeoffset(7)` se adquieren como `STRING`: no se inventa
+  una zona horaria ni se pierde precisión, y Delivery conserva su texto exacto.
+  Los nombres `id`/`*_id` aplican la política de identificadores existente. Los
+  tipos nativos permanecen en metadata.
 
 ## Credenciales y transporte
 

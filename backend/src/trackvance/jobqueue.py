@@ -20,7 +20,14 @@ class JobQueue(Protocol):
 
     key: str
 
-    def submit(self, db: Session, run: Run, *, executable: bool = True) -> Job: ...
+    def submit(
+        self,
+        db: Session,
+        run: Run,
+        *,
+        executable: bool = True,
+        lane: str = "DEFAULT",
+    ) -> Job: ...
 
 
 class DatabaseJobQueue:
@@ -28,11 +35,21 @@ class DatabaseJobQueue:
 
     key = "DATABASE"
 
-    def submit(self, db: Session, run: Run, *, executable: bool = True) -> Job:
+    def submit(
+        self,
+        db: Session,
+        run: Run,
+        *,
+        executable: bool = True,
+        lane: str = "DEFAULT",
+    ) -> Job:
+        if lane not in {"DEFAULT", "DELIVERY"}:
+            raise ValueError("Lane de trabajo no soportado.")
         job = Job(
             organization_id=run.organization_id,
             run_id=run.id,
             status="QUEUED" if executable else "FAILED",
+            lane=lane,
         )
         db.add(job)
         return job

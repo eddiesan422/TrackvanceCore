@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -113,6 +114,31 @@ class ExternalConnectionVersion(Record, Base):
     config_hash: Mapped[str] = mapped_column(String(64))
 
 
+class DeliveryDestination(Record, Base):
+    """Organization-scoped output identity; revisions remain immutable."""
+
+    __tablename__ = "delivery_destinations"
+    name: Mapped[str] = mapped_column(String(160))
+    sink_type: Mapped[str] = mapped_column(String(30))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    last_test_status: Mapped[str] = mapped_column(String(20), default="UNTESTED")
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_message: Mapped[str] = mapped_column(String(240), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DeliveryDestinationVersion(Record, Base):
+    __tablename__ = "delivery_destination_versions"
+    __table_args__ = (UniqueConstraint("destination_id", "version"),)
+    destination_id: Mapped[str] = mapped_column(ForeignKey("delivery_destinations.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    config: Mapped[dict] = mapped_column(JSON)
+    secret_reference: Mapped[str] = mapped_column(String(240))
+    config_hash: Mapped[str] = mapped_column(String(64))
+
+
 class DatasetSourceBinding(Record, Base):
     """Selection to refresh; each resulting snapshot records its exact configuration."""
 
@@ -168,12 +194,37 @@ class Run(Record, Base):
 
 class Job(Record, Base):
     __tablename__ = "jobs"
+    __table_args__ = (Index("ix_jobs_lane_status_created_at", "lane", "status", "created_at"),)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
+    lane: Mapped[str] = mapped_column(String(20), default="DEFAULT", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DeliveryAttempt(Record, Base):
+    __tablename__ = "delivery_attempts"
+    __table_args__ = (UniqueConstraint("run_id", "attempt_number"),)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    destination_version_id: Mapped[str] = mapped_column(
+        ForeignKey("delivery_destination_versions.id"), index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="STARTED", index=True)
+    target_locator: Mapped[str] = mapped_column(String(300))
+    rows_attempted: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rows_written: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rows_inserted: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rows_updated: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bytes_sent: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    remote_reference: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Finding(Record, Base):

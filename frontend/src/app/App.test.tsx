@@ -36,7 +36,13 @@ describe('App session', () => {
     const user = userEvent.setup()
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/datasets']}><App/><CurrentLocation/></MemoryRouter></QueryClientProvider>)
 
-    await user.click(await screen.findByLabelText('Cerrar sesión'))
+    const logout = await screen.findByLabelText('Cerrar sesión')
+    const links = screen.getAllByRole('link')
+    const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
+    const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
+    expect(delivery).toBe(sentinel + 1)
+    expect(screen.getByText(/v0\.5\.0/)).toBeInTheDocument()
+    await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
     expect(await screen.findByRole('button', { name: 'Entrar al entorno demo' })).toBeInTheDocument()

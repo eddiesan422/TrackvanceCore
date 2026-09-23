@@ -211,6 +211,10 @@ def test_dashboard_filters_apply_consistently_and_validate_dataset_scope(authent
     assert healthy_only["recent_runs"][0]["dataset_id"] == healthy_id
     assert next(item for item in healthy_only["module_status"] if item["module"] == "intake")["runs"] == 0
 
+    delivery_only = authenticated.get("/api/v1/dashboard?period=30d&module=DELIVERY")
+    assert delivery_only.status_code == 200
+    assert "DELIVERY" in delivery_only.json()["filter_options"]["modules"]
+
     assert authenticated.get("/api/v1/dashboard?period=1d").status_code == 422
     assert authenticated.get("/api/v1/dashboard?status=UNKNOWN").status_code == 422
     missing = authenticated.get("/api/v1/dashboard?dataset_id=missing")

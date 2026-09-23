@@ -1,0 +1,40 @@
+# Opt-in overlay used only by scripts/tests/delivery_cycle.py. These databases
+# are disposable external Data Delivery targets, never Trackvance metadata.
+services:
+  destination-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: trackvance_delivery
+      POSTGRES_USER: delivery_admin
+      POSTGRES_PASSWORD: ${DELIVERY_POSTGRES_ADMIN_PASSWORD:?Use scripts/tests/delivery_cycle.py}
+    volumes:
+      - destination_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U delivery_admin -d trackvance_delivery']
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: "no"
+
+  destination-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${DELIVERY_MSSQL_SA_PASSWORD:?Use scripts/tests/delivery_cycle.py}
+      MSSQL_MEMORY_LIMIT_MB: '2048'
+    volumes:
+      - destination_sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'SQLCMDPASSWORD="$${MSSQL_SA_PASSWORD}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q "SELECT 1" -o /dev/null'
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 50
+    restart: "no"
+
+volumes:
+  destination_postgres_data:
+  destination_sqlserver_data:

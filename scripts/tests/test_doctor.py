@@ -17,11 +17,17 @@ def recovery_inventory(monkeypatch):
         "containers": [
             {"id": "api-id", "service": "api"},
             {"id": "worker-id", "service": "worker"},
+            {"id": "delivery-worker-id", "service": "delivery-worker"},
         ],
         "volumes": [
             {"logical_name": "trackvance_data", "name": "data-volume"},
             {"logical_name": "connection_credentials", "name": "credential-volume"},
             {"logical_name": "connection_keys", "name": "key-volume"},
+            {
+                "logical_name": "delivery_credentials",
+                "name": "delivery-credential-volume",
+            },
+            {"logical_name": "delivery_keys", "name": "delivery-key-volume"},
         ],
     }
     fake_module = SimpleNamespace(inventory=lambda _project: state)
@@ -37,6 +43,14 @@ def test_recovery_ready_checks_secret_mount_isolation(recovery_inventory, monkey
                 "/var/lib/trackvance": "data-volume",
                 "/var/lib/trackvance-credentials": "credential-volume",
                 "/var/lib/trackvance-keys": "key-volume",
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
+            }
+        if container_id == "delivery-worker-id":
+            return {
+                "/var/lib/trackvance": "data-volume",
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
             }
         return {"/var/lib/trackvance": "data-volume"}
 
@@ -57,8 +71,44 @@ def test_recovery_ready_rejects_worker_secret_mount(recovery_inventory, monkeypa
                 **common,
                 "/var/lib/trackvance-credentials": "credential-volume",
                 "/var/lib/trackvance-keys": "key-volume",
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
             }
-        return {**common, "/var/lib/trackvance-keys": "key-volume"}
+        if container_id == "delivery-worker-id":
+            return {
+                **common,
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
+            }
+        return {**common, "/var/lib/trackvance-delivery-keys": "delivery-key-volume"}
+
+    monkeypatch.setattr(doctor, "_inspect_mounts", mounts)
+    assert not doctor.recovery_checks("trackvance-recovery-test", 64)[
+        "Montajes de recuperación"
+    ]
+
+
+def test_recovery_ready_rejects_source_secret_on_delivery_worker(
+    recovery_inventory, monkeypatch
+):
+    def mounts(container_id):
+        common = {"/var/lib/trackvance": "data-volume"}
+        if container_id == "api-id":
+            return {
+                **common,
+                "/var/lib/trackvance-credentials": "credential-volume",
+                "/var/lib/trackvance-keys": "key-volume",
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
+            }
+        if container_id == "delivery-worker-id":
+            return {
+                **common,
+                "/var/lib/trackvance-keys": "key-volume",
+                "/var/lib/trackvance-delivery-credentials": "delivery-credential-volume",
+                "/var/lib/trackvance-delivery-keys": "delivery-key-volume",
+            }
+        return common
 
     monkeypatch.setattr(doctor, "_inspect_mounts", mounts)
     assert not doctor.recovery_checks("trackvance-recovery-test", 64)[

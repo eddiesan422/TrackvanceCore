@@ -22,6 +22,18 @@ def required_permission(path: str, method: str) -> str | None:
         return None
     if path.endswith("/refresh-source"):
         return "connections:use"
+    if path.startswith("/delivery/destinations"):
+        if path.endswith(("/schemas", "/tables", "/table-metadata")):
+            return "connections:use"
+        return "connections:read" if method == "GET" else "connections:manage"
+    if path.startswith("/delivery/configurations"):
+        return "runs:read" if method == "GET" else "configurations:write"
+    if path.startswith("/delivery/runs"):
+        if path.endswith("/receipt"):
+            return "artifacts:download"
+        return "runs:read" if method == "GET" else "runs:execute"
+    if path.startswith(("/delivery/preview", "/delivery/preflight")):
+        return "configurations:write"
     if path.startswith("/connections"):
         if path == "/connections/test":
             return "connections:manage"

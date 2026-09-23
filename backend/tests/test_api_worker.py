@@ -2,9 +2,11 @@ import hashlib
 import json
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
+from trackvance import api
 from trackvance.db import utcnow
 from trackvance.models import (
     AuditEvent,
@@ -135,6 +137,46 @@ def test_cancelled_queue_is_never_processed(authenticated, queued_intake):
     assert response.json()["status"] == "CANCELLED"
     assert process_once("test-worker") is False
     assert authenticated.post(url).status_code == 409
+
+
+def test_cancel_locks_run_before_deciding_queued_state(monkeypatch):
+    run = Run(id="run-lock", organization_id="org-lock", module="DELIVERY", status="QUEUED")
+    job = Job(
+        id="job-lock",
+        organization_id="org-lock",
+        run_id=run.id,
+        status="QUEUED",
+        lane="DELIVERY",
+    )
+
+    class CapturingSession:
+        def __init__(self):
+            self.queries = []
+            self.records = iter((run, job))
+            self.committed = False
+
+        def scalar(self, statement):
+            self.queries.append(statement)
+            return next(self.records)
+
+        def commit(self):
+            self.committed = True
+
+    session = CapturingSession()
+    monkeypatch.setattr(api, "audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(api, "run_dto", lambda _db, value: {"status": value.status})
+
+    result = api.cancel_run(
+        run.id,
+        db=session,
+        user=SimpleNamespace(organization_id="org-lock", name="Tester"),
+    )
+
+    assert result == {"status": "CANCELLED"}
+    assert session.committed is True
+    assert len(session.queries) == 2
+    assert session.queries[0]._for_update_arg is not None
+    assert session.queries[1]._for_update_arg is not None
 
 
 def test_exception_version_conflicts_transitions_and_resolution_requirements(authenticated, database, queued_intake, tmp_path):

@@ -55,13 +55,28 @@ def test_connection_parameters_allow_only_controlled_options(overrides):
 
 @pytest.mark.parametrize(("native", "expected"), [
     ("bigint", "INT64"), ("numeric(24,8)", "DECIMAL"), ("double precision", "DECIMAL"),
-    ("date", "DATE"), ("timestamp(6) with time zone", "TIMESTAMP"), ("datetime2", "TIMESTAMP"),
-    ("datetimeoffset", "TIMESTAMP"), ("rowversion", "STRING"), ("nvarchar", "STRING"),
+    ("date", "DATE"), ("timestamp(6) with time zone", "TIMESTAMP"),
+    ("timestamptz(3)", "TIMESTAMP"), ("datetimeoffset(6)", "TIMESTAMP"),
+    ("datetimeoffset(7)", "STRING"),
+    ("timestamp without time zone", "STRING"), ("timestamp(6)", "STRING"),
+    ("datetime", "STRING"), ("datetime2", "STRING"), ("datetime2(6)", "STRING"),
+    ("smalldatetime", "STRING"), ("rowversion", "STRING"), ("nvarchar", "STRING"),
     ("boolean", "BOOLEAN"),
 ])
 def test_native_schema_mapping(native, expected):
     assert _logical(native)[0] == expected
     assert _column("document_id", "bigint", False)["logical_type"] == "STRING"
+
+
+@pytest.mark.parametrize(
+    "native",
+    ["timestamp without time zone", "timestamp(6)", "datetime", "datetime2", "smalldatetime"],
+)
+def test_naive_database_temporals_remain_publishable_as_exact_text(native):
+    logical, frame_type = _logical(native)
+
+    assert (logical, frame_type) == ("STRING", "String")
+    assert _column("observed_at", native, True)["logical_type"] == "STRING"
 
 
 def fake_source(monkeypatch, rows, columns=None):
@@ -174,9 +189,37 @@ def test_sqlserver_readonly_quoted_identifiers_and_datetimeoffset(monkeypatch):
     connection = connect.return_value
     connection.close.assert_called_once()
     connection.commit.assert_not_called()
-    source._select(connection, "s]name", "t]name", [_column("at]offset", "datetimeoffset", False)], 3)
+    source._select(connection, "s]name", "t]name", [_column("at]offset", "datetimeoffset(6)", False)], 3)
     assert connection.cursor.return_value.execute.call_args.args == (
         "SELECT TOP (3) CONVERT(nvarchar(50), [at]]offset], 127) AS [at]]offset] FROM [s]]name].[t]]name]",
+    )
+
+
+def test_sqlserver_temporal_precision_is_preserved_without_inventing_an_offset():
+    source = SQLServerDatasetSource(settings("SQLSERVER", port=1433))
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.fetchall.return_value = [
+        ("with_offset", "datetimeoffset", True, 34, 6, 10),
+        ("exact_offset", "datetimeoffset", True, 34, 7, 10),
+        ("naive", "datetime2", True, 27, 7, 8),
+    ]
+
+    columns = source._columns(connection, "dbo", "events")
+
+    assert [(column["native_type"], column["logical_type"]) for column in columns] == [
+        ("datetimeoffset(6)", "TIMESTAMP"),
+        ("datetimeoffset(7)", "STRING"),
+        ("datetime2", "STRING"),
+    ]
+    source._select(connection, "dbo", "events", columns, 3)
+    expected_query = (
+        "SELECT TOP (3) CONVERT(nvarchar(50), [with_offset], 127) AS [with_offset], "
+        "CONVERT(nvarchar(50), [exact_offset], 127) AS [exact_offset], "
+        "CONVERT(nvarchar(50), [naive], 126) AS [naive] FROM [dbo].[events]"
+    )
+    assert connection.cursor.return_value.execute.call_args.args == (
+        expected_query,
     )
 
 

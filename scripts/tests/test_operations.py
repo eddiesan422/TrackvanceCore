@@ -45,6 +45,24 @@ def add_connection_secret(runtime, secret="private-connection-password"):
     return reference
 
 
+def add_delivery_secret(runtime, secret="private-delivery-password"):
+    store = EncryptedFileSecretStore(
+        runtime / "delivery_credentials", runtime / "delivery_keys/master.key"
+    )
+    reference = store.put("org-a", secret)
+    with sqlite3.connect(runtime / "trackvance.db") as connection:
+        connection.execute(
+            "CREATE TABLE delivery_destination_versions "
+            "(id TEXT PRIMARY KEY, organization_id TEXT, secret_reference TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO delivery_destination_versions VALUES (?, ?, ?)",
+            ("destination-version", "org-a", reference),
+        )
+        connection.commit()
+    return reference
+
+
 def test_backup_restore_preserves_identity_and_bytes(runtime, tmp_path):
     backup, restored = tmp_path / "backup", tmp_path / "restored"
     original_hash = backup_module.digest(runtime / "trackvance.db")
@@ -70,11 +88,35 @@ def test_backup_restore_preserves_connection_secret_and_default_locations(
     manifest = backup_module.verify(backup)
     backup_module.restore(backup, restored)
 
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert "keys/master.key" in manifest["files"]
     assert any(name.startswith("credentials/") for name in manifest["files"])
     restored_store = EncryptedFileSecretStore(
         restored / "credentials", restored / "keys/master.key"
+    )
+    assert restored_store.get("org-a", reference) == secret
+    output = capsys.readouterr()
+    assert secret not in output.out
+    assert secret not in output.err
+
+
+def test_backup_restore_preserves_separate_delivery_secret_store(
+    runtime, tmp_path, capsys
+):
+    secret = "private-delivery-password"
+    reference = add_delivery_secret(runtime, secret)
+    backup, restored = tmp_path / "backup", tmp_path / "restored"
+
+    backup_module.backup(runtime, backup)
+    manifest = backup_module.verify(backup)
+    backup_module.restore(backup, restored)
+
+    assert "delivery_keys/master.key" in manifest["files"]
+    assert any(
+        name.startswith("delivery_credentials/") for name in manifest["files"]
+    )
+    restored_store = EncryptedFileSecretStore(
+        restored / "delivery_credentials", restored / "delivery_keys/master.key"
     )
     assert restored_store.get("org-a", reference) == secret
     output = capsys.readouterr()
@@ -91,6 +133,30 @@ def test_corrupt_backup_fails_before_creating_restore_destination(runtime, tmp_p
     assert not restored.exists()
 
 
+def test_restore_rejects_source_mutation_between_verify_and_copy(
+    runtime, tmp_path, monkeypatch
+):
+    backup, restored = tmp_path / "backup", tmp_path / "restored"
+    backup_module.backup(runtime, backup)
+    real_verify = backup_module.verify
+
+    def verify_then_mutate(source):
+        manifest = real_verify(source)
+        with sqlite3.connect(source / "trackvance.db") as connection:
+            connection.execute(
+                "UPDATE dataset_versions SET id='mutated-after-verify'"
+            )
+            connection.commit()
+        return manifest
+
+    monkeypatch.setattr(backup_module, "verify", verify_then_mutate)
+
+    with pytest.raises(ValueError, match="Integridad.*copia"):
+        backup_module.restore(backup, restored)
+
+    assert not (restored / "restoration.json").exists()
+
+
 @pytest.mark.parametrize("material", ["credential", "key"])
 def test_corrupt_connection_material_fails_before_restore(runtime, tmp_path, material):
     add_connection_secret(runtime)
@@ -104,6 +170,31 @@ def test_corrupt_connection_material_fails_before_restore(runtime, tmp_path, mat
     (backup / relative).write_bytes(b"corrupt")
 
     with pytest.raises(ValueError, match="Integridad"):
+        backup_module.restore(backup, restored)
+    assert not restored.exists()
+
+
+@pytest.mark.parametrize("material", ["credential", "key"])
+def test_missing_delivery_material_fails_before_restore(runtime, tmp_path, material):
+    add_delivery_secret(runtime)
+    backup, restored = tmp_path / "backup", tmp_path / "restored"
+    backup_module.backup(runtime, backup)
+    manifest_path = backup / "backup-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if material == "key":
+        removed_names = ["delivery_keys/master.key"]
+    else:
+        removed_names = [
+            name
+            for name in manifest["files"]
+            if name.startswith("delivery_credentials/")
+        ]
+    for name in removed_names:
+        (backup / name).unlink()
+        del manifest["files"][name]
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="Data Delivery"):
         backup_module.restore(backup, restored)
     assert not restored.exists()
 
@@ -163,6 +254,8 @@ def test_schema_one_without_connections_remains_restorable(runtime, tmp_path):
     backup_module.restore(backup, restored)
     assert (restored / "credentials").is_dir()
     assert (restored / "keys").is_dir()
+    assert (restored / "delivery_credentials").is_dir()
+    assert (restored / "delivery_keys").is_dir()
 
 
 @pytest.mark.parametrize("missing", ["credential", "key"])

@@ -26,7 +26,7 @@ def sample_inventory(project="trackvance-recovery-test"):
                 "image_id": "sha256:image",
                 "running": True,
             }
-            for service in ("postgres", "api", "worker", "web")
+            for service in ("postgres", "api", "worker", "delivery-worker", "web")
         ],
         "volumes": [
             {"name": f"{project}_{logical}", "logical_name": logical}
@@ -48,6 +48,17 @@ def test_backup_inventory_rejects_unknown_volume():
     state = sample_inventory()
     state["volumes"].append({"name": "foreign", "logical_name": "foreign_data"})
     with pytest.raises(docker_state.OperationError, match="ajenos"):
+        docker_state.require_backup_inventory(state)
+
+
+def test_backup_inventory_requires_delivery_secret_volumes():
+    state = sample_inventory()
+    state["volumes"] = [
+        item
+        for item in state["volumes"]
+        if item["logical_name"] != "delivery_keys"
+    ]
+    with pytest.raises(docker_state.OperationError, match="persistente completo"):
         docker_state.require_backup_inventory(state)
 
 
@@ -80,7 +91,7 @@ def test_reset_requires_literal_confirmation_before_docker_mutation(
 
     confirmation = f"RESET:{state['project']}:{plan['plan_sha256'][:12]}"
     receipt = docker_state.reset(plan_path, confirmation)
-    assert receipt["removed"] == {"containers": 4, "volumes": 4, "networks": 1}
+    assert receipt["removed"] == {"containers": 5, "volumes": 6, "networks": 1}
     assert calls[0][:3] == ["docker", "rm", "-f"]
     assert calls[1][:3] == ["docker", "volume", "rm"]
     assert calls[2][:3] == ["docker", "network", "rm"]
@@ -132,8 +143,11 @@ def test_restore_validates_dump_before_checking_or_creating_target(monkeypatch, 
     calls = []
     monkeypatch.setattr(
         docker_state,
-        "verify_backup",
-        lambda _source: {"source_project": "trackvance-source-test"},
+        "stage_verified_backup",
+        lambda _source, _destination: {
+            "schema_version": 2,
+            "source_project": "trackvance-source-test",
+        },
     )
 
     def reject_dump(_source):
@@ -159,6 +173,338 @@ def archive_bytes(name="evidence.txt", content=b"binary\x00evidence"):
         member.size = len(content)
         archive.addfile(member, io.BytesIO(content))
     return buffer.getvalue()
+
+
+def write_legacy_backup(
+    root: Path,
+    *,
+    migration: str = "0007_monitor_scheduling",
+    state_schema_version: int = 2,
+):
+    root.mkdir()
+    (root / "volumes").mkdir()
+    tables = {table: {} for table in docker_state.LEGACY_STATE_TABLES}
+    tables["jobs"] = {"job": "1" * 64}
+    state = {
+        "schema_version": state_schema_version,
+        "migration": migration,
+        "tables": tables,
+        "verified_artifacts": 0,
+        "verified_secrets": 0,
+        "validated_relationships": 0,
+    }
+    (root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    (root / "postgres.dump").write_bytes(b"PGDMPlegacy-test")
+    components = {}
+    for relative in ("state.json", "postgres.dump"):
+        path = root / relative
+        components[relative] = {
+            "path": relative,
+            "sha256": docker_state.digest(path),
+            "size_bytes": path.stat().st_size,
+        }
+    for logical in docker_state.LEGACY_ARCHIVED_VOLUMES:
+        relative = f"volumes/{logical}.tar.gz"
+        path = root / relative
+        path.write_bytes(archive_bytes(f"{logical}.txt", logical.encode()))
+        components[relative] = {
+            "path": relative,
+            "sha256": docker_state.digest(path),
+            "size_bytes": path.stat().st_size,
+            "entries": docker_state.inspect_archive(path),
+        }
+    manifest = {
+        "schema_version": 1,
+        "consistency": "quiesced",
+        "migration": migration,
+        "components": components,
+    }
+    (root / "backup-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    return manifest, state
+
+
+def rewrite_legacy_state(root: Path, manifest: dict, state: dict) -> None:
+    path = root / "state.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    manifest["components"]["state.json"] = {
+        "path": "state.json",
+        "sha256": docker_state.digest(path),
+        "size_bytes": path.stat().st_size,
+    }
+    (root / "backup-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+
+def test_verify_backup_accepts_exact_041_format_and_routes_only_legacy_volumes(
+    tmp_path,
+):
+    root = tmp_path / "backup"
+    manifest, _ = write_legacy_backup(root)
+
+    assert docker_state.verify_backup(root) == manifest
+    assert docker_state.archived_volumes_for_backup(1) == (
+        "trackvance_data",
+        "connection_credentials",
+        "connection_keys",
+    )
+    assert set(docker_state.archived_volumes_for_backup(2)) == {
+        "trackvance_data",
+        "connection_credentials",
+        "connection_keys",
+        "delivery_credentials",
+        "delivery_keys",
+    }
+
+
+def test_stage_verified_backup_is_private_and_read_only(tmp_path):
+    source = tmp_path / "source"
+    manifest, _ = write_legacy_backup(source)
+    staged = tmp_path / "private-stage"
+
+    assert docker_state.stage_verified_backup(source, staged) == manifest
+    assert docker_state.verify_backup(staged) == manifest
+    assert all(
+        path.stat().st_mode & 0o222 == 0
+        for path in staged.rglob("*")
+        if path.is_file()
+    )
+    if os.name != "nt":
+        assert staged.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    ("migration", "state_schema_version", "message"),
+    [
+        ("0006_local_identity_exceptions", 2, "baseline 0.4.1"),
+        ("0007_monitor_scheduling", 3, "huella persistente"),
+    ],
+)
+def test_verify_backup_rejects_v1_outside_exact_041_baseline(
+    tmp_path, migration, state_schema_version, message
+):
+    root = tmp_path / "backup"
+    write_legacy_backup(
+        root,
+        migration=migration,
+        state_schema_version=state_schema_version,
+    )
+
+    with pytest.raises(docker_state.OperationError, match=message):
+        docker_state.verify_backup(root)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_table", "inventario"),
+        ("extra_table", "inventario"),
+        ("malformed_hash", "hashes"),
+        ("invalid_counter", "contadores"),
+    ],
+)
+def test_verify_backup_rejects_incomplete_or_malformed_v1_state(
+    tmp_path, mutation, message
+):
+    root = tmp_path / "backup"
+    manifest, state = write_legacy_backup(root)
+    if mutation == "missing_table":
+        state["tables"].pop("users")
+    elif mutation == "extra_table":
+        state["tables"]["delivery_attempts"] = {}
+    elif mutation == "malformed_hash":
+        state["tables"]["jobs"]["job"] = "not-a-sha256"
+    else:
+        state["verified_artifacts"] = True
+    rewrite_legacy_state(root, manifest, state)
+
+    with pytest.raises(docker_state.OperationError, match=message):
+        docker_state.verify_backup(root)
+
+
+def test_verify_backup_rejects_delivery_component_in_v1_even_with_valid_hash(tmp_path):
+    root = tmp_path / "backup"
+    manifest, _ = write_legacy_backup(root)
+    relative = "volumes/delivery_credentials.tar.gz"
+    path = root / relative
+    path.write_bytes(archive_bytes("unexpected.secret", b"ciphertext"))
+    manifest["components"][relative] = {
+        "path": relative,
+        "sha256": docker_state.digest(path),
+        "size_bytes": path.stat().st_size,
+        "entries": docker_state.inspect_archive(path),
+    }
+    (root / "backup-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(docker_state.OperationError, match="componentes"):
+        docker_state.verify_backup(root)
+
+
+def restored_0008_state():
+    return {
+        "schema_version": 3,
+        "migration": "0008_data_delivery",
+        "tables": {table: {} for table in docker_state.DELIVERY_TABLES},
+        "verified_secrets": 0,
+        "verified_source_secrets": 0,
+        "verified_delivery_secrets": 0,
+    }
+
+
+def test_validate_restored_state_accepts_exact_normalized_041_upgrade(tmp_path):
+    manifest, expected = write_legacy_backup(tmp_path / "backup")
+
+    docker_state.validate_restored_state(
+        manifest,
+        expected,
+        restored_0008_state(),
+        normalized_legacy_state=expected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("migration", "migración segura"),
+        ("delivery_rows", "migración segura"),
+        ("delivery_secrets", "migración segura"),
+        ("normalized_job", "normalizada"),
+    ],
+)
+def test_validate_restored_state_rejects_incomplete_or_changed_041_upgrade(
+    tmp_path, mutation, message
+):
+    manifest, expected = write_legacy_backup(tmp_path / "backup")
+    restored = restored_0008_state()
+    normalized = json.loads(json.dumps(expected))
+    if mutation == "migration":
+        restored["migration"] = "0007_monitor_scheduling"
+    elif mutation == "delivery_rows":
+        restored["tables"]["delivery_attempts"] = {"attempt": "hash"}
+    elif mutation == "delivery_secrets":
+        restored["verified_delivery_secrets"] = 1
+        restored["verified_secrets"] = 2
+    else:
+        normalized["tables"]["jobs"]["job"] = "changed-job-hash"
+
+    with pytest.raises(docker_state.OperationError, match=message):
+        docker_state.validate_restored_state(
+            manifest,
+            expected,
+            restored,
+            normalized_legacy_state=normalized,
+        )
+
+
+def test_restore_v1_uses_legacy_archives_and_post_migration_normalization(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "backup"
+    manifest, expected = write_legacy_backup(source)
+    manifest["source_project"] = "trackvance-source-test"
+    (source / "backup-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    state = sample_inventory("trackvance-restore-test")
+    extracted = []
+    snapshot_commands = []
+
+    monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _source: None)
+    monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _project: None)
+    monkeypatch.setattr(
+        docker_state,
+        "compose_services",
+        lambda _project, _environment: list(docker_state.PRIMARY_SERVICES),
+    )
+    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: "")
+    monkeypatch.setattr(docker_state, "inventory", lambda _project: state)
+    monkeypatch.setattr(docker_state, "execute", lambda *args, **kwargs: "")
+    monkeypatch.setattr(
+        docker_state,
+        "_extract_volume",
+        lambda _root, archive, _volume, _image: extracted.append(archive),
+    )
+
+    def snapshot(_api, _destination, *, command="snapshot"):
+        snapshot_commands.append(command)
+        return restored_0008_state() if command == "snapshot" else expected
+
+    monkeypatch.setattr(docker_state, "_copy_snapshot", snapshot)
+
+    receipt = docker_state.restore(source, "trackvance-restore-test")
+
+    assert receipt["status"] == "STOPPED_VERIFIED"
+    assert snapshot_commands == ["snapshot", "snapshot-legacy-v2"]
+    assert extracted == [
+        f"volumes/{logical}.tar.gz"
+        for logical in docker_state.LEGACY_ARCHIVED_VOLUMES
+    ]
+    assert not any("delivery_" in archive for archive in extracted)
+
+
+def test_restore_uses_only_private_stage_after_source_changes(monkeypatch, tmp_path):
+    source = tmp_path / "backup"
+    manifest, expected = write_legacy_backup(source)
+    manifest["source_project"] = "trackvance-source-test"
+    (source / "backup-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    original_state_sha256 = docker_state.digest(source / "state.json")
+    target_state = sample_inventory("trackvance-restore-test")
+    validated_roots = []
+    extraction_roots = []
+    dump_sources = []
+
+    def mutate_original_after_staging(staged_root):
+        validated_roots.append(staged_root)
+        assert staged_root.resolve() != source.resolve()
+        swapped = json.loads(json.dumps(expected))
+        swapped["tables"]["jobs"]["job"] = "2" * 64
+        (source / "state.json").write_text(json.dumps(swapped), encoding="utf-8")
+
+    def execute(arguments, **_kwargs):
+        if arguments[:2] == ["docker", "cp"] and str(arguments[2]).endswith(
+            "postgres.dump"
+        ):
+            dump_sources.append(Path(arguments[2]))
+        return ""
+
+    monkeypatch.setattr(
+        docker_state, "validate_postgres_dump", mutate_original_after_staging
+    )
+    monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _project: None)
+    monkeypatch.setattr(
+        docker_state,
+        "compose_services",
+        lambda _project, _environment: list(docker_state.PRIMARY_SERVICES),
+    )
+    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: "")
+    monkeypatch.setattr(docker_state, "inventory", lambda _project: target_state)
+    monkeypatch.setattr(docker_state, "execute", execute)
+    monkeypatch.setattr(
+        docker_state,
+        "_extract_volume",
+        lambda root, _archive, _volume, _image: extraction_roots.append(root),
+    )
+    monkeypatch.setattr(
+        docker_state,
+        "_copy_snapshot",
+        lambda _api, _destination, *, command="snapshot": (
+            restored_0008_state() if command == "snapshot" else expected
+        ),
+    )
+
+    receipt = docker_state.restore(source, "trackvance-restore-test")
+
+    assert receipt["status"] == "STOPPED_VERIFIED"
+    assert docker_state.digest(source / "state.json") != original_state_sha256
+    assert receipt["verified_state_sha256"] == original_state_sha256
+    assert len(validated_roots) == 1
+    assert extraction_roots and set(extraction_roots) == {validated_roots[0]}
+    assert len(dump_sources) == 1
+    assert dump_sources[0].parent == validated_roots[0]
 
 
 def test_archive_streams_to_private_host_file_without_writable_bind(monkeypatch, tmp_path):

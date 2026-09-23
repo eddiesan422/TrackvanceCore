@@ -81,18 +81,42 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         volumes = {item["logical_name"]: item["name"] for item in state["volumes"]}
         api = services["api"]
         worker = services["worker"]
-        expected = {
+        delivery_worker = services["delivery-worker"]
+        source_mounts = {
             "/var/lib/trackvance": volumes["trackvance_data"],
             "/var/lib/trackvance-credentials": volumes["connection_credentials"],
             "/var/lib/trackvance-keys": volumes["connection_keys"],
         }
+        delivery_mounts = {
+            "/var/lib/trackvance-delivery-credentials": volumes["delivery_credentials"],
+            "/var/lib/trackvance-delivery-keys": volumes["delivery_keys"],
+        }
         api_mounts = _inspect_mounts(api["id"])
         worker_mounts = _inspect_mounts(worker["id"])
-        mounts_ok = all(api_mounts.get(path) == volume for path, volume in expected.items())
+        delivery_worker_mounts = _inspect_mounts(delivery_worker["id"])
+        mounts_ok = all(
+            api_mounts.get(path) == volume
+            for path, volume in {**source_mounts, **delivery_mounts}.items()
+        )
         worker_ok = (
             worker_mounts.get("/var/lib/trackvance") == volumes["trackvance_data"]
-            and "/var/lib/trackvance-credentials" not in worker_mounts
-            and "/var/lib/trackvance-keys" not in worker_mounts
+            and all(
+                path not in worker_mounts
+                for path in source_mounts | delivery_mounts
+                if path != "/var/lib/trackvance"
+            )
+        )
+        delivery_worker_ok = (
+            delivery_worker_mounts.get("/var/lib/trackvance") == volumes["trackvance_data"]
+            and all(
+                delivery_worker_mounts.get(path) == volume
+                for path, volume in delivery_mounts.items()
+            )
+            and all(
+                path not in delivery_worker_mounts
+                for path in source_mounts
+                if path != "/var/lib/trackvance"
+            )
         )
     except (ImportError, KeyError, ValueError):
         return {
@@ -101,7 +125,9 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
             "Espacio de recuperación": False,
         }
 
-    checks = {"Montajes de recuperación": mounts_ok and worker_ok}
+    checks = {
+        "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok
+    }
     verify = ROOT / "scripts" / "verify_storage.py"
     copied = command_check(
         ["docker", "cp", str(verify), f"{api['id']}:/tmp/verify_storage.py"], timeout=30
@@ -131,13 +157,16 @@ def local_storage_checks(root: Path) -> dict[str, bool]:
         checks["Disco local (al menos 64 MiB libres)"] = (
             shutil.disk_usage(resolved).free >= 64 * 1024 * 1024
         )
-        heartbeat = json.loads(
-            (resolved / "worker-heartbeat.json").read_text(encoding="utf-8")
-        )
-        age = (
-            datetime.now(UTC) - datetime.fromisoformat(heartbeat["last_seen"])
-        ).total_seconds()
-        checks["Worker local (heartbeat reciente)"] = 0 <= age < 30
+        for lane in ("default", "delivery"):
+            heartbeat = json.loads(
+                (resolved / f"worker-heartbeat-{lane}.json").read_text(encoding="utf-8")
+            )
+            age = (
+                datetime.now(UTC) - datetime.fromisoformat(heartbeat["last_seen"])
+            ).total_seconds()
+            checks[f"Worker local {lane.upper()} (heartbeat reciente)"] = (
+                heartbeat.get("lane") == lane.upper() and 0 <= age < 30
+            )
     except (OSError, ValueError, KeyError):
         checks["Directorio/worker local"] = False
     return checks
@@ -174,7 +203,7 @@ def main() -> int:
             ["docker", "info", "--format", "{{.OSType}}"]
         )[0]
         checks["Configuración Compose"] = command_check([*prefix, "config", "--quiet"])[0]
-        checks["Worker Compose"] = command_check(
+        checks["Worker Compose DEFAULT"] = command_check(
             [
                 *prefix,
                 "exec",
@@ -184,7 +213,21 @@ def main() -> int:
                 "-c",
                 (
                     "from trackvance.worker import worker_status; "
-                    "raise SystemExit(0 if worker_status()['status'] == 'RUNNING' else 1)"
+                    "raise SystemExit(0 if worker_status('DEFAULT')['status'] == 'RUNNING' else 1)"
+                ),
+            ]
+        )[0]
+        checks["Worker Compose DELIVERY"] = command_check(
+            [
+                *prefix,
+                "exec",
+                "-T",
+                "delivery-worker",
+                "python",
+                "-c",
+                (
+                    "from trackvance.worker import worker_status; "
+                    "raise SystemExit(0 if worker_status('DELIVERY')['status'] == 'RUNNING' else 1)"
                 ),
             ]
         )[0]

@@ -49,6 +49,11 @@ class LocalExecutionEngine:
     ) -> None:
         # Delayed import keeps the port independent from application services
         # and avoids a services -> execution -> services import cycle.
+        if run.module == "DELIVERY":
+            from .delivery_service import execute_delivery_run
+
+            execute_delivery_run(db, run, lease_owner=lease_owner)
+            return
         from .services import execute_run
 
         execute_run(db, run, lease_owner=lease_owner, observed_at=observed_at)

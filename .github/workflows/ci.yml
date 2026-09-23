@@ -184,6 +184,36 @@ jobs:
           path: .codex-local/connections-e2e/
           include-hidden-files: true
           if-no-files-found: ignore
+  delivery-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [backend, frontend]
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@11.19.0
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Real PostgreSQL and SQL Server Data Delivery certification
+        run: python scripts/tests/delivery_cycle.py
+      - name: Upload sanitized Delivery and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: delivery-evidence
+          path: .codex-local/delivery-e2e/
+          include-hidden-files: true
+          if-no-files-found: ignore
   backup-restore-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30

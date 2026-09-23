@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the destructive Docker E2E cycle in an isolated Compose project.
 
-The generated project name owns its PostgreSQL and ArtifactStore volumes. The
-runner removes only that project, even when a command fails, so the developer's
+The generated project name owns its PostgreSQL, ArtifactStore and secret volumes.
+The runner removes only that project, even when a command fails, so the developer's
 normal Trackvance installation and data are never selected for cleanup.
 """
 

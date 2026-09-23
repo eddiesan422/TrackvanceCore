@@ -62,17 +62,49 @@ def test_failed_start_cleans_only_its_new_isolated_project(monkeypatch, tmp_path
     assert calls[-1] == ["docker", "compose", "-p", project, "down", "-v", "--remove-orphans"]
 
 
-def test_compose_mounts_connection_secrets_only_into_api():
+def test_compose_isolates_source_and_delivery_secrets_by_worker_lane():
     compose = (runner.ROOT / "compose.yml").read_text(encoding="utf-8")
     shared, services = compose.split("services:", 1)
     api, remaining = services.split("  api:", 1)[1].split("  worker:", 1)
-    worker = remaining.split("  web:", 1)[0]
+    worker, remaining = remaining.split("  delivery-worker:", 1)
+    delivery_worker = remaining.split("  web:", 1)[0]
 
     assert "- trackvance_data:/var/lib/trackvance" in shared
     assert "connection_credentials:/var/lib/trackvance-credentials" not in shared
     assert "connection_keys:/var/lib/trackvance-keys" not in shared
+    assert "delivery_credentials:/var/lib/trackvance-delivery-credentials" not in shared
+    assert "delivery_keys:/var/lib/trackvance-delivery-keys" not in shared
     assert "- trackvance_data:/var/lib/trackvance" in api
     assert "- connection_credentials:/var/lib/trackvance-credentials" in api
     assert "- connection_keys:/var/lib/trackvance-keys" in api
+    assert "- delivery_credentials:/var/lib/trackvance-delivery-credentials" in api
+    assert "- delivery_keys:/var/lib/trackvance-delivery-keys" in api
     assert "connection_credentials:/var/lib/trackvance-credentials" not in worker
     assert "connection_keys:/var/lib/trackvance-keys" not in worker
+    assert "delivery_credentials:/var/lib/trackvance-delivery-credentials" not in worker
+    assert "delivery_keys:/var/lib/trackvance-delivery-keys" not in worker
+    assert "TRACKVANCE_WORKER_LANE: DEFAULT" in worker
+    assert "- trackvance_data:/var/lib/trackvance" in delivery_worker
+    assert "connection_credentials:/var/lib/trackvance-credentials" not in delivery_worker
+    assert "connection_keys:/var/lib/trackvance-keys" not in delivery_worker
+    assert (
+        "- delivery_credentials:/var/lib/trackvance-delivery-credentials"
+        in delivery_worker
+    )
+    assert "- delivery_keys:/var/lib/trackvance-delivery-keys" in delivery_worker
+    assert "TRACKVANCE_WORKER_LANE: DELIVERY" in delivery_worker
+
+
+def test_direct_start_isolates_source_secrets_from_delivery_worker():
+    script = (runner.ROOT / "scripts" / "start-local.ps1").read_text(
+        encoding="utf-8"
+    )
+    delivery_setup = script.split(
+        "$env:TRACKVANCE_WORKER_LANE = 'DELIVERY'", 1
+    )[1].split("Start-TrackvanceProcess 'delivery-worker'", 1)[0]
+
+    assert "$env:TRACKVANCE_SECRETS_DIR = $isolatedSourceSecretsDir" in delivery_setup
+    assert (
+        "$env:TRACKVANCE_SECRET_KEY_FILE = $isolatedSourceSecretKeyFile"
+        in delivery_setup
+    )

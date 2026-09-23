@@ -1,15 +1,15 @@
 # Trackvance Core
 
-## Evolución funcional local 0.4.1
+## Evolución funcional local 0.5.0
 
-El prototipo conserva el monolito modular FastAPI/React, PostgreSQL, worker
+El prototipo conserva el monolito modular FastAPI/React, PostgreSQL, workers
 y almacenamiento local. Incluye perfiles observados sin trim implícito,
 identificadores con ceros iniciales, reglas declarativas avanzadas, salidas
 Intake en Parquet, evidencia v2 y reportes Excel estructurados con openpyxl.
 Las configuraciones publicadas, ejecuciones y archivos históricos permanecen
 inmutables. La capa de entrada admite CSV, Excel XLSX, JSON, Parquet y TXT
 delimitado, además de PostgreSQL y SQL Server mediante **Conexiones**;
-la migración más reciente es `0007_monitor_scheduling`.
+la migración más reciente es `0008_data_delivery`.
 
 Esta revisión amplía Intake con unicidad compuesta, longitud, comparaciones,
 condiciones e integridad contra otra DatasetVersion. ReconOps permite reglas
@@ -17,13 +17,20 @@ independientes por columna, políticas de null, transforms y agregaciones 1:N/N:
 Sentinel incorpora programación local e historia compatible; Excepciones añade
 asignación, SLA, adjuntos, reapertura y resolución automática opcional con evidencia
 técnica. Configuración permite administrar usuarios locales y sus cinco roles.
-La revisión 0.4.1 guía la configuración con el esquema real: simplifica la
-selección de identificadores, incorpora un catálogo de responsables, ofrece
-previews informativos de transforms y claves, y usa selectores de columnas en
-Sentinel. Los contratos de ejecución y las configuraciones históricas se conservan.
-La [línea oficial de evolución](docs/roadmap.md) conserva los puntos 1–2 y madura
-los puntos 3–9 antes de productizar. Las pruebas de operación y volumen se informan
-con resultados medidos; no se habilita infraestructura cloud.
+La revisión 0.5.0 incorpora **Data Delivery**: publica una DatasetVersion ya
+registrada hacia PostgreSQL o SQL Server mediante destinos versionados, mapping
+tipado, preview, preflight, configuraciones inmutables y transacciones remotas.
+`CREATE_AND_LOAD`, `APPEND`, `OVERWRITE` y `UPSERT` se ejecutan en una lane y un
+`delivery-worker` separados. Cada intento conserva `STARTED`, `COMMITTED`,
+`FAILED` o `UNKNOWN`; una confirmación remota incierta nunca se presenta como
+éxito/fallo ni se reintenta a ciegas. Receipt, manifest, auditoría y linaje fijan
+la versión de dataset y destino sin exponer secretos ni filas completas.
+
+Los contratos históricos se conservan. La
+[línea oficial de evolución](docs/roadmap.md) completa el punto 10 local antes de
+productizar en el punto 11. La certificación local final de 0.5.0 está cerrada;
+el resultado del commit de publicación se registra por separado en GitHub Actions.
+No se habilita infraestructura cloud ni se extrapolan garantías productivas.
 
 Documentación del ciclo:
 
@@ -38,14 +45,15 @@ Documentación del ciclo:
 - [Manifiestos, identidad y compatibilidad](docs/adr/0002-evidence-and-artifacts.md).
 - [Lectores y normalización de datasets](docs/adr/0004-dataset-readers.md).
 - [Conexiones, credenciales y snapshots externos](docs/adr/0007-external-connections.md).
+- [Data Delivery, transacciones y estado UNKNOWN](docs/adr/0015-data-delivery.md).
 - [Validación técnica de excepciones](docs/adr/0005-technical-validation-of-exceptions.md).
 - [Contenido y seguridad de los Excel](docs/exports-xlsx.md).
 - [Validación y pendientes explícitos](docs/development/validation.md).
 - [Operación, Docker y respaldo](docs/development/operations.md).
 - [Backup, restore y reset verificados](docs/adr/0013-local-backup-restore.md).
 - [Benchmarks medidos y límites](docs/development/volume-benchmark.md).
-- [OpenAPI 0.4.1](backend/openapi.json) y [contrato HTTP](backend/API_CONTRACT.md).
-- [Especificación técnica v1.1 — implementación 0.4.1](docs/specification/README.md).
+- [Snapshot OpenAPI](backend/openapi.json) y [contrato HTTP 0.5.0](backend/API_CONTRACT.md).
+- [Especificación técnica v1.1 — implementación 0.5.0](docs/specification/README.md).
 
 La instalación local `trackvance-certification` utiliza `http://localhost:3100`.
 El puerto por defecto de una instalación nueva es 3000; `WEB_PORT` y
@@ -53,7 +61,7 @@ El puerto por defecto de una instalación nueva es 3000; `WEB_PORT` y
 en el documento de validación, separados de las capacidades preparadas.
 
 Prototipo local de la plataforma de confiabilidad de datos de Trackvance
-Colombia SAS. Integra Data Intake Gateway, ReconOps, Data Sentinel,
+Colombia SAS. Integra Data Intake Gateway, ReconOps, Data Sentinel, Data Delivery,
 Excepciones y Auditoría en una misma aplicación.
 
 Basado en **Trackvance Core — Especificación Técnica v1.1**. Esta evolución
@@ -61,7 +69,7 @@ funcional no representa la implementación de la
 arquitectura objetivo del documento. Consulta [el estado de arquitectura](docs/architecture.md)
 y [el alcance vigente](docs/development/prototype-scope.md).
 Los resultados de las pruebas están en [verificación local](docs/development/validation.md).
-La especificación oficial v1.1 tiene una [revisión de implementación 0.4.1](docs/specification/README.md)
+La especificación oficial v1.1 tiene una [revisión de implementación 0.5.0](docs/specification/README.md)
 y conserva su [fuente editable](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md) en el repositorio.
 
 ## Inicio recomendado: Docker Compose y PostgreSQL
@@ -74,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 ```
 
 El bootstrap conserva un `.env` existente o crea uno con una contraseña local
-aleatoria, construye las imágenes, aplica Alembic y espera la salud de los cuatro
+aleatoria, construye las imágenes, aplica Alembic y espera la salud de los cinco
 servicios. Abre **http://localhost:3000** en una instalación nueva, o el puerto
 configurado. La instalación de este equipo usa **http://localhost:3100**.
 El botón **Entrar al entorno demo** abre la sesión local cuando ese modo está
@@ -172,10 +180,18 @@ volumen nuevos; la autenticación local y RBAC no cambian.
    asignar roles, activar/desactivar, consultar permisos y restablecer contraseñas.
    Los cambios sensibles revocan sesiones; el último administrador queda protegido.
    **Cerrar sesión** limpia los datos de sesión del navegador y vuelve al inicio.
+8. **Data Delivery:** administra un destino PostgreSQL o SQL Server con una cuenta
+   de escritura de mínimo privilegio; prueba el acceso, selecciona una
+   DatasetVersion, revisa metadata, crea el mapping y ejecuta preview/preflight.
+   Publica la configuración y encola la entrega. El detalle muestra lane,
+   `DeliveryAttempt`, filas, target y receipt. Si aparece `UNKNOWN`, verifica el
+   destino: no equivale a `FAILED` ni `COMMITTED` y no genera reintento automático.
 
-Cada ejecución completada ofrece un informe Excel y manifiesto JSON. `SUCCESS`
-indica que el procesamiento terminó: los datos pueden contener diferencias o
-haber sido rechazados por Intake.
+Cada ejecución de calidad completada ofrece informe Excel y manifest JSON; Data
+Delivery ofrece manifest y receipt tras `COMMITTED` cuando la evidencia local se
+publicó correctamente. `SUCCESS` indica que el
+procesamiento terminó: los datos pueden contener diferencias o haber sido
+rechazados por Intake. En Delivery, consulta además el estado del intento.
 
 ## Detalles de Docker Compose
 
@@ -186,7 +202,8 @@ En otros sistemas, copia `.env.example` a `.env`, reemplaza
 docker compose up --build -d --wait
 ```
 
-Servicios: `web` en localhost:3000, API, worker estándar y PostgreSQL.
+Servicios: `web` en localhost:3000, API, worker `DEFAULT`, `delivery-worker` en
+lane `DELIVERY` y PostgreSQL.
 Los archivos y los metadatos persisten en volúmenes Docker. No expone
 PostgreSQL ni la API al exterior. Detener con `docker compose down` conserva
 los volúmenes. No uses `down -v` si quieres conservar los datos.
@@ -196,8 +213,10 @@ Trackvance al encender el equipo. Arráncalo manualmente desde esta carpeta con
 `docker compose up -d --wait` y detenlo con `docker compose stop`.
 
 Compose ha sido verificado con PostgreSQL 16 y Docker Engine 29.1.3. El build
-inicial descarga dependencias; con las imágenes preparadas la aplicación opera
-sin servicios externos. Consulta la evidencia de operación y sus límites.
+inicial descarga dependencias; con las imágenes preparadas los flujos sobre
+snapshots locales operan sin servicios cloud. Conexiones y Data Delivery requieren
+red hacia la fuente/destino cuando se usan. Consulta la evidencia de operación y
+sus límites.
 
 ## Conexiones PostgreSQL y SQL Server
 
@@ -206,6 +225,10 @@ base, usuario y contraseña. Prueba el acceso y guarda. Después explora un sche
 elige una tabla/vista, revisa columnas y una muestra limitada y registra el dataset.
 El dataset ofrece **Actualizar desde fuente** para crear una versión nueva; Intake,
 ReconOps y Sentinel usan esos snapshots con el mismo flujo que los archivos.
+Los timestamps con zona (`timestamptz`/`datetimeoffset(0..6)`) conservan el tipo
+lógico `TIMESTAMP`. Los temporales sin zona y `datetimeoffset(7)` se conservan
+como `STRING`; Trackvance no inventa una zona horaria ni pierde precisión durante
+la adquisición o Data Delivery.
 
 La fuente externa es distinta del PostgreSQL interno de Trackvance. Utiliza una
 cuenta externa de solo lectura y un host accesible desde el contenedor API. Para
@@ -215,12 +238,13 @@ esa salida; el overlay offline debe retirarse si necesitas fuentes externas.
 Las contraseñas se cifran fuera de PostgreSQL y del almacenamiento de artifacts.
 Conserva los volúmenes `connection_credentials` y `connection_keys` al actualizar
 la instalación y respáldalos de forma protegida junto con metadata y artifacts.
-Solo la API monta esos dos volúmenes; el worker procesa los snapshots canónicos
+Solo la API monta esos dos volúmenes; el worker `DEFAULT` procesa los snapshots canónicos
 sin acceder a credenciales externas. Al editar host, puerto, base, usuario o modo
 TLS se exige introducir de nuevo la contraseña antes de probar o guardar.
 Nunca publiques ni incluyas sus contenidos en Git. El cifrado de transporte está
 activado por defecto; configura certificados y permisos en el servidor según tu
-entorno. No se ofrece escritura hacia bases externas.
+entorno. **Conexiones** continúa siendo sólo lectura; la escritura externa vive
+exclusivamente en el módulo separado Data Delivery y usa otros destinos/secretos.
 
 Para certificar ambos motores en contenedores reales, sin tocar datos de tu
 instalación, ejecuta desde la raíz con Docker, Python y pnpm disponibles:
@@ -234,12 +258,83 @@ para ambos motores; crea un proyecto temporal y elimina solamente sus propios
 volúmenes. Los detalles de límites, secretos y nuevos conectores están en
 [ADR 0007](docs/adr/0007-external-connections.md).
 
+## Data Delivery hacia PostgreSQL y SQL Server
+
+En **Data Delivery → Destinos**, registra una cuenta externa con los permisos
+mínimos necesarios para la estrategia. La API prueba y descubre schemas/tablas;
+la contraseña queda cifrada en `delivery_credentials` y su clave en
+`delivery_keys`. Después, **Nueva entrega** fija una DatasetVersion, revisión de
+destino, target, mapping técnico y estrategia. Preview no escribe; preflight
+valida artifact/hash, tipos, permisos, compatibilidad y claves. El delivery-worker
+repite el preflight justo antes de la transacción.
+
+- `CREATE_AND_LOAD` crea una tabla nueva y opcionalmente su schema.
+- `APPEND` agrega filas a una tabla compatible.
+- `OVERWRITE` ejecuta borrado e inserción dentro de una transacción remota.
+- `UPSERT` exige claves explícitas sin nulls/duplicados y una PK/unique compatible.
+
+El mapping admite `STRING`, `INT64`, `DECIMAL`, `DATE`, `TIMESTAMP` y `BOOLEAN`;
+selecciona, ordena y renombra columnas, pero conserva el tipo lógico declarado en
+la DatasetVersion. Sólo adapta ese tipo a su representación técnica remota: no
+interpreta un STRING como número, fecha, timestamp o booleano. `DECIMAL` usa valores exactos de driver, valida por separado dígitos
+enteros y fraccionales y rechaza targets aproximados `real`/`float`; nunca pasa
+por `float` binario. `STRING` sólo usa almacenamiento Unicode variable exacto:
+PostgreSQL `text`/`varchar` y SQL Server `nvarchar`, con longitud en unidades
+UTF-16 y collation `_SC`/`_UTF8` cuando hay caracteres suplementarios.
+`TIMESTAMP` exige offset, conserva el instante y admite como máximo seis dígitos
+fraccionales (`timestamptz(6)` / `datetimeoffset(6)`). NUL, surrogates no
+emparejados, strings fixed/no Unicode y tipos desconocidos se rechazan. Un commit
+confirmado autoriza publicar receipt y manifest con IDs, hashes, métricas y linaje;
+si esa evidencia local falla, el Run sigue `COMMITTED` con `PENDING_REPAIR` y no
+se repite la escritura. Si la confirmación se pierde, el intento y Run quedan
+`UNKNOWN`; Trackvance no repite automáticamente una escritura cuyo resultado
+remoto no puede demostrar. Un rechazo explícito del motor —restricción,
+serialización o deadlock con rollback confirmado— queda `FAILED`, no `UNKNOWN`.
+
+Antes de `STARTED`, `PreparedDelivery` resuelve identificadores, tipos, valores y
+bytes sin iniciar la transacción de escritura remota. En la transacción, las tablas existentes se bloquean
+también para datasets vacíos. PostgreSQL revalida la restricción UPSERT nombrada
+y rechaza `OVERWRITE` con RLS activa. SQL Server rechaza índices únicos
+`IGNORE_DUP_KEY`; para `OVERWRITE` exige `VIEW DEFINITION` y rechaza FILTER
+security policies, de modo que un `DELETE` no pueda ocultar filas.
+Los staging de claves reutilizan tipos/collations nativos. PostgreSQL UPSERT exige
+`SELECT` y `TEMPORARY`; SQL Server exige `SELECT`, depende de la política de
+`tempdb`, evita `MERGE`, usa `SELECT @@ROWCOUNT` y aborta si una clave encuentra
+más de una fila. Una cancelación pre-`STARTED` evita el intento; después, un
+resultado remoto conocido prevalece sobre una cancelación tardía.
+
+La separación de montajes es deliberada: la API monta secretos de origen y
+destino; el worker `DEFAULT` sólo artifacts; el `delivery-worker`, artifacts y
+secretos de destino, nunca los de origen. 0.5.0 reutiliza permisos existentes de
+conexiones, configuraciones, runs y artifacts; un RBAC granular propio de Delivery
+permanece pendiente. Tampoco se implementan otros sinks, scheduler de entregas,
+transformación arbitraria ni transacción distribuida.
+
+La certificación aislada usa motores y volúmenes desechables, sin tocar la
+instalación principal:
+
+```powershell
+python scripts/tests/delivery_cycle.py
+```
+
+Consulta garantías y límites en [ADR 0015](docs/adr/0015-data-delivery.md) y los
+resultados ejecutados en
+[validación](docs/development/validation.md).
+
 ## Mantenimiento y pruebas de volumen
 
 El backup Docker conserva un conjunto consistente: PostgreSQL, artifacts,
-credenciales cifradas y clave. Detiene brevemente las escrituras, registra hashes
-y vuelve a iniciar sólo los servicios que estaban activos. El restore exige un
-proyecto nuevo, verifica la huella y puede dejarlo detenido o iniciarlo explícitamente.
+credenciales/clave de conexiones y credenciales/clave de Delivery. Detiene
+brevemente web, scheduler y ambos workers, registra hashes y vuelve a iniciar sólo
+los servicios que estaban activos. El restore exige un proyecto nuevo, verifica
+la huella y puede dejarlo detenido o iniciarlo explícitamente.
+También acepta backups schema 1/state 2 de la baseline 0.4.1 en migración 0007:
+preserva exactamente sus 21 tablas, migra a 0008, deja vacías las tres tablas
+Delivery y asigna lane `DEFAULT` a los jobs históricos.
+Docker copia cada componente a staging privado/read-only y vuelve a verificar
+tamaño/hash antes de consumirlo. El state 2 legacy no contenía una huella DDL del
+catálogo; la certificación compara su proyección canónica exacta de 21 tablas sin
+inventar esa evidencia histórica.
 
 ```powershell
 python scripts/docker_state.py backup --project trackvance-certification --destination backups/local
@@ -309,6 +404,15 @@ con PostgreSQL y SQL Server reales. Consulta los conteos y resultados vigentes e
 [validación](docs/development/validation.md); los informes anteriores conservan
 sus resultados históricos.
 
+Data Delivery usa su proyecto aislado y fixtures de destino:
+
+```sh
+python scripts/tests/delivery_cycle.py
+```
+
+Este runner puede ejecutar el spec focal
+`frontend/tests-e2e/delivery.spec.ts`; no lo apuntes a la instalación principal.
+
 Con API, worker e interfaz iniciados:
 
 ```sh
@@ -326,13 +430,13 @@ Las dependencias resueltas se registran en `backend/uv.lock` y
 
 ## Estructura
 
-Las capas se organizan por responsabilidades dentro del monolito; la API y el
-worker comparten modelos y servicios. Los puertos permiten sustituir la
+Las capas se organizan por responsabilidades dentro del monolito; la API y ambos
+workers comparten modelos y servicios. Los puertos permiten sustituir la
 infraestructura sin cambiar las reglas. El [mapa de arquitectura](docs/architecture.md)
 identifica los archivos y los límites pendientes de esa separación.
 
 ```text
-backend/       API, persistencia, procesamiento, worker y pruebas
+backend/       API, persistencia, procesamiento, workers y pruebas
 frontend/      SPA React + TypeScript + Vite
 demo/          Datos ficticios de demostración
 deploy/        Imagen de interfaz y proxy Nginx
@@ -356,18 +460,29 @@ compose.yml    Entorno PostgreSQL local
   requiere, pero no un adaptador de ejecución instalado. Redis/Celery, conectores
   adicionales, object storage y OIDC/SSO son evoluciones preparadas o de producto.
 - El despliegue local usa cola persistente en PostgreSQL, leases y heartbeat.
-  El scheduler depende de ese worker; no corre con Docker detenido. Los resultados
-  de volumen, backup/restore y máximos realmente certificados se publican en
+  `DEFAULT` y `DELIVERY` son lanes y heartbeats separados; el scheduler depende
+  sólo del worker DEFAULT y no corre con Docker detenido.
+- Data Delivery escribe realmente en PostgreSQL/SQL Server. No incluye otros
+  sinks, DDL/SQL libre, scheduler, transforms de negocio, 2PC, reintento automático
+  tras `UNKNOWN` ni RBAC Delivery granular. Preflight es informativo; existencia,
+  arbitraje UPSERT y políticas que podrían ocultar/omitir filas se revalidan bajo
+  bloqueo dentro de la transacción. Otros cambios externos siguen siendo
+  responsabilidad operativa del destino.
+- Los resultados de volumen, backup/restore y máximos realmente certificados se publican en
   [validación](docs/development/validation.md). No se extrapolan garantías de
   producción ni volúmenes no ejecutados.
 
 ## Si algo no inicia
 
-- **Docker:** consulta `docker compose ps` y `docker compose logs api worker web`.
+- **Docker:** consulta `docker compose ps` y
+  `docker compose logs api worker delivery-worker web`.
 - **Puerto ocupado:** detén la instancia que lo utiliza o ajusta puerto y origen web.
 - **Modo directo sin API:** revisa `.local/api.err.log`.
 - **Ejecución en cola:** revisa los logs del worker y Configuración; en modo directo,
   `.local/worker.err.log`.
+- **Entrega en cola o `UNKNOWN`:** revisa `delivery-worker`, los intentos y el
+  destino antes de crear otra ejecución; no asumas que una transacción incierta
+  falló.
 - **Interfaz no disponible:** revisa `.local/web.err.log` y reinstala las
   dependencias con `pnpm install --frozen-lockfile` en `frontend/`.
 - **Docker no disponible:** inicia Docker Desktop y comprueba `docker info`;

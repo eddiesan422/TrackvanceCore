@@ -1,21 +1,23 @@
-# Contrato prototipo local 0.4.1
+# Contrato prototipo local 0.5.0
 
-El esquema ejecutable versionado está en [openapi.json](openapi.json). Se
-genera desde la aplicación y documenta sesión cookie, CSRF, MIME XLSX,
-declaraciones de reglas y errores. Mantiene base `/api/v1` para compatibilidad.
+El esquema ejecutable se genera desde la aplicación y mantiene base `/api/v1`
+para compatibilidad. El archivo [openapi.json](openapi.json) se regenera y revisa
+como paso documental separado. El snapshot 0.5.0 contiene 81 paths, incluidos
+14 paths bajo Data Delivery, y corresponde a las rutas efectivamente instaladas.
+El runtime documenta sesión cookie, CSRF, MIME, DTOs y errores desde ese contrato.
 
 Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string opacos. Fechas ISO UTC. Todos los endpoints salvo `/health`, `/health/ready` y `/auth/demo|login` requieren cookie sesión. Los aliases absolutos `/health` y `/health/ready`, sin el prefijo `/api/v1`, también son públicos para diagnóstico y Compose. Todas las mutaciones autenticadas requieren `X-CSRF-Token` devuelto al iniciar sesión. El proxy Vite preserva cookie; usar `credentials: 'include'`.
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.4.1',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.5.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `{user:{id,name,email,role,permissions:[]},organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
 - `POST /auth/login` `{email,password}` → mismo.
 - `GET /me` → mismo.
 - `POST /auth/logout` → `{ok:true}`.
-- `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `health_history` desglosa salud general, Intake, ReconOps y Sentinel; `recent_runs` añade dataset, registros procesados, hallazgos, duración, estado operativo y salud cuando existen. `health_score` pondera por unidades evaluadas. `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado de negocio está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
-- `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen},limits:{max_upload_mb,max_rows},mode:'local-prototype'}`.
+- `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel|DELIVERY&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `recent_runs` puede incluir Delivery y sus métricas; `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
+- `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen,lane},workers:{DEFAULT:{...},DELIVERY:{...}},limits:{max_upload_mb,max_rows},mode:'local-prototype'}`. `worker` conserva el heartbeat DEFAULT por compatibilidad.
 
 ## Datasets
 
@@ -105,25 +107,151 @@ Version conserva `source_type` del motor y `ingestion_metadata.source` con
 connection_id, connection_version_id, connection_version, config_hash, schema_name,
 object_name, object_kind y captured_at. Run y evidencia heredan este linaje mediante
 la versión del input. `row_numbering=SNAPSHOT_ROW` identifica registros del snapshot.
+El tipo lógico `TIMESTAMP` exige offset y hasta seis dígitos fraccionales:
+PostgreSQL `timestamptz` y SQL Server `datetimeoffset(0..6)` lo conservan;
+`timestamp without time zone`, `datetime`, `datetime2`, `smalldatetime` y
+`datetimeoffset(7)` se adquieren como `STRING` para no inventar una zona horaria
+ni perder precisión.
 Errores de fuente usan códigos SOURCE_AUTH_FAILED, SOURCE_PERMISSION_DENIED,
 SOURCE_TIMEOUT, SOURCE_UNAVAILABLE, SOURCE_OBJECT_UNAVAILABLE o SOURCE_SIZE_LIMIT;
 los mensajes no incluyen errores originales del driver ni credenciales.
+
+## Data Delivery (escritura controlada)
+
+Todas las rutas usan el prefijo `/delivery`. Los destinos pertenecen a la
+organización autenticada y sólo admiten `POSTGRESQL` o `SQLSERVER`. La contraseña
+se guarda en el almacén cifrado de destino y jamás aparece en respuesta, auditoría,
+manifest o receipt.
+
+`Destination = {id,name,sink_type,enabled,version,host,port,database,username,
+options,destination_version_id,config_hash,last_test_status,last_test_at,
+last_test_message,created_at,updated_at}`.
+
+`options` admite `connect_timeout` 1..15, `query_timeout` 1..300 y
+`sslmode=disable|require|verify-ca|verify-full` para PostgreSQL o
+`encryption=off|require` para SQL Server. Defaults: 5 s, 60 s y `require`.
+
+- `GET /delivery/destinations` y `GET /delivery/destinations/{id}` → colección y
+  detalle. Requieren `connections:read`.
+- `POST /delivery/destinations/test` prueba un borrador
+  `{name,sink_type,host,port,database,username,password?,options?,destination_id?}`
+  sin persistirlo. `destination_id` permite reutilizar el secreto vigente sólo
+  cuando el endpoint/usuario/modo de transporte sigue siendo compatible.
+- `POST /delivery/destinations` con
+  `{name,sink_type,host,port,database,username,password,options?}` → Destination
+  201 y revisión v1. `PATCH /delivery/destinations/{id}` usa `version` esperado,
+  crea revisión inmutable y rechaza conflictos.
+  `DELETE /delivery/destinations/{id}?version=<revisión>` hace baja lógica.
+- `POST /delivery/destinations/{id}/test` prueba la revisión guardada.
+- `GET /delivery/destinations/{id}/schemas`,
+  `/tables?schema_name=` y
+  `/table-metadata?schema_name=&table_name=` descubren únicamente objetos
+  accesibles. Metadata incluye columnas, tipos nativos/lógicos, nullability,
+  defaults/identity/generated y restricciones relevantes. Requiere
+  `connections:use`; no acepta SQL libre.
+
+Un borrador de entrega es:
+
+```json
+{
+  "schema_version": 1,
+  "dataset_version_id": "...",
+  "destination_id": "...",
+  "destination_version_id": "...",
+  "target": {
+    "mode": "EXISTING_TABLE",
+    "schema_name": "public",
+    "table_name": "orders",
+    "create_schema": false
+  },
+  "columns": [
+    {
+      "source_name": "order_id",
+      "target_name": "order_id",
+      "target_type": "STRING",
+      "ordinal": 0,
+      "nullable": false,
+      "length": 64
+    }
+  ],
+  "write_strategy": "UPSERT",
+  "upsert_keys": ["order_id"]
+}
+```
+
+`target.mode` es `EXISTING_TABLE|CREATE_TABLE`; tipos lógicos:
+`STRING|INT64|DECIMAL|DATE|TIMESTAMP|BOOLEAN`; estrategias:
+`CREATE_AND_LOAD|APPEND|OVERWRITE|UPSERT`. `CREATE_AND_LOAD` exige tabla nueva;
+las otras estrategias exigen tabla existente. `UPSERT` requiere claves explícitas
+en el mapping, sin nulls/duplicados en la fuente y respaldadas por PK/unique en
+el target. `target_type` debe coincidir con el `logical_type` inmutable de la
+columna en la DatasetVersion; Delivery no convierte STRING a número, fecha,
+timestamp o booleano ni cambia entre familias lógicas. `DECIMAL` admite
+`precision`/`scale`; `STRING`, `length`.
+Para tablas existentes, `DECIMAL` sólo acepta familias exactas `numeric`/`decimal`
+y `money` con escala inspeccionable; `real`/`float` se rechazan. El preflight
+comprueba escala y capacidad de dígitos enteros, no sólo precisión total.
+`STRING` sólo acepta `text`/`varchar` en PostgreSQL y `nvarchar` en SQL Server;
+la longitud se mide en unidades UTF-16 y texto suplementario exige collation
+`_SC`/`_UTF8`. `TIMESTAMP` requiere offset explícito y precisión máxima 6; las
+tablas nuevas usan `timestamptz(6)`/`datetimeoffset(6)`. Tipos nativos ambiguos,
+fixed/non-Unicode, NUL, surrogates no emparejados y pérdida de precisión se
+rechazan antes de crear `STARTED`.
+
+La ejecución prepara todo el payload localmente y luego bloquea una tabla
+existente aun con cero filas. PostgreSQL revalida la constraint UPSERT nombrada y
+rechaza `OVERWRITE` con RLS activa. SQL Server exige `SELECT` para targets
+existentes y rechaza `IGNORE_DUP_KEY`; `OVERWRITE` exige además `VIEW DEFINITION`
+y rechaza FILTER security policies.
+Estas son precondiciones de ejecución además de checks de preflight.
+
+- `POST /delivery/preview?limit=8` con el borrador → muestra acotada de filas de
+  origen y destino después del mapping; no escribe.
+- `POST /delivery/preflight` con el borrador → `{status:'PASS',checks,source,
+  destination,target}` o error sanitizado. Valida artifact/hash, versión exacta
+  del destino, mapping/tipos, target, restricciones, permisos y claves UPSERT.
+- `GET /delivery/configurations` → configuraciones Delivery publicadas.
+- `POST /delivery/configurations` añade `name`, `owner` y `description` al
+  borrador → snapshot 201. Ejecuta preflight antes de publicar.
+- `POST /delivery/configurations/{id}/versions` publica un sucesor inmutable del
+  snapshot indicado y vuelve a ejecutar preflight.
+- `GET /delivery/runs` → runs Delivery.
+- `POST /delivery/runs` `{configuration_id,dataset_version_id}` con
+  `Idempotency-Key` → Run 202 en lane `DELIVERY`. Repite preflight en el worker
+  inmediatamente antes de escribir.
+- `GET /delivery/runs/{id}/attempts` → `{items:[DeliveryAttempt],total}`.
+- `GET /delivery/runs/{id}/receipt` → JSON descargable sólo tras un commit
+  confirmado y con `artifacts:download`.
+
+`DeliveryAttempt` conserva `{id,run_id,destination_version_id,attempt_number,
+idempotency_key,status,target_locator,rows_attempted,rows_written,rows_inserted,
+rows_updated,bytes_sent,remote_reference,error_code,error_message,started_at,
+finished_at}`. Sus estados son `STARTED|COMMITTED|FAILED|UNKNOWN`. `UNKNOWN`
+indica que Trackvance no puede confirmar el commit remoto; no equivale a fallo ni
+éxito y no se reintenta automáticamente. El operador debe verificar el destino y
+decidir una ejecución explícita. Receipt y manifest no contienen secretos ni filas
+completas y enlazan Run, DatasetVersion, DestinationVersion y DeliveryAttempt.
+
+RBAC 0.5.0 reutiliza provisionalmente `connections:read/manage/use`,
+`configurations:write`, `runs:read/execute` y `artifacts:download`. Permisos
+granulares propios de Delivery permanecen pendientes; no deben inferirse del
+nombre de las rutas.
 
 ## Configuraciones y ejecuciones
 
 `Configuration = {id,name,module,version,dataset_id,dataset_name,target_dataset_id,target_dataset_name,owner,description,status,config,created_at,latest_run:Run|null}`.
 
-`Run = {id,run_id,job_id,module,name,status,decision,config_id,dataset_version_id,target_version_id,dataset_name,created_at,started_at,finished_at,progress_percent,progress_stage,metrics,execution_plan,error,output_version_id}`.
+`Run = {id,run_id,job_id,module,name,status,decision,config_id,dataset_version_id,target_version_id,dataset_name,created_at,started_at,finished_at,progress_percent,progress_stage,metrics,execution_plan,error,output_version_id}`. `module` también puede ser `DELIVERY`; su estado puede quedar `UNKNOWN` cuando no existe confirmación concluyente del destino.
 
 - `GET /intake/contracts`, `GET /recon/controls`, `GET /monitors` → lista Configuration.
 - `POST /intake/contracts` `{name,dataset_id,owner?,description?,config:{required_columns:['pedido_id'],unique_columns:['pedido_id'],numeric_columns:['valor'],positive_columns:['valor'],max_error_rate:0.05}}` → Configuration 201. Las columnas opcionales de config default a [] y tasa 0.
 - `POST /recon/controls` `{name,dataset_id,target_dataset_id,owner?,description?,config:{key_columns:['pedido_id'],amount_column:'valor',tolerance:'0.01'}}` → Configuration 201. El shorthand conserva tolerancia Decimal; los nuevos snapshots tienen normalización explícita default NONE. Preferir comparison_rules para las capacidades nuevas.
 - `POST /monitors` `{name,dataset_id,owner?,description?,config:{required_columns:['pedido_id'],null_columns:['pedido_id'],max_null_rate:0.05,max_volume_change_pct:15,max_age_hours:48}}` → Configuration 201.
-- `GET /runs?module=intake|recon|sentinel` → lista Run.
+- `GET /runs?module=intake|recon|sentinel|DELIVERY` → lista Run.
 - `POST /intake/runs` `{contract_id,dataset_version_id}` → Run 202.
 - `POST /recon/runs` `{control_id,source_version_id,target_version_id}` → Run 202.
 - `POST /monitors/{id}/runs` `{dataset_version_id?:string}` → Run 202 (última versión si omitida).
-- `GET /runs/{id}` → Run más `{findings:Finding[]}`. Poll hasta SUCCESS/FAILED/CANCELLED. SUCCESS significa procesamiento terminado; calidad es decision.
+- `GET /runs/{id}` → Run más `{findings:Finding[]}`. Para Delivery, el target permanece en `execution_plan` y los intentos se consultan en `/delivery/runs/{id}/attempts`. Poll hasta `SUCCESS|FAILED|UNKNOWN|CANCELLED|FAILED_PRECONDITION`. SUCCESS significa procesamiento terminado; calidad o resultado remoto vive en `decision`.
 - `POST /runs/{id}/cancel` `{}` → Run.
 - `GET /runs/{id}/results?classification=&offset=0&limit=50` → lista row. Alias `/intake/runs/{id}/errors`, `/recon/runs/{id}/results`.
 - `GET /runs/{id}/evidence` → descarga JSON manifest (v1 histórico intacto o v2 nuevo); `GET /runs/{id}/export.xlsx` → informe Excel estructurado. `export.csv` es deprecated y se conserva por compatibilidad de clientes históricos.
@@ -161,10 +289,45 @@ Errores: `{error:{code,message,details,request_id}}`. Validación 422, sesión 4
 ```
 uv run python -m trackvance.seed
 uv run uvicorn trackvance.api:app --host 127.0.0.1 --port 8000
+# Lane general (default)
 uv run python -m trackvance.worker
+# Lane exclusiva de escritura remota
+TRACKVANCE_WORKER_LANE=DELIVERY uv run python -m trackvance.worker
 ```
 
-Variables: `DATABASE_URL` (SQLite por defecto o PostgreSQL psycopg), `TRACKVANCE_STORAGE_DIR` (alias `TRACKVANCE_STORAGE_ROOT` admitido), `DEMO_ACCESS_ENABLED=true`, `DEMO_SEED_ENABLED=true`, `TRACKVANCE_WEB_ORIGIN=http://localhost:3000`, `MAX_UPLOAD_BYTES=10485760`, `TRACKVANCE_MAX_ROWS=100000`. API startup aplica Alembic y backfill de artifacts. `DEMO_ACCESS_ENABLED` controla exclusivamente la sesión demo; cuando está habilitado se garantiza la identidad y organización mínimas necesarias para autenticar. `DEMO_SEED_ENABLED` controla exclusivamente el seed idempotente de datasets, configuraciones, ejecuciones, hallazgos y excepciones sintéticas. En una actualización donde la nueva variable aún esté ausente, acceso hereda el valor legado de seed para no reabrir el login demo accidentalmente; una vez definida, ambas son independientes. Deshabilitar el seed no elimina datos persistidos. Worker espera schema inicializado. Dockerfile en backend, context raíz, copia backend y demo.
+Variables: `DATABASE_URL` (SQLite por defecto o PostgreSQL psycopg),
+`TRACKVANCE_STORAGE_DIR` (alias `TRACKVANCE_STORAGE_ROOT` admitido),
+`TRACKVANCE_WORKER_LANE=DEFAULT|DELIVERY`,
+`TRACKVANCE_DESTINATION_SECRETS_DIR`,
+`TRACKVANCE_DESTINATION_SECRET_KEY_FILE`, `DEMO_ACCESS_ENABLED=true`,
+`DEMO_SEED_ENABLED=true`, `TRACKVANCE_WEB_ORIGIN=http://localhost:3000`,
+`MAX_UPLOAD_BYTES=10485760`, `TRACKVANCE_MAX_ROWS=100000`. Las variables
+`TRACKVANCE_SECRETS_DIR` y `TRACKVANCE_SECRET_KEY_FILE`
+continúan aislando credenciales de entrada. API startup aplica Alembic y backfill
+de artifacts. `DEMO_ACCESS_ENABLED` controla exclusivamente la sesión demo;
+`DEMO_SEED_ENABLED`, el seed idempotente. Deshabilitar el seed no elimina datos
+persistidos. Los workers esperan el schema inicializado.
+
+Compose ejecuta dos procesos del mismo módulo: `worker` en lane `DEFAULT` y
+`delivery-worker` en lane `DELIVERY`. El primero no monta secretos; el segundo
+monta artifacts y secretos de destino, pero no secretos de conexiones de origen.
+La API monta ambos tipos para administrar y explorar conexiones/destinos. Los
+heartbeats se guardan por lane y el scheduler Sentinel sólo se despacha desde
+`DEFAULT`.
+
+## Adiciones y semántica 0.5.0
+
+La migración `0008_data_delivery` agrega las tablas de destinos, revisiones e
+intentos, más `jobs.lane`. Las configuraciones históricas no se modifican. Data
+Delivery fija una DatasetVersion y DestinationVersion, ejecuta preflight dos veces,
+usa una transacción remota por intento y publica receipt/manifest/linaje sólo
+después de confirmación. `UNKNOWN` conserva la ambigüedad de commit y bloquea el
+reintento automático. Ver [ADR 0015](../docs/adr/0015-data-delivery.md).
+
+Backup/restore y verificación incorporan `delivery_credentials` y `delivery_keys`.
+Los almacenes cifrados y sus claves son material sensible aunque las respuestas y
+manifests no lo muestren. El control de acceso reutiliza permisos existentes en
+0.5.0; un RBAC específico de Delivery no forma parte de este contrato.
 
 ## Adiciones y semántica 0.3.0
 

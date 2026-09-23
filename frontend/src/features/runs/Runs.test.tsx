@@ -57,6 +57,18 @@ describe('Run evidence actions', () => {
     expect(screen.getByRole('button', { name: 'Manifiesto' })).toBeEnabled()
   })
 
+  it('routes DELIVERY runs to delivery evidence without requesting generic results', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/runs/run-123') return { id: 'run-123', module: 'DELIVERY', name: 'Publicar ventas', status: 'UNKNOWN', dataset_name: 'Ventas', execution_plan: { destination_version_id: 'destination-version-2', target: { schema_name: 'public', table_name: 'sales' }, write_strategy: 'APPEND' } }
+      if (path === '/delivery/runs/run-123/attempts') return { items: [{ id: 'attempt-1', attempt_number: 1, status: 'UNKNOWN', target_locator: 'public.sales' }], total: 1 }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    renderRun(['runs:read', 'artifacts:download'])
+    expect(await screen.findByText('Confirmación remota desconocida')).toBeInTheDocument()
+    expect(screen.getAllByText('public.sales').length).toBeGreaterThan(0)
+    expect(vi.mocked(api).mock.calls.some(([path]) => String(path).includes('/results?'))).toBe(false)
+  })
+
   it.each(['RUNNING', 'QUEUED', 'FAILED', 'CANCELLED'])('disables report downloads for %s execution', async status => {
     mockRun(status)
     renderRun()

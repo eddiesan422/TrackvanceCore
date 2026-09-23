@@ -112,7 +112,16 @@ def _safe_error(exc: Exception) -> SourceError:
 
 
 def _logical(native: str) -> tuple[str, str]:
-    value = native.casefold().split("(")[0]
+    # Preserve the timezone qualifier while removing precision/scale parameters.
+    # Trackvance TIMESTAMP has an explicit-offset contract; treating a naïve
+    # database datetime as TIMESTAMP would create a DatasetVersion that Delivery
+    # cannot publish without inventing a timezone.
+    raw = native.casefold().strip()
+    datetimeoffset = re.fullmatch(r"datetimeoffset\s*\(\s*(\d+)\s*\)", raw)
+    if datetimeoffset and int(datetimeoffset.group(1)) > 6:
+        # Delivery's exact TIMESTAMP grammar is capped at microseconds.
+        return "STRING", "String"
+    value = re.sub(r"\s*\([^)]*\)", "", raw).strip()
     if value in {"int", "int2", "int4", "int8", "integer", "bigint", "smallint", "tinyint"}:
         return "INT64", "Int64"
     if value in {"decimal", "numeric", "money", "smallmoney", "real", "float", "float4", "float8", "double precision"}:
@@ -121,7 +130,7 @@ def _logical(native: str) -> tuple[str, str]:
         return "BOOLEAN", "Boolean"
     if value == "date":
         return "DATE", "Date"
-    if value in {"datetime", "datetime2", "smalldatetime", "datetimeoffset", "timestamp", "timestamptz", "timestamp without time zone", "timestamp with time zone"}:
+    if value in {"datetimeoffset", "timestamptz", "timestamp with time zone"}:
         return "TIMESTAMP", "Datetime"
     return "STRING", "String"
 
@@ -338,17 +347,31 @@ class SQLServerDatasetSource(DatabaseDatasetSource):
                 JOIN sys.types t ON t.user_type_id=c.user_type_id
                 JOIN sys.objects o ON o.object_id=c.object_id JOIN sys.schemas s ON s.schema_id=o.schema_id
                 WHERE s.name=%s AND o.name=%s ORDER BY c.column_id""", (schema_name, object_name))
-            # SQL Server timestamp is binary rowversion, never a datetime.
-            return [{**_column(r[0], "rowversion" if r[1] == "timestamp" else r[1], bool(r[2])),
-                     "precision": r[3], "scale": r[4], "max_length_bytes": r[5]} for r in cursor.fetchall()]
+            columns = []
+            for row in cursor.fetchall():
+                # SQL Server timestamp is binary rowversion, never a datetime.
+                native = "rowversion" if row[1] == "timestamp" else row[1]
+                if native == "datetimeoffset":
+                    native = f"datetimeoffset({row[4]})"
+                columns.append({**_column(row[0], native, bool(row[2])),
+                                "precision": row[3], "scale": row[4],
+                                "max_length_bytes": row[5]})
+            return columns
 
     def _select(self, connection: Any, schema_name: str, object_name: str,
                 columns: list[dict[str, Any]], limit: int) -> Any:
         selected = []
         for column in columns:
             name = _quote_mssql(column["name"])
-            selected.append(f"CONVERT(nvarchar(50), {name}, 127) AS {name}"
-                            if column["native_type"] == "datetimeoffset" else name)
+            native = re.sub(r"\s*\([^)]*\)", "", column["native_type"].casefold()).strip()
+            # Ask SQL Server for canonical text so datetime2(7)/datetimeoffset(7)
+            # never pass through Python's microsecond-limited datetime object.
+            if native == "datetimeoffset":
+                selected.append(f"CONVERT(nvarchar(50), {name}, 127) AS {name}")
+            elif native in {"datetime", "datetime2", "smalldatetime"}:
+                selected.append(f"CONVERT(nvarchar(50), {name}, 126) AS {name}")
+            else:
+                selected.append(name)
         cursor = connection.cursor()
         # limit is a range-checked integer; identifiers are metadata-validated and quoted.
         cursor.execute(f"SELECT TOP ({limit}) {', '.join(selected)} FROM "

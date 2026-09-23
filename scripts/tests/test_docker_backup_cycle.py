@@ -75,6 +75,8 @@ def test_source_bootstrap_password_only_in_stdin_and_reader_is_select_only(monke
     assert password not in " ".join(observed["args"])
     assert password in observed["input_text"]
     assert "GRANT SELECT ON ALL TABLES" in observed["input_text"]
+    assert "CREATE ROLE tv_recovery_writer" in observed["input_text"]
+    assert "CREATE SCHEMA recovery_delivery" in observed["input_text"]
     assert "GRANT ALL" not in observed["input_text"]
     assert "CREATE VIEW" in observed["input_text"]
     with pytest.raises(RuntimeError):
@@ -311,7 +313,9 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
         if "backup" in args:
             (evidence / "backup").mkdir()
             (evidence / "backup" / "state.json").write_text(json.dumps({
-                "verified_secrets": 1, "verified_artifacts": 4, "validated_relationships": 8,
+                "verified_secrets": 2, "verified_source_secrets": 1,
+                "verified_delivery_secrets": 1,
+                "verified_artifacts": 4, "validated_relationships": 8,
                 "tables": {name: {"one": "hash", **({"two": "hash"} if name == "monitor_schedule_versions" else {})}
                            for name in ("exceptions", "exception_attachments", "monitor_schedules",
                                         "monitor_schedule_versions", "monitor_occurrences", "metric_history")}}))

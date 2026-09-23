@@ -1,9 +1,10 @@
 # Operación local y verificación de persistencia
 
-Trackvance Core se ejecuta con cuatro servicios de Docker Compose: PostgreSQL 16,
-API FastAPI, worker y pasarela web React/nginx. API y worker comparten el mismo
-código del monolito y el volumen de ArtifactStore. La única puerta publicada es
-la web, ligada a `127.0.0.1`; PostgreSQL y la API no publican puertos al host.
+Trackvance Core se ejecuta con cinco servicios de Docker Compose: PostgreSQL 16,
+API FastAPI, worker `DEFAULT`, `delivery-worker` y pasarela web React/nginx. Los
+dos workers reutilizan el mismo código del monolito, pero consumen lanes distintas.
+La única puerta publicada es la web, ligada a `127.0.0.1`; PostgreSQL y la API no
+publican puertos al host.
 
 ## Arranque en Windows
 
@@ -15,7 +16,7 @@ Desde la raíz del repositorio, con Docker Desktop en contenedores Linux:
 
 Si `.env` no existe, bootstrap lo crea desde `.env.example` con una contraseña
 aleatoria local. No la muestra ni la sube a Git. Conserva un `.env` existente.
-El arranque instala las imágenes, aplica Alembic y espera la salud de los cuatro
+El arranque instala las imágenes, aplica Alembic y espera la salud de los cinco
 servicios. La interfaz queda en `http://localhost:3000`.
 
 Un entorno adicional puede coexistir con el prototipo nativo:
@@ -29,13 +30,14 @@ python scripts/doctor.py --base-url http://localhost:3100 --docker
 python scripts/smoke_test.py --base-url http://localhost:3100
 ```
 
-Cada nombre de proyecto Compose conserva sus propios volúmenes PostgreSQL y
-ArtifactStore. `docker compose restart` y `docker compose down` conservan los
+Cada nombre de proyecto Compose conserva sus seis volúmenes: PostgreSQL,
+ArtifactStore y los dos pares credencial/clave de fuentes y destinos.
+`docker compose restart` y `docker compose down` conservan los
 volúmenes. No se debe usar `down -v` para reiniciar o actualizar una instalación.
 El prototipo nativo usa `.local/trackvance.db` y `.local/storage`; ese entorno no
 es la base PostgreSQL de Docker y no se modifica al arrancar Compose.
 
-Los cuatro servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
+Los cinco servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
 Windows sin levantar Trackvance; el proyecto permanece detenido hasta ejecutar
 manualmente `docker compose up -d --wait` desde la raíz. Para apagarlo sin borrar
 contenedores ni volúmenes se utiliza `docker compose stop`.
@@ -43,8 +45,9 @@ contenedores ni volúmenes se utiliza `docker compose stop`.
 ## Readiness y diagnósticos
 
 `GET /api/v1/health/ready` verifica conexión SQL, revisión Alembic y una escritura
-temporal en almacenamiento. Devuelve 503 si alguna comprobación falla. El worker
-escribe un heartbeat local; `doctor.py --docker` comprueba también que sea reciente.
+temporal en almacenamiento. Devuelve 503 si alguna comprobación falla. Cada worker
+escribe su propio heartbeat (`worker-heartbeat-default.json` y
+`worker-heartbeat-delivery.json`); `doctor.py --docker` comprueba ambos por lane.
 El script respeta `COMPOSE_PROJECT_NAME` y nunca imprime la URL de base de datos,
 el contenido de `.env` ni credenciales.
 
@@ -70,7 +73,8 @@ docker compose -f compose.yml -f deploy/docker/compose.offline.yml up -d --wait 
 
 Docker Desktop no publica la puerta de una pasarela conectada únicamente a una red
 interna en el host probado. Por ello nginx tiene un segundo puente sin masquerade.
-API, worker y PostgreSQL permanecen exclusivamente en la red interna, sin gateway.
+API, worker `DEFAULT`, `delivery-worker` y PostgreSQL permanecen exclusivamente en
+la red interna, sin gateway.
 Este override **no garantiza bloqueo de Internet desde nginx**: en Docker Desktop
 29.1.3 se observó salida desde ese contenedor incluso sin masquerade. El aislamiento
 total del host depende de su firewall o desconexión externa; no se modifica la red
@@ -78,10 +82,10 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual llega a `0007_monitor_scheduling`, precedida por
+La revisión actual llega a `0008_data_delivery`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
-`0006_local_identity_exceptions`. Las
+`0006_local_identity_exceptions`, `0007_monitor_scheduling`. Las
 correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
 puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
 En bases SQLite previas sin tabla Alembic, el adaptador
@@ -123,9 +127,10 @@ El respaldo usa la API de backup de SQLite; consolida una fuente WAL en un solo
 archivo de copia, sin alterar el journal del origen. Incluye todos los archivos
 referenciados por versiones, runs y ArtifactStore, conserva sus bytes y genera un
 manifest con SHA-256/tamaños. Se comprueban `integrity_check`, rutas y cobertura.
-Incluye también las credenciales cifradas y su clave maestra del modo directo.
-Si la base referencia conexiones externas, la ausencia de un secreto o de su
-clave impide declarar válido el respaldo; no se inventan credenciales nuevas.
+Incluye también las credenciales cifradas y claves maestras separadas del modo
+directo. Si la base referencia conexiones externas o destinos de Delivery, la
+ausencia de su secreto o clave correspondiente impide declarar válido el respaldo;
+no se inventan credenciales nuevas.
 
 ```powershell
 python scripts/backup_local.py backup --source .local --destination backups/local-2026-09-13
@@ -136,19 +141,23 @@ python scripts/backup_local.py restore --source backups/local-2026-09-13 --desti
 Los destinos deben ser nuevos y estar fuera del origen. Una restauración valida
 todos los hashes antes de crear el destino. Reubica las rutas internas hacia el
 nuevo almacenamiento, conserva IDs/versiones/configuraciones y verifica referencias.
-Las credenciales y la clave se restauran en `credentials/` y `keys/` del destino;
-ambos directorios deben conservar acceso restringido. Los respaldos históricos
-sin conexiones continúan siendo compatibles.
+Los secretos se restauran en `credentials/`, `keys/`, `delivery_credentials/` y
+`delivery_keys/`; los cuatro directorios deben conservar acceso restringido. Los
+respaldos históricos sin conexiones ni destinos continúan siendo compatibles.
 No sustituye la instalación activa. Los backups contienen datos locales y deben
 guardarse fuera de Git, con permisos equivalentes a los del almacenamiento original.
+Después de copiar cada archivo, incluido `trackvance.db`, el helper compara
+tamaño/SHA contra el manifest antes de abrir o mutar la copia. Una sustitución
+concurrente aborta la operación.
 
 ## Copia y restauración Docker coordinada
 
-`docker_state.py` automatiza PostgreSQL, ArtifactStore, SecretStore y su clave como
-una sola unidad. El proyecto y la carpeta de destino son explícitos; el destino debe
-ser nuevo. Durante una ventana breve detiene entrada, scheduler, worker y API,
-rechaza runs/jobs pendientes, genera `pg_dump --format=custom`, archiva los tres
-volúmenes y vuelve a iniciar solo los contenedores que estaban activos.
+`docker_state.py` automatiza PostgreSQL, ArtifactStore y los SecretStore de fuentes
+y destinos con sus claves como una sola unidad. El proyecto y la carpeta de destino
+son explícitos; el destino debe ser nuevo. Durante una ventana breve detiene entrada,
+scheduler, ambos workers y API, rechaza runs/jobs pendientes, genera
+`pg_dump --format=custom`, archiva los cinco volúmenes de archivos y vuelve a iniciar
+solo los contenedores que estaban activos.
 
 ```powershell
 python scripts/docker_state.py inventory --project trackvance-core
@@ -161,6 +170,9 @@ quiescente; no contiene `.env`, contraseñas, referencias de secretos, clave ni 
 absolutas. La carpeta sí contiene credenciales cifradas y clave maestra: restringir
 su acceso y no publicarla como artifact de CI. Un backup parcial queda para
 diagnóstico, pero `verify` no lo acepta.
+El backup usa staging temporal privado, crea copias exclusivamente, ejecuta
+`fsync`, vuelve a comprobar tamaño/hash e inventario, marca los componentes
+read-only y hace que verify/restore consuman únicamente esos bytes preparados.
 
 La restauración solo opera sobre otro proyecto `trackvance-...` sin contenedores,
 volúmenes ni redes. Valida todo antes de crear recursos, restaura PostgreSQL en una
@@ -195,6 +207,14 @@ restauración; después se reutilizó la credencial restaurada contra la Postgre
 externa, se refrescó el datasource y se ejecutó un Intake nuevo. La comprobación web
 de este drill es HTTP/HTML 200; Playwright queda registrado como `NOT_RUN` y se cubre
 en su suite separada.
+
+El drill 0.5.0 separado terminó PASS con siete artifacts, dos secretos —fuente y
+destino— y 127 relaciones. Destruyó el origen, restauró en 0008 y utilizó la
+credencial destino recuperada para una Delivery COMMITTED de cuatro filas. La
+compatibilidad desde la baseline 0.4.1/0007 preservó la proyección normalizada de
+21 tablas, migró a 24, dejó Delivery vacío y asignó lane DEFAULT a 19 jobs. State
+2 no contenía un hash estructural del catálogo; no se afirma una prueba DDL que el
+formato histórico nunca almacenó.
 
 ## Reset local con plan exacto
 
@@ -260,13 +280,14 @@ el Compose base (`COMPOSE_FILE=compose.yml`), conservando proyecto, puerto, dato
 sin fuentes externas; bloquea la salida necesaria para consultar esas bases.
 No se publican puertos adicionales de PostgreSQL interno ni de API.
 
-El arranque aplica la migración aditiva `0005_external_connections`. Además de
-`postgres_data` y `trackvance_data`, preserva `connection_credentials` (cifrado) y
-`connection_keys` (clave maestra). Solo la API monta estos dos últimos volúmenes;
-el worker monta únicamente `trackvance_data`. El respaldo debe incluir un dump de
-metadata y las copias coordinadas de artifacts, credenciales y clave descritas
-arriba. Los secretos no son artifacts descargables y no deben incluirse en logs,
-Git o contextos de build.
+Además de `postgres_data` y `trackvance_data`, Compose preserva
+`connection_credentials` y `connection_keys` para fuentes, y
+`delivery_credentials` y `delivery_keys` para destinos. La API monta ambos dominios
+porque prueba fuentes y destinos. El worker `DEFAULT` monta únicamente
+`trackvance_data`; `delivery-worker` monta datos y solo los secretos de destinos.
+El respaldo incluye el dump de metadata y las cinco copias coordinadas de archivos.
+Los secretos no son artifacts descargables y no deben incluirse en logs, Git o
+contextos de build.
 
 Configura las fuentes con cuentas SELECT y TLS. Para un servidor en el PC usa un
 host accesible desde Docker, como `host.docker.internal`. La BD interna almacena
@@ -278,6 +299,43 @@ La certificación independiente se ejecuta con
 SQL Server reales en un proyecto nuevo, verifica migraciones, fuentes, Intake,
 exports, UI, fallos de acceso y persistencia; finalmente elimina sus propios
 contenedores y volúmenes. No añade datos de prueba a la instalación habitual.
+
+### Data Delivery - 23 de septiembre de 2026
+
+La lane `DELIVERY` no comparte credenciales de escritura con el worker normal. El
+servicio `delivery-worker` no ejecuta el scheduler y conserva su heartbeat separado.
+`doctor.py --docker` valida la lane y los montajes exactos: el worker `DEFAULT` no
+puede montar secretos y el de Delivery no puede montar secretos de fuentes.
+
+La certificación aislada se prepara con:
+
+```powershell
+python scripts/tests/delivery_cycle.py
+```
+
+El runner exige un proyecto `trackvance-delivery-e2e-*` nuevo, levanta PostgreSQL y
+SQL Server desechables, crea cuentas de escritura acotadas, prueba CREATE_AND_LOAD,
+APPEND, OVERWRITE y UPSERT, además de preflight inválido, permisos insuficientes,
+un intento remoto fallido, receipt, manifest, auditoría y ausencia de secretos.
+Puede ejecutar el flujo Playwright focal `tests-e2e/delivery.spec.ts`; al terminar
+elimina exclusivamente sus contenedores y volúmenes. La ejecución local publicada
+aprobó 92 comprobaciones y Playwright 1/1; GitHub Actions se informa por separado.
+
+PostgreSQL requiere `INSERT` para APPEND; `INSERT+DELETE` para OVERWRITE; y
+`INSERT+UPDATE+SELECT` más `TEMPORARY` de base para UPSERT. En SQL Server,
+cualquier tabla existente requiere `SELECT` además del permiso de escritura para
+adquirir el lock y validar catálogos. `OVERWRITE` requiere
+`INSERT+DELETE+VIEW DEFINITION`; sin visibilidad
+completa de security policies falla cerrado. No habilites `IGNORE_DUP_KEY` en
+índices únicos de un target Delivery. PostgreSQL `OVERWRITE` no se ejecuta cuando
+`row_security_active` es verdadero para la cuenta. SQL Server UPSERT necesita
+`INSERT+UPDATE+SELECT`; la creación de `#temp` depende de la política de `tempdb`.
+
+El restore actual acepta backups 0.4.1 manifest 1/state 2/0007 y los migra a 0008.
+La certificación real preservó exactamente 21 tablas legacy, dejó vacías las tres
+tablas Delivery y convirtió 19 jobs históricos a lane DEFAULT. Los directorios de
+backup se preparan con permisos privados y cada copia se valida por tamaño/hash
+antes de abrirla; no uses un backup cuyo inventario cambie durante la operación.
 
 ## Revisión de arquitectura - 16 de septiembre de 2026
 

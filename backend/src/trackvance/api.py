@@ -40,6 +40,7 @@ from .connections_api import router as connections_router
 from .connections_service import ConnectionOperationError
 from .credential_store import SecretStoreError
 from .dashboard import DashboardFilters, build_dashboard
+from .data_sinks import DeliveryError
 from .dataset_readers import (
     UnsupportedDatasetFormat,
     dataset_reader_registry,
@@ -47,6 +48,8 @@ from .dataset_readers import (
 )
 from .dataset_sources import SourceError
 from .db import SessionLocal, get_db, iso, utcnow
+from .delivery_api import router as delivery_router
+from .delivery_service import DeliveryOperationError
 from .exceptions_api import router as exceptions_router
 from .identity_api import router as identity_router
 from .identity_api import user_dto
@@ -168,6 +171,16 @@ async def connection_error(request, exc):
     return error_response(request, exc.status, exc.code, exc.message)
 
 
+@app.exception_handler(DeliveryOperationError)
+async def delivery_operation_error(request, exc):
+    return error_response(request, exc.status, exc.code, exc.message, exc.details)
+
+
+@app.exception_handler(DeliveryError)
+async def delivery_error(request, exc):
+    return error_response(request, 422, exc.code, exc.message)
+
+
 @app.exception_handler(ScheduleError)
 async def schedule_error(request: Request, exc: ScheduleError):
     return error_response(request, exc.status, exc.code, exc.message)
@@ -180,7 +193,7 @@ async def source_error(request, exc):
 
 @app.exception_handler(SecretStoreError)
 async def secret_store_error(request, _exc):
-    return error_response(request, 503, "CREDENTIAL_STORE_UNAVAILABLE", "No se pudieron recuperar las credenciales de la conexión.")
+    return error_response(request, 503, "CREDENTIAL_STORE_UNAVAILABLE", "No se pudieron recuperar las credenciales solicitadas.")
 
 
 @app.exception_handler(ProcessingError)
@@ -910,7 +923,7 @@ def monitor_run(monitor_id: str, body: MonitorRunBody, request: Request, db: Ses
 
 
 @router.get("/runs")
-def runs(module: Literal["intake", "recon", "sentinel"] | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def runs(module: Literal["intake", "recon", "sentinel", "DELIVERY"] | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return listing([run_dto(db, r) for r in scoped(db, Run, user) if module is None or r.module == module])
 
 
@@ -923,13 +936,25 @@ def run_detail(run_id: str, db: Session = Depends(get_db), user: User = Depends(
 
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    run = owned(db, Run, run_id, user)
-    if run.status in {"SUCCESS", "FAILED", "CANCELLED"}:
+    # Serialize the QUEUED/RUNNING decision with Delivery's STARTED fence.
+    # Both paths lock Run before Job, so cancellation can never act on a stale
+    # QUEUED snapshot after a remote attempt has become durable.
+    run = db.scalar(
+        select(Run)
+        .where(
+            Run.id == run_id,
+            Run.organization_id == user.organization_id,
+        )
+        .with_for_update()
+    )
+    if run is None:
+        raise APIError(404, "NOT_FOUND", "No se encontró el registro solicitado.")
+    if run.status in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}:
         raise APIError(409, "RUN_FINISHED", "La ejecución ya terminó.")
     run.cancel_requested = True
     if run.status == "QUEUED":
         run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
-        job = db.scalar(select(Job).where(Job.run_id == run.id))
+        job = db.scalar(select(Job).where(Job.run_id == run.id).with_for_update())
         if job:
             job.status = "CANCELLED"
     audit(db, "RUN_CANCEL_REQUESTED", "run", run.id, "Cancelación solicitada", user.name, user.organization_id)
@@ -1015,6 +1040,8 @@ def export_excel(run_id: str, db: Session = Depends(get_db), user: User = Depend
     from .exports import XLSX_MIME_TYPE, build_run_workbook, export_filename
     from .manifests import read_manifest
     run = owned(db, Run, run_id, user)
+    if run.module == "DELIVERY":
+        raise APIError(409, "EXPORT_NOT_SUPPORTED", "Delivery publica receipt y manifest JSON; no genera un Excel de resultados.")
     if run.status != "SUCCESS":
         raise APIError(409, "RESULTS_NOT_READY", "Los resultados estarán disponibles al completar la ejecución.")
     config = owned(db, Configuration, run.config_id, user)
@@ -1058,6 +1085,8 @@ def csv_cell(value):
 @router.get("/runs/{run_id}/export.csv", deprecated=True, description="Compatibilidad para clientes históricos. La interfaz utiliza el informe Excel estructurado.")
 def export_csv(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     run = owned(db, Run, run_id, user)
+    if run.module == "DELIVERY":
+        raise APIError(409, "EXPORT_NOT_SUPPORTED", "Delivery publica receipt y manifest JSON; no genera CSV.")
     if run.status != "SUCCESS":
         raise APIError(409, "RESULTS_NOT_READY", "Los resultados estarán disponibles al completar la ejecución.")
     verify_registered_file(db, run.result_path, user.organization_id)
@@ -1138,14 +1167,15 @@ def rules():
 @router.get("/system/engines")
 def engines():
     from .worker import worker_status
-    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local CSV y Parquet; conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark local", "version": None, "available": False, "status": "UNAVAILABLE", "description": "Adaptador opcional aún no implementado. El plan rechaza cargas que superen el presupuesto local; no simula su ejecución."}], "worker": worker_status(), "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS}, "mode": "local-prototype"}
+    workers = {"DEFAULT": worker_status("DEFAULT"), "DELIVERY": worker_status("DELIVERY")}
+    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local CSV y Parquet; conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark local", "version": None, "available": False, "status": "UNAVAILABLE", "description": "Adaptador opcional aún no implementado. El plan rechaza cargas que superen el presupuesto local; no simula su ejecución."}], "worker": workers["DEFAULT"], "workers": workers, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS}, "mode": "local-prototype"}
 
 
 @router.get("/dashboard")
 def dashboard(
     period: Literal["7d", "30d", "90d", "all"] = "30d",
     dataset_id: str | None = None,
-    module: Literal["intake", "recon", "sentinel"] | None = None,
+    module: Literal["intake", "recon", "sentinel", "DELIVERY"] | None = None,
     status: Literal["ATTENTION", "HEALTHY", "IN_PROGRESS", "TECHNICAL_FAILURE"] | None = None,
     criticality: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"] | None = None,
     db: Session = Depends(get_db),
@@ -1201,7 +1231,7 @@ def run_execution_plan(run_id: str, db: Session = Depends(get_db), user: User = 
 def run_diagnostics(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     run = owned(db, Run, run_id, user)
     configuration = owned(db, Configuration, run.config_id, user)
-    effective = effective_config(run.module, configuration.config)
+    effective = configuration.config if run.module == "DELIVERY" else effective_config(run.module, configuration.config)
     return {"run_id": run.id, "status": run.status, "execution_plan": run.execution_plan, "key_normalization": effective.get("key_normalization"), "configuration_schema_version": effective.get("schema_version"), "started_at": iso(run.started_at), "finished_at": iso(run.finished_at), "error": run.error}
 
 
@@ -1225,6 +1255,7 @@ def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user
 
 app.include_router(router)
 app.include_router(connections_router)
+app.include_router(delivery_router)
 app.include_router(identity_router)
 app.include_router(exceptions_router)
 app.include_router(sentinel_router)

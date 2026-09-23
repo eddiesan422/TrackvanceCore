@@ -52,6 +52,18 @@ if (-not $SkipInstall) {
 $env:DATABASE_URL = 'sqlite:///' + (Join-Path $runtimeRoot 'trackvance.db').Replace('\', '/')
 $env:TRACKVANCE_STORAGE_ROOT = Join-Path $runtimeRoot 'storage'
 $env:TRACKVANCE_STORAGE_DIR = $env:TRACKVANCE_STORAGE_ROOT
+$env:TRACKVANCE_SECRETS_DIR = Join-Path $runtimeRoot 'credentials'
+$env:TRACKVANCE_SECRET_KEY_FILE = Join-Path $runtimeRoot 'keys\master.key'
+$sourceSecretsDir = $env:TRACKVANCE_SECRETS_DIR
+$sourceSecretKeyFile = $env:TRACKVANCE_SECRET_KEY_FILE
+$isolatedSourceSecretsDir = Join-Path $runtimeRoot 'delivery_worker_no_source_credentials'
+$isolatedSourceSecretKeyFile = Join-Path $runtimeRoot 'delivery_worker_no_source_keys\master.key'
+$destinationSecretsDir = Join-Path $runtimeRoot 'delivery_credentials'
+$destinationSecretKeyFile = Join-Path $runtimeRoot 'delivery_keys\master.key'
+$isolatedDestinationSecretsDir = Join-Path $runtimeRoot 'worker_no_delivery_credentials'
+$isolatedDestinationSecretKeyFile = Join-Path $runtimeRoot 'worker_no_delivery_keys\master.key'
+$env:TRACKVANCE_DESTINATION_SECRETS_DIR = $destinationSecretsDir
+$env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $destinationSecretKeyFile
 $env:TRACKVANCE_WEB_ORIGIN = 'http://localhost:3000'
 $env:DEMO_ACCESS_ENABLED = 'true'
 $env:DEMO_SEED_ENABLED = 'true'
@@ -74,7 +86,21 @@ try {
         } catch { Start-Sleep -Milliseconds 1000 }
     }
     if (-not $ready) { throw 'La API no inicio. Consulta .local/api.err.log.' }
+    $env:TRACKVANCE_WORKER_LANE = 'DEFAULT'
+    $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $isolatedDestinationSecretsDir
+    $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $isolatedDestinationSecretKeyFile
     Start-TrackvanceProcess 'worker' $pythonExe @('-m','trackvance.worker') $backendRoot
+    $env:TRACKVANCE_WORKER_LANE = 'DELIVERY'
+    $env:TRACKVANCE_SECRETS_DIR = $isolatedSourceSecretsDir
+    $env:TRACKVANCE_SECRET_KEY_FILE = $isolatedSourceSecretKeyFile
+    $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $destinationSecretsDir
+    $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $destinationSecretKeyFile
+    Start-TrackvanceProcess 'delivery-worker' $pythonExe @('-m','trackvance.worker') $backendRoot
+    $env:TRACKVANCE_WORKER_LANE = 'DEFAULT'
+    $env:TRACKVANCE_SECRETS_DIR = $sourceSecretsDir
+    $env:TRACKVANCE_SECRET_KEY_FILE = $sourceSecretKeyFile
+    $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $isolatedDestinationSecretsDir
+    $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $isolatedDestinationSecretKeyFile
     $nodeExe = (Get-Command node -ErrorAction Stop).Source
     Start-TrackvanceProcess 'web' $nodeExe @('node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','3000','--strictPort') $frontendRoot
     $webReady = $false

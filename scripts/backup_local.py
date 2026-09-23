@@ -15,10 +15,16 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-BACKUP_SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = {1, BACKUP_SCHEMA_VERSION}
-PORTABLE_DIRECTORIES = ("credentials", "keys")
+BACKUP_SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, BACKUP_SCHEMA_VERSION}
+PORTABLE_DIRECTORIES = (
+    "credentials",
+    "keys",
+    "delivery_credentials",
+    "delivery_keys",
+)
 MASTER_KEY = "keys/master.key"
+DELIVERY_MASTER_KEY = "delivery_keys/master.key"
 LOCAL_SECRET_REFERENCE = re.compile(r"local:[a-f0-9]{32}")
 PATH_COLUMNS = {
     "dataset_versions": ("original_path", "canonical_path"),
@@ -51,13 +57,15 @@ def path_entries(connection: sqlite3.Connection):
                     yield table, column, identifier, value
 
 
-def connection_secret_files(connection: sqlite3.Connection) -> set[str]:
-    """Return the portable credential paths required by the database snapshot."""
-    if "external_connection_versions" not in table_names(connection):
+def secret_files(
+    connection: sqlite3.Connection, table: str, directory: str
+) -> set[str]:
+    """Return portable credential paths required by one versioned secret domain."""
+    if table not in table_names(connection):
         return set()
     required = set()
     query = (
-        "SELECT organization_id, secret_reference FROM external_connection_versions "
+        f'SELECT organization_id, secret_reference FROM "{table}" '
         "WHERE secret_reference IS NOT NULL AND secret_reference != ''"
     )
     for organization_id, reference in connection.execute(query):
@@ -69,8 +77,16 @@ def connection_secret_files(connection: sqlite3.Connection) -> set[str]:
         ):
             raise ValueError("La base de datos contiene una referencia de credencial local inválida.")
         scope = hashlib.sha256(organization_id.encode()).hexdigest()
-        required.add((Path("credentials") / scope / f"{reference[6:]}.secret").as_posix())
+        required.add((Path(directory) / scope / f"{reference[6:]}.secret").as_posix())
     return required
+
+
+def connection_secret_files(connection: sqlite3.Connection) -> set[str]:
+    return secret_files(connection, "external_connection_versions", "credentials")
+
+
+def delivery_secret_files(connection: sqlite3.Connection) -> set[str]:
+    return secret_files(connection, "delivery_destination_versions", "delivery_credentials")
 
 
 def fresh_destination(destination: Path, source: Path) -> Path:
@@ -209,13 +225,18 @@ def manifest_files(source: Path, manifest: dict) -> dict[str, dict]:
 
 
 def validate_connection_material(connection: sqlite3.Connection, file_names: set[str]) -> None:
-    required_credentials = connection_secret_files(connection)
-    if not required_credentials:
-        return
-    if MASTER_KEY not in file_names or not required_credentials.issubset(file_names):
-        raise ValueError(
-            "El backup no incluye las credenciales y la clave requeridas por Conexiones."
-        )
+    domains = (
+        (connection_secret_files(connection), MASTER_KEY, "Conexiones"),
+        (delivery_secret_files(connection), DELIVERY_MASTER_KEY, "Data Delivery"),
+    )
+    for required_credentials, master_key, label in domains:
+        if required_credentials and (
+            master_key not in file_names
+            or not required_credentials.issubset(file_names)
+        ):
+            raise ValueError(
+                f"El backup no incluye las credenciales y la clave requeridas por {label}."
+            )
 
 
 def verify(source: Path) -> dict:
@@ -252,10 +273,22 @@ def restore(source: Path, destination: Path) -> None:
     manifest = verify(source)
     destination = fresh_destination(destination, source)
     for name in sorted(manifest["files"]):
-        copy_verified(source / name, destination / name)
+        copied = destination / name
+        copy_verified(source / name, copied)
+        expected = manifest["files"][name]
+        if (
+            copied.stat().st_size != expected["size_bytes"]
+            or digest(copied) != expected["sha256"]
+        ):
+            raise ValueError(
+                f"Integridad de archivo incorrecta tras la copia: {name}"
+            )
     old_storage = Path(manifest["source_storage"])
     new_storage = destination / "storage"
-    for directory in (new_storage, destination / "credentials", destination / "keys"):
+    for directory in (
+        new_storage,
+        *(destination / name for name in PORTABLE_DIRECTORIES),
+    ):
         directory.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(destination / "trackvance.db")) as connection:
         for table, column, identifier, value in list(path_entries(connection)):

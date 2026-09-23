@@ -49,6 +49,8 @@ def _metric_number(metrics: dict[str, Any], key: str) -> float | None:
 def run_operational_status(run: Run) -> str:
     if run.status in IN_PROGRESS_STATUSES:
         return "IN_PROGRESS"
+    if run.module == "DELIVERY":
+        return "HEALTHY" if run.status == "SUCCESS" and run.decision == "COMMITTED" else "TECHNICAL_FAILURE"
     if run.status != "SUCCESS":
         return "TECHNICAL_FAILURE"
     if not run.decision or run.decision in HEALTHY_DECISIONS:
@@ -57,6 +59,8 @@ def run_operational_status(run: Run) -> str:
 
 
 def run_health_score(run: Run) -> float | None:
+    if run.module not in {"intake", "recon", "sentinel"}:
+        return None
     operational_status = run_operational_status(run)
     if operational_status == "IN_PROGRESS":
         return None
@@ -91,7 +95,7 @@ def processed_records(run: Run) -> int | None:
         target = _metric_number(metrics, "target_rows")
         if source is not None or target is not None:
             return int((source or 0) + (target or 0))
-    for key in ("total_rows", "row_count", "source_rows"):
+    for key in ("total_rows", "row_count", "source_rows", "rows_written"):
         value = _metric_number(metrics, key)
         if value is not None:
             return int(value)
@@ -188,6 +192,12 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
 
     current_runs = [run for run in runs if matches_dimensions(run) and in_period(run, current_start)]
     previous_runs = [run for run in runs if previous_start and matches_dimensions(run) and in_period(run, previous_start, current_start)]
+    quality_current_runs = [
+        run for run in current_runs if run.module in {"intake", "recon", "sentinel"}
+    ]
+    quality_previous_runs = [
+        run for run in previous_runs if run.module in {"intake", "recon", "sentinel"}
+    ]
     current_ids, previous_ids = {run.id for run in current_runs}, {run.id for run in previous_runs}
     active_cases = [case for case in cases if case.state in ACTIVE_EXCEPTION_STATES and case.run_id in current_ids]
     previous_active_cases = [case for case in cases if case.state in ACTIVE_EXCEPTION_STATES and case.run_id in previous_ids]
@@ -207,11 +217,18 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
                 affected.update(filtered_dataset_ids(case_run))
         return affected
 
-    current_affected = affected_ids(current_runs, active_cases)
-    previous_affected = affected_ids(previous_runs, previous_active_cases)
-    current_health, previous_health = aggregate_health(current_runs), aggregate_health(previous_runs)
-    current_failed = sum(run_operational_status(run) in {"ATTENTION", "TECHNICAL_FAILURE"} for run in current_runs)
-    previous_failed = sum(run_operational_status(run) in {"ATTENTION", "TECHNICAL_FAILURE"} for run in previous_runs)
+    current_affected = affected_ids(quality_current_runs, active_cases)
+    previous_affected = affected_ids(quality_previous_runs, previous_active_cases)
+    current_health = aggregate_health(quality_current_runs)
+    previous_health = aggregate_health(quality_previous_runs)
+    current_failed = sum(
+        run_operational_status(run) in {"ATTENTION", "TECHNICAL_FAILURE"}
+        for run in quality_current_runs
+    )
+    previous_failed = sum(
+        run_operational_status(run) in {"ATTENTION", "TECHNICAL_FAILURE"}
+        for run in quality_previous_runs
+    )
     comparison_available = bool(previous_runs or previous_active_cases)
 
     latest_version_by_dataset: dict[str, DatasetVersion] = {}
@@ -309,7 +326,7 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
     attention_items = [item for _, _, item in attention]
 
     health_by_day: dict[str, dict[str, list[Run]]] = defaultdict(lambda: defaultdict(list))
-    for run in current_runs:
+    for run in quality_current_runs:
         day = (iso(run.created_at) or "")[:10]
         if day:
             health_by_day[day][run.module].append(run)
@@ -347,7 +364,7 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
         })
 
     latest_current_by_dataset: dict[str, Run] = {}
-    for run in current_runs:
+    for run in quality_current_runs:
         for dataset_id in filtered_dataset_ids(run):
             previous = latest_current_by_dataset.get(dataset_id)
             if previous is None or (_utc(run.created_at) or datetime.min.replace(tzinfo=UTC)) > (_utc(previous.created_at) or datetime.min.replace(tzinfo=UTC)):
@@ -367,7 +384,9 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
         latest = latest_current_by_dataset.get(dataset_id)
         if not dataset or not latest:
             continue
-        relevant_current = [run for run in current_runs if dataset_id in associations.get(run.id, ())]
+        relevant_current = [
+            run for run in quality_current_runs if dataset_id in associations.get(run.id, ())
+        ]
         relevant_all = [run for run in runs if dataset_id in associations.get(run.id, ()) and matches_dimensions(run, include_status=False)]
         scored: list[tuple[Run, float]] = []
         for run in relevant_all:
@@ -421,7 +440,7 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
         "filter_options": {
             "datasets": [{"id": dataset.id, "name": dataset.name, "domain": dataset.domain, "criticality": dataset.criticality} for dataset in sorted(datasets, key=lambda item: item.name.casefold())],
             "periods": ["7d", "30d", "90d", "all"],
-            "modules": ["intake", "recon", "sentinel"],
+            "modules": ["intake", "recon", "sentinel", "DELIVERY"],
             "statuses": ["ATTENTION", "HEALTHY", "IN_PROGRESS", "TECHNICAL_FAILURE"],
             "criticalities": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
         },

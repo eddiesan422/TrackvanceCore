@@ -1,0 +1,17 @@
+{
+  "Alcance 0.5.0": "Data Delivery controlado desde DatasetVersions inmutables hacia PostgreSQL y SQL Server. No incorpora transformaciones funcionales ni capacidades de productización.",
+  "pytest backend + scripts": "869 aprobadas en 54,78 s. Dos avisos de deprecación Starlette/AnyIO; sin fallos.",
+  "Ruff / Mypy": "PASS; Mypy revisó 38 archivos fuente.",
+  "Frontend": "ESLint y TypeScript PASS. Vitest: 128 aprobadas en 14 archivos.",
+  "Build frontend": "PASS; bundle JavaScript principal 611,41 kB / 179,47 kB gzip. Advertencia informativa de tamaño, no bloqueante.",
+  "Playwright": "PASS: 20 pruebas aprobadas y 5 opt-in omitidas en el ciclo integral; las omisiones se cubren en runners especializados y no se contabilizan como éxito.",
+  "Compose / smoke / doctor": "PASS: doctor 8/8, smoke API 84/84, migración 0008, Alembic check y round trip upgrade/downgrade/upgrade; workers DEFAULT/DELIVERY y persistencia tras restart.",
+  "Conexiones reales": "PASS: 62 comprobaciones PostgreSQL/SQL Server y 2/2 Playwright focales; incluye temporales sin zona, smoke 84/84, credenciales y persistencia tras restart.",
+  "Data Delivery real": "PASS: 92 comprobaciones PostgreSQL/SQL Server y Playwright focal 1/1; CREATE_AND_LOAD, APPEND, OVERWRITE y UPSERT, target nuevo/existente, preflight, permisos, fallo remoto, reinicio, secretos, auditoría, receipt y manifest.",
+  "Estado UNKNOWN": "La pérdida exacta de confirmación post-commit quedó NOT_RUN_NONDETERMINISTIC contra motores reales. Pruebas deterministas certifican UNKNOWN separado de FAILED/COMMITTED y sin reintento automático.",
+  "Backup / restore / reset": "PASS: 7 artifacts, 2 secretos (1 fuente y 1 destino), 127 relaciones y origen destruido antes del restore. La credencial destino recuperada produjo una Delivery COMMITTED de 4 filas.",
+  "Compatibilidad 0.4.1 a 0.5.0": "PASS desde 92c58eae9a1ddef653c0c9c888cfd7698ee1af3a: manifest 1/state 2/0007; 21 tablas legacy y SHA canónico idénticos; restore en 0008 con 24 tablas, tres tablas Delivery vacías y 19 jobs históricos en lane DEFAULT.",
+  "Benchmark smoke": "PASS: 1.074.923 bytes, 1.000 filas, cuatro columnas y 40,31 s; peak total 379.941.026 bytes. Prueba acotada del harness, no certificación de volumen.",
+  "Contrato": "OpenAPI 0.5.0 regenerado: 81 paths, incluidos 14 paths de Data Delivery. Migración vigente 0008_data_delivery.",
+  "GitHub Actions": "[PENDIENTE: completar con URL, commit y resultado real de los siete jobs declarados]."
+}

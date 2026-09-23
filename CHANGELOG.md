@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.5.0 — 2026-09-23 — Data Delivery controlado
+
+- Incorpora **Data Delivery** como módulo de salida separado de `DatasetSource`,
+  con destinos versionados PostgreSQL y SQL Server, credenciales cifradas fuera
+  de metadata y un puerto `DataSink` específico de escritura.
+- Añade preview de mapping, preflight obligatorio al publicar y antes de ejecutar,
+  configuraciones inmutables, idempotencia de creación de runs, `DeliveryAttempt`
+  y receipt/manifest enlazados al Run, DatasetVersion y revisión exacta del destino.
+- Implementa targets `EXISTING_TABLE` y `CREATE_TABLE`, tipos lógicos `STRING`,
+  `INT64`, `DECIMAL`, `DATE`, `TIMESTAMP` y `BOOLEAN`, y estrategias
+  `CREATE_AND_LOAD`, `APPEND`, `OVERWRITE` y `UPSERT`. `UPSERT` exige claves
+  explícitas, no nulas, únicas en la fuente y respaldadas por PK/unique en destino.
+- Introduce la lane persistida `DELIVERY`, un `delivery-worker` independiente y
+  heartbeats separados. El worker `DEFAULT` no monta secretos de origen ni de
+  destino; el delivery-worker monta únicamente artifacts y secretos de destino;
+  la API monta ambos almacenes para descubrimiento y administración.
+- Distingue `STARTED`, `COMMITTED`, `FAILED` y `UNKNOWN` en intentos remotos.
+  Una confirmación de commit perdida queda `UNKNOWN`, no se presenta como fallo ni
+  éxito y no se reintenta a ciegas.
+- Prepara identificadores, tipos y payload antes de `STARTED`; toma el lease antes
+  de reconciliar y conserva el orden de locks Run→Job frente a cancelación.
+  Un resultado remoto conocido prevalece sobre cancelación tardía. PostgreSQL
+  revalida la constraint UPSERT nombrada y rechaza RLS en `OVERWRITE`; SQL Server
+  rechaza `IGNORE_DUP_KEY` y, para `OVERWRITE`, falla cerrado ante FILTER security
+  policies invisibles o activas.
+- Endurece exactitud: strings Unicode variables con longitud UTF-16/collation
+  compatible, timestamps con offset y precisión máxima 6, y decimales sin float.
+  El mapping conserva el tipo lógico de la DatasetVersion y rechaza conversiones
+  funcionales entre STRING, número, fecha, timestamp y booleano.
+- Alinea adquisición y Delivery: sólo `timestamptz` y `datetimeoffset(0..6)` se
+  etiquetan `TIMESTAMP`; temporales SQL sin zona y `datetimeoffset(7)` se preservan
+  como `STRING`, sin inventar zona ni crear snapshots imposibles de publicar.
+- Añade la experiencia `/delivery`: administración y prueba de destinos, builder
+  guiado, mapping, metadata de tabla, preview/preflight, publicación, ejecución,
+  intentos, estado `UNKNOWN` y descarga de receipt/manifiesto.
+- La migración aditiva `0008_data_delivery` crea
+  `delivery_destinations`, `delivery_destination_versions` y `delivery_attempts`,
+  y agrega `jobs.lane`, sin reescribir configuraciones o ejecuciones históricas.
+- Backup, restore, reset, doctor y verificación de almacenamiento incluyen
+  `delivery_credentials`, `delivery_keys`, las tres tablas nuevas, lanes,
+  heartbeats y linaje de entrega. El conjunto de backup contiene material sensible.
+- Certifica restore real desde la baseline exacta 0.4.1/0007: 21 tablas y estado
+  legacy idénticos, jobs históricos en lane DEFAULT y tablas Delivery vacías tras 0008.
+- Cierra carreras TOCTOU de backup mediante copia privada, apertura exclusiva,
+  `fsync` y reverificación de tamaño/hash antes de consumir cada componente.
+- CI declara un job aislado `delivery-e2e` con PostgreSQL y SQL Server reales; el
+  runner no reutiliza ni destruye la instalación principal.
+- Reutiliza temporalmente permisos existentes de conexiones, configuraciones,
+  ejecuciones y artifacts. Permisos Delivery granulares y roles específicos
+  permanecen pendientes.
+- **Certificación local 0.5.0:** 869 pruebas Python y 128 Vitest aprobadas;
+  Ruff, Mypy, ESLint, TypeScript y build PASS; Playwright 20 aprobadas/5 opt-in
+  omitidas; smoke 84/84, Conexiones 62/62, Delivery real 92/92 y recovery PASS.
+  GitHub Actions: `[PENDIENTE — completar tras publicar el commit de producto]`.
+
 ## 0.4.1 — 2026-09-21 — configuración guiada por esquema
 
 - Simplifica la carga y el versionado de datasets: elimina la entrada redundante

@@ -8,8 +8,6 @@ x-backend: &backend
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-trackvance}:${POSTGRES_PASSWORD:?Create .env with POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trackvance}
     TRACKVANCE_STORAGE_ROOT: /var/lib/trackvance
     TRACKVANCE_STORAGE_DIR: /var/lib/trackvance
-    TRACKVANCE_SECRETS_DIR: /var/lib/trackvance-credentials
-    TRACKVANCE_SECRET_KEY_FILE: /var/lib/trackvance-keys/master.key
     TRACKVANCE_WEB_ORIGIN: ${TRACKVANCE_WEB_ORIGIN:-http://localhost:3000}
     DEMO_ACCESS_ENABLED: ${DEMO_ACCESS_ENABLED:-${DEMO_SEED_ENABLED:-true}}
     DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
@@ -40,10 +38,18 @@ services:
   api:
     <<: *backend
     command: ['python', '-m', 'uvicorn', 'trackvance.api:app', '--host', '0.0.0.0', '--port', '8000']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_SECRETS_DIR: /var/lib/trackvance-credentials
+      TRACKVANCE_SECRET_KEY_FILE: /var/lib/trackvance-keys/master.key
+      TRACKVANCE_DESTINATION_SECRETS_DIR: /var/lib/trackvance-delivery-credentials
+      TRACKVANCE_DESTINATION_SECRET_KEY_FILE: /var/lib/trackvance-delivery-keys/master.key
     volumes:
       - trackvance_data:/var/lib/trackvance
       - connection_credentials:/var/lib/trackvance-credentials
       - connection_keys:/var/lib/trackvance-keys
+      - delivery_credentials:/var/lib/trackvance-delivery-credentials
+      - delivery_keys:/var/lib/trackvance-delivery-keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,11 +63,36 @@ services:
   worker:
     <<: *backend
     command: ['python', '-m', 'trackvance.worker']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_WORKER_LANE: DEFAULT
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status()['status'] == 'RUNNING' else 1)"]
+      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('DEFAULT')['status'] == 'RUNNING' else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+  delivery-worker:
+    <<: *backend
+    command: ['python', '-m', 'trackvance.worker']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_WORKER_LANE: DELIVERY
+      TRACKVANCE_DESTINATION_SECRETS_DIR: /var/lib/trackvance-delivery-credentials
+      TRACKVANCE_DESTINATION_SECRET_KEY_FILE: /var/lib/trackvance-delivery-keys/master.key
+    volumes:
+      - trackvance_data:/var/lib/trackvance
+      - delivery_credentials:/var/lib/trackvance-delivery-credentials
+      - delivery_keys:/var/lib/trackvance-delivery-keys
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('DELIVERY')['status'] == 'RUNNING' else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 20s
@@ -88,3 +119,5 @@ volumes:
   trackvance_data:
   connection_credentials:
   connection_keys:
+  delivery_credentials:
+  delivery_keys:

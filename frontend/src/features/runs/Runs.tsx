@@ -10,6 +10,7 @@ import { RunsTable } from '../../routes/Dashboard'
 import { ConfigDialog } from './ConfigDialog'
 import { usePermission } from '../../app/session'
 import { SampleValue } from '../datasets/VersionIdentity'
+import { DeliveryRunDetail } from '../delivery/Delivery'
 
 type Module = 'intake' | 'recon' | 'sentinel'
 const modules = {
@@ -57,12 +58,14 @@ export function RunDetail() {
   const canExport = usePermission('exports:download'), canDownload = usePermission('artifacts:download'), canExecute = usePermission('runs:execute')
   const [classification, setClassification] = useState(''), [offset, setOffset] = useState(0), [tab, setTab] = useState('results')
   const run = useQuery({ queryKey: ['run', id], queryFn: () => api(`/runs/${id}`), refetchInterval: q => activeRun(q.state.data?.status) ? 1500 : false })
-  const results = useQuery({ queryKey: ['run-results', id, classification, offset], queryFn: () => api<Collection>(`/runs/${id}/results?classification=${encodeURIComponent(classification)}&offset=${offset}&limit=50`), enabled: !!run.data && !activeRun(run.data.status) })
+  const deliveryRun = String(run.data?.module || '').toUpperCase() === 'DELIVERY'
+  const results = useQuery({ queryKey: ['run-results', id, classification, offset], queryFn: () => api<Collection>(`/runs/${id}/results?classification=${encodeURIComponent(classification)}&offset=${offset}&limit=50`), enabled: !!run.data && !deliveryRun && !activeRun(run.data.status) })
   const exportFile = useMutation({ mutationFn: (format: 'xlsx' | 'json') => download(`/runs/${id}/${format === 'xlsx' ? 'export.xlsx' : 'evidence'}`, `trackvance_${run.data?.module || 'run'}_${id}.${format}`) })
   const cancel = useMutation({ mutationFn: () => post(`/runs/${id}/cancel`), onSuccess: () => { cache.invalidateQueries({ queryKey: ['run', id] }); cache.invalidateQueries({ queryKey: ['runs'] }) } })
   const exception = useMutation({ mutationFn: (finding: string) => post(`/findings/${finding}/exceptions`), onSuccess: data => { cache.invalidateQueries({ queryKey: ['run', id] }); cache.invalidateQueries({ queryKey: ['exceptions'] }); cache.invalidateQueries({ queryKey: ['dashboard'] }); navigate(`/exceptions?id=${data.id}`) } })
   if (run.isPending) return <Loading text="Cargando ejecución y evidencia…"/>
   if (run.error) return <ErrorState error={run.error} retry={() => run.refetch()}/>
+  if (deliveryRun) return <DeliveryRunDetail data={run.data}/>
   const data = run.data, metrics = data.metrics || {}, module = data.module as Module, pending = activeRun(data.status), rows = results.data?.items || [], findings: RecordData[] = data.findings || []
   const summary = module === 'intake' ? [{ title: 'Filas evaluadas', value: metrics.total_rows }, { title: 'Filas válidas', value: metrics.valid_rows }, { title: 'Filas con error', value: metrics.error_rows }, { title: 'Aceptación', value: metrics.acceptance_rate, percent: true }] : module === 'recon' ? [{ title: 'Registros en origen', value: metrics.source_rows }, { title: 'Registros en destino', value: metrics.target_rows }, { title: 'Coincidencias', value: metrics.matched }, { title: 'Coincidencia', value: metrics.match_rate, percent: true }] : [{ title: 'Registros evaluados', value: metrics.row_count }, { title: 'Controles evaluados', value: metrics.total_checks }, { title: 'Controles fallidos', value: metrics.failed_checks }, { title: 'Salud del dataset', value: metrics.health_score, percent: true }]
   const classifications = module === 'recon' ? ['MATCH', 'VALUE_MISMATCH', 'SOURCE_ONLY', 'TARGET_ONLY', 'DUPLICATE_SOURCE', 'DUPLICATE_TARGET', 'INVALID'] : module === 'sentinel' ? ['PASS', 'FAIL'] : ['ERROR', 'WARNING']

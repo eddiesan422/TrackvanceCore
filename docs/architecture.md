@@ -1,9 +1,9 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.4.1, configuración guiada por esquema, 21 de septiembre de 2026.
+Revisión de implementación: 0.5.0, Data Delivery controlado, 23 de septiembre de 2026.
 
-Trackvance es un monolito modular con una API FastAPI, una aplicación React y un
-worker que comparte los modelos y servicios del backend. Docker Compose con
+Trackvance es un monolito modular con una API FastAPI, una aplicación React y
+dos workers que comparten los modelos y servicios del backend. Docker Compose con
 PostgreSQL es la instalación local principal. Las reglas y los módulos conservan
 sus contratos al sustituir infraestructura mediante puertos. No se plantea dividir
 el producto en microservicios para completar esta evolución.
@@ -21,36 +21,43 @@ flowchart LR
   U[Usuario] --> W[Web React + nginx]
   W --> A[API FastAPI]
   A --> P[(PostgreSQL: metadata y jobs)]
-  K[Worker local] --> P
+  K[Worker DEFAULT] --> P
+  KD[Delivery worker] --> P
   K --> SCH[Scheduler Sentinel local]
   SCH --> P
   A --> S[StorageProvider]
   K --> S
+  KD --> S
   S --> V[(Volumen persistente de artifacts)]
   K --> E[LocalExecutionEngine: Polars / Python]
   A --> D[DatasetSource + DatasetReader]
   D --> F[CSV / XLSX / JSON / Parquet / TXT]
   D --> EXT[PostgreSQL / SQL Server externos]
-  A --> SEC[SecretStore: credenciales cifradas]
+  A --> SEC[SecretStore de fuentes]
+  A --> DSEC[SecretStore de destinos]
+  KD --> DSEC
+  KD --> DS[DataSink]
+  DS --> OUT[PostgreSQL / SQL Server destino]
 ```
 
-Compose levanta `web`, `api`, `worker` y `postgres`. Solamente `web` publica un
+Compose levanta `web`, `api`, `worker`, `delivery-worker` y `postgres`. Solamente `web` publica un
 puerto, ligado a `127.0.0.1`. La API y PostgreSQL son accesibles dentro de la red
-del proyecto. Los cuatro servicios tienen `restart: "no"`: el usuario inicia
+del proyecto. Los cinco servicios tienen `restart: "no"`: el usuario inicia
 Trackvance manualmente. Una instalación nueva usa puerto 3000; la instalación
 `trackvance-certification` de este equipo usa 3100.
 
 El volumen `postgres_data` guarda metadata transaccional: organización, usuarios,
 datasets y versiones, configuraciones, runs, jobs, excepciones, auditoría y
-referencias de evidencia. El volumen `trackvance_data`, compartido por API y
-worker, conserva archivos recibidos, Parquet canónicos, resultados, manifests y
+referencias de evidencia, incluidos destinos/revisiones/intentos de Delivery. El
+volumen `trackvance_data`, compartido por API y ambos workers, conserva archivos recibidos, Parquet canónicos, resultados, manifests y
 exports. Los bytes de los archivos no se guardan en PostgreSQL. Detener o recrear
 contenedores conservando sus volúmenes mantiene esas partes de la instalación.
-Solo la API monta `connection_credentials` y `connection_keys`: el primero
-contiene credenciales externas cifradas y el segundo su clave maestra. El worker
-accede únicamente a `trackvance_data` y procesa snapshots sin recuperar secretos.
-La recuperación de Conexiones requiere conservar metadata, artifacts y ambos
-volúmenes de secretos de forma coordinada y con acceso restringido.
+Solo la API monta los secretos de fuente (`connection_credentials` y
+`connection_keys`) y de destino (`delivery_credentials` y `delivery_keys`). El
+worker `DEFAULT` accede únicamente a `trackvance_data`; el `delivery-worker`
+accede a artifacts y secretos de destino, pero nunca a los de fuente. La
+recuperación requiere conservar metadata, artifacts y los cuatro volúmenes de
+secretos de forma coordinada y con acceso restringido.
 
 El lanzador directo con SQLite permanece como facilidad de desarrollo y pruebas.
 Es una instalación separada, con su propia base y almacenamiento en `.local/`.
@@ -62,6 +69,7 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 | --- | --- | --- | --- |
 | `StorageProvider` | Publicar artifacts inmutables, leerlos, materializarlos y asignar staging temporal | `FileArtifactStore`, volumen local | S3/Azure Blob, cache local acotado y migración de locators |
 | `DatasetSource` | Adquirir datos y entregar `DatasetReadResult` | Archivos locales, PostgreSQL y SQL Server | APIs, otros motores y object storage como fuentes |
+| `DataSink` | Descubrir targets, validar permisos y publicar una DatasetVersion mediante transacción remota | PostgreSQL y SQL Server | S3/Blob/REST, warehouses u otros sinks con contratos específicos |
 | `SecretStore` | Guardar y recuperar credenciales aisladas por organización | Fernet en volumen local; clave en volumen separado | Key Vault, Secrets Manager o Vault |
 | `DatasetReader` | Interpretar un formato y normalizar su estructura | CSV, XLSX, JSON/JSON Lines, Parquet, TXT/TSV | Nuevos formatos sin cambios en reglas |
 | `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine`, Polars/Python | Adaptador de ejecución distribuida |
@@ -95,7 +103,9 @@ completamente independientes.
 | Aplicación | `services.py`, `dashboard.py` | Casos de uso, versiones, ejecución, excepciones y cockpit |
 | Conexiones | `connections_api.py`, `connections_service.py` | Endpoints, prueba, configuración versionada, bindings, adquisición y linaje |
 | Fuentes externas | `dataset_sources.py` | Adaptadores PostgreSQL/SQL Server de solo lectura, metadata, límites y representación normalizada |
-| Credenciales | `credential_store.py` | Contrato `SecretStore`, cifrado local y aislamiento de credenciales por organización |
+| Data Delivery | `delivery_api.py`, `delivery_service.py`, `delivery_schemas.py` | Destinos/configuraciones versionados, preview, preflight, intentos, receipt, manifest y linaje |
+| Destinos externos | `data_sinks.py` | Puerto y adaptadores PostgreSQL/SQL Server, tipos, quoting, permisos, estrategias y transacción remota |
+| Credenciales | `credential_store.py`, `delivery_credential_store.py` | SecretStores separados, cifrado local y aislamiento por organización/recurso |
 | Semántica de dominio | `config_semantics.py`, `processing.py`, `portable_engine.py`, `manifests.py` | Configuraciones declarativas, reglas, resultados y evidencia |
 | Modelo persistido | `models.py`, `db.py`, `backend/migrations/` | ORM, transacciones y evolución del schema |
 | Almacenamiento y entrada | `artifactstore.py`, `dataset_readers.py` | Puertos, adaptadores locales, integridad y lectura multiformato |
@@ -120,6 +130,7 @@ inicialización SQLite pueden consultar el filesystem como infraestructura local
 | Data Intake | Contratos, catálogo de responsables, transforms con preview, reglas simples/compuestas, tipo/longitud/rango/fecha, condiciones, comparaciones e integridad referencial contra snapshots |
 | ReconOps | Claves simples/compuestas con preview, transforms por lado, comparación por columna, nulls, tolerancias y agregaciones 1:N/N:1 SUM/COUNT |
 | Sentinel | Selectores por esquema, schema/nulls, frescura, volumen, distinct/uniqueness, bandas median/IQR, programación local, alertas internas y series compatibles |
+| Data Delivery | Destinos PostgreSQL/SQL Server, mapping tipado, preview/preflight, configuraciones inmutables, estrategias CREATE_AND_LOAD/APPEND/OVERWRITE/UPSERT, lane separada, intentos, UNKNOWN, receipt y linaje |
 | Excepciones | Hallazgo/configuración, responsable, prioridad, SLA, adjuntos, reapertura, validación posterior, resolución automática opcional y cierres administrativos |
 | Centro de Control | Filtros, salud, fallos, atención priorizada, tendencias y navegación a recursos |
 | Auditoría e identidad | Administración local de usuarios/roles, actor estable, eventos sanitizados, sesiones, CSRF y aislamiento por organización |
@@ -145,7 +156,7 @@ no habilita un nuevo cierre. Los casos ya resueltos conservan su historia.
 
 ### Configuración asistida por esquema
 
-La interfaz 0.4.1 utiliza el esquema y la muestra acotada de la DatasetVersion
+Desde 0.4.1, la interfaz utiliza el esquema y la muestra acotada de la DatasetVersion
 seleccionada para reducir entradas libres sin cambiar los contratos del motor.
 Al cargar o versionar un dataset, los identificadores se eligen desde las
 columnas inspeccionadas, con selección individual o **Todos**; se eliminó la
@@ -199,18 +210,59 @@ Agrupa atrasos y omite solapamientos; cada decisión queda registrada. No refres
 fuentes ni añade un servicio externo. La cronología visible usa fechas previstas,
 despacho e inicio real; el worker detenido implica programación detenida.
 
+### Data Delivery y confirmación remota
+
+Data Delivery fija una DatasetVersion, una revisión inmutable de destino, target,
+mapping y estrategia. Preview materializa una muestra sin escribir; preflight
+comprueba hash/artifact, schema, tipos, restricciones, permisos y claves, primero
+al publicar y nuevamente al ejecutar. `CREATE_AND_LOAD`, `APPEND`, `OVERWRITE` y
+`UPSERT` operan dentro de una transacción del motor remoto. No existe una
+transacción distribuida entre PostgreSQL interno y el destino.
+
+Cada job Delivery usa la lane `DELIVERY`; el resto usa `DEFAULT`. Los heartbeats
+`worker-heartbeat-default.json` y `worker-heartbeat-delivery.json` permiten
+diagnosticar ambos procesos. El scheduler Sentinel sólo corre en DEFAULT. Un
+`DeliveryAttempt` iniciado termina `COMMITTED`, `FAILED` o `UNKNOWN`. `UNKNOWN`
+preserva una confirmación de commit perdida o un intento recuperado sin prueba:
+no se reinterpreta ni se reintenta automáticamente. El receipt sólo existe tras
+commit confirmado; el manifest/linaje conectan Run, DatasetVersion,
+DestinationVersion, intento y artifacts sin incluir secretos o filas completas.
+
+El mapping conserva el tipo lógico de la DatasetVersion; no convierte STRING en
+número, fecha, timestamp o booleano. Toda materialización técnica compatible se
+congela como `PreparedDelivery` antes de `STARTED`. El claim condicional del job ocurre antes de reconciliar y respeta el
+orden Run→Job, compartido con cancelación. Un estado remoto conocido prevalece
+sobre una cancelación posterior; un lease perdido sin prueba no autoriza replay.
+Las tablas existentes se bloquean aun con cero filas. PostgreSQL revalida bajo
+lock la constraint UPSERT nombrada y rechaza RLS activa para `OVERWRITE`. SQL
+Server rechaza `IGNORE_DUP_KEY`; `OVERWRITE` exige visibilidad de metadata de
+seguridad y rechaza FILTER policies que pudieran ocultar filas al `DELETE`.
+Los staging de claves replican tipos/collations nativos; PostgreSQL usa
+`ON CONFLICT ON CONSTRAINT`, mientras SQL Server evita `MERGE`, obtiene el conteo
+con `SELECT @@ROWCOUNT` y falla si una clave coincide con más de una fila.
+`STRING` usa longitud UTF-16/Unicode variable exacto; `TIMESTAMP`, offset y hasta
+seis microsegundos. Si la evidencia local falla tras commit, el Run conserva
+`COMMITTED` con `PENDING_REPAIR`, sin repetir la transacción.
+
+La política 0.5.0 reutiliza permisos de conexiones, configuraciones, runs y
+artifacts. Esto mantiene autorización backend y organización, pero no constituye
+RBAC granular de Delivery. Permisos por destino, estrategia o aprobación de un
+nuevo run después de `UNKNOWN` permanecen pendientes. Ver
+[ADR 0015](adr/0015-data-delivery.md).
+
 ## Arquitectura local y arquitectura de producto
 
 | Componente | Local implementado | Producto objetivo |
 | --- | --- | --- |
-| Despliegue | Docker Compose, cuatro servicios | Kubernetes: AKS, EKS u OpenShift; mismos límites del monolito |
+| Despliegue | Docker Compose, cinco servicios | Kubernetes: AKS, EKS u OpenShift; mismos límites del monolito |
 | Metadata | PostgreSQL 16 en volumen | PostgreSQL administrado, políticas de disponibilidad y recuperación |
 | Artifacts | `FileArtifactStore` en volumen | S3 o Azure Blob mediante `StorageProvider` |
 | Fuentes | Cinco formatos de archivo, PostgreSQL y SQL Server | S3, Azure Blob, APIs y otros motores mediante `DatasetSource` |
+| Destinos | PostgreSQL y SQL Server mediante `DataSink`; escritura transaccional controlada | S3/Blob/REST, warehouses y otros sinks con gobierno productivo |
 | Procesamiento | Polars/Python; DuckDB para reglas portables | Polars y PySpark según presupuesto y capacidad instalada |
 | Cola | Jobs PostgreSQL, leases, reintentos y heartbeat | Redis/Celery con entrega fiable y workers escalables |
 | Identidad | Usuarios locales, roles base, contraseñas, revocación de sesiones, CSRF y RBAC | Federación OIDC/SSO y gobierno de identidad productivo |
-| Secretos | Configuración local; credenciales externas cifradas con clave separada | Key Vault, Secrets Manager o Vault y rotación |
+| Secretos | Stores y claves separados para fuentes y destinos | Key Vault, Secrets Manager o Vault y rotación |
 | Observabilidad | Logs, readiness, heartbeat y auditoría | OpenTelemetry, Prometheus y Grafana |
 | Infraestructura | Compose y scripts operativos | Terraform, Helm y despliegues controlados |
 | Entrega | Workflow de checks backend/frontend/migraciones/E2E | Controles de seguridad, dependencias e imágenes y promoción de entornos |
@@ -238,14 +290,32 @@ inicial permanece síncrona y acotada. Las ejecuciones de módulos pasan al work
 La lectura XLSX/JSON y el profiling de gran volumen requieren una evolución
 asíncrona antes de ampliar estos límites.
 
-La revisión del schema actual es `0007_monitor_scheduling`, con 21 tablas de
-aplicación. `0006_local_identity_exceptions` añade campos y adjuntos; `0007` añade
-programaciones. Los cambios futuros requieren migraciones Alembic nuevas. Los
+Data Delivery trabaja con la DatasetVersion canónica registrada y conserva los
+límites de columnas del prototipo. El preflight diagnostica incompatibilidades;
+la transacción vuelve a resolver y bloquear el target y revalida las condiciones
+críticas antes del DML. Las cuentas de destino deben aplicar privilegio mínimo
+por estrategia; PostgreSQL UPSERT requiere `TEMPORARY`. SQL Server exige `SELECT`
+para targets existentes, `OVERWRITE` requiere además `VIEW DEFINITION` y UPSERT
+depende de la política de `tempdb` para su tabla temporal.
+`UNKNOWN` requiere
+verificación operativa; repetir a ciegas puede duplicar o reemplazar datos.
+
+La revisión del schema actual es `0008_data_delivery`, con 24 tablas de
+aplicación. `0007` añade programaciones; `0008` crea destinos, revisiones e intentos
+de entrega y agrega `jobs.lane`. Los cambios futuros requieren migraciones Alembic nuevas. Los
 runbooks de arranque, reinicio, diagnóstico, reset, backup y restore están en
 [operación](development/operations.md); su certificación se registra en
 [validación](development/validation.md). Los ensayos destructivos sólo usan
-proyectos, bases y volúmenes aislados. La recuperación de una conexión exige el
-conjunto consistente PostgreSQL, artifacts, credenciales cifradas y clave.
+proyectos, bases y volúmenes aislados. La recuperación exige el conjunto
+consistente PostgreSQL, artifacts, credenciales/clave de fuentes y
+credenciales/clave de destinos.
+
+La restauración certificada acepta además backups 0.4.1 manifest 1/state 2/0007:
+preserva la proyección exacta de 21 tablas, migra a 24 tablas/0008, deja Delivery
+vacío y asigna lane DEFAULT a los jobs históricos. El staging de backup verifica
+tamaño/hash antes de consumir cada copia para impedir sustituciones TOCTOU.
+State 2 no incluía hash estructural del catálogo; esa limitación histórica se
+conserva explícita.
 
 El framework de volumen registra recursos y resultados medidos. Los límites por
 defecto no aumentan porque exista un runner: sólo una medición completa puede
@@ -266,7 +336,8 @@ y [volumen](development/volume-benchmark.md).
 
 La secuencia oficial está en [roadmap](roadmap.md): conservar Conexiones y las
 fuentes PostgreSQL/SQL Server; completar Intake, ReconOps, Sentinel programado,
-excepciones, administración local de usuarios, operación y benchmarks medidos.
-La productización comienza sólo después de esos nueve puntos y con una nueva
+excepciones, administración local de usuarios, operación, benchmarks medidos y
+Data Delivery SQL controlado. La productización comienza después de esos diez
+puntos y con una nueva
 autorización de alcance. Los adaptadores y despliegues cloud del mapa anterior
 siguen siendo objetivos futuros, no trabajo de este ciclo.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Certify recovery with a real PostgreSQL source and three disposable projects.
+"""Certify recovery with real PostgreSQL source/destination and disposable projects.
 
 Trackvance source is destroyed before restoration. Its independent PostgreSQL
-source remains alive; restored credentials must support a new snapshot and run.
+source remains alive; restored source and destination credentials must work again.
 The backup also includes an assigned exception with an attachment and a completed
 scheduled Sentinel occurrence; the paused schedule must remain paused on restore.
 --keep preserves destination and external DB; source Trackvance is still destroyed.
@@ -165,12 +165,17 @@ def fixture_compose() -> dict[str, Any]:
 
 
 def initialize_source(compose: list[str], environment: dict[str, str],
-                      credentials: tuple[str, ...], reader_password: str) -> None:
+                      credentials: tuple[str, ...], reader_password: str,
+                      delivery_password: str | None = None) -> None:
     # Hexadecimal generated password cannot escape this SQL literal. SQL enters
     # psql via stdin; it is never written to evidence or shell command arguments.
+    delivery_password = delivery_password or reader_password
     ensure(bool(re.fullmatch(r"[a-f0-9]{48}", reader_password)), "Credencial de fixture inválida.")
+    ensure(bool(re.fullmatch(r"[a-f0-9]{48}", delivery_password)),
+           "Credencial destino de fixture inválida.")
     sql = f"""
 CREATE ROLE tv_recovery_reader LOGIN PASSWORD '{reader_password}';
+CREATE ROLE tv_recovery_writer LOGIN PASSWORD '{delivery_password}';
 CREATE SCHEMA recovery_data;
 CREATE TABLE recovery_data.transactions (
     record_id varchar(20) PRIMARY KEY, customer_id varchar(20), amount numeric(16,2),
@@ -186,6 +191,16 @@ REVOKE ALL ON DATABASE recovery_source FROM PUBLIC;
 GRANT CONNECT ON DATABASE recovery_source TO tv_recovery_reader;
 GRANT USAGE ON SCHEMA recovery_data TO tv_recovery_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA recovery_data TO tv_recovery_reader;
+CREATE SCHEMA recovery_delivery AUTHORIZATION tv_recovery_writer;
+CREATE TABLE recovery_delivery.records (
+    record_id varchar(20) PRIMARY KEY, customer_id varchar(20), amount numeric(16,2) NOT NULL,
+    booked_on date NOT NULL, recorded_at timestamptz, active boolean NOT NULL
+);
+ALTER TABLE recovery_delivery.records OWNER TO tv_recovery_writer;
+GRANT CONNECT ON DATABASE recovery_source TO tv_recovery_writer;
+GRANT USAGE ON SCHEMA recovery_delivery TO tv_recovery_writer;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA recovery_delivery
+TO tv_recovery_writer;
 """
     execute([*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
              "-d", "recovery_source", "-v", "ON_ERROR_STOP=1"], environment,
@@ -194,13 +209,16 @@ GRANT SELECT ON ALL TABLES IN SCHEMA recovery_data TO tv_recovery_reader;
 
 def attach_external_network(project: str, database: str, environment: dict[str, str]) -> None:
     application, fixture = docker_state.inventory(project), docker_state.inventory(database)
-    apis = [item for item in application["containers"] if item["service"] == "api"]
-    ensure(len(apis) == 1 and apis[0]["running"], "API aislada no disponible.")
+    clients = [item for item in application["containers"]
+               if item["service"] in {"api", "delivery-worker"}]
+    ensure(len(clients) == 2 and all(item["running"] for item in clients),
+           "API o delivery-worker aislado no disponible.")
     ensure(len(fixture["networks"]) == 1, "La fuente externa necesita una única red aislada.")
     ensure(len(fixture["containers"]) == 1 and fixture["containers"][0]["running"],
            "La fuente PostgreSQL externa no está disponible.")
-    execute(["docker", "network", "connect", fixture["networks"][0]["id"], apis[0]["id"]],
-            environment)
+    for client in clients:
+        execute(["docker", "network", "connect", fixture["networks"][0]["id"],
+                 client["id"]], environment)
 
 
 def wait_run(api: RecoveryApi, contract_id: str, version_id: str) -> dict[str, Any]:
@@ -215,7 +233,7 @@ def wait_existing_run(api: RecoveryApi, run_id: str) -> dict[str, Any]:
     while time.monotonic() < deadline:
         run = api.json("GET", f"/runs/{run_id}")
         if run["status"] in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED"}:
-            ensure(run["status"] == "SUCCESS", "La ejecución de calidad tuvo un error técnico.")
+            ensure(run["status"] == "SUCCESS", "La ejecución restaurada tuvo un error técnico.")
             return run
         time.sleep(0.5)
     raise RuntimeError("La ejecución aislada no terminó a tiempo.")
@@ -345,7 +363,9 @@ def validate_case_after_correction(api: RecoveryApi, historical: dict[str, Any],
             "historical_timeline_preserved": True}
 
 
-def capture_original(api: RecoveryApi, password: str) -> dict[str, Any]:
+def capture_original(api: RecoveryApi, password: str,
+                     delivery_password: str | None = None) -> dict[str, Any]:
+    delivery_password = delivery_password or password
     connection = api.json("POST", "/connections", {
         "name": "PostgreSQL externo de recuperación", "source_type": "POSTGRESQL",
         "host": DATABASE_SERVICE, "port": 5432, "database": "recovery_source",
@@ -392,11 +412,32 @@ def capture_original(api: RecoveryApi, password: str) -> dict[str, Any]:
     version = next(item for item in details["versions"] if item["id"] == version["id"])
     run = api.json("GET", f"/runs/{run['id']}")  # Finding DTO now links the associated case.
     manifest = api.request("GET", f"/runs/{run['id']}/evidence")
+    destination = api.json("POST", "/delivery/destinations", {
+        "name": "PostgreSQL destino de recuperación", "sink_type": "POSTGRESQL",
+        "host": DATABASE_SERVICE, "port": 5432, "database": "recovery_source",
+        "username": "tv_recovery_writer", "password": delivery_password,
+        "options": {"sslmode": "disable", "connect_timeout": 3, "query_timeout": 15},
+    }, expected=201)
+    destination_test = api.json(
+        "POST", f"/delivery/destinations/{destination['id']}/test", {})
+    ensure(destination_test["status"] == "SUCCESS",
+           "El destino real inicial no pasó la prueba.")
+    destination_tables = api.json(
+        "GET", f"/delivery/destinations/{destination['id']}/tables"
+        "?schema_name=recovery_delivery")
+    ensure("records" in destination_tables["items"],
+           "No se descubrió la tabla del destino de recuperación.")
     return {
         "connection_id": connection_id, "connection_version_id": connection["connection_version_id"],
         "connection_config_hash": connection["config_hash"], "dataset_id": dataset_id,
         "version": version, "contract_id": contract["id"], "run": run,
         "exception": case, "monitor": monitor,
+        "destination": {
+            "id": destination["id"],
+            "version": destination["version"],
+            "destination_version_id": destination["destination_version_id"],
+            "config_hash": destination["config_hash"],
+        },
         "canonical_sha256": artifact_hash(api, version),
         "evidence_sha256": hashlib.sha256(manifest).hexdigest(),
     }
@@ -408,6 +449,88 @@ def destroy_before_restore(source: str, database: str, evidence: Path) -> None:
     fixture = docker_state.inventory(database)
     ensure(len(fixture["containers"]) == 1 and fixture["containers"][0]["running"],
            "La fuente PostgreSQL debe sobrevivir a la destrucción de Trackvance.")
+
+
+def validate_delivery_restoration(
+    api: RecoveryApi,
+    original: dict[str, Any],
+    compose: list[str],
+    environment: dict[str, str],
+    credentials: tuple[str, ...],
+) -> dict[str, Any]:
+    saved = original["destination"]
+    tested = api.json("POST", f"/delivery/destinations/{saved['id']}/test", {})
+    ensure(tested["status"] == "SUCCESS",
+           "La credencial destino restaurada no permite reconectar.")
+    destination = api.json("GET", f"/delivery/destinations/{saved['id']}")
+    ensure(destination["version"] == saved["version"]
+           and destination["destination_version_id"] == saved["destination_version_id"]
+           and destination["config_hash"] == saved["config_hash"],
+           "La configuración destino cambió durante la recuperación.")
+    draft = {
+        "schema_version": 1,
+        "dataset_version_id": original["version"]["id"],
+        "destination_id": destination["id"],
+        "destination_version_id": destination["destination_version_id"],
+        "target": {"mode": "EXISTING_TABLE", "schema_name": "recovery_delivery",
+                   "table_name": "records", "create_schema": False},
+        "columns": [
+            {"source_name": "record_id", "target_name": "record_id",
+             "target_type": "STRING", "ordinal": 0, "nullable": False, "length": 20},
+            {"source_name": "customer_id", "target_name": "customer_id",
+             "target_type": "STRING", "ordinal": 1, "nullable": True, "length": 20},
+            {"source_name": "amount", "target_name": "amount", "target_type": "DECIMAL",
+             "ordinal": 2, "nullable": False, "precision": 16, "scale": 2},
+            {"source_name": "booked_on", "target_name": "booked_on", "target_type": "DATE",
+             "ordinal": 3, "nullable": False},
+            {"source_name": "recorded_at", "target_name": "recorded_at",
+             "target_type": "TIMESTAMP", "ordinal": 4, "nullable": True},
+            {"source_name": "active", "target_name": "active", "target_type": "BOOLEAN",
+             "ordinal": 5, "nullable": False},
+        ],
+        "write_strategy": "APPEND",
+        "upsert_keys": [],
+    }
+    preflight = api.json("POST", "/delivery/preflight", draft)
+    ensure(preflight["status"] == "PASS",
+           "El destino restaurado no superó el preflight de solo lectura.")
+    configuration = api.json("POST", "/delivery/configurations", {
+        **draft,
+        "name": "Entrega posterior a recuperación",
+        "owner": "Recovery drill",
+        "description": "Demuestra secreto destino restaurado sin exponerlo",
+    }, expected=201)
+    queued = api.json("POST", "/delivery/runs", {
+        "configuration_id": configuration["id"],
+        "dataset_version_id": original["version"]["id"],
+    }, expected=202)
+    run = wait_existing_run(api, queued["id"])
+    ensure(run["module"] == "DELIVERY" and run["decision"] == "COMMITTED",
+           "La entrega posterior al restore no quedó confirmada.")
+    attempts = api.json("GET", f"/delivery/runs/{run['id']}/attempts")
+    ensure(attempts["total"] == 1 and attempts["items"][0]["status"] == "COMMITTED",
+           "El intento Delivery restaurado no quedó confirmado.")
+    receipt = json.loads(api.request("GET", f"/delivery/runs/{run['id']}/receipt"))
+    ensure(receipt["result"] == "COMMITTED" and receipt["rows_written"] == 4,
+           "El receipt posterior al restore no coincide con la escritura.")
+    count = execute(
+        [*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
+         "-d", "recovery_source", "-At", "-c",
+         "SELECT COUNT(*) FROM recovery_delivery.records"],
+        environment,
+        credentials=credentials,
+    ).strip()
+    ensure(count == "4", "La entrega restaurada no escribió las cuatro filas externas.")
+    return {
+        "destination_test": "SUCCESS",
+        "destination_id": destination["id"],
+        "destination_version_id": destination["destination_version_id"],
+        "run_id": run["id"],
+        "attempt_id": attempts["items"][0]["id"],
+        "receipt_result": receipt["result"],
+        "rows_written": receipt["rows_written"],
+        "restored_destination_credential_used": True,
+    }
 
 
 def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[str],
@@ -436,6 +559,8 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
     ensure(restored_case == original["exception"], "La excepción y su historial cambiaron durante el restore.")
     attachment_hash(api, restored_case)
     monitor_report = validate_monitor_restoration(api, original["monitor"])
+    delivery_report = validate_delivery_restoration(
+        api, original, compose, environment, credentials)
     execute([*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
              "-d", "recovery_source", "-v", "ON_ERROR_STOP=1"], environment,
             input_text="UPDATE recovery_data.transactions SET amount=2.00 WHERE record_id='002';",
@@ -476,7 +601,8 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
         "new_evidence_sha256": hashlib.sha256(new_manifest).hexdigest(),
         "historical_records_unchanged": True, "refresh_lineage_verified": True,
         "restored_credential_used": True,
-        "exception": case_report, "sentinel": monitor_report,
+        "restored_destination_credential_used": True,
+        "exception": case_report, "sentinel": monitor_report, "delivery": delivery_report,
     }
 
 
@@ -508,8 +634,10 @@ def main() -> int:
                 / f"{source}-to-{target}").resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     backup = evidence / "backup"
-    internal_password, external_password, reader_password = (secrets.token_hex(24) for _ in range(3))
-    credentials = (internal_password, external_password, reader_password)
+    internal_password, external_password, reader_password, delivery_password = (
+        secrets.token_hex(24) for _ in range(4)
+    )
+    credentials = (internal_password, external_password, reader_password, delivery_password)
     environment = {
         **os.environ, "POSTGRES_PASSWORD": internal_password,
         "RECOVERY_SOURCE_PASSWORD": external_password,
@@ -536,7 +664,8 @@ def main() -> int:
         stage = "external_postgresql"
         claimed.append(database)
         execute([*fixture, "up", "-d", "--wait"], environment, credentials=credentials)
-        initialize_source(fixture, environment, credentials, reader_password)
+        initialize_source(
+            fixture, environment, credentials, reader_password, delivery_password)
         stage = "source_trackvance"
         claimed.append(source)
         compose = ["docker", "compose", "-p", source, "-f", str(ROOT / "compose.yml")]
@@ -545,13 +674,17 @@ def main() -> int:
             up.append("--build")
         execute(up, environment, credentials=credentials)
         attach_external_network(source, database, environment)
-        original = capture_original(RecoveryApi(source_port, credentials), reader_password)
+        original = capture_original(
+            RecoveryApi(source_port, credentials), reader_password, delivery_password)
         stage = "backup"
         execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "backup",
                  "--project", source, "--destination", str(backup)], environment,
                 credentials=credentials)
         state = json.loads((backup / "state.json").read_text(encoding="utf-8"))
-        ensure(state.get("verified_secrets") == 1, "No se verificó la credencial externa real.")
+        ensure(state.get("verified_secrets") == 2
+               and state.get("verified_source_secrets") == 1
+               and state.get("verified_delivery_secrets") == 1,
+               "No se verificaron por separado las credenciales de fuente y destino.")
         counts = {name: len(state["tables"].get(name, {})) for name in (
             "exceptions", "exception_attachments", "monitor_schedules", "monitor_schedule_versions",
             "monitor_occurrences", "metric_history",
@@ -563,6 +696,8 @@ def main() -> int:
             "state_sha256": docker_state.digest(backup / "state.json"),
             "verified_artifacts": state.get("verified_artifacts"),
             "verified_secrets": state.get("verified_secrets"),
+            "verified_source_secrets": state.get("verified_source_secrets"),
+            "verified_delivery_secrets": state.get("verified_delivery_secrets"),
             "validated_relationships": state.get("validated_relationships"),
             "alembic_revision": state.get("migration"),
             "operational_table_counts": counts,
