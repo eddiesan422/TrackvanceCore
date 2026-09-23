@@ -1,0 +1,191 @@
+{
+  "status": "PASS",
+  "project": "trackvance-delivery-e2e-25980-727b1c",
+  "dataset_version_id": "f33dd177-6057-4303-8a78-7dc806ff31a8",
+  "destinations": [
+    {
+      "sink_type": "POSTGRESQL",
+      "destination_id": "4a503748-1c54-4200-8694-b7e28c5e00d4",
+      "destination_version_id": "c30d911e-99b0-41a3-a4b7-38abffd7152f",
+      "runs": [
+        {
+          "configuration_id": "38b97e84-30c3-4253-9962-53d5d9914739",
+          "run_id": "a1c8ac03-c62d-4fce-8c2d-8fd9a7e7cd16",
+          "attempt_id": "07e34665-478c-4c88-99d6-a88412250618",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "c72dd845-293a-481a-942c-8906164c76a6",
+          "run_id": "e49fd8bc-6602-4b16-b2ef-0b012ba09683",
+          "attempt_id": "cd67e43c-d7ac-4551-9719-b9b1f8bfa184",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "d8e9b07f-1f1a-4a8a-9157-04d70ea04df9",
+          "run_id": "49565f02-6f6e-4d4a-ac15-7e6971706c56",
+          "attempt_id": "65685541-5649-46ab-9dea-4634f862d15c",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "df64c3fb-f84d-44ec-ac14-f286effcb02e",
+          "run_id": "f52fbd56-b290-46bf-a8dd-98c50fe6da06",
+          "attempt_id": "afd9c2c4-5fce-4f28-b5b1-51dd28c1e23f",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "25ff0969-7138-43a5-a19e-baa717ec6513",
+        "attempt_id": "71fcada6-8723-4456-9dab-abfa165c2a24",
+        "status": "FAILED"
+      },
+      "collation_guard": null,
+      "status": "PASS"
+    },
+    {
+      "sink_type": "SQLSERVER",
+      "destination_id": "d0f49671-2669-46f2-a6f0-ae76b0f33ff3",
+      "destination_version_id": "f39d2383-e531-4400-9496-6a2c51d578b2",
+      "runs": [
+        {
+          "configuration_id": "5ef4d5ce-2fa6-4521-91b8-1d29abd9d7d9",
+          "run_id": "66cc26dc-5189-4712-b97c-aff9e45f9062",
+          "attempt_id": "d4405773-b62b-4684-85c2-25fd380595b1",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "60539421-6f25-4be8-ae79-b183a5d4a743",
+          "run_id": "d88c6c39-c1d9-4d15-af5c-ea8e1339f988",
+          "attempt_id": "3062bb73-7dc9-4356-af86-d476893f2102",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "65bce402-7cb0-4b14-991a-a87a55ca4bad",
+          "run_id": "468cb364-882a-4383-9720-815e4b971b54",
+          "attempt_id": "837fa5a9-f543-492f-8e8c-5094269f6ed4",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "bebb8a41-fa49-4c3a-a7b4-0f10a1918ddd",
+          "run_id": "e1808159-7d6a-4693-8563-b91f39ff8baa",
+          "attempt_id": "49e41dc6-0d62-4916-b564-1aa73f074a86",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "5c12bdc1-3879-43ee-b20d-5dbbbe3032c3",
+        "attempt_id": "fd954461-3cb2-475e-bd3b-8224cbc3528d",
+        "status": "FAILED"
+      },
+      "collation_guard": {
+        "run_id": "10ab5341-f825-498f-b198-32973e1bb942",
+        "attempt_id": "9f7bace3-83e7-48fa-904c-0965d7822ba0",
+        "status": "FAILED"
+      },
+      "status": "PASS"
+    }
+  ],
+  "checks": [
+    "DatasetVersion inmutable de entrada contiene las filas certificadas",
+    "POSTGRESQL: prueba credencial real de escritura",
+    "POSTGRESQL: destino versionado recupera su secreto segregado",
+    "POSTGRESQL: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "POSTGRESQL CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: crea schema/tabla y carga exactamente la DatasetVersion",
+    "POSTGRESQL APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: APPEND deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture stale preparado antes de OVERWRITE",
+    "POSTGRESQL OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: OVERWRITE deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture update/insert preparado antes de UPSERT",
+    "POSTGRESQL UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: UPSERT deja el conjunto remoto esperado",
+    "POSTGRESQL: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "POSTGRESQL: preflight rechaza target inexistente sin modificarlo",
+    "POSTGRESQL: preflight detecta permisos insuficientes sin escribir",
+    "POSTGRESQL: preflight previo es v\u00e1lido",
+    "POSTGRESQL: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "SQLSERVER: prueba credencial real de escritura",
+    "SQLSERVER: destino versionado recupera su secreto segregado",
+    "SQLSERVER: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "SQLSERVER CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: crea schema/tabla y carga exactamente la DatasetVersion",
+    "SQLSERVER APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: APPEND deja el conjunto remoto esperado",
+    "SQLSERVER: fixture stale preparado antes de OVERWRITE",
+    "SQLSERVER OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: OVERWRITE deja el conjunto remoto esperado",
+    "SQLSERVER: fixture update/insert preparado antes de UPSERT",
+    "SQLSERVER UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: UPSERT deja el conjunto remoto esperado",
+    "SQLSERVER: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "SQLSERVER: preflight rechaza target inexistente sin modificarlo",
+    "SQLSERVER: preflight detecta permisos insuficientes sin escribir",
+    "SQLSERVER: preflight previo es v\u00e1lido",
+    "SQLSERVER: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "SQLSERVER: preflight conserva deduplicaci\u00f3n exacta de la fuente",
+    "SQLSERVER: collation nativa rechaza claves UPSERT equivalentes",
+    "SQLSERVER: colisi\u00f3n UPSERT hace rollback antes de mutar el target",
+    "POSTGRESQL: credencial destino persiste cifrada tras reinicio",
+    "SQLSERVER: credencial destino persiste cifrada tras reinicio",
+    "Auditor\u00eda cubre destino, cola, inicio, commit y fallo de Delivery",
+    "Secretos ausentes de logs, metadata, auditor\u00eda y evidencia"
+  ],
+  "playwright": "PASS",
+  "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC"
+}

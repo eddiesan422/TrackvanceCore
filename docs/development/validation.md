@@ -17,7 +17,24 @@ registran únicamente después de observar el workflow correspondiente.
 | Backup/restore/reset | PASS: migración 0008, 7 artifacts, 2 secretos —1 fuente y 1 destino—, 127 relaciones y destrucción del origen antes del restore. La credencial destino restaurada produjo una Delivery COMMITTED de 4 filas; doctor, smoke y búsqueda de secretos también pasaron. |
 | Compatibilidad backup 0.4.1→0.5.0 | PASS desde `92c58eae9a1ddef653c0c9c888cfd7698ee1af3a`: manifest 1/state 2/0007, 21 tablas legacy y SHA canónico idénticos; restore actual en 0008 con 24 tablas, tres tablas Delivery vacías, 19 jobs históricos en lane DEFAULT, ambos workers y doctor recovery-ready. |
 | Benchmark smoke | PASS: 1.074.923 bytes, 1.000 filas y cuatro columnas, 40,31 s; peak total 379.941.026 bytes. Es una prueba acotada del harness, no una certificación de volumen. |
-| GitHub Actions | `[PENDIENTE — completar con URL, commit y estado de los siete jobs declarados]` |
+| GitHub Actions | [PASS: siete jobs](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35875426350), commit `57c0319ae2f0ef27ae63eced8e354258efc0854d`, sin reintentos. Backend 869/869; frontend 128/128; Conexiones 62/62; Delivery 92/92. |
+
+CI aprobó `backend`, `frontend`, `compose-e2e`, `connections-e2e`, `delivery-e2e`,
+`backup-restore-e2e` y `benchmark-smoke`. Los logs remotos registran Python en
+50,08 s; Playwright Compose 19 aprobadas/6 opt-in omitidas y demo limpio 1/1;
+Conexiones 23 aprobadas/2 omitidas; Delivery focal 1/1. Son ejecuciones separadas:
+no se suman como escenarios únicos ni se convierten omisiones en éxitos. El
+restore CI verificó siete artifacts, dos secretos y 127 relaciones, con uso
+efectivo de la credencial destino restaurada y receipt COMMITTED.
+El cruce de nombres en los logs confirma 25 escenarios Playwright distintos
+con al menos un PASS: los cuatro opt-in de fuentes SQL pasan en Conexiones;
+demo limpio pasa en su paso separado y Delivery en su job. Los IDs de jobs y
+este cruce están en [el resumen CI](evidence/0.5.0/ci.json).
+
+La [evidencia local saneada](evidence/0.5.0/README.md) conserva los resultados
+de Delivery, Conexiones, recuperación y compatibilidad 0.4.1. El último caso
+se ejecutó localmente, no como job adicional de CI. El commit posterior del PDF
+y del resultado de Actions constituye el cierre documental de este código.
 
 El código preparado para esta certificación usa proyectos y volúmenes aislados.
 `scripts/tests/delivery_cycle.py` levanta destinos reales, aplica fixtures, prueba

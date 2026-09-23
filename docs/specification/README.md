@@ -50,13 +50,19 @@ Cuando ese archivo archivado está junto al generador, su hash se valida sin
 sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
-[validación](../development/validation.md). La publicación 0.4.1 se generó con
-los resultados cerrados, se renderizó y se revisó visualmente completa: 33
-páginas y 25 marcadores. El PDF versionado y su copia oficial son idénticos;
-su SHA-256 es
-`84950486bb046c97c8184a88c1bc6a2ba1967962a52b4643acf9b349134d57ac`.
+[validación](../development/validation.md). La publicación 0.5.0 incorpora
+[GitHub Actions: siete jobs SUCCESS](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35875426350)
+sobre `57c0319ae2f0ef27ae63eced8e354258efc0854d`, 869 pruebas Python,
+128 Vitest y 25 escenarios Playwright distintos con al menos un PASS.
 
-Ese PDF es la última publicación cerrada mientras se completa la publicación
-0.5.0. OpenAPI y resultados locales 0.5.0 ya fueron regenerados y revisados.
-Publicación 0.5.0: `[PENDIENTE: registrar GitHub Actions, generar candidato,
-revisar cada página y sólo entonces publicar/cotejar hash y copia oficial]`.
+Se generó el candidato, se renderizaron y revisaron visualmente sus 36 páginas
+y se publicó mediante `--publish`. Los 36 PNG del PDF publicado coinciden
+exactamente con los del candidato revisado; conserva 26 marcadores. El generador
+respeta párrafos Markdown, evita viudas y mantiene enteros los identificadores
+de variables. Fuente, generador, resultados y PDF coinciden con la copia oficial.
+SHA-256 del PDF publicado:
+`d49386c6dbebb59bc33f8d18e35b37ef53b48d346416c85d70b75e389a193460`.
+
+La edición anterior 0.4.1 (33 páginas, 25 marcadores) conserva como antecedente
+el SHA-256 `84950486bb046c97c8184a88c1bc6a2ba1967962a52b4643acf9b349134d57ac`;
+está recuperable en Git y archivada junto a la copia oficial.

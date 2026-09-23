@@ -53,7 +53,8 @@
 - **Certificación local 0.5.0:** 869 pruebas Python y 128 Vitest aprobadas;
   Ruff, Mypy, ESLint, TypeScript y build PASS; Playwright 20 aprobadas/5 opt-in
   omitidas; smoke 84/84, Conexiones 62/62, Delivery real 92/92 y recovery PASS.
-  GitHub Actions: `[PENDIENTE — completar tras publicar el commit de producto]`.
+  GitHub Actions: [siete jobs SUCCESS](https://github.com/eddiesan422/TrackvanceCore/actions/runs/35875426350)
+  sobre `57c0319ae2f0ef27ae63eced8e354258efc0854d`, sin reintentos.
 
 ## 0.4.1 — 2026-09-21 — configuración guiada por esquema
 

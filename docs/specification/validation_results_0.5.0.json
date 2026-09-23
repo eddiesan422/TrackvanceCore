@@ -13,5 +13,6 @@
   "Compatibilidad 0.4.1 a 0.5.0": "PASS desde 92c58eae9a1ddef653c0c9c888cfd7698ee1af3a: manifest 1/state 2/0007; 21 tablas legacy y SHA canónico idénticos; restore en 0008 con 24 tablas, tres tablas Delivery vacías y 19 jobs históricos en lane DEFAULT.",
   "Benchmark smoke": "PASS: 1.074.923 bytes, 1.000 filas, cuatro columnas y 40,31 s; peak total 379.941.026 bytes. Prueba acotada del harness, no certificación de volumen.",
   "Contrato": "OpenAPI 0.5.0 regenerado: 81 paths, incluidos 14 paths de Data Delivery. Migración vigente 0008_data_delivery.",
-  "GitHub Actions": "[PENDIENTE: completar con URL, commit y resultado real de los siete jobs declarados]."
+  "GitHub Actions": "PASS: siete jobs SUCCESS, sin reintentos. Workflow 35875426350; commit 57c0319ae2f0ef27ae63eced8e354258efc0854d. https://github.com/eddiesan422/TrackvanceCore/actions/runs/35875426350",
+  "Conteos remotos CI": "Backend 869 en 50,08 s; frontend 128; Playwright Compose 19 aprobadas/6 omitidas y demo limpio 1/1; Conexiones 23 aprobadas/2 omitidas; Delivery 1/1. El cruce de nombres confirma 25 escenarios distintos con al menos un PASS, sin sumar repeticiones. Conexiones 62 y Delivery 92 comprobaciones reales; recovery 7 artifacts, 2 secretos, 127 relaciones y entrega COMMITTED."
 }

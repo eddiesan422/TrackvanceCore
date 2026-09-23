@@ -1,0 +1,26 @@
+{
+  "run_id": 35875426350,
+  "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/35875426350",
+  "commit": "57c0319ae2f0ef27ae63eced8e354258efc0854d",
+  "branch": "feat/local-prototype",
+  "status": "completed",
+  "conclusion": "success",
+  "attempt": 1,
+  "verification": "GitHub API, GitHub connector and completed job logs",
+  "jobs": [
+    {"name": "backend", "id": 107229958802, "conclusion": "success", "pytest_passed": 869, "pytest_seconds": 50.08, "ruff": "PASS", "mypy_files": 38, "migrations": "PASS"},
+    {"name": "frontend", "id": 107229959057, "conclusion": "success", "vitest_passed": 128, "vitest_files": 14, "lint": "PASS", "typecheck": "PASS", "build": "PASS"},
+    {"name": "delivery-e2e", "id": 107230585684, "conclusion": "success", "real_checks": 92, "playwright_passed": 1},
+    {"name": "benchmark-smoke", "id": 107230585743, "conclusion": "success", "target_mib": 1, "rows": 1000},
+    {"name": "compose-e2e", "id": 107230585769, "conclusion": "success", "playwright_passed": 19, "playwright_skipped": 6, "clean_demo_passed": 1, "smoke_checks": 84, "persistence_exact": "PASS"},
+    {"name": "connections-e2e", "id": 107230585809, "conclusion": "success", "real_checks": 62, "playwright_passed": 23, "playwright_skipped": 2, "smoke_checks": 84},
+    {"name": "backup-restore-e2e", "id": 107230585956, "conclusion": "success", "verified_artifacts": 7, "verified_secrets": 2, "validated_relationships": 127, "source_destroyed_before_restore": true, "restored_delivery_credential_used": true, "receipt_result": "COMMITTED"}
+  ],
+  "playwright_unique_scenarios_with_pass": 25,
+  "playwright_coverage": {
+    "method": "Match declared scenario names across completed job logs; never add repeated executions or count skips as passes.",
+    "compose_skips": ["demo-access-clean", "delivery", "connections PostgreSQL", "connections SQL Server", "roadmap-source-cycle PostgreSQL", "roadmap-source-cycle SQL Server"],
+    "connections_skips": ["demo-access-clean", "delivery"],
+    "covered_opt_ins": {"sql_source_scenarios": "connections-e2e", "demo-access-clean": "compose-e2e separate step", "delivery": "delivery-e2e"}
+  }
+}

@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "certification": "trackvance-restore-v0.4.1-to-v0.5.0",
+  "status": "PASS",
+  "certified_at_utc": "2026-09-23T06:23:29.1986180Z",
+  "scope": {
+    "baseline_commit": "92c58eae9a1ddef653c0c9c888cfd7698ee1af3a",
+    "baseline_version": "0.4.1",
+    "target_version_reported_by_api": "0.5.0",
+    "source_project": "trackvance-compat041-src-92c58e",
+    "target_project": "trackvance-compat050-dst-92c58e",
+    "source_web_port": 34141,
+    "target_web_port": 34150
+  },
+  "runtime": {
+    "docker_engine": "29.1.3",
+    "docker_compose": "5.0.0-desktop.1",
+    "target_git_head": "92c58eae9a1ddef653c0c9c888cfd7698ee1af3a",
+    "target_worktree_dirty": true,
+    "target_status_entries_after_build": 73,
+    "target_status_sha256_after_build": "7afbe8e605316b5ffe79a6ba6e715a7ddc2c92fa7c406e412277faf4c128cb59",
+    "target_tracked_diff_sha256_after_build": "b63ecc7001209726fd2c277c7a40ed9cebcdbbebde839cb666976c1840928419"
+  },
+  "baseline_execution": {
+    "health": {
+      "status": "ok",
+      "version": "0.4.1",
+      "demo_access_enabled": true,
+      "demo_seed_enabled": true
+    },
+    "readiness": {
+      "status": "ready",
+      "database": "ready",
+      "storage": "ready",
+      "migrations": "head"
+    },
+    "smoke_checks_passed": 84,
+    "smoke_exit_code": 0,
+    "migration": "0007_monitor_scheduling",
+    "application_table_count": 21,
+    "application_tables": [
+      "artifact_links",
+      "artifacts",
+      "audit_events",
+      "configurations",
+      "dataset_source_bindings",
+      "dataset_versions",
+      "datasets",
+      "exception_attachments",
+      "exceptions",
+      "external_connection_versions",
+      "external_connections",
+      "findings",
+      "idempotency_keys",
+      "jobs",
+      "metric_history",
+      "monitor_occurrences",
+      "monitor_schedule_versions",
+      "monitor_schedules",
+      "runs",
+      "sessions",
+      "users"
+    ]
+  },
+  "backup": {
+    "path": "backup",
+    "manifest_schema_version": 1,
+    "state_schema_version": 2,
+    "migration": "0007_monitor_scheduling",
+    "git_revision": "92c58eae9a1ddef653c0c9c888cfd7698ee1af3a",
+    "consistency": "quiesced",
+    "created_at": "2026-09-23T06:15:57.259697Z",
+    "manifest_sha256": "46343ee7a57744bdb93ace6d6822781916f69b85a2152b3d6131b581d83e12b0",
+    "state_file_sha256": "41bde11920faf2f1f9c6984212e42d3404395db855506cff9b334f4489284dc1",
+    "state_canonical_sha256": "785d6db27de099428f9a3704265f0e39ace7371e2afa6fc41f11330177d59d47",
+    "legacy_table_fingerprints": 21,
+    "verified_artifacts": 78,
+    "verified_secrets": 0,
+    "validated_relationships": 771,
+    "postgres_dump_sha256": "5dac0730d2623613214076c9ea3f910102cf3b8ef1d3b842a37c567e477ce514",
+    "archived_volumes": [
+      "trackvance_data",
+      "connection_credentials",
+      "connection_keys"
+    ],
+    "baseline_verifier_result": "PASS"
+  },
+  "source_destruction_before_restore": {
+    "plan_sha256": "842bc955b922d0e6f1814c659f59e0187e79545f63f59ea191fb9d4675d59985",
+    "completed_at": "2026-09-23T06:17:11.629461Z",
+    "removed": {
+      "containers": 4,
+      "networks": 1,
+      "volumes": 4
+    },
+    "post_reset_inventory_empty": true
+  },
+  "restore": {
+    "receipt_status": "RUNNING_VERIFIED",
+    "restored_at": "2026-09-23T06:18:34.988325Z",
+    "source_manifest_sha256": "46343ee7a57744bdb93ace6d6822781916f69b85a2152b3d6131b581d83e12b0",
+    "verified_state_sha256": "41bde11920faf2f1f9c6984212e42d3404395db855506cff9b334f4489284dc1",
+    "health": {
+      "status": "ok",
+      "version": "0.5.0",
+      "demo_access_enabled": false,
+      "demo_seed_enabled": false
+    },
+    "readiness": {
+      "status": "ready",
+      "database": "ready",
+      "storage": "ready",
+      "migrations": "head"
+    },
+    "migration": "0008_data_delivery",
+    "application_table_count": 24,
+    "legacy_projection_exact_equal": true,
+    "legacy_projection_table_fingerprints": 21,
+    "legacy_projection_canonical_sha256": "785d6db27de099428f9a3704265f0e39ace7371e2afa6fc41f11330177d59d47",
+    "current_state_schema_version": 3,
+    "verified_artifacts": 78,
+    "verified_source_secrets": 0,
+    "verified_delivery_secrets": 0,
+    "validated_relationships": 790,
+    "delivery_tables": {
+      "delivery_attempts": 0,
+      "delivery_destination_versions": 0,
+      "delivery_destinations": 0
+    },
+    "legacy_jobs": {
+      "total": 19,
+      "lane_counts": {
+        "DEFAULT": 19
+      },
+      "non_default": 0,
+      "lane_nullable": false,
+      "lane_default": "DEFAULT"
+    },
+    "delivery_runs": 0,
+    "worker_lanes": {
+      "worker": "DEFAULT",
+      "delivery-worker": "DELIVERY"
+    },
+    "heartbeat_files": [
+      "worker-heartbeat-default.json",
+      "worker-heartbeat-delivery.json"
+    ],
+    "doctor_recovery_ready": {
+      "ok": true,
+      "checks": [
+        "API",
+        "Almacenamiento",
+        "Base de datos",
+        "Configuracion Compose",
+        "Docker Linux disponible",
+        "Espacio de recuperacion",
+        "Huella/linaje/SecretStore",
+        "Migraciones Alembic",
+        "Montajes de recuperacion",
+        "Worker Compose DEFAULT",
+        "Worker Compose DELIVERY"
+      ]
+    },
+    "target_image_ids": {
+      "api": "sha256:0e7b14895a1852178efc092b074a33347f92347dfb62c24b438ba29d6d914a83",
+      "worker": "sha256:741d331d828b4f80ec400eea1f8bdfbd3719f90589f941bb19266a728ace1f9c",
+      "delivery-worker": "sha256:2b9ab6547be130f374e6471728c483d87468cbb6b75a508d73f5c1ea58ef1fc2",
+      "web": "sha256:88f59decb3d787564968f150801fb50854bc6f41996cc670f9ed4a217f603976"
+    }
+  },
+  "cleanup": {
+    "target_reset_plan_sha256": "04ff2d04f9038534dfbd503b7fb10d20ca2d02c104920dd2c7109a07da04e852",
+    "target_reset_completed_at": "2026-09-23T06:22:15.393356Z",
+    "target_removed": {
+      "containers": 5,
+      "networks": 1,
+      "volumes": 6
+    },
+    "source_inventory_empty": true,
+    "target_inventory_empty": true,
+    "isolated_image_tags_removed": 7,
+    "isolated_image_tags_remaining": 0,
+    "baseline_worktree_removed": true,
+    "retained_intentionally": [
+      "backup",
+      "reset plans and receipts",
+      "restore receipt",
+      "this certification result"
+    ],
+    "unrelated_project_observation": {
+      "trackvance-certification_running_healthy_services": 4,
+      "delivery-test_containers_observed": 0,
+      "unrelated_resources_mutated": false
+    }
+  },
+  "commands": [
+    "git worktree add --detach <isolated-worktree> 92c58eae9a1ddef653c0c9c888cfd7698ee1af3a",
+    "docker compose -p trackvance-compat041-src-92c58e -f compose.yml up --build -d --wait",
+    "python scripts/smoke_test.py --base-url http://127.0.0.1:34141 --job-timeout 180",
+    "python scripts/docker_state.py backup --project trackvance-compat041-src-92c58e --destination <evidence>/backup",
+    "python scripts/docker_state.py verify --source <evidence>/backup",
+    "python scripts/docker_state.py plan-reset --project trackvance-compat041-src-92c58e --output <evidence>/source-reset-plan.json",
+    "python scripts/docker_state.py reset --plan <evidence>/source-reset-plan.json --confirm <signed-confirmation>",
+    "python scripts/docker_state.py restore --source <evidence>/backup --target-project trackvance-compat050-dst-92c58e --web-port 34150 --start",
+    "python scripts/doctor.py --base-url http://127.0.0.1:34150 --docker --project trackvance-compat050-dst-92c58e --recovery-ready --json",
+    "docker exec <target-api> python /tmp/verify_storage.py snapshot-legacy-v2",
+    "docker exec <target-api> python /tmp/verify_storage.py snapshot",
+    "psql: verify alembic revision, table catalog, empty Delivery tables, DEFAULT Jobs, and zero DELIVERY Runs",
+    "python scripts/docker_state.py plan-reset --project trackvance-compat050-dst-92c58e --output <evidence>/target-reset-plan.json",
+    "python scripts/docker_state.py reset --plan <evidence>/target-reset-plan.json --confirm <signed-confirmation>",
+    "docker image rm <seven exact isolated image tags>",
+    "git worktree remove -- <isolated-worktree>"
+  ],
+  "limitations": [
+    "The target was built from a dirty shared worktree. HEAD alone does not reproduce the tested 0.5.0 code; post-build status and tracked-diff hashes are recorded, but untracked file contents are not fully captured.",
+    "Legacy state schema 2 did not record a live PostgreSQL catalog hash. Compatibility is proven by exact equality of all 21 legacy per-row fingerprints plus an independent SQL catalog check after restore.",
+    "The baseline fixture contained no source connection secrets. The test proves empty secret volumes restore safely and that Delivery secrets remain empty; it does not exercise decryption of a legacy source credential.",
+    "No post-restore smoke was run because it would mutate the restored data and invalidate the exact legacy projection comparison.",
+    "Docker build cache was not pruned to avoid affecting unrelated projects; all exact isolated containers, volumes, networks, image tags, and the detached worktree were removed."
+  ]
+}

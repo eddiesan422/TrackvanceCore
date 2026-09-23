@@ -924,10 +924,22 @@ cubrir suite backend/scripts, calidad estática, frontend, migración 0008,
 Compose/persistencia, Conexiones, Data Delivery con ambos motores, UI, estado
 UNKNOWN, secretos/linaje y backup/restore con entrega posterior. Resultado final:
 869 pruebas Python y 128 Vitest aprobadas; calidad estática y build PASS;
-Playwright 20 aprobadas/5 opt-in omitidas; smoke 84/84, Conexiones 62/62,
+Playwright 20 aprobadas/5 opt-in omitidas; smoke 84/84, Conexiones 62/62 y Playwright focal 2/2,
 Delivery real 92/92 y Playwright Delivery 1/1; recovery y compatibilidad real
-0.4.1→0.5.0 PASS. GitHub Actions:
-`[PENDIENTE: incorporar URL, commit y resultado de los siete jobs]`.
+0.4.1→0.5.0 PASS. GitHub Actions: workflow `35875426350`, commit
+`57c0319ae2f0ef27ae63eced8e354258efc0854d`, siete jobs SUCCESS sin reintentos:
+backend, frontend, compose-e2e, connections-e2e, delivery-e2e,
+backup-restore-e2e y benchmark-smoke. La URL está en la tabla de resultados.
+
+CI registró Python 869/869 en 50,08 s y frontend 128/128; Playwright Compose
+19 aprobadas/6 opt-in omitidas más demo limpio 1/1, Conexiones 23 aprobadas/2
+omitidas y Delivery focal 1/1. Estas ejecuciones no se suman como escenarios
+únicos; el cruce de nombres confirma 25 escenarios distintos con al menos un
+PASS. Los cuatro opt-in de fuentes SQL pasan en Conexiones, demo limpio en su
+paso separado y Delivery en su job. La compatibilidad con el baseline 0.4.1 se certificó localmente; no es
+un job adicional de CI. Los JSON saneados de las pruebas locales y sus límites
+están en docs/development/evidence/0.5.0. El commit posterior del PDF y del dato
+de Actions es un cierre documental del código de producto certificado.
 
 ### Base certificada de 0.4.1
 
@@ -1025,4 +1037,4 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | 21-09-2026 | v1.1, implementación 0.4.1 | Configuración guiada por esquema, previews informativos, catálogo de responsables y cierre de sesión corregido; contratos del motor sin cambios. |
 | 23-09-2026 | v1.1, implementación 0.5.0 | Data Delivery PostgreSQL/SQL Server, destinos/configuraciones versionados, lanes, UNKNOWN, exactitud de tipos, locks/guardias transaccionales, secretos/evidencia/backup compatible y UI; validación local cerrada y CI informado por separado. |
 
-La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.0 ya fue regenerado; el PDF se publicará sólo después de cerrar GitHub Actions y revisar visualmente el candidato completo. Los resultados 0.5.0 son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.5.0.
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.0 fue regenerado; el PDF corresponde a la certificación local y a los siete jobs de GitHub Actions aprobados, con revisión visual completa antes de publicarse. Los resultados 0.5.0 son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.5.0.

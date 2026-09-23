@@ -65,7 +65,7 @@ pdfmetrics.registerFontFamily("Arial", normal="Arial", bold="ArialBold", italic=
 
 STYLES = {
     "body": ParagraphStyle("body", fontName="Arial", fontSize=9, leading=11.8,
-                           textColor=INK, spaceAfter=6),
+                           textColor=INK, spaceAfter=6, allowWidows=0, allowOrphans=0),
     "h1": ParagraphStyle("h1", fontName="ArialBold", fontSize=18, leading=22,
                          textColor=NAVY, spaceAfter=12, keepWithNext=True),
     "h2": ParagraphStyle("h2", fontName="ArialBold", fontSize=11, leading=15,
@@ -94,7 +94,11 @@ def paragraph(text: str, style: str = "body") -> Paragraph:
 
 def table(rows: list[list[str]], widths: list[float] | None = None) -> Table:
     if widths is None:
-        widths = [CONTENT * 0.29, CONTENT * 0.71] if len(rows[0]) == 2 else [CONTENT / len(rows[0])] * len(rows[0])
+        if len(rows[0]) == 2:
+            first_fraction = 0.55 if rows[0][0] == "Variable" else 0.29
+            widths = [CONTENT * first_fraction, CONTENT * (1 - first_fraction)]
+        else:
+            widths = [CONTENT / len(rows[0])] * len(rows[0])
     cells = [[paragraph(c, "head" if i == 0 else "cell") for c in row] for i, row in enumerate(rows)]
     result = Table(cells, colWidths=widths, repeatRows=1, hAlign="LEFT")
     result.setStyle(TableStyle([
@@ -145,7 +149,7 @@ class Diagram(Flowable):
         w = CONTENT
         if self.kind == "logical":
             self.box(0, 139, w, 43, "React / API / RBAC", "Interacción, identidad y contratos HTTP")
-            self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Excepciones · Audit")
+            self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Delivery · Excepciones · Audit")
             boundaries = ["DatasetSource", "DataSink", "StorageProvider", "ExecutionEngine", "JobQueue"]
             for i, title in enumerate(boundaries):
                 x = i * (w + 8) / 5
@@ -300,7 +304,16 @@ def build(candidate: Path, results: dict, draft: bool):
         elif line.startswith("- ") or re.match(r"\d+\. ", line):
             story.append(paragraph(line, "bullet"))
         else:
-            story.append(paragraph(line))
+            # Markdown soft line breaks belong to one paragraph. Keeping each
+            # source line as its own Paragraph adds unintended vertical gaps.
+            parts = [line]
+            while i + 1 < len(lines):
+                following = lines[i + 1].strip()
+                if not following or following.startswith(("#", "@", "|", "```", "- ")) or re.match(r"\d+\. ", following):
+                    break
+                parts.append(following)
+                i += 1
+            story.append(paragraph(" ".join(parts)))
         i += 1
     SpecDocument(candidate).multiBuild(story)
 
