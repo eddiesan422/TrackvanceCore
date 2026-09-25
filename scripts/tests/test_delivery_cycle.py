@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,3 +72,40 @@ def test_destructive_runner_detects_a_preexisting_network():
         "networks": "network-id",
     }
     assert any(arguments[1:3] == ["network", "ls"] for arguments in calls)
+
+
+def test_wait_for_evidence_waits_after_durable_commit_using_only_reads(monkeypatch):
+    pending = {"status": "SUCCESS", "decision": "COMMITTED", "metrics": {}}
+    published = {**pending, "metrics": {"receipt_artifact_id": "receipt"}}
+    states = iter([pending, pending, published])
+    requests = []
+
+    def get(path):
+        requests.append(path)
+        return next(states)
+
+    monkeypatch.setattr(delivery_cycle.smoke.time, "sleep", lambda _: None)
+    assert delivery_cycle.wait_for_evidence(SimpleNamespace(get=get), "run") == published
+    assert requests == ["/api/v1/runs/run"] * 3
+
+
+@pytest.mark.parametrize("damage", ["UNKNOWN", "FAILED", "PENDING_REPAIR", "wrong_decision"])
+def test_wait_for_evidence_fails_closed_without_retrying_delivery(damage):
+    state = {"status": "SUCCESS", "decision": "COMMITTED", "metrics": {}}
+    if damage == "PENDING_REPAIR":
+        state["metrics"] = {"evidence_status": damage, "receipt_artifact_id": "partial"}
+    elif damage == "wrong_decision":
+        state["decision"] = "UNKNOWN"
+    else:
+        state["status"] = damage
+    with pytest.raises(delivery_cycle.smoke.SmokeFailure):
+        delivery_cycle.wait_for_evidence(SimpleNamespace(get=lambda _: state), "run")
+
+
+def test_wait_for_evidence_is_bounded(monkeypatch):
+    clock = iter([0, 0, 2])
+    monkeypatch.setattr(delivery_cycle.smoke.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(delivery_cycle.smoke.time, "sleep", lambda _: None)
+    pending = {"status": "SUCCESS", "decision": "COMMITTED", "metrics": {}}
+    with pytest.raises(delivery_cycle.smoke.SmokeFailure, match="Tiempo agotado"):
+        delivery_cycle.wait_for_evidence(SimpleNamespace(get=lambda _: pending), "run", timeout=1)

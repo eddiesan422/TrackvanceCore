@@ -125,16 +125,138 @@ def test_http_error_never_exposes_response_body():
     assert "private-driver-error" not in str(caught.value)
 
 
-def test_run_precondition_failure_is_terminal_without_polling_again():
+@pytest.mark.parametrize("status", ["FAILED_PRECONDITION", "UNKNOWN", "FAILED", "CANCELLED"])
+def test_run_precondition_failure_is_terminal_without_polling_again(status):
     requests = []
 
     def response(method, path, *args, **kwargs):
         requests.append((method, path))
-        return {"run_id": "blocked"} if method == "POST" else {"status": "FAILED_PRECONDITION"}
+        return {"run_id": "blocked"} if method == "POST" else {"status": status}
 
     with pytest.raises(RuntimeError, match="error técnico"):
         runner.wait_run(SimpleNamespace(json=response), "contract", "version")
     assert requests == [("POST", "/intake/runs"), ("GET", "/runs/blocked")]
+
+
+def test_delivery_evidence_waits_for_atomic_publication_reference_using_only_get(monkeypatch):
+    base = {"id": "committed", "status": "SUCCESS", "decision": "COMMITTED"}
+    ready = {**base, "metrics": {"receipt_artifact_id": "receipt"}}
+    responses = iter([base, {**base, "metrics": None}, ready])
+    calls, sleeps = [], []
+
+    def response(method, path):
+        calls.append((method, path))
+        return next(responses)
+
+    monkeypatch.setattr(runner.time, "sleep", sleeps.append)
+    assert runner.wait_for_delivery_evidence(SimpleNamespace(json=response), "committed") == ready
+    assert calls == [("GET", "/runs/committed")] * 3
+    assert sleeps == [0.5, 0.5]
+
+
+def test_delivery_evidence_already_ready_returns_without_sleeping(monkeypatch):
+    ready = {"status": "SUCCESS", "decision": "COMMITTED",
+             "metrics": {"receipt_artifact_id": "receipt"}}
+    monkeypatch.setattr(runner.time, "sleep", lambda _: pytest.fail("Ready evidence must not wait"))
+    assert runner.wait_for_delivery_evidence(SimpleNamespace(json=lambda *args: ready), "run") == ready
+
+
+@pytest.mark.parametrize("status,decision,metrics,code", [
+    ("SUCCESS", "COMMITTED", {"evidence_status": "PENDING_REPAIR"}, "DELIVERY_EVIDENCE_PENDING_REPAIR"),
+    ("SUCCESS", "COMMITTED", {"evidence_status": "PENDING_REPAIR", "receipt_artifact_id": "old"},
+     "DELIVERY_EVIDENCE_PENDING_REPAIR"),
+    ("UNKNOWN", "UNKNOWN", {}, "DELIVERY_EVIDENCE_NOT_COMMITTED"),
+    ("FAILED", "FAILED", {}, "DELIVERY_EVIDENCE_NOT_COMMITTED"),
+    ("CANCELLED", "CANCELLED", {}, "DELIVERY_EVIDENCE_NOT_COMMITTED"),
+    ("SUCCESS", "UNKNOWN", {"receipt_artifact_id": "old"}, "DELIVERY_EVIDENCE_NOT_COMMITTED"),
+])
+def test_delivery_evidence_failure_never_retries_repairs_or_replays(monkeypatch, status, decision, metrics, code):
+    calls = []
+
+    def response(method, path):
+        calls.append((method, path))
+        return {"status": status, "decision": decision, "metrics": metrics}
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _: pytest.fail("Failure must be immediate"))
+    with pytest.raises(runner.DeliveryEvidenceError) as caught:
+        runner.wait_for_delivery_evidence(SimpleNamespace(json=response), "run")
+    assert caught.value.code == code
+    assert calls == [("GET", "/runs/run")]
+
+
+def test_delivery_evidence_wait_is_bounded_without_accepting_missing_reference(monkeypatch):
+    elapsed, calls = [0.0], []
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+
+    def response(method, path):
+        calls.append((method, path))
+        return {"status": "SUCCESS", "decision": "COMMITTED", "metrics": {}}
+
+    monkeypatch.setattr(runner.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(runner.time, "sleep", sleep)
+    with pytest.raises(runner.DeliveryEvidenceError) as caught:
+        runner.wait_for_delivery_evidence(SimpleNamespace(json=response), "run", timeout=0.75)
+    assert caught.value.code == "DELIVERY_EVIDENCE_TIMEOUT"
+    assert elapsed[0] == 0.75
+    assert calls == [("GET", "/runs/run")] * 2
+
+
+def test_delivery_evidence_http_failure_is_not_hidden_by_retry(monkeypatch):
+    def failed(*args):
+        raise RuntimeError("HTTP 403; respuesta suprimida.")
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _: pytest.fail("HTTP failure must propagate"))
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        runner.wait_for_delivery_evidence(SimpleNamespace(json=failed), "run")
+
+
+@pytest.mark.parametrize("operation", ["prepare_delivery_operations", "validate_delivery_restoration"])
+def test_delivery_recovery_waits_for_publication_before_downloading_receipt(monkeypatch, operation):
+    original = {"version": {"id": "snapshot"}, "destination": {
+        "id": "destination", "version": 1, "destination_version_id": "revision", "config_hash": "hash"}}
+    committed = {"id": "run", "module": "DELIVERY", "status": "SUCCESS", "decision": "COMMITTED"}
+    calls, ready = [], [False]
+
+    class ReceiptReached(Exception):
+        pass
+
+    def response(method, path, payload=None, **kwargs):
+        calls.append((method, path))
+        if path == "/delivery/destinations/destination/test":
+            return {"status": "SUCCESS"}
+        if path == "/delivery/destinations/destination":
+            return original["destination"]
+        if path == "/delivery/preflight":
+            return {"status": "PASS"}
+        if path == "/delivery/configurations":
+            return {"id": "config"}
+        if path == "/delivery/runs":
+            return {"id": "run"}
+        if path == "/runs/run":
+            if not ready[0]:
+                ready[0] = True
+                return committed
+            return {**committed, "metrics": {"receipt_artifact_id": "receipt"}}
+        if path == "/delivery/runs/run/attempts":
+            return {"total": 1, "items": [{"id": "attempt", "status": "COMMITTED"}]}
+        raise AssertionError(path)
+
+    def download(method, path):
+        assert (method, path) == ("GET", "/delivery/runs/run/receipt")
+        assert calls.count(("GET", "/runs/run")) == 2
+        raise ReceiptReached
+
+    monkeypatch.setattr(runner, "wait_existing_run", lambda *args: committed)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    api = SimpleNamespace(json=response, request=download)
+    arguments = (api, original, [], [], {}, ()) if operation == "prepare_delivery_operations" else (
+        api, original, [], {}, ())
+    with pytest.raises(ReceiptReached):
+        getattr(runner, operation)(*arguments)
+    assert [path for method, path in calls if method == "POST"].count("/delivery/runs") == 1
+    assert not any("repair" in path for _, path in calls)
 
 
 def test_artifact_download_uses_manifest_artifact_identity_and_checks_hash():
@@ -374,6 +496,24 @@ def test_existing_project_is_never_cleaned_when_guard_fails(monkeypatch, tmp_pat
     assert runner.main() == 1
     assert cleaned == executed == []
     assert json.loads((evidence / "result.json").read_text())["failed_stage"] == "freshness_guards"
+
+
+@pytest.mark.parametrize("code", list(runner.DeliveryEvidenceError.messages))
+def test_recovery_report_emits_only_allowlisted_evidence_readiness_error_code(monkeypatch, tmp_path, code):
+    evidence, _, _, _ = setup_main(monkeypatch, tmp_path)
+
+    def failed(project):
+        raise runner.DeliveryEvidenceError(code)
+
+    monkeypatch.setattr(runner, "assert_fresh", failed)
+    assert runner.main() == 1
+    result = json.loads((evidence / "result.json").read_text())
+    assert result["status"] == "FAIL"
+    assert result["error_type"] == "DeliveryEvidenceError"
+    assert result["error_code"] == code
+    assert "error_message" not in result
+    with pytest.raises(KeyError):
+        runner.DeliveryEvidenceError("untrusted provider error")
 
 
 @pytest.mark.parametrize("keep", [False, True])

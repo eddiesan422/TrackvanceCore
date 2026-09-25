@@ -26,7 +26,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -239,11 +239,46 @@ def wait_existing_run(api: RecoveryApi, run_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         run = api.json("GET", f"/runs/{run_id}")
-        if run["status"] in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED"}:
+        if run["status"] in {"SUCCESS", "FAILED", "UNKNOWN", "FAILED_PRECONDITION", "CANCELLED"}:
             ensure(run["status"] == "SUCCESS", "La ejecución restaurada tuvo un error técnico.")
             return run
         time.sleep(0.5)
     raise RuntimeError("La ejecución aislada no terminó a tiempo.")
+
+
+class DeliveryEvidenceError(RuntimeError):
+    """Only fixed, non-sensitive readiness codes may enter recovery evidence."""
+
+    messages: ClassVar[dict[str, str]] = {
+        "DELIVERY_EVIDENCE_NOT_COMMITTED": "La evidencia requiere SUCCESS / COMMITTED.",
+        "DELIVERY_EVIDENCE_PENDING_REPAIR": "La entrega requiere reparación explícita de evidencia.",
+        "DELIVERY_EVIDENCE_TIMEOUT": "La evidencia local no se publicó a tiempo.",
+    }
+
+    def __init__(self, code: str) -> None:
+        super().__init__(self.messages[code])
+        self.code = code
+
+
+def wait_for_delivery_evidence(
+    api: RecoveryApi, run_id: str, *, timeout: float = 120,
+) -> dict[str, Any]:
+    """Wait for local publication after COMMITTED; never replay or repair."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = api.json("GET", f"/runs/{run_id}")
+        if run["status"] != "SUCCESS" or run["decision"] != "COMMITTED":
+            raise DeliveryEvidenceError("DELIVERY_EVIDENCE_NOT_COMMITTED")
+        metrics = run.get("metrics") or {}
+        if metrics.get("evidence_status") == "PENDING_REPAIR":
+            raise DeliveryEvidenceError("DELIVERY_EVIDENCE_PENDING_REPAIR")
+        # SUCCESS / COMMITTED has its own durable transaction. The worker adds
+        # this reference atomically with BOTH completed receipt and manifest in
+        # the later publication transaction; the Run DTO has no evidence_path.
+        if metrics.get("receipt_artifact_id"):
+            return run
+        time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+    raise DeliveryEvidenceError("DELIVERY_EVIDENCE_TIMEOUT")
 
 
 def artifact_hash(api: RecoveryApi, version: dict[str, Any]) -> str:
@@ -516,6 +551,7 @@ def prepare_delivery_operations(
     }, expected=202)
     committed = wait_existing_run(api, queued["id"])
     ensure(committed["decision"] == "COMMITTED", "La entrega real inicial no quedó confirmada.")
+    committed = wait_for_delivery_evidence(api, committed["id"])
     receipt_before = api.request("GET", f"/delivery/runs/{committed['id']}/receipt")
     manifest_before = api.request("GET", f"/runs/{committed['id']}/evidence")
     ensure(operational_remote_count(fixture, environment, credentials) == 4,
@@ -687,6 +723,7 @@ def validate_delivery_restoration(
     run = wait_existing_run(api, queued["id"])
     ensure(run["module"] == "DELIVERY" and run["decision"] == "COMMITTED",
            "La entrega posterior al restore no quedó confirmada.")
+    run = wait_for_delivery_evidence(api, run["id"])
     attempts = api.json("GET", f"/delivery/runs/{run['id']}/attempts")
     ensure(attempts["total"] == 1 and attempts["items"][0]["status"] == "COMMITTED",
            "El intento Delivery restaurado no quedó confirmado.")
@@ -927,6 +964,8 @@ def main() -> int:
             subprocess.SubprocessError) as error:
         # Exception text may contain driver details. Report phase and class only.
         result.update({"failed_stage": stage, "error_type": type(error).__name__})
+        if isinstance(error, DeliveryEvidenceError):
+            result["error_code"] = error.code
         print(f"ERROR: recuperación en {stage} ({type(error).__name__}); detalle suprimido.",
               file=sys.stderr)
     finally:

@@ -35,6 +35,44 @@ def test_image_overrides_contain_only_immutable_ids_and_no_credentials_or_builds
     assert all(service["pull_policy"] == "never" for service in frozen["services"].values())
 
 
+def test_delivery_configuration_uses_supported_list_endpoint():
+    class Api:
+        def json(self, method, path):
+            assert (method, path) == ("GET", "/delivery/configurations")
+            return {"items": [{"id": "other"}, {"id": "wanted", "version": 1}]}
+
+    assert runner.delivery_configuration(Api(), "wanted") == {"id": "wanted", "version": 1}
+
+
+def test_legacy_delivery_waits_for_publication_before_downloads(monkeypatch):
+    run = {"id": "run", "status": "SUCCESS", "decision": "COMMITTED"}
+    events = []
+
+    class Api:
+        def json(self, method, path, *_args, **_kwargs):
+            return {
+                ("POST", "/delivery/configurations"): {"id": "configuration"},
+                ("POST", "/delivery/runs"): {"id": "run"},
+                ("GET", "/runs/run"): run,
+                ("GET", "/datasets/dataset"): {"versions": [{"id": "version"}]},
+                ("GET", "/delivery/configurations"): {"items": [{"id": "configuration"}]},
+                ("GET", "/delivery/runs/run/attempts"): {"items": []},
+            }[method, path]
+
+        def request(self, _method, _path):
+            assert events == ["published"]
+            return b"{}"
+
+    monkeypatch.setattr(runner.recovery, "delivery_draft", lambda *_args: {})
+    monkeypatch.setattr(runner.recovery, "wait_existing_run", lambda *_args: run)
+    monkeypatch.setattr(runner.recovery, "wait_for_delivery_evidence",
+                        lambda *_args: events.append("published") or run)
+    monkeypatch.setattr(runner.recovery, "artifact_hash", lambda *_args: "canonical")
+    captured = runner.capture_delivery(Api(), {"dataset_id": "dataset", "version": {"id": "version"}})
+    assert captured["run"] == run
+    assert captured["canonical_sha256"] == "canonical"
+
+
 def test_legacy_runner_never_cleans_resources_after_failed_freshness(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.sys, "argv", ["legacy_restore_cycle.py", "--legacy041-backup",
         str(tmp_path / "unread-backup"), "--evidence-dir", str(tmp_path / "evidence")])
@@ -82,6 +120,22 @@ def test_final_inspection_failure_still_persists_result(monkeypatch, tmp_path):
     assert report["status"] == "FAIL"
     assert report["main_inventory_unchanged"] is False
     assert report["main_inspection_error"] == "ValueError"
+
+
+def test_runtime_failure_context_redacts_generated_credentials(monkeypatch, tmp_path):
+    secret = "private-generated-credential"
+    monkeypatch.setattr(runner.secrets, "token_hex", lambda _length: secret)
+    monkeypatch.setattr(runner.sys, "argv", ["legacy_restore_cycle.py", "--legacy041-backup",
+        str(tmp_path / "unread-backup"), "--evidence-dir", str(tmp_path / "evidence")])
+    state = {"containers": []}
+    monkeypatch.setattr(runner, "baseline_images", lambda _project: (state, {}))
+    monkeypatch.setattr(runner.docker_state, "inventory", lambda _project: state)
+    monkeypatch.setattr(runner.recovery, "assert_fresh",
+                        lambda _project: (_ for _ in ()).throw(RuntimeError(f"failure {secret}")))
+    assert runner.main() == 1
+    report = (tmp_path / "evidence/result.json").read_text(encoding="utf-8")
+    assert secret not in report
+    assert json.loads(report)["failure_context"] == "failure [REDACTED]"
 
 
 @pytest.mark.parametrize("mismatch", [None, "state", "archives"])

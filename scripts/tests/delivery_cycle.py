@@ -229,6 +229,25 @@ def wait_for_run(api, run_id: str, *, timeout: float = 120) -> dict[str, Any]:
     )
 
 
+def wait_for_evidence(api, run_id: str, *, timeout: float = 120) -> dict[str, Any]:
+    """COMMITTED is durable before evidence; wait without replay or repair."""
+    def ready(current):
+        if current["status"] != "SUCCESS" or current["decision"] != "COMMITTED":
+            raise smoke.SmokeFailure("La evidencia requiere una entrega SUCCESS / COMMITTED.")
+        metrics = current.get("metrics") or {}
+        if metrics.get("evidence_status") == "PENDING_REPAIR":
+            raise smoke.SmokeFailure("La entrega requiere reparación explícita de evidencia.")
+        # The worker persists this reference in the same transaction as the
+        # completed receipt AND manifest, after its separate COMMITTED commit.
+        return bool(metrics.get("receipt_artifact_id"))
+
+    return smoke.wait_until(
+        "la evidencia local de la entrega " + run_id,
+        lambda: api.get("/api/v1/runs/" + run_id),
+        ready, timeout=timeout, interval=0.5,
+    )
+
+
 def publish_and_run(
     api,
     checks,
@@ -273,6 +292,7 @@ def publish_and_run(
         completed["status"] == "SUCCESS" and completed["decision"] == "COMMITTED",
         f"{label}: delivery-worker confirma la transacción remota",
     )
+    completed = wait_for_evidence(api, completed["id"])
     attempts = api.get(f"/api/v1/delivery/runs/{completed['id']}/attempts")
     checks.verify(
         attempts["total"] == 1

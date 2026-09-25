@@ -124,6 +124,12 @@ def compare_native_backups(archived: Path, current: Path) -> dict:
             "primary_restore_input": "ARCHIVED_0.5.0_TOOL_BACKUP"}
 
 
+def delivery_configuration(api: recovery.RecoveryApi, identifier: str) -> dict:
+    # Both baselines expose the list endpoint, not a GET /configurations/{id}.
+    return next(item for item in api.json("GET", "/delivery/configurations")["items"]
+                if item["id"] == identifier)
+
+
 def capture_delivery(api: recovery.RecoveryApi, original: dict) -> dict:
     draft = recovery.delivery_draft(original, "records")
     config = api.json("POST", "/delivery/configurations", {
@@ -135,6 +141,7 @@ def capture_delivery(api: recovery.RecoveryApi, original: dict) -> dict:
     run = recovery.wait_existing_run(api, queued["id"])
     recovery.ensure(run["status"] == "SUCCESS" and run["decision"] == "COMMITTED",
                     "La baseline 0.5.0 no confirmó la entrega real.")
+    run = recovery.wait_for_delivery_evidence(api, run["id"])
     receipt = api.request("GET", f"/delivery/runs/{run['id']}/receipt")
     manifest = api.request("GET", f"/runs/{run['id']}/evidence")
     recovery.ensure("metric_semantics" not in json.loads(receipt),
@@ -143,7 +150,7 @@ def capture_delivery(api: recovery.RecoveryApi, original: dict) -> dict:
     version = next(item for item in details["versions"] if item["id"] == original["version"]["id"])
     return {"dataset_id": original["dataset_id"],
             "run": api.json("GET", f"/runs/{run['id']}"),
-            "configuration": api.json("GET", f"/delivery/configurations/{config['id']}"),
+            "configuration": delivery_configuration(api, config["id"]),
             "attempts": api.json("GET", f"/delivery/runs/{run['id']}/attempts"),
             "dataset_version": version,
             "canonical_sha256": recovery.artifact_hash(api, version),
@@ -155,7 +162,7 @@ def verify_delivery_history(api: recovery.RecoveryApi, historical: dict) -> dict
     run = historical["run"]
     comparisons = {
         "run": api.json("GET", f"/runs/{run['id']}"),
-        "configuration": api.json("GET", f"/delivery/configurations/{historical['configuration']['id']}"),
+        "configuration": delivery_configuration(api, historical["configuration"]["id"]),
         "attempts": api.json("GET", f"/delivery/runs/{run['id']}/attempts"),
     }
     for name, actual in comparisons.items():
@@ -256,7 +263,9 @@ def main() -> int:
         recovery.ensure(version == "0.5.0", "La imagen aislada no es Trackvance Core 0.5.0.")
         recovery.attach_external_network(source, database, environment)
         api = recovery.RecoveryApi(source_port, credentials)
+        stage = "capture_original_050"
         original = recovery.capture_original(api, reader, writer)
+        stage = "capture_delivery_050"
         historical = capture_delivery(api, original)
         # Old 0.5.0 startup may add its legacy generic Delivery input edges once.
         # Settle that authentic behavior before either backup; the upgrade must
@@ -264,6 +273,10 @@ def main() -> int:
         recovery.execute([*compose, "restart", "api"], environment, credentials=credentials)
         recovery.execute([*compose, "up", "-d", "--wait", "--no-build", "--pull", "never", "api"],
                          environment, credentials=credentials)
+        # Capture the full old graph after its one-time startup backfill settles.
+        details = api.json("GET", f"/datasets/{original['dataset_id']}")
+        historical["dataset_version"] = next(item for item in details["versions"]
+                                              if item["id"] == original["version"]["id"])
         stage = "backup_050"
         backup050 = evidence / "backup-050"
         # The archive is not a checkout. Prevent the old tool from attributing
@@ -306,6 +319,13 @@ def main() -> int:
     except (OSError, RuntimeError, ValueError, KeyError, StopIteration,
             subprocess.SubprocessError, zipfile.BadZipFile) as error:
         result.update({"failed_stage": stage, "error_type": type(error).__name__})
+        if isinstance(error, (RuntimeError, docker_state.OperationError)):
+            # Harness RuntimeErrors already omit response bodies and subprocess
+            # output. Redact generated credentials again before exposing context.
+            context = str(error)
+            for credential in credentials:
+                context = context.replace(credential, "[REDACTED]")
+            result["failure_context"] = context
         print(f"ERROR: legacy restore en {stage} ({type(error).__name__}); detalle suprimido.", file=sys.stderr)
     finally:
         for project in reversed(claimed):

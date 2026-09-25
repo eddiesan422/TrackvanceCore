@@ -248,6 +248,9 @@ def measure_case(api, run, project: str, destination: dict, version: dict,
         run_seconds = time.monotonic() - queued_start
         if completed["status"] != "SUCCESS" or completed["decision"] != "COMMITTED":
             raise RuntimeError(f"{engine}/{strategy}: {completed['status']} no certifica commit.")
+        # Keep enqueue-to-terminal timing separate. Total includes the explicit
+        # wait for asynchronous local evidence, without a repair/replay request.
+        completed = delivery.wait_for_evidence(api, queued["id"], timeout=timeout)
         attempts = api.get(f"/api/v1/delivery/runs/{queued['id']}/attempts")["items"]
         receipt = api.get(f"/api/v1/delivery/runs/{queued['id']}/receipt")
         manifest = api.get(f"/api/v1/runs/{queued['id']}/evidence")

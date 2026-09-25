@@ -12,7 +12,7 @@ async function stubApi(page: Page, state: 'UNKNOWN' | 'PENDING_REPAIR' | 'VALID'
     const request = route.request(), path = new URL(request.url()).pathname.replace('/api/v1', '')
     const method = request.method()
     if (method !== 'GET') writes.push(`${method} ${path}`)
-    const run = { id: 'delivery-fixture', name: 'Entrega operacional de prueba', module: 'DELIVERY', status: unknown ? 'UNKNOWN' : 'SUCCESS', decision: unknown ? 'UNKNOWN' : 'COMMITTED', dataset_name: 'Fixture', dataset_version_id: 'version-fixture', created_at: '2026-09-25T12:00:00Z', metrics: { evidence_status: repaired ? 'VALID' : state === 'PENDING_REPAIR' ? 'PENDING_REPAIR' : undefined }, findings: [] }
+    const run = { id: 'delivery-fixture', name: 'Entrega operacional de prueba', module: 'DELIVERY', status: unknown ? 'UNKNOWN' : 'SUCCESS', decision: unknown ? 'UNKNOWN' : 'COMMITTED', dataset_name: 'Fixture', dataset_version_id: 'version-fixture', created_at: '2026-09-25T12:00:00Z', metrics: { receipt_artifact_id: repaired ? 'receipt-fixture' : undefined, evidence_status: state === 'PENDING_REPAIR' && !repaired ? 'PENDING_REPAIR' : undefined }, findings: [] }
     let body: unknown = { items: [], total: 0 }
     let status = 200
     if (path === '/me') body = { user: { id: 'operator-fixture', name: 'Operador de prueba', role: writable ? 'Data Analyst' : 'Auditor', permissions: ['runs:read', 'datasets:read', 'connections:read', 'artifacts:download', ...(writable ? ['runs:execute', 'configurations:write'] : [])] }, organization: { id: 'fixture', name: 'Fixture aislado' }, csrf_token: 'fixture-only' }
@@ -70,6 +70,32 @@ test('PENDING_REPAIR repairs evidence through the explicit action without replay
   await expect(page.getByText('Confirmado', { exact: true }).first()).toBeVisible()
   expect(writes).toEqual(['POST /delivery/runs/delivery-fixture/repair-evidence'])
 })
+
+for (const finalState of ['VALID', 'PENDING_REPAIR'] as const) {
+  test(`COMMITTED settles into ${finalState} without reload or replay`, async ({ page }) => {
+    const writes = await stubApi(page, finalState)
+    let reads = 0
+    await page.route('**/api/v1/runs/delivery-fixture', async route => {
+      reads += 1
+      if (reads > 1) { await route.fallback(); return }
+      await route.fulfill({ json: { id: 'delivery-fixture', module: 'DELIVERY', name: 'Entrega operacional de prueba', status: 'SUCCESS', decision: 'COMMITTED', metrics: {} } })
+    })
+    await page.goto('/runs/delivery-fixture')
+    await expect(page.getByText('Entrega confirmada. Publicando evidencia local…')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Receipt', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Manifiesto', exact: true })).toBeDisabled()
+    if (finalState === 'VALID') {
+      await expect(page.getByRole('button', { name: 'Receipt', exact: true })).toBeEnabled()
+      await expect(page.locator('.delivery-receipt').getByText('fixture.target')).toBeVisible()
+    } else {
+      await expect(page.getByText('Entrega confirmada. La evidencia local está pendiente de reparación.')).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Reparar evidencia', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Receipt', exact: true })).toBeDisabled()
+    }
+    expect(reads).toBeGreaterThan(1)
+    expect(writes).toEqual([])
+  })
+}
 
 test('UNKNOWN review remains external, survives reload, and never creates a new Run', async ({ page }) => {
   const writes = await stubApi(page, 'UNKNOWN')
