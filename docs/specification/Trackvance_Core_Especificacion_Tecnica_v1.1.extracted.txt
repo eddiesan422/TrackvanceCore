@@ -302,9 +302,9 @@ Invariantes compartidos
 - Toda modificación del esquema persistente se realiza mediante una migración Alembic nueva. No se editan migraciones ya
  aplicadas.
 - La autorización por rol, permiso y organización se verifica en backend; ocultar un botón no sustituye la autorización.
- 
+
 - El prototipo funciona localmente con imágenes preparadas. No necesita servicios cloud para operar.
- 
+
 Qué no se certifica como implementado
 PySpark operativo, Redis/Celery productivo, fuentes o destinos distintos de PostgreSQL/SQL Server, object storage remoto,
 OIDC/SSO, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción
@@ -1287,15 +1287,15 @@ marcar identificadores. Los mismos controles se ofrecen al crear una versión de
  nueva.
 Secuencia persistente
 1. La API escribe el upload en staging limitado del provider y detecta el lector.
- 
+
 2. El lector produce el modelo común; profiling valida inferencia/overrides.
- 
+
 3. StorageProvider conserva ORIGINAL_UPLOAD con hash, tamaño y MIME.
- 
+
 4. Se publica CANONICAL_PARQUET y se crea DatasetVersion inmutable con esquema, perfil e ingestion_metadata.
- 
+
 5. ArtifactLink registra relaciones y AuditEvent registra DATASET_UPLOADED. Los temporales del flujo normal se eliminan.
- 
+
 DatasetVersion conserva dataset_id, version, filename, source_type, SHA-256, schema_hash, filas/columnas, profile_status,
 schema_json, profile, ingestion_metadata, parent_version_id, original_artifact_id, canonical_artifact_id y source_run_id.
 original_path/canonical_path se conservan como metadata interna compatible, no se exponen como rutas del cliente.
@@ -1652,9 +1652,9 @@ reciente; no se acepta una validación positiva obsoleta cuando existe una ejecu
 métricas suficientes: evaluated_count mayor que cero y failed_count igual a cero. La mera ausencia de otro Finding no
 demuestra que la regla se haya evaluado.
 - ReconOps: el control debe quedar conforme o desaparecer la clasificación asociada al hallazgo.
- 
+
 - Sentinel: el monitor debe volver a HEALTHY.
- 
+
 La UI deshabilita Resolver mientras no se cumplen los criterios y muestra el motivo. Una validación correcta se presenta como
 Validada técnicamente y enlaza el Run confirmatorio. Resolver sólo se acepta desde PENDING_VALIDATION y exige causa raíz y
 resolución. La API reevalúa antes de guardar.
@@ -2672,17 +2672,17 @@ Quality gates, análisis de dependencias/SAST/secretos/imágenes, SBOM y desplie
 controlado.
 Pasos de evolución sin cambiar reglas
 1. Introducir locator remoto y materialización acotada en un StorageProvider, migrando referencias y validando hashes históricos.
- 
+
 2. Ampliar PostgreSQL/SQL Server con otros conectores DatasetSource/DataSink, límites, credenciales externas, snapshots y
  receipts reproducibles.
 3. Implementar JobQueue Redis/Celery con patrón transaccional/outbox o garantía equivalente; conservar Run y evidencia
  idempotentes.
 4. Añadir ExecutionEngine PySpark, capacidades del planner y pruebas de paridad antes de habilitarlo.
- 
+
 5. Integrar IdP, secretos y observabilidad; aplicar tests de aislamiento y recuperación.
- 
+
 6. Desplegar réplicas API/workers y certificar concurrencia, presión de recursos, backup/restore y upgrades.
- 
+
 Los puertos actuales reducen el área de cambio, pero no certifican esos adapters. La transición requerirá código de infraestructura y
 migraciones; no deberá reescribir la semántica de reglas, resultados ni trazabilidad.
 22. Calidad, pruebas y aceptación

@@ -421,6 +421,7 @@ def main():
     if args.publish:
         shutil.copy2(candidate, original)
         extracted = "\n\n".join(f"--- PAGE {i + 1} ---\n{page.extract_text()}" for i, page in enumerate(reader.pages))
+        extracted = "\n".join(line.rstrip() for line in extracted.splitlines()) + "\n"
         original.with_suffix(".extracted.txt").write_text(extracted, encoding="utf-8")
 
 
