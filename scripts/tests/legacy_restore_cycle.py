@@ -180,7 +180,8 @@ def main() -> int:
     credentials = (internal, external, reader, writer)
     environment = {**os.environ, "POSTGRES_PASSWORD": internal,
                    "RECOVERY_SOURCE_PASSWORD": external, "DEMO_ACCESS_ENABLED": "true",
-                   "DEMO_SEED_ENABLED": "false"}
+                   "DEMO_SEED_ENABLED": "false", "PYTHONIOENCODING": "utf-8",
+                   "PYTHONUTF8": "1"}
     claimed = []
     result = {"status": "FAIL", "baseline_revision": BASELINE,
               "main_project": options.baseline_image_project}
@@ -226,6 +227,10 @@ def main() -> int:
         claimed.append(source)
         recovery.execute([*compose, "up", "-d", "--wait", "--no-build", "--pull", "never"],
                          environment, credentials=credentials)
+        actual_images = {item["service"]: item["image_id"]
+                         for item in docker_state.inventory(source)["containers"]
+                         if item["service"] in IMAGE_SERVICES}
+        recovery.ensure(actual_images == images, "Compose no reutilizó las imágenes inmutables seleccionadas.")
         version = recovery.execute([*compose, "exec", "-T", "api", "python", "-c",
             "import trackvance; print(trackvance.__version__)"], environment, credentials=credentials).strip()
         recovery.ensure(version == "0.5.0", "La imagen aislada no es Trackvance Core 0.5.0.")
@@ -261,6 +266,7 @@ def main() -> int:
             recovery.ensure(restored_api.json("POST", path, {})["status"] == "SUCCESS",
                             "La credencial histórica no permite reconectar.")
         result["legacy_050"]["source_runtime_version"] = version
+        result["legacy_050"]["source_images_match_baseline"] = True
         result["legacy_050"]["source_destroyed_before_restore"] = True
         result["legacy_050"]["restored_source_and_destination_credentials"] = "PASS"
         result["legacy_050"]["historical_delivery"] = verify_delivery_history(
@@ -278,7 +284,11 @@ def main() -> int:
                 result["status"] = "FAIL"
                 result.setdefault("cleanup_failures", []).append({"project": project, "type": type(error).__name__})
         if before_main is not None:
-            result["main_inventory_unchanged"] = docker_state.inventory(options.baseline_image_project) == before_main
+            try:
+                result["main_inventory_unchanged"] = docker_state.inventory(options.baseline_image_project) == before_main
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                result["main_inventory_unchanged"] = False
+                result["main_inspection_error"] = type(error).__name__
             if not result["main_inventory_unchanged"]:
                 result["status"] = "FAIL"
         serialized = json.dumps(result, indent=2, sort_keys=True)
