@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "release": "0.5.1",
+  "attempts": [
+    {
+      "run_id": 36191914224,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36191914224",
+      "jobs": [
+        {
+          "id": 108258778182,
+          "name": "backend",
+          "status": "completed",
+          "conclusion": "failure",
+          "failed_steps": [
+            "Check Python code"
+          ]
+        },
+        {
+          "id": 108258778418,
+          "name": "frontend",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108259197217,
+          "name": "backup-restore-e2e",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        },
+        {
+          "id": 108259197295,
+          "name": "delivery-benchmark-smoke",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        },
+        {
+          "id": 108259197441,
+          "name": "connections-e2e",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        },
+        {
+          "id": 108259197452,
+          "name": "delivery-e2e",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        },
+        {
+          "id": 108259197799,
+          "name": "benchmark-smoke",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        },
+        {
+          "id": 108259198111,
+          "name": "compose-e2e",
+          "status": "completed",
+          "conclusion": "skipped",
+          "failed_steps": []
+        }
+      ],
+      "commit": "4451cb6c8e6ce71510cf60a4a46c2aad36eb9868",
+      "failure_analysis": "Backend pytest1051 PASS and frontend PASS; Linux Ruff EXE001 on two nonexecutable shebang scripts. Executable git modes fixed inff525ce."
+    },
+    {
+      "run_id": 36192516936,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36192516936",
+      "jobs": [
+        {
+          "id": 108260727073,
+          "name": "backend",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108260727444,
+          "name": "frontend",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108261230931,
+          "name": "backup-restore-e2e",
+          "status": "completed",
+          "conclusion": "failure",
+          "failed_steps": [
+            "Restore PostgreSQL, artifacts and source credentials into a fresh project"
+          ]
+        },
+        {
+          "id": 108261230939,
+          "name": "connections-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108261230968,
+          "name": "delivery-benchmark-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108261230972,
+          "name": "compose-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108261231014,
+          "name": "delivery-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108261231023,
+          "name": "benchmark-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        }
+      ],
+      "commit": "ff525cee368c9befe9e0b34b562286c4534796d9",
+      "failure_analysis": "Recovery runner failed; stage-only diagnostic does not establish exact cause. A separate local drill exposed startup backfill graph mutation, fixed in705a1f0. Other job outcomes are reported individually."
+    },
+    {
+      "run_id": 36192953681,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36192953681",
+      "jobs": [
+        {
+          "id": 108262152879,
+          "name": "backend",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108262153045,
+          "name": "frontend",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108262631169,
+          "name": "backup-restore-e2e",
+          "status": "completed",
+          "conclusion": "failure",
+          "failed_steps": [
+            "Restore PostgreSQL, artifacts and source credentials into a fresh project"
+          ]
+        },
+        {
+          "id": 108262631207,
+          "name": "benchmark-smoke",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108262631234,
+          "name": "delivery-benchmark-smoke",
+          "status": "completed",
+          "conclusion": "failure",
+          "failed_steps": [
+            "Measure all four Delivery strategies on real disposable targets"
+          ]
+        },
+        {
+          "id": 108262631256,
+          "name": "delivery-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108262631386,
+          "name": "connections-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        },
+        {
+          "id": 108262631391,
+          "name": "compose-e2e",
+          "status": "completed",
+          "conclusion": "success",
+          "failed_steps": []
+        }
+      ],
+      "commit": "705a1f07ae54a837be48d07f131455b12d4b448d",
+      "failure_analysis": "Delivery benchmark failed3/8 on RECEIPT_NOT_READY after observing durable SUCCESS/COMMITTED. Recovery failed in delivery_operational_fixtures; precise original RuntimeError unavailable from suppressed stage-only log. Bounded evidence-publication waits and explicit safe diagnostic codes added without relaxing verification or replaying writes."
+    }
+  ]
+}

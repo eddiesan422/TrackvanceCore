@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "project": "trackvance-e2e-hardening051-final",
+  "smoke": {
+    "status": "PASS",
+    "checks": 84,
+    "seconds": 10.9
+  },
+  "playwright": {
+    "status": "PASS",
+    "passed": 24,
+    "skipped": 6,
+    "reported_minutes": 2.0,
+    "skip_reason": "Opt-in clean-demo, external database connections/source-roadmap and real Delivery fixtures are not enabled in the general cycle.",
+    "delivery_operations_cases_passed": 5
+  },
+  "migrations": "PASS",
+  "persistence_after_restart": "PASS",
+  "state_schema": 4,
+  "migration": "0009_delivery_reviews",
+  "verified_artifacts": 206,
+  "verified_secrets": 0,
+  "validated_relationships": 1605,
+  "restart_policies": ["no"],
+  "isolated_resources_removed": true
+}

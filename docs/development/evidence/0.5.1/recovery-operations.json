@@ -1,0 +1,174 @@
+{
+  "alembic_revision": "0009_delivery_reviews",
+  "api_smoke": "PASS",
+  "backup_manifest_sha256": "e6d0b85acb9a977eab6754cfebca402165b71c216dcf40f4e94311ca7562ba6d",
+  "doctor": "PASS",
+  "external_database_project": "trackvance-recovery-db-9488-330932",
+  "log_secret_scan": "PASS",
+  "operational_table_counts": {
+    "delivery_attempts": 2,
+    "delivery_reviews": 1,
+    "exception_attachments": 1,
+    "exceptions": 1,
+    "metric_history": 31,
+    "monitor_occurrences": 1,
+    "monitor_schedule_versions": 2,
+    "monitor_schedules": 1
+  },
+  "persistence_exact_comparison": "PASS",
+  "postgres_migration": {
+    "0008_0009_roundtrip": "PASS",
+    "0008_delivery_attempts_preserved": {
+      "COMMITTED": 1,
+      "UNKNOWN": 1
+    },
+    "0008_delivery_lineage_edges_preserved": 8,
+    "0008_tables_preserved": 24,
+    "actor_backfill": "PASS",
+    "historical_tables_preserved": 6,
+    "model_parity": "PASS",
+    "roundtrip": "PASS",
+    "status": "PASS"
+  },
+  "recovery": {
+    "canonical_sha256": "5bd09e5a94cbb2926393d2ffcc470cf6a818323f5edf31f8b14a6916d51d550d",
+    "connection_id": "5b830c62-9453-4f25-b4e7-80b69698125d",
+    "connection_test": "SUCCESS",
+    "connection_version_id": "6f0496c9-232a-4e6c-9379-a4a84fcc3a0f",
+    "dataset_id": "67f82ae3-6af5-423a-976f-3498dc5f1620",
+    "delivery": {
+      "attempt_id": "92bcb738-44a0-46ce-ab7d-03ed75fe4e46",
+      "destination_id": "4a83beec-77ab-47f7-9996-c7bb346b67e6",
+      "destination_test": "SUCCESS",
+      "destination_version_id": "48cf4e29-2c84-4b62-973f-679b8213f763",
+      "receipt_result": "COMMITTED",
+      "restored_destination_credential_used": true,
+      "rows_written": 4,
+      "run_id": "8404c684-dbb3-4d77-ae3d-0686304857f7"
+    },
+    "delivery_operations": {
+      "committed_run_id": "e8bcc3d4-62f5-42b9-ac27-58dd9d5a28a0",
+      "concurrent_repair_statuses": [
+        "ALREADY_VALID",
+        "REPAIRED"
+      ],
+      "historical_unknown_unchanged": true,
+      "manifest_sha256": "f9ac81a7a160104e3f119fc0389749600077362a5690ee31c354e150deb34970",
+      "post_restore_repair_status": "ALREADY_VALID",
+      "receipt_sha256": "5d06657029c7a70a420e569b040f0daf7e71d1ffa710337dbbed237b297c8c3c",
+      "remote_replay": false,
+      "remote_rows_before_and_after": 4,
+      "repaired_evidence_exactly_preserved": true,
+      "review_exactly_preserved": true,
+      "review_id": "5f25a45f-6803-4ead-9621-b20421fa407c",
+      "unknown_fixture": "SIMULATED_UNKNOWN_NO_REMOTE_IO",
+      "unknown_run_id": "f2a1a0ad-57f7-4fab-9247-329f09b78e3b"
+    },
+    "evidence_sha256": "59d4032f4bd6279da93186a7c6ea7ce7ccfe523775fc3db57ab15d635ae6a276",
+    "exception": {
+      "assigned_user_id": "user-demo-admin",
+      "attachment_artifact_id": "9d037a54-0f30-46af-9c22-f1e626dfa893",
+      "attachment_id": "b5ed1a78-7d17-4e73-9080-eba3dd1d7bb6",
+      "attachment_sha256": "ce3c2954e8db34c058fe42ef8f69186eb71eb1caac595ac46546d11628b72d1a",
+      "auto_resolve_enabled": false,
+      "case_id": "e620baab-e361-4b50-956c-fe60859ec57c",
+      "historical_timeline_preserved": true,
+      "origin_run_id": "0a8a0ea9-8ec8-4406-8e11-e372446bd517",
+      "sla_hours": 24,
+      "state": "PENDING_VALIDATION",
+      "technical_validation": "VALIDATED",
+      "validation_run_id": "b53dc88f-f9c1-4f41-8b97-d31152ad804b"
+    },
+    "historical_records_unchanged": true,
+    "new_decision": "APPROVED",
+    "new_evidence_sha256": "220a9738ff7cb7ef3ac221a8c5b9069405a19abd448e6c6272bd0e4fd37efd8d",
+    "new_run_id": "b53dc88f-f9c1-4f41-8b97-d31152ad804b",
+    "original_decision": "REJECTED",
+    "original_run_id": "0a8a0ea9-8ec8-4406-8e11-e372446bd517",
+    "original_version_id": "1a70be7f-db64-454b-a196-7bf16e109e20",
+    "refresh_lineage_verified": true,
+    "refreshed_canonical_sha256": "61b1c9065a61eb618de90e1d7b668bba0067179627ed6df3fd08c7a097a793c7",
+    "refreshed_version_id": "f9f6f8a3-aafa-4bfc-ab9e-8a1f9eb10010",
+    "restored_credential_used": true,
+    "restored_destination_credential_used": true,
+    "sentinel": {
+      "dataset_version_id": "1a70be7f-db64-454b-a196-7bf16e109e20",
+      "historical_occurrence_metrics_alerts_unchanged": true,
+      "metric_samples": 31,
+      "monitor_id": "daa81b67-990b-43f0-9547-11213e598de3",
+      "occurrence_id": "11e1032d-302f-4a3c-a65b-dfc2d8aee1ba",
+      "paused": true,
+      "run_id": "d5d3a637-1c4f-4281-ae8c-124bb0e5cef5",
+      "schedule_id": "459601e5-935a-43ae-ace9-eff0a56d6882",
+      "schedule_version": 2
+    }
+  },
+  "retained_projects": [],
+  "schema_version": 4,
+  "source_destroyed_before_restore": true,
+  "source_port": 60794,
+  "source_project": "trackvance-recovery-src-9488-330932",
+  "state_sha256": "82272856a6503bdd2c9b907a20d814bb61557d21de4690e67d365509a58596ed",
+  "status": "PASS",
+  "target_port": 60795,
+  "target_project": "trackvance-recovery-dst-9488-330932",
+  "ui_validation": {
+    "html_http_status": 200,
+    "playwright": "NOT_RUN_IN_THIS_DRILL"
+  },
+  "validated_relationships": 164,
+  "verified_artifacts": 9,
+  "verified_delivery_secrets": 1,
+  "verified_secrets": 2,
+  "verified_source_secrets": 1,
+  "evidence_provenance": {
+    "release": "0.5.1",
+    "executed_on": "2026-09-25",
+    "command": "uv run python ../scripts/tests/docker_backup_cycle.py --evidence-dir ../.codex-local/recovery/0.5.1-operational-recovery-20260925c",
+    "private_result": ".codex-local/recovery/0.5.1-operational-recovery-20260925c/result.json",
+    "fixture_scope": {
+      "committed_write": "Real PostgreSQL APPEND of four rows before backup.",
+      "pending_repair": "Controlled removal of two validated local evidence files, retaining their registered metadata and hashes; no remote fault was simulated for this committed Run.",
+      "concurrent_repair": "Two real API requests backed by PostgreSQL; one REPAIRED and one ALREADY_VALID; identical artifact identities and original bytes.",
+      "unknown": "Explicit SIMULATED_UNKNOWN_NO_REMOTE_IO fixture. This proves immutable UNKNOWN/review persistence, not a real network-induced ambiguous commit.",
+      "separate_post_restore_delivery": "A deliberate new Run writes four rows to a separate target table to prove restored destination credentials. It is not a retry or replay of either historical Run."
+    },
+    "strict_fingerprint_comparison_weakened": false,
+    "retained_projects_after_final_run": [],
+    "main_installation_modified": false,
+    "excluded_from_public_evidence": [
+      "backup archives",
+      "database dump",
+      "environment variables",
+      "plaintext credentials",
+      "raw provider output"
+    ],
+    "prior_failed_attempts": [
+      {
+        "private_result": ".codex-local/recovery/0.5.1-operational-recovery-20260925a/result.json",
+        "status": "FAIL",
+        "stage": "postgres_migration",
+        "error_type": "UnicodeEncodeError",
+        "cause": "Windows default CP1252 subprocess stdin could not encode Unicode arrows in the migration proof script.",
+        "correction": "Explicit UTF-8 subprocess text transport with a focused regression.",
+        "disposable_resources_cleaned": true
+      },
+      {
+        "private_result": ".codex-local/recovery/0.5.1-operational-recovery-20260925b/result.json",
+        "status": "FAIL",
+        "stage": "restore",
+        "error_type": "RuntimeError",
+        "cause": "Legacy startup backfill added two generic RUN_INPUT edges to Delivery Runs already using canonical DELIVERY_INPUT; strict restored fingerprint rejected the graph change.",
+        "observed_relationships_before": 164,
+        "observed_relationships_after": 168,
+        "correction": "Skip Delivery in legacy startup artifact backfill; use explicit repair-evidence for Delivery evidence recovery. Existing historical edges are preserved, not deleted.",
+        "additional_disposable_diagnostic_restores": 2,
+        "diagnostic_projects": [
+          "trackvance-recovery-dst-diagnose-a4dc3c31",
+          "trackvance-recovery-dst-diagnose-b9be693e"
+        ],
+        "disposable_resources_cleaned": true
+      }
+    ]
+  }
+}

@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.5.1 — 2026-09-25 — hardening y operación de Data Delivery
+
+Código 8927ea0 certificado con ocho jobs SUCCESS en el workflow
+[36194431770](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770).
+Los resultados 0.5.0 de la sección siguiente son históricos y no certifican esta revisión.
+
+- Añade `POST /delivery/runs/{run_id}/repair-evidence` para reconstruir evidencia
+  local de una Run `SUCCESS / COMMITTED`, con validación de configuración,
+  DatasetVersion, destino/revisión, intento confirmado y artifact canónico íntegro.
+  No vuelve a ejecutar DataSink ni obtiene credenciales del destino. Reutiliza
+  evidencia válida, evita duplicar vínculos y sólo limpia `PENDING_REPAIR` tras
+  publicar ambos artifacts verificables. Audita inicio, reparación o fallo cerrado.
+- Añade `GET/POST /delivery/runs/{run_id}/reviews` y la migración aditiva
+  `0009_delivery_reviews`. Cada revisión conserva intento, revisor estable/nombre,
+  fecha externa, fecha de registro, resultado y nota. Los resultados admitidos son
+  `REMOTE_COMMIT_OBSERVED`, `REMOTE_NOT_COMMITTED_OBSERVED` e `INCONCLUSIVE`.
+  Son observaciones externas append-only: no cambian Run/DeliveryAttempt `UNKNOWN`,
+  no crean replay ni una Run nueva. Las migraciones 0001–0008 permanecen intactas.
+- Conserva la frontera entre commit durable y publicación local: UI consulta la
+  evidencia pendiente hasta 60 segundos, sin cancelar un GET lento, y ofrece
+  actualizar estado al vencer el plazo. Los runners esperan la referencia de
+  receipt antes de descargarlo, sin reparar automáticamente ni repetir entregas.
+  El backfill legacy de arranque ya no añade RUN_INPUT genéricos a Runs Delivery;
+  conserva sin reescribir cualquier enlace histórico preexistente.
+- Presenta **Reparar evidencia** y **Revisar resultado** en el detalle de Delivery
+  con el permiso existente `runs:execute`; roles de lectura sólo consultan estado
+  e historial. La UI separa verificación externa de confirmación de Trackvance.
+- Formaliza `rows_attempted`, `rows_written`, `rows_inserted`, `rows_updated` y
+  `bytes_sent` en evidencia aditiva. Las etiquetas **Filas preparadas / enviadas**
+  y la ayuda funcional explican el efecto de triggers/rules. `null` se muestra
+  `N/D`, incluso cuando otro DTO contiene un conteo; cero sólo expresa cero real.
+- Endurece conteos UPSERT PostgreSQL dentro de la misma transacción. En
+  PostgreSQL 18+ usa `RETURNING WITH (OLD AS ...)` documentado para distinguir
+  acciones; no emplea `xmax` ni consultas previas. En PostgreSQL 16/17 un UPSERT
+  con actualizaciones conserva `null / null`; el caso sólo-claves `DO NOTHING`
+  conoce filas afectadas y cero actualizaciones. No cambia `ON CONFLICT` ni
+  presenta efectos de triggers/rules como un censo físico del destino.
+- Amplía regresiones de temporales PostgreSQL/SQL Server desde adquisición,
+  refresh y DatasetVersions históricas hasta Intake, ReconOps, Sentinel y Delivery.
+  Se conserva la política explícita STRING/TIMESTAMP de 0.5.0.
+- Unifica documentación y pruebas de lineage: relación `DELIVERED_TO` hacia
+  entidad `DELIVERY_DESTINATION_VERSION`. No reescribe ArtifactLinks históricos
+  para corregir nomenclatura documental.
+- Incorpora benchmark específico de Delivery sobre PostgreSQL/SQL Server reales
+  y sus cuatro estrategias, con fixtures deterministas variados y evidencia
+  saneada por tier. Las cargas no ejecutadas no se convierten en PASS ni elevan
+  automáticamente límites del producto.
+- Separa rutas pesadas con React.lazy/Suspense nativos y extrae el detalle
+  Delivery para no cargar su builder al consultar un Run. Mantiene shell,
+  permisos, loader accesible, recuperación de error y deep links. Build medido:
+  611.407 → 364.966 bytes de entrada; gzip 179.471 → 116.768 bytes; 19 chunks JS,
+  cuatro CSS y sin warning Vite de más de 500 kB.
+- Actualiza documentación funcional/técnica y evidencia 0.5.1. La especificación
+  y el PDF se publican únicamente después de su revisión y validación completa;
+  no se presentan capacidades de producto futuras como implementadas.
+- Verificación frontend ejecutada: 154 Vitest/17 archivos, ESLint, TypeScript y
+  build PASS; siete escenarios de navegador sobre build de producción y API
+  interceptada PASS. Estos escenarios no certifican transacciones SQL reales;
+  los ciclos integrados y GitHub Actions se informan en validación por separado.
+
 ## 0.5.0 — 2026-09-23 — Data Delivery controlado
 
 - Incorpora **Data Delivery** como módulo de salida separado de `DatasetSource`,

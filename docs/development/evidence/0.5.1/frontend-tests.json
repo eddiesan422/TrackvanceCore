@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "version": "0.5.1",
+  "executed_on": "2026-09-25",
+  "candidate": "8927ea00703ff090708c302d7755dae20a7687b9",
+  "eslint": {
+    "command": "pnpm lint",
+    "status": "PASS",
+    "exit_code": 0
+  },
+  "typescript": {
+    "command": "pnpm typecheck",
+    "status": "PASS",
+    "exit_code": 0
+  },
+  "vitest": {
+    "command": "pnpm test",
+    "status": "PASS",
+    "passed": 154,
+    "failed": 0,
+    "test_files": 17,
+    "duration_seconds": 10.96
+  },
+  "build": {
+    "command": "pnpm build",
+    "status": "PASS",
+    "evidence": "frontend-bundle.json"
+  },
+  "playwright_deterministic": {
+    "command": "PLAYWRIGHT_BASE_URL=http://127.0.0.1:33157 pnpm test:e2e tests-e2e/delivery-operations.spec.ts",
+    "status": "PASS",
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "duration_seconds": 13.6,
+    "browser": "Chrome",
+    "served_artifact": "Vite production preview",
+    "api": "Fully intercepted deterministic fixtures; no live backend or remote SQL writes.",
+    "scenarios": [
+      "lazy navigation, direct nested links, browser reload and read-only builder",
+      "explicit PENDING_REPAIR action and evidence refresh without Run-creation request",
+      "append operational UNKNOWN review, preserve historical state and reload history",
+      "read-only UNKNOWN without mutation controls",
+      "read-only PENDING_REPAIR without mutation controls",
+      "committed Run exposes late receipt without reload/replay; downloads remain blocked while awaiting evidence",
+      "committed Run exposes late PENDING_REPAIR without reload/replay"
+    ],
+    "prior_run": {
+      "status": "FAIL",
+      "passed": 4,
+      "failed": 1,
+      "reason": "Test selector expected two separate text nodes for N/D / N/D; Playwright resolves the combined nested metric as one element.",
+      "resolution": "Assertion now targets the Insertadas / actualizadas metric's full strong text. Product code unchanged; repeated all five scenarios successfully."
+    }
+  },
+  "live_integration": {
+    "status": "RECORDED_SEPARATELY",
+    "scope": "Real backend/SQL, delivery-cycle and full Compose/Connections Playwright are recorded by their isolated runners, not inferred from these browser fixtures."
+  },
+  "warnings": [
+    "Playwright NO_COLOR ignored because FORCE_COLOR is set; non-blocking."
+  ],
+  "preliminary_failures": [
+    {
+      "command": "pnpm build",
+      "cause": "New Testing Library tests used unsupported exact option in ByRoleOptions.",
+      "resolution": "Removed exact from unit-test queries; pnpm build and TypeScript passed."
+    }
+  ],
+  "initial_vitest": {
+    "command": "pnpm test",
+    "status": "PASS",
+    "passed": 148,
+    "failed": 0,
+    "test_files": 16,
+    "duration_seconds": 10.77
+  },
+  "initial_playwright_deterministic": {
+    "command": "PLAYWRIGHT_BASE_URL=http://127.0.0.1:33157 pnpm test:e2e tests-e2e/delivery-operations.spec.ts",
+    "status": "PASS",
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "duration_seconds": 8.7,
+    "browser": "Chrome",
+    "served_artifact": "Vite production preview",
+    "api": "Fully intercepted deterministic fixtures; no live backend or remote SQL writes.",
+    "scenarios": [
+      "lazy navigation, direct nested links, browser reload and read-only builder",
+      "explicit PENDING_REPAIR action and evidence refresh without Run-creation request",
+      "append operational UNKNOWN review, preserve historical state and reload history",
+      "read-only UNKNOWN without mutation controls",
+      "read-only PENDING_REPAIR without mutation controls"
+    ],
+    "prior_run": {
+      "status": "FAIL",
+      "passed": 4,
+      "failed": 1,
+      "reason": "Test selector expected two separate text nodes for N/D / N/D; Playwright resolves the combined nested metric as one element.",
+      "resolution": "Assertion now targets the Insertadas / actualizadas metric's full strong text. Product code unchanged; repeated all five scenarios successfully."
+    }
+  },
+  "evidence_settlement_regressions": {
+    "command": "pnpm test -- src/features/delivery/DeliveryEvidenceSettlement.test.tsx",
+    "status": "PASS",
+    "passed": 6,
+    "failed": 0,
+    "duration_seconds": 2.16,
+    "policy": "GET-only polling every 1500 ms for at most 60 seconds; manual state refresh after expiry, no replay or fabricated PENDING_REPAIR; existing permissions remain authoritative.",
+    "scenarios": [
+      "RUNNING to committed SUCCESS to late receipt; block downloads and stop polling when receipt arrives",
+      "committed SUCCESS deep link to late PENDING_REPAIR",
+      "fixed 60-second deadline across changed response objects; manual GET refresh after expiry; no POST",
+      "read-only late PENDING_REPAIR without repair/download controls",
+      "reuse slow in-flight state GET instead of cancelling or duplicating it",
+      "clear interval and timeout on unmount"
+    ]
+  }
+}

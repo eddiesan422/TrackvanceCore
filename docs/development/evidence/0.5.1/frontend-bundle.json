@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "version": "0.5.1",
+  "measured_on": "2026-09-25",
+  "baseline_commit": "e7838c3c86b2117605a889f23242e75d9b09577d",
+  "candidate": "8927ea00703ff090708c302d7755dae20a7687b9",
+  "command": "pnpm build",
+  "toolchain": {
+    "node": "22.14.0",
+    "vite": "7.3.6",
+    "new_frontend_dependencies": false
+  },
+  "baseline": {
+    "status": "PASS",
+    "main_js": {
+      "file": "index-CCebnB5P.js",
+      "bytes": 611407,
+      "gzip_bytes": 179471
+    },
+    "main_css": {
+      "file": "index-CgVykQbv.css",
+      "bytes": 88933,
+      "gzip_bytes": 18495
+    },
+    "transformed_modules": 1714,
+    "chunk_over_500kb_warning": true
+  },
+  "after": {
+    "status": "PASS",
+    "main_js": {
+      "file": "index-Dcon_AYs.js",
+      "bytes": 364966,
+      "gzip_bytes": 116768
+    },
+    "transformed_modules": 1718,
+    "build_seconds": 2.15,
+    "chunk_over_500kb_warning": false,
+    "js_chunks": 19,
+    "css_chunks": 4,
+    "assets": [
+      {
+        "file": "ColumnMultiSelect-Dts_OU8C.js",
+        "bytes": 3620,
+        "gzip_bytes": 1635
+      },
+      {
+        "file": "Connections-BUQl6dZH.js",
+        "bytes": 19795,
+        "gzip_bytes": 5828
+      },
+      {
+        "file": "Dashboard-32RbkD9q.js",
+        "bytes": 20761,
+        "gzip_bytes": 6464
+      },
+      {
+        "file": "Datasets-cLNJ4aYg.js",
+        "bytes": 25330,
+        "gzip_bytes": 8639
+      },
+      {
+        "file": "Delivery-BxPWHnO2.js",
+        "bytes": 49127,
+        "gzip_bytes": 13630
+      },
+      {
+        "file": "DeliveryRunDetail-Dx12BIDr.js",
+        "bytes": 18331,
+        "gzip_bytes": 5820
+      },
+      {
+        "file": "History-GzWL0x3A.js",
+        "bytes": 1827,
+        "gzip_bytes": 962
+      },
+      {
+        "file": "Operations-D26G_QdY.js",
+        "bytes": 35973,
+        "gzip_bytes": 9852
+      },
+      {
+        "file": "Runs-BhaSnw1t.css",
+        "bytes": 1413,
+        "gzip_bytes": 569
+      },
+      {
+        "file": "Runs-CocLtwoB.js",
+        "bytes": 81005,
+        "gzip_bytes": 22689
+      },
+      {
+        "file": "VersionIdentity-CHu2gPNa.js",
+        "bytes": 4893,
+        "gzip_bytes": 1951
+      },
+      {
+        "file": "arrow-up-GPBcSe3k.js",
+        "bytes": 265,
+        "gzip_bytes": 198
+      },
+      {
+        "file": "arrow-up-right-FtoARGsk.js",
+        "bytes": 162,
+        "gzip_bytes": 155
+      },
+      {
+        "file": "connections-DvzioCo2.css",
+        "bytes": 1997,
+        "gzip_bytes": 736
+      },
+      {
+        "file": "delivery-Fsh741vI.css",
+        "bytes": 12941,
+        "gzip_bytes": 3114
+      },
+      {
+        "file": "delivery-jbY0PAsJ.js",
+        "bytes": 233,
+        "gzip_bytes": 173
+      },
+      {
+        "file": "index-DFaEhnTn.css",
+        "bytes": 72918,
+        "gzip_bytes": 15492
+      },
+      {
+        "file": "index-Dcon_AYs.js",
+        "bytes": 364966,
+        "gzip_bytes": 116768
+      },
+      {
+        "file": "pencil-UEZsVWBN.js",
+        "bytes": 273,
+        "gzip_bytes": 221
+      },
+      {
+        "file": "play-COF3U6bm.js",
+        "bytes": 131,
+        "gzip_bytes": 142
+      },
+      {
+        "file": "plus-D6z7Wgnx.js",
+        "bytes": 150,
+        "gzip_bytes": 147
+      },
+      {
+        "file": "refresh-cw-D_SNxp6h.js",
+        "bytes": 317,
+        "gzip_bytes": 227
+      },
+      {
+        "file": "trash-2-B4QDSYAv.js",
+        "bytes": 354,
+        "gzip_bytes": 245
+      }
+    ]
+  },
+  "reduction": {
+    "main_js_bytes": 246441,
+    "main_js_percent": 40.30719308087739,
+    "main_js_gzip_bytes": 62703,
+    "main_js_gzip_percent": 34.93767795354123
+  },
+  "semantics": {
+    "sizes": "Raw production minified bytes and Node zlib.gzipSync bytes; kB in Vite uses 1000 bytes.",
+    "initial_entry": "The main entry is not every authenticated route's total transfer. The selected route and its shared chunks load on demand.",
+    "scope": "Measured bundle size only; no claim of measured latency, Core Web Vitals, server throughput or business-data changes."
+  },
+  "initial_after": {
+    "status": "PASS",
+    "main_js": {
+      "file": "index-Aa8tQ_cA.js",
+      "bytes": 364966,
+      "gzip_bytes": 116764
+    },
+    "transformed_modules": 1718,
+    "build_seconds": 1.96,
+    "chunk_over_500kb_warning": false,
+    "js_chunks": 19,
+    "css_chunks": 4,
+    "assets": [
+      {
+        "file": "arrow-up-Cfl0VU4C.js",
+        "bytes": 265,
+        "gzip_bytes": 199
+      },
+      {
+        "file": "arrow-up-right-BqqLZzdw.js",
+        "bytes": 162,
+        "gzip_bytes": 155
+      },
+      {
+        "file": "ColumnMultiSelect-D60sWpmk.js",
+        "bytes": 3620,
+        "gzip_bytes": 1635
+      },
+      {
+        "file": "connections-DvzioCo2.css",
+        "bytes": 1997,
+        "gzip_bytes": 736
+      },
+      {
+        "file": "Connections-XGBBWMph.js",
+        "bytes": 19795,
+        "gzip_bytes": 5828
+      },
+      {
+        "file": "Dashboard-Dm2ctNXC.js",
+        "bytes": 20761,
+        "gzip_bytes": 6465
+      },
+      {
+        "file": "Datasets-BlltBByX.js",
+        "bytes": 25330,
+        "gzip_bytes": 8642
+      },
+      {
+        "file": "Delivery-CSHvRz8x.js",
+        "bytes": 49127,
+        "gzip_bytes": 13631
+      },
+      {
+        "file": "delivery-Fsh741vI.css",
+        "bytes": 12941,
+        "gzip_bytes": 3114
+      },
+      {
+        "file": "delivery-jbY0PAsJ.js",
+        "bytes": 233,
+        "gzip_bytes": 173
+      },
+      {
+        "file": "DeliveryRunDetail-B-5YTu7Q.js",
+        "bytes": 17395,
+        "gzip_bytes": 5549
+      },
+      {
+        "file": "History-JHxE_-SC.js",
+        "bytes": 1827,
+        "gzip_bytes": 963
+      },
+      {
+        "file": "index-Aa8tQ_cA.js",
+        "bytes": 364966,
+        "gzip_bytes": 116764
+      },
+      {
+        "file": "index-DFaEhnTn.css",
+        "bytes": 72918,
+        "gzip_bytes": 15492
+      },
+      {
+        "file": "Operations-B6TRYMta.js",
+        "bytes": 35973,
+        "gzip_bytes": 9852
+      },
+      {
+        "file": "pencil-JH_13j3k.js",
+        "bytes": 273,
+        "gzip_bytes": 219
+      },
+      {
+        "file": "play-Cpj7PliE.js",
+        "bytes": 131,
+        "gzip_bytes": 141
+      },
+      {
+        "file": "plus-DgsMkjIc.js",
+        "bytes": 150,
+        "gzip_bytes": 147
+      },
+      {
+        "file": "refresh-cw-uHOAFISS.js",
+        "bytes": 317,
+        "gzip_bytes": 226
+      },
+      {
+        "file": "Runs-BhaSnw1t.css",
+        "bytes": 1413,
+        "gzip_bytes": 569
+      },
+      {
+        "file": "Runs-DC3Hs7A4.js",
+        "bytes": 81005,
+        "gzip_bytes": 22692
+      },
+      {
+        "file": "trash-2-55BeshGW.js",
+        "bytes": 354,
+        "gzip_bytes": 244
+      },
+      {
+        "file": "VersionIdentity-CJAOc3c8.js",
+        "bytes": 4893,
+        "gzip_bytes": 1951
+      }
+    ]
+  },
+  "initial_reduction": {
+    "main_js_bytes": 246441,
+    "main_js_percent": 40.30719308087738,
+    "main_js_gzip_bytes": 62707,
+    "main_js_gzip_percent": 34.93990672587772
+  },
+  "measurement_history": "initial_after and initial_reduction preserve the first code-splitting/operations UI build; after is the final build including bounded, GET-only local evidence settlement polling."
+}

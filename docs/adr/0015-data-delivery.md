@@ -1,7 +1,7 @@
 # ADR 0015: Data Delivery controlado hacia bases SQL
 
 - Estado: implementado y certificado localmente; CI del commit se registra por separado.
-- Fecha: 2026-09-23.
+- Fecha: 2026-09-23. Ampliación 0.5.1: 2026-09-25.
 - Sustituye únicamente la afirmación histórica de ADR 0007 que describía Data
   Delivery como futuro. No cambia la frontera de lectura de `DatasetSource`.
 
@@ -194,10 +194,78 @@ Todos los recursos continúan acotados por organización.
 - La implementación no constituye garantía de alta disponibilidad, throughput o
   volumen productivo. Los resultados medidos no se extrapolan a cargas no ejecutadas.
 - Triggers/rules del target pueden transformar o suprimir DML. `rows_written`
-  representa filas intentadas por Trackvance, no una lectura post-trigger exacta.
+  representa filas fuente enviadas en una operación confirmada, no una lectura post-trigger exacta.
   `PENDING_REPAIR` requiere intervención; no hay reconciliador automático.
 
 ## Verificación
+
+### Decisión aditiva 0.5.1: evidencia y revisión operacional
+
+La reparación explícita de COMMITTED + PENDING_REPAIR valida únicamente datos
+locales retenidos y materialización íntegra. `repair-evidence` no utiliza DataSink,
+no descifra credenciales y no abre transacción remota. Bloquea Run, reutiliza
+artifacts/enlaces válidos y deriva IDs nuevos de org/Run/kind. Un archivo histórico
+ausente sólo se reconstruye si coincide con el SHA registrado; no se sobrescribe
+un archivo corrupto ni se recalcula su hash esperado. La repetición devuelve
+ALREADY_VALID sin duplicar escritura o evidencia. Cada petición conserva auditoría.
+
+UNKNOWN requiere una entidad propia consultable: `DeliveryOperationalReview`
+en `delivery_reviews`, creada por `0009_delivery_reviews`. Incluye organización,
+Run, DeliveryAttempt, revisor estable y snapshot de nombre, outcome de un conjunto
+cerrado, nota y fechas. Se descarta usar únicamente AuditEvent: no proporciona el
+contrato de consulta e historial de observaciones requerido. La nota permanece
+fuera de metadata de auditoría. El servicio admite anexar, nunca editar/borrar;
+un comentario correctivo es otra observación. No cambia Run/attempt UNKNOWN, no
+habilita replay ni requiere un esquema de aprobación/RBAC nuevo.
+
+Se reutilizan `runs:execute` para ambas acciones y `runs:read` para historial,
+además de scope de organización y CSRF. La migración no modifica tablas previas;
+0001..0008 se mantienen intactas. Reparación no necesita otra tabla.
+
+### Decisión aditiva 0.5.1: métricas, PostgreSQL y linaje
+
+`rows_attempted` significa filas preparadas; `rows_written`, fuente enviada en
+operación confirmada. No es un COUNT remoto post-trigger. Los conteos INSERT/UPDATE
+sólo se publican con garantía del adaptador; la ausencia se representa como null
+en API/evidencia y N/D en UI. `delivery_metrics.py` versiona esta definición
+aditivamente; no se reescriben manifests0.5.0. Duraciones nuevas se miden en
+preflight del worker y deliver_prepared/commit, no se infieren a partir de la cola.
+
+PostgreSQL18 permite contar acciones con RETURNING OLD/NEW documentado. Se usa
+el registro OLD completo para distinguir inserción, preservando ON CONFLICT,
+constraint nombrada y locks. PostgreSQL 16/17 no fingen el desglose: null para
+UPSERT no vacío con columnas actualizables. Sólo-claves usa DO NOTHING y conserva
+el número conocido de inserciones y cero actualizaciones; vacío también permite
+cero. Se rechazan alternativas racy de pre-SELECT, estadísticas o xmax.
+Referencias: [RETURNING](https://www.postgresql.org/docs/18/dml-returning.html) e
+[INSERT](https://www.postgresql.org/docs/18/sql-insert.html). Los motores de prueba
+16/18 son separados; el servidor de metadata no cambia.
+
+Linaje existente: DatasetVersion --DELIVERY_INPUT--> Run --DELIVERED_TO-->
+DestinationVersion; Run --DELIVERY_RECEIPT--> Artifact --EVIDENCE_OF-->
+DeliveryAttempt, más RUN_OUTPUT hacia receipt/manifest. El target_type de destino
+es DELIVERY_DESTINATION_VERSION, no una relation. Sólo se corrige documentación
+y se prueba el grafo; no se migran enlaces anteriores.
+
+### Compatibilidad y validación 0.5.1
+
+La huella de storage pasa a4 y añade revisiones; manifest de backup sigue2.
+Restore0.5.0/state3/0008 se proyecta exactamente mediante legacy-v3 tras migrar
+a0009 con revisiones vacías. Restore0.4.x/state2/0007 mantiene legacy-v2 y exige
+vacías todas las tablas añadidas, incluidos reviews. No se ocultan registros para
+aprobar una comparación. El drill nuevo verifica evidencia reparada y revisión
+UNKNOWN, identificando explícitamente la incertidumbre simulada del fixture.
+
+La política temporal no cambia: fuentes sin zona son STRING; datetimeoffset(7)
+es STRING para conservar precisión. SQLServer CONVERT estilo127 puede normalizar
+su offset a UTC al adquirir el snapshot; conservar texto canónico no significa
+recuperar la forma numérica original del offset. La matriz real recorre todos los
+módulos y rechaza coerción STRING→TIMESTAMP en Delivery.
+
+Benchmark dedicado recorre cuatro estrategias por motor con datos variados,
+medición de fases y recursos, sin elevar defaults. La recertificación local y CI
+0.5.1 se informa separadamente en validation.md; los éxitos0.5.0 siguientes son
+antecedentes, no evidencia ejecutada de esta revisión.
 
 Unitarios y pruebas de API cubren validación, quoting, tipos, estrategias,
 preflight, evidencia, autorización, lanes y recuperación. El runner aislado

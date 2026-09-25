@@ -1,0 +1,88 @@
+{
+  "created_at": "2026-09-25T21:28:05.668134Z",
+  "expires_at": "2026-09-25T22:28:05.668134Z",
+  "nonce": "f0c6ec111d884723bb27614b9144407c",
+  "plan_sha256": "0693f0eafea1962b88a926e2c092cd618e5fab6c6bb9d660a716b5c627c7b234",
+  "project": "trackvance-delivery-bench-28040-1e3384e5",
+  "resources": {
+    "containers": [
+      {
+        "id": "8123fab5c0d179db1380ce5de3a4c332139ef681dc79393b61ba6dd0f25d8528",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-api-1",
+        "service": "api"
+      },
+      {
+        "id": "c1b8fcfc3f00e158425f09cdedcc514fef9466811f27ef3eb8f24c7bb56b2309",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-delivery-worker-1",
+        "service": "delivery-worker"
+      },
+      {
+        "id": "9901309c4791f08ed57590dbe23ea066fb4eea6dfd9b9f966e2452e68c21e36e",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-destination-postgres-1",
+        "service": "destination-postgres"
+      },
+      {
+        "id": "00e108207f05416665cc2e6dc4208ecae98d14cc9187c2524e537134ed90eab0",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-destination-sqlserver-1",
+        "service": "destination-sqlserver"
+      },
+      {
+        "id": "93fe4612efb7675584896e63c5db2ef7c164c6a78c217db34d163111e827bea5",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-postgres-1",
+        "service": "postgres"
+      },
+      {
+        "id": "cee456651bbbcbaf7395e9955dded47cb6fb307b6268c3e124c57ac637778503",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-web-1",
+        "service": "web"
+      },
+      {
+        "id": "c4523e9f736c90726422b4547a660df64ca8417ab4447f5d6d4ffb0d083fc807",
+        "name": "trackvance-delivery-bench-28040-1e3384e5-worker-1",
+        "service": "worker"
+      }
+    ],
+    "networks": [
+      {
+        "id": "e37c97a8c127c20155907f29d6441a712f93bbd3109d0bd87c0d6cba5bc3b1de",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_default"
+      }
+    ],
+    "project": "trackvance-delivery-bench-28040-1e3384e5",
+    "volumes": [
+      {
+        "logical_name": "connection_credentials",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_connection_credentials"
+      },
+      {
+        "logical_name": "connection_keys",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_connection_keys"
+      },
+      {
+        "logical_name": "delivery_credentials",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_delivery_credentials"
+      },
+      {
+        "logical_name": "delivery_keys",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_delivery_keys"
+      },
+      {
+        "logical_name": "destination_postgres_data",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_destination_postgres_data"
+      },
+      {
+        "logical_name": "destination_sqlserver_data",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_destination_sqlserver_data"
+      },
+      {
+        "logical_name": "postgres_data",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_postgres_data"
+      },
+      {
+        "logical_name": "trackvance_data",
+        "name": "trackvance-delivery-bench-28040-1e3384e5_trackvance_data"
+      }
+    ]
+  },
+  "schema_version": 1
+}

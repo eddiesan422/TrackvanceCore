@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "0.5.1",
+  "executed_on": "2026-09-25",
+  "candidate": "8927ea00703ff090708c302d7755dae20a7687b9",
+  "pytest": {
+    "command": "uv run pytest tests ../scripts/tests -q --junitxml=../.codex-local/hardening051-tests-final.xml",
+    "status": "PASS",
+    "passed": 1091,
+    "failed": 0,
+    "warnings": 2,
+    "duration_seconds": 65.97,
+    "warning_details": ["Starlette httpx TestClient deprecation", "AnyIO BlockingPortal alias deprecation"]
+  },
+  "ruff": {"command": "uv run ruff check src tests ../scripts", "status": "PASS"},
+  "mypy": {"command": "uv run mypy src/trackvance --check-untyped-defs --ignore-missing-imports", "status": "PASS", "source_files": 39},
+  "openapi": {"status": "PASS", "version": "0.5.1", "paths": 83, "schemas": 71, "delivery_paths": 16, "check": "JSON equals runtime app.openapi(); no U+FFFD"},
+  "existing_migrations": {"status": "UNCHANGED", "baseline": "e7838c3c86b2117605a889f23242e75d9b09577d", "revisions": "0001..0008"},
+  "real_migration_and_recovery": "Reported separately by isolated Docker runners; not inferred from unit tests."
+}

@@ -1,6 +1,6 @@
 # Trackvance Core
 
-## Evolución funcional local 0.5.0
+## Evolución funcional local 0.5.1
 
 El prototipo conserva el monolito modular FastAPI/React, PostgreSQL, workers
 y almacenamiento local. Incluye perfiles observados sin trim implícito,
@@ -9,7 +9,7 @@ Intake en Parquet, evidencia v2 y reportes Excel estructurados con openpyxl.
 Las configuraciones publicadas, ejecuciones y archivos históricos permanecen
 inmutables. La capa de entrada admite CSV, Excel XLSX, JSON, Parquet y TXT
 delimitado, además de PostgreSQL y SQL Server mediante **Conexiones**;
-la migración más reciente es `0008_data_delivery`.
+la migración más reciente es `0009_delivery_reviews`.
 
 Esta revisión amplía Intake con unicidad compuesta, longitud, comparaciones,
 condiciones e integridad contra otra DatasetVersion. ReconOps permite reglas
@@ -28,9 +28,51 @@ la versión de dataset y destino sin exponer secretos ni filas completas.
 
 Los contratos históricos se conservan. La
 [línea oficial de evolución](docs/roadmap.md) completa el punto 10 local antes de
-productizar en el punto 11. La certificación local final de 0.5.0 está cerrada;
-el resultado del commit de publicación se registra por separado en GitHub Actions.
+productizar en el punto 11. El ciclo 0.5.1 endurece Data Delivery sin añadir
+conectores ni módulos grandes. El código 8927ea0 obtuvo ocho jobs SUCCESS en
+[GitHub Actions](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770).
+Los resultados de 0.5.0 son antecedentes, no pruebas heredadas de esta revisión.
 No se habilita infraestructura cloud ni se extrapolan garantías productivas.
+
+### Qué cambia en 0.5.1
+
+- **Evidencia pendiente:** una entrega `SUCCESS / COMMITTED` con
+  `PENDING_REPAIR` ofrece **Reparar evidencia**. Reconstruye receipt/manifest
+  desde referencias y hashes persistidos, sin ejecutar DataSink ni contactar el
+  destino. La acción exige `runs:execute`; un fallo conserva el commit confirmado.
+- **Confirmación desconocida:** **Revisar resultado** documenta quién verificó
+  externamente, cuándo, qué observó y por qué. La revisión se persiste separada
+  en `delivery_reviews`; el intento y la Run originales conservan `UNKNOWN`.
+  Guardarla no reenvía datos ni crea una ejecución nueva.
+- **Métricas interpretables:** **Filas preparadas**, **Filas enviadas** e
+  **Insertadas / actualizadas** separan payload de conteos del adaptador. Los
+  valores desconocidos se muestran `N/D`, nunca cero ficticio; no se afirma un
+  censo físico posterior a triggers/rules del destino. Receipt y manifest añaden
+  definiciones sin invalidar la evidencia histórica.
+- **UPSERT PostgreSQL:** PostgreSQL 18+ permite distinguir acciones mediante el
+  `OLD` documentado de `RETURNING`; PostgreSQL 16/17 conserva `null / N/D` para
+  UPSERT con actualizaciones. El caso sólo-claves `DO NOTHING` sí conoce sus
+  inserciones y cero actualizaciones. No se usa consulta previa ni `xmax`.
+- **Temporales:** se amplían regresiones de snapshots y consumidores sin convertir
+  STRING temporal en TIMESTAMP ni inventar una zona o perder el séptimo decimal.
+- **Linaje canónico:** `DELIVERED_TO` es la relación; su `target_type` es
+  `DELIVERY_DESTINATION_VERSION`. No se reescriben vínculos históricos por una
+  confusión documental entre relación y tipo de entidad.
+- **Benchmark Delivery:** el ciclo específico mide motores/estrategias por
+  separado de Intake/Recon/Sentinel. Sólo las cargas realmente ejecutadas se
+  publican como mediciones; los no ejecutados conservan su motivo. Smoke y
+  carga representativa de 8.917.809 bytes / 20.000 filas aprobaron 8/8 casos cada
+  uno; ver [resultados y límites](docs/development/delivery-benchmark-results-0.5.1.md).
+- **Carga por rutas:** React.lazy/Suspense reduce el JavaScript inicial medido
+  de 611,41 a 364,97 kB y de 179,47 a 116,77 kB gzip. La navegación permanece
+  disponible mientras carga una sección y un fallo de chunk ofrece recuperación.
+  Ver [medición y límites](docs/development/code-splitting-results-0.5.1.md).
+
+La única migración nueva añade revisiones consultables y auditables de UNKNOWN.
+No cambia los estados históricos de DeliveryAttempt ni las migraciones 0001–0008.
+El estado de pruebas, Docker/SQL y GitHub Actions se mantiene en
+[validación](docs/development/validation.md); la evidencia de interfaz distingue
+tests con API simulada de los ciclos con bases reales.
 
 Documentación del ciclo:
 
@@ -52,8 +94,8 @@ Documentación del ciclo:
 - [Operación, Docker y respaldo](docs/development/operations.md).
 - [Backup, restore y reset verificados](docs/adr/0013-local-backup-restore.md).
 - [Benchmarks medidos y límites](docs/development/volume-benchmark.md).
-- [Snapshot OpenAPI](backend/openapi.json) y [contrato HTTP 0.5.0](backend/API_CONTRACT.md).
-- [Especificación técnica v1.1 — implementación 0.5.0](docs/specification/README.md).
+- [Snapshot OpenAPI](backend/openapi.json) y [contrato HTTP vigente](backend/API_CONTRACT.md).
+- [Especificación técnica v1.1 y su revisión de implementación](docs/specification/README.md).
 
 La instalación local `trackvance-certification` utiliza `http://localhost:3100`.
 El puerto por defecto de una instalación nueva es 3000; `WEB_PORT` y
@@ -69,7 +111,7 @@ funcional no representa la implementación de la
 arquitectura objetivo del documento. Consulta [el estado de arquitectura](docs/architecture.md)
 y [el alcance vigente](docs/development/prototype-scope.md).
 Los resultados de las pruebas están en [verificación local](docs/development/validation.md).
-La especificación oficial v1.1 tiene una [revisión de implementación 0.5.0](docs/specification/README.md)
+La especificación oficial v1.1 tiene una [revisión de implementación versionada](docs/specification/README.md)
 y conserva su [fuente editable](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md) en el repositorio.
 
 ## Inicio recomendado: Docker Compose y PostgreSQL
@@ -95,6 +137,12 @@ Para iniciar y detener una instalación ya preparada:
 docker compose up -d --wait
 docker compose stop
 ```
+
+Después de actualizar el código, **Start** de Docker Desktop sólo inicia los
+contenedores existentes. Para instalar una revisión nueva se requiere un backup
+verificado y `docker compose up --build -d --wait`; no uses `down -v`. La API
+aplica la migración al iniciar. Comprueba `/api/v1/health` y conserva el mismo
+proyecto/volúmenes; reconstruir no implica crear una instalación vacía.
 
 PostgreSQL guarda metadata; los archivos y artefactos permanecen fuera de la
 base, en un volumen persistente compartido por API y worker. Todos los servicios
@@ -186,6 +234,9 @@ volumen nuevos; la autenticación local y RBAC no cambian.
    Publica la configuración y encola la entrega. El detalle muestra lane,
    `DeliveryAttempt`, filas, target y receipt. Si aparece `UNKNOWN`, verifica el
    destino: no equivale a `FAILED` ni `COMMITTED` y no genera reintento automático.
+   Después registra **Revisar resultado**, sin modificar la incertidumbre histórica.
+   Si el commit está confirmado pero la evidencia falta, usa **Reparar evidencia**;
+   esa acción nunca se denomina ni ejecuta un reintento de entrega.
 
 Cada ejecución de calidad completada ofrece informe Excel y manifest JSON; Data
 Delivery ofrece manifest y receipt tras `COMMITTED` cuando la evidencia local se
@@ -305,7 +356,7 @@ resultado remoto conocido prevalece sobre una cancelación tardía.
 
 La separación de montajes es deliberada: la API monta secretos de origen y
 destino; el worker `DEFAULT` sólo artifacts; el `delivery-worker`, artifacts y
-secretos de destino, nunca los de origen. 0.5.0 reutiliza permisos existentes de
+secretos de destino, nunca los de origen. 0.5.1 conserva los permisos existentes de
 conexiones, configuraciones, runs y artifacts; un RBAC granular propio de Delivery
 permanece pendiente. Tampoco se implementan otros sinks, scheduler de entregas,
 transformación arbitraria ni transacción distribuida.
@@ -328,9 +379,13 @@ credenciales/clave de conexiones y credenciales/clave de Delivery. Detiene
 brevemente web, scheduler y ambos workers, registra hashes y vuelve a iniciar sólo
 los servicios que estaban activos. El restore exige un proyecto nuevo, verifica
 la huella y puede dejarlo detenido o iniciarlo explícitamente.
-También acepta backups schema 1/state 2 de la baseline 0.4.1 en migración 0007:
-preserva exactamente sus 21 tablas, migra a 0008, deja vacías las tres tablas
-Delivery y asigna lane `DEFAULT` a los jobs históricos.
+La compatibilidad de restore incluye backups schema 1/state 2 de la baseline
+0.4.1 en migración 0007 y el esquema 0.5.0/0008. La certificación histórica
+0.5.0 preservó exactamente la proyección legacy de 21 tablas y añadió las tres
+tablas Delivery vacías, con lane `DEFAULT` en jobs históricos. En 0.5.1 el head
+es `0009_delivery_reviews`: añade una cuarta tabla Delivery, inicialmente vacía
+al migrar backups anteriores. La recertificación de ambos orígenes y de las
+revisiones nuevas se informa en validación, sin reutilizar el PASS histórico.
 Docker copia cada componente a staging privado/read-only y vuelve a verificar
 tamaño/hash antes de consumirlo. El state 2 legacy no contenía una huella DDL del
 catálogo; la certificación compara su proyección canónica exacta de 21 tablas sin
@@ -351,12 +406,14 @@ no es un paso de actualización.
 
 El benchmark reproducible se ejecuta con
 `python scripts/tests/benchmark_cycle.py`, siempre en un proyecto desechable.
-El perfil variado de 50.000 filas y cuatro columnas completó nominalmente 100 MiB
+Como antecedente 0.4.0, el perfil variado de 50.000 filas y cuatro columnas completó nominalmente 100 MiB
 (106.194.531 bytes), con Parquet de archivo de 79.145.600 bytes. Ese ensayo usó
 overrides locales y no eleva los defaults del producto. 500 MiB, 1/2/5 GiB no se
 ejecutaron por presupuesto; no son capacidades certificadas ni fallos medidos.
 Tiempos, memoria, temporal, fuentes SQL y limitaciones están en
-[el informe de volumen](docs/development/volume-benchmark.md).
+[el informe de volumen](docs/development/volume-benchmark.md). No se atribuye esa
+medición histórica a 0.5.1; sus ejecuciones nuevas están en validación y en el
+informe específico de Data Delivery.
 
 ## Desarrollo directo opcional
 

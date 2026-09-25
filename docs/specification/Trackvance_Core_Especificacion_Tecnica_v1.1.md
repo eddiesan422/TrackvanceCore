@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-Revisión de implementación 0.5.0 | 23 de septiembre de 2026
+Revisión de implementación 0.5.1 | 25 de septiembre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -10,7 +10,7 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps, Sentinel y Data Delivery con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles o entregas y conserva evidencia verificable del resultado.
 
-Esta especificación describe la evolución funcional local 0.5.0: conserva las capacidades anteriores e incorpora Data Delivery controlado hacia PostgreSQL y SQL Server, con destinos/configuraciones versionados, mapping tipado, preflight, transacciones remotas, intentos, estado UNKNOWN y evidencia. El documento y la versión del software tienen ciclos distintos: se conserva el nombre v1.1 solicitado. La certificación local está cerrada y el resultado del commit de publicación se registra separadamente; no se extrapolan resultados de versiones anteriores.
+Esta especificación describe el endurecimiento local 0.5.1 sobre la baseline 0.5.0. Conserva Data Delivery PostgreSQL/SQL Server y añade reparación de evidencia, revisión operacional UNKNOWN, métricas honestas, conteos UPSERT fiables cuando el motor los proporciona, regresión temporal, linaje preciso, benchmark dedicado y carga diferida del frontend. El documento conserva su nombre v1.1. La tabla de validación informa cada ejecución real y distingue antecedentes, pendientes y limitaciones; no se heredan éxitos de otra versión.
 
 | Estado | Significado normativo |
 | --- | --- |
@@ -197,102 +197,587 @@ Un nuevo adaptador implementa DatasetSource y su normalización, registra opcion
 
 ## 5B. Data Delivery
 
-IMPLEMENTADO para destinos PostgreSQL y SQL Server. Un destino tiene identidad
-estable, revisión optimista y versiones inmutables. Registra motor, endpoint,
-usuario y opciones permitidas; la contraseña se cifra en `delivery_credentials`
-con clave en `delivery_keys` y sólo se representa mediante referencia opaca. La
-API no devuelve password ni referencia. Editar/deshabilitar un destino no cambia
-configuraciones o runs históricos que fijaron otra DestinationVersion.
+IMPLEMENTADO. Data Delivery publica una DatasetVersion canónica e inmutable en
+PostgreSQL o SQL Server. La versión 0.5.1 endurece la evidencia, la interpretación
+operativa de UNKNOWN y las métricas. No incorpora transformación funcional,
+conectores nuevos, automatización de entregas ni una transacción distribuida.
 
-La UI `/delivery` permite administrar/probar destinos, descubrir schemas/tablas y
-metadata, seleccionar una DatasetVersion, declarar target/mapping, revisar preview
-y preflight, publicar una configuración y ejecutar/consultar intentos/receipt. El
-mapping admite STRING, INT64, DECIMAL, DATE, TIMESTAMP y BOOLEAN; puede
-seleccionar, ordenar y renombrar columnas, pero el tipo lógico destino debe
-coincidir con el tipo lógico inmutable de la DatasetVersion. El sink sólo adapta
-su representación técnica: STRING no se interpreta como número, fecha, timestamp
-o booleano. No ejecuta transforms de negocio ni SQL arbitrario. DECIMAL viaja como valor exacto del driver; el
-preflight valida escala y dígitos enteros contra numeric/decimal o money con
-escala inspeccionable, y rechaza real/float aproximados. Los identificadores se
-validan y citan por dialecto.
+### A. Propósito y flujo funcional
 
-STRING admite únicamente almacenamiento Unicode variable exacto: text/varchar en
-PostgreSQL y nvarchar en SQL Server. La longitud se mide en unidades UTF-16; NUL,
-surrogates no emparejados y familias fixed/no Unicode se rechazan. Caracteres
-suplementarios exigen collation `_SC`/`_UTF8`; las tablas SQL Server nuevas usan
-`Latin1_General_100_CI_AS_SC`. TIMESTAMP exige offset explícito,
-conserva el instante y admite hasta seis microsegundos; las tablas nuevas usan
-timestamptz(6) y datetimeoffset(6). Un datetimeoffset(7) se mapea a STRING si
-se necesita conservar el séptimo dígito.
+El usuario escoge una versión concreta, un destino versionado, el target y el
+mapping. La vista previa explica la proyección; el preflight inspecciona el
+destino sin escribir. Publicar fija una configuración inmutable. Ejecutar crea
+una Run y un Job DELIVERY; el worker repite las comprobaciones antes de abrir la
+transacción. El resultado durable precede a receipt y manifest.
 
-La API `/api/v1/delivery` expone: `GET/POST /destinations`, detalle
-`GET/PATCH/DELETE /destinations/{id}`, pruebas de borrador/guardado, y
-`/schemas`, `/tables`, `/table-metadata`; `POST /preview` y `/preflight`;
-`GET/POST /configurations` y publicación de
-`/configurations/{id}/versions`; `GET/POST /runs`,
-`/runs/{id}/attempts` y `/runs/{id}/receipt`. El detalle/evidencia genéricos del
-Run continúan en `/api/v1/runs/{id}` y `/runs/{id}/evidence`. Los DTOs completos
-y permisos están en `backend/API_CONTRACT.md`.
+@diagram delivery-flow
 
-### Target, estrategias y preflight
+La fuente no se consulta otra vez durante la entrega: el mismo snapshot conserva
+sus valores aunque una tabla fuente o un archivo original cambien. Una versión
+aceptada de Intake también puede ser input; su linaje sigue apuntando al Intake
+que la produjo. La entrega no significa que las reglas de negocio del receptor
+hayan aprobado el contenido.
 
-`EXISTING_TABLE` exige una tabla existente compatible. `CREATE_TABLE` se usa sólo
-con `CREATE_AND_LOAD` y puede crear schema si se declaró; una tabla/schema que
-aparece durante la carrera produce fallo controlado. `APPEND` inserta;
-`OVERWRITE` ejecuta DELETE e inserción en la misma transacción; `UPSERT` exige
-claves explícitas del mapping, sin nulls/duplicados en la fuente y respaldadas por
-PK/unique compatible. El preflight valida artifact/hash, versión exacta de
-destino, target, tipos, nullability, permisos y recursos al publicar y nuevamente
-inmediatamente antes de escribir.
+### B. Identidad y versiones del destino
 
-Las tablas existentes se bloquean dentro de la transacción incluso con cero
-filas. PostgreSQL revalida nombre/columnas de la constraint UPSERT después de
-tomar el lock, exige una PK/UNIQUE nombrada no diferible, ejecuta
-`ON CONFLICT ON CONSTRAINT` y usa claves temporales con tipos/collation nativos;
-OVERWRITE rechaza RLS activa. PostgreSQL requiere INSERT para APPEND,
-INSERT+DELETE para OVERWRITE y INSERT+UPDATE+SELECT más TEMPORARY en la base para
-UPSERT. SQL Server exige SELECT para todo target existente, usa `#temp` con
-tipos/collation nativos, rechaza cualquier índice unique con IGNORE_DUP_KEY,
-evita MERGE y verifica cada clave con `SELECT @@ROWCOUNT`, abortando si afecta
-más de una fila. OVERWRITE requiere además INSERT+DELETE+VIEW DEFINITION y
-rechaza FILTER security policies; la creación de `#temp` depende de la política
-de tempdb. El preflight informa; estas comprobaciones transaccionales son la
-autoridad frente a drift.
+DeliveryDestination mantiene identidad estable, nombre, motor, estado enabled,
+revisión optimista y último test. DeliveryDestinationVersion conserva una revisión
+inmutable con configuración técnica y hash. Una configuración fija ambos IDs;
+cambiar la contraseña, host o nombre del destino no reescribe runs históricos.
 
-Cada ejecución se publica en lane DELIVERY. El delivery-worker no ejecuta el
-scheduler y nunca monta secretos de fuente. Un DeliveryAttempt pasa por STARTED y
-termina COMMITTED, FAILED o UNKNOWN. COMMITTED requiere confirmación del commit;
-FAILED representa un fallo comprobado; UNKNOWN conserva pérdida de confirmación,
-lease/worker perdido o recuperación de un STARTED sin prueba concluyente. UNKNOWN
-no se reintenta automáticamente. `PreparedDelivery` completa identificadores,
-tipos, valores y tamaño local antes de STARTED;
-constraints, serialización o deadlock explícitamente revertidos quedan FAILED,
-no UNKNOWN. El operador debe verificar el destino antes de
-crear deliberadamente otro Run.
+La API recibe password pero no la devuelve ni expone secret_reference. La
+contraseña cifrada vive en delivery_credentials y la clave en delivery_keys,
+volúmenes diferentes de los secretos fuente. La referencia opaca participa en el
+hash interno, no aparece como credencial pública. Deshabilitar o eliminar
+lógicamente el destino impide nuevas entregas; no borra su historia.
 
-El worker reclama condicionalmente el job antes de reconciliar y conserva el
-orden de locks Run→Job frente a cancelación. Una cancelación anterior a STARTED
-impide iniciar la transacción o escritura remota; un COMMITTED/FAILED conocido
-después de STARTED prevalece sobre cancelación tardía. Lease perdido o STARTED
-recuperado sin prueba concluyente queda UNKNOWN y nunca provoca replay ciego.
+### C. Contrato DataSink y límites de responsabilidad
 
-La transacción es atómica dentro del motor remoto, no una 2PC con metadata
-Trackvance. Un commit confirmado se persiste antes de autorizar evidencia local.
-El artifact DELIVERY_RECEIPT y la sección `delivery` del manifest schema 2 fijan
-Run, DatasetVersion/hash, DestinationVersion, target, estrategia, intento y
-métricas sin secretos ni filas completas. El linaje y auditoría conectan todos
-esos recursos.
+| Operación | Responsabilidad |
+| --- | --- |
+| test / schemas / tables | Comprobar conectividad y descubrir objetos autorizados; no escribir negocio. |
+| table_metadata / permissions | Obtener tipos, constraints, collation y capacidades necesarias. |
+| prepare | Validar identificadores, convertir representación técnica del mismo tipo lógico y congelar PreparedDelivery localmente. |
+| deliver_prepared | Ejecutar la estrategia y confirmar o clasificar el resultado de la transacción remota. |
+| DeliveryResult | Métricas de la operación confirmada y referencia remota opcional; no inventario físico final. |
 
-0.5.0 reutiliza `connections:read/manage/use`, `configurations:write`,
-`runs:read/execute` y `artifacts:download`. Mantiene autorización backend y scope
-de organización, pero el RBAC granular por destino, estrategia o aprobación tras
-UNKNOWN permanece pendiente. Tampoco se implementan sinks S3/Blob/REST,
-scheduler, ejecución masiva, aprobación de cuatro ojos, transformación funcional
-ni garantías de alta disponibilidad/volumen productivo. Triggers/rules del
-destino pueden transformar o suprimir DML y `rows_written` representa filas
-intentadas; `PENDING_REPAIR` requiere reparación explícita de evidencia y no
-repite la escritura. Un MONEY extremo que exceda el tipo remoto falla mediante
-rollback. Ver ADR 0015.
+DatasetSource sólo lee. StorageProvider sólo administra evidencia interna.
+DataSink no evalúa reglas Intake/Recon/Sentinel ni modifica el Parquet canónico.
+PreparedDelivery contiene schema, tabla, columnas, tuplas, estrategia, claves y
+bytes preparados. La preparación ocurre antes del marcador STARTED: un error
+local de tipos no debe convertirse en una supuesta transacción ambigua.
+
+### D. Mapping, selección y orden
+
+El mapping declara source_name, target_name, target_type, ordinal y nullable;
+STRING añade length y DECIMAL admite precision/scale. Puede seleccionar,
+reordenar y renombrar. No puede inventar columnas, repetir nombres o interpretar
+STRING como número, fecha, timestamp o booleano.
+
+| Tipo lógico | Target nuevo PostgreSQL | Target nuevo SQL Server | Regla de conservación |
+| --- | --- | --- | --- |
+| STRING | text / varchar | nvarchar con collation suplementaria | Texto Unicode exacto; identificadores conservan ceros iniciales. |
+| INT64 | bigint | bigint | Entero dentro del rango; no redondeo. |
+| DECIMAL | numeric(p,s) | decimal(p,s) | Valor exacto, escala y dígitos enteros suficientes. |
+| DATE | date | date | Fecha ISO inequívoca; no zona horaria. |
+| TIMESTAMP | timestamptz(6) | datetimeoffset(6) | Offset explícito, instante conservado, hasta microsegundos. |
+| BOOLEAN | boolean | bit | Booleano lógico; no interpretación libre de texto. |
+
+En target existente se inspecciona el tipo real y su capacidad. DECIMAL no se
+escribe en real/float aproximado. Un MONEY fuera del rango remoto puede superar
+las comprobaciones locales y fallar en la transacción: rollback comprobado, no
+éxito parcial. Identificadores SQL se validan y citan por dialecto; no se admite
+SQL libre en nombres ni una plantilla de consulta escrita por el usuario.
+
+### E. Texto y temporales: ejemplos exactos
+
+STRING acepta almacenamiento variable Unicode exacto: text/varchar PostgreSQL y
+nvarchar SQL Server. Se rechazan NUL, surrogates no emparejados, tipos fixed y
+familias no Unicode. La longitud se comprueba conservadoramente en unidades
+UTF-16; caracteres suplementarios exigen collation _SC/_UTF8 en SQL Server.
+Tablas nuevas usan Latin1_General_100_CI_AS_SC.
+
+| Fuente nativa | Lógico conservado | Ejemplo / consecuencia |
+| --- | --- | --- |
+| PostgreSQL timestamptz(0..6) | TIMESTAMP | 2026-09-20T11:30:00.123456-05:00 conserva el instante; la representación del offset puede normalizarse. |
+| PostgreSQL timestamp without time zone(0..6) | STRING | 2026-09-20 11:30:00.123456 no adquiere UTC implícita. |
+| SQL Server datetimeoffset(0..6) | TIMESTAMP | Zona explícita y fracción hasta seis cifras. |
+| SQL Server datetimeoffset(7) | STRING | CONVERT estilo127 conserva el séptimo dígito y puede representar el instante normalizado a UTC, por ejemplo 2026-09-20T16:30:00.1234567Z. |
+| SQL Server datetime2(0..7), datetime, smalldatetime | STRING | Sin zona; conservar texto nativo, no atribuir un instante. |
+
+La regresión 0.5.1 recorre adquisición, refresh, lectura histórica, Intake,
+Sentinel, Recon y Delivery en ambos motores. El objetivo no es cambiar esta
+política sino detectar pérdida de fracción, offset o coerción implícita. Si una
+versión conserva un temporal como STRING, Data Delivery sólo lo publica como
+STRING; convertirlo a TIMESTAMP requiere otra capacidad explícita, fuera de este
+endurecimiento.
+
+### F. Target nuevo o existente
+
+EXISTING_TABLE exige schema y tabla existentes, columnas compatibles, permisos y
+constraints adecuados. CREATE_TABLE se combina exclusivamente con CREATE_AND_LOAD.
+create_schema=true significa crear un schema que todavía no existe; no autoriza
+adoptar uno aparecido concurrentemente.
+
+El preflight no reserva el nombre. La transacción vuelve a comprobarlo: si otra
+sesión creó el schema o target entre validación y escritura, falla de forma
+controlada. Ni la carrera ni un reintento convierten CREATE_AND_LOAD en overwrite.
+No se ejecuta DROP TABLE para acomodar una estructura incompatible.
+
+### G. CREATE_AND_LOAD
+
+Crea el target con la definición técnica validada y carga la población preparada
+en una transacción. Cuando se solicitó, incluye la creación del schema. Un error
+de DDL o una fila rechazada revierte el conjunto conforme a las garantías del
+motor; no se publica un receipt COMMITTED antes de confirmar commit.
+
+Para cero filas puede crear una tabla vacía: filas preparadas y enviadas son cero.
+Esto no demuestra que otros volúmenes sean soportados. La metadata de la nueva
+tabla se gobierna por el mapping, no por una inferencia distinta dentro del sink.
+
+Precondiciones y permisos: schema existente con USAGE/CREATE en PostgreSQL, o
+CREATE de base si se crea schema; SQL Server requiere CREATE TABLE y ALTER del
+schema existente, o CREATE SCHEMA si es nuevo. El target debe estar ausente.
+La operación usa los locks DDL del motor, no reserva previamente el nombre.
+TARGET_ALREADY_EXISTS o SCHEMA_NOT_FOUND abortan ante drift; fallos de permisos
+o constraints no se convierten en carga parcial confirmada.
+
+Idempotencia y métricas: reabrir la misma Run no recrea la tabla ni reenvía datos.
+Otra Run deliberada contra el mismo nombre falla por existencia. Tras COMMITTED,
+rows_written=N; rows_inserted usa el conteo conocido del driver o null y
+rows_updated=0. Confirmación de commit perdida produce UNKNOWN, no un replay DDL.
+
+### H. APPEND
+
+Inserta todas las filas preparadas en un target existente. No elimina ni compara
+el contenido anterior. Dos runs deliberadamente diferentes pueden anexar las
+mismas filas: la idempotencia de Trackvance evita duplicar una misma solicitud
+identificada, no convierte APPEND en deduplicación remota.
+
+rows_written describe la población fuente enviada en la operación confirmada.
+Si había 100 filas y se enviaron 20, el contador no se convierte en 120. Un trigger
+puede además suprimir, transformar o generar filas; ese efecto no se deduce del
+contador.
+
+Precondiciones y permisos: estructura compatible y columnas requeridas
+satisfechas; PostgreSQL exige INSERT, SQL Server INSERT+SELECT. PostgreSQL toma
+ROW EXCLUSIVE para estabilizar el target; SQL Server TABLOCKX/HOLDLOCK hasta fin
+de transacción. El lock SQL Server puede bloquear otros escritores/lectores y
+no implica un rendimiento ilimitado. Constraints, timeout o target ausente
+producen error saneado y rollback conocido cuando el motor lo confirma.
+
+Resultado y métricas: no hay actualizaciones explícitas (rows_updated=0);
+inserciones sólo se reportan si el driver conoce su conteo. La población previa
+no se suma. La pérdida de confirmación conserva UNKNOWN y exige verificar el
+destino antes de otra Run, pues volver a anexar puede duplicar filas.
+
+### I. OVERWRITE
+
+Ejecuta DELETE e inserción en una misma transacción; conserva la tabla y no hace
+drop/recreate. Sustituye toda la población autorizada del target. Si falla la
+carga, un rollback conocido debe conservar la población anterior.
+
+Se rechazan RLS activa en PostgreSQL y FILTER security policies en SQL Server,
+porque podrían dejar filas no visibles al usuario y falsear la idea de reemplazo.
+Permisos INSERT y DELETE son necesarios; SQL Server requiere también SELECT y
+VIEW DEFINITION para las verificaciones. Un input vacío borra la población
+existente dentro de la transacción: debe ser una elección deliberada.
+
+Locks: SHARE ROW EXCLUSIVE en PostgreSQL; TABLOCKX/HOLDLOCK en SQL Server. La
+validación de políticas se repite bajo lock. UNSAFE_ROW_SECURITY o falta de
+visibilidad completa impiden la operación; no se considera válido borrar sólo
+las filas que una policy deja ver. IGNORE_DUP_KEY en SQL Server también se
+rechaza. Puede haber contención, crecimiento de log y fallos de constraints;
+la estrategia no deshabilita triggers ni integridad referencial.
+
+Métricas e idempotencia: rows_written cuenta N filas enviadas, no filas borradas;
+rows_inserted depende del driver y rows_updated=0. Otra Run es otra sustitución,
+no una continuación automática. Si no se conoce el resultado del commit, la
+revisión externa precede a cualquier nueva sustitución deliberada.
+
+### J. UPSERT y claves compuestas
+
+Exige claves explícitas, incluidas en el mapping, sin null ni duplicados en la
+fuente. El destino debe respaldarlas con PK o UNIQUE compatible. Una clave
+compuesta es una tupla ordenada con comparación nativa; no se concatena texto con
+un separador que pueda provocar colisiones.
+
+El staging de claves usa tipos y collation del target para descubrir colisiones
+que la igualdad de Python no detectaría. No se acepta una restricción distinta
+porque parezca equivalente después de un cambio concurrente. Un input vacío
+sigue validando y bloqueando el target; cero filas no desactiva la seguridad.
+
+Permisos: INSERT+UPDATE+SELECT en ambos motores, más TEMPORARY de base en
+PostgreSQL y acceso a #temp conforme a tempdb en SQL Server. PostgreSQL toma
+ROW EXCLUSIVE, revalida el árbitro nombrado y ejecuta ON CONFLICT; SQL Server
+conserva TABLOCKX/HOLDLOCK y UPDLOCK/HOLDLOCK para la búsqueda/actualización, sin
+MERGE. TARGET_KEY_NOT_UNIQUE y drift de constraint impiden confirmar una
+coincidencia ambigua; los errores de constraints y duplicados revierten el lote.
+
+Una repetición como Run nueva puede modificar otra vez valores o disparar
+triggers: UPSERT no garantiza ausencia universal de efectos secundarios.
+rows_written=N; insertadas/actualizadas siguen las capacidades descritas en K/L,
+no se infieren de una consulta previa. Vacío informa cero acciones conocidas.
+
+### K. PostgreSQL: transacción y conteos fiables
+
+El adaptador conserva el lock del target y revalida nombre/columnas de la
+constraint después de adquirirlo. UPSERT exige una PK/UNIQUE nombrada no
+diferible y usa ON CONFLICT ON CONSTRAINT; no sustituye la operación atómica por
+un SELECT seguido de UPDATE/INSERT susceptible a carreras.
+
+En PostgreSQL 18 la cláusula RETURNING documentada permite observar OLD/NEW.
+La detección de inserción usa la ausencia del registro OLD completo, no sólo una
+clave nullable; un registro existente cuyos campos sean null sigue siendo un
+registro existente. Los conteos son acciones DML de nivel superior reportadas
+por el motor. BEFORE triggers que suprimen filas no se cuentan como inserciones
+físicas exitosas; los efectos secundarios de triggers no son un censo final.
+
+En PostgreSQL 16/17 no hay una descomposición fiable equivalente para UPSERT no
+vacío con columnas actualizables: rows_inserted y rows_updated quedan null/N/D.
+La excepción es el mapping formado sólo por claves, que ejecuta DO NOTHING ante
+conflictos: las inserciones usan el affected-row count conocido y las
+actualizaciones son cero. Una operación vacía también puede afirmar cero porque
+no hubo acciones. No se usa xmax, estadísticas aproximadas ni un SELECT previo
+para fabricar precisión.
+
+Referencias primarias: https://www.postgresql.org/docs/18/dml-returning.html y
+https://www.postgresql.org/docs/18/sql-insert.html. La base metadata y el destino
+baseline siguen en PostgreSQL 16; el runner añade un destino desechable 18, sin
+actualizar silenciosamente la instalación del usuario.
+
+### L. SQL Server: concurrencia y conteos
+
+El adaptador evita MERGE. Usa transacción, staging #temp con tipos/collation del
+target, locks y comprobación por clave; SELECT @@ROWCOUNT valida que una acción
+no afecte más de una fila. La disponibilidad de tablas temporales depende de la
+política de tempdb. Un índice unique con IGNORE_DUP_KEY se rechaza para no
+silenciar duplicados.
+
+Los conteos sólo se exponen cuando el adaptador puede sostenerlos. Si el driver
+no proporciona un affected-row count conocido, se utiliza null, no el tamaño
+de la fuente ni un cero ficticio. Los efectos secundarios de triggers no se
+deducen de esos contadores. La semántica de rows_written
+continúa siendo filas fuente enviadas en la operación confirmada, no la suma de
+todas las filas tocadas por triggers.
+
+### M. Familias de preflight y fallos
+
+| Familia | Comprobación / riesgo prevenido |
+| --- | --- |
+| Fuente e integridad | DatasetVersion propia, artifact canónico materializable, tamaño y SHA-256; no entregar bytes sustituidos. |
+| Destino | Revisión exacta, hash, enabled y conexión; no usar otro endpoint por una edición posterior. |
+| Mapping y valores | Columnas, preservación de tipo, identificadores, nullability, longitudes, precisión y escala. |
+| Target | Existencia/ausencia esperada, metadata, columnas generadas/identity/default y compatibilidad real. |
+| Permisos | Privilegios específicos de estrategia, schema, tabla y temporales. |
+| UPSERT | PK/UNIQUE compatible; claves fuente no nulas, no duplicadas y collation nativa. |
+| Recursos locales | Consistencia del número real de filas/columnas con la metadata, límite MAX_ROWS y hasta 100 columnas. No comprueba memoria ni espacio libre del host. |
+
+POST /preflight realiza lectura técnica; el resultado no garantiza que nada
+cambie después. El worker lo repite, y los guards transaccionales son la última
+autoridad ante drift. FAILED_PRECONDITION es un estado del Run anterior al intento
+remoto: no debe confundirse con DeliveryAttempt.FAILED después de STARTED.
+
+### N. Preview, configuración y publicación
+
+POST /preview muestra una muestra acotada antes/después del mapping, orden y
+nombres. No envía datos al destino ni crea un intento. No certifica que todas las
+filas satisfagan constraints externas. La publicación de configuración valida el
+draft y fija schema_version=1, DatasetVersion, DestinationVersion, target,
+columns, write_strategy y upsert_keys.
+
+Una nueva revisión es otra configuración inmutable. La UI no puede cambiar
+target_type para forzar una conversión lógica prohibida. El propietario visible
+es una etiqueta operativa y no sustituye permisos o identidad de usuario.
+config_hash y stored_config_hash permiten verificar lo publicado.
+
+### O. Workers, lanes y frontera de commit
+
+@diagram delivery-lanes
+
+DEFAULT procesa Intake/Recon/Sentinel y programación local. DELIVERY sólo procesa
+entregas y no ejecuta scheduler ni monta secretos fuente. Ambos comparten
+metadata y StorageProvider; el delivery-worker sólo monta secretos de destino.
+El Job incluye lane y una reclamación condicionada al lease.
+
+La adquisición/reconciliación conserva el orden Run -> Job. Antes de STARTED se
+comprueba de nuevo que el worker conserva la reclamación. Una cancelación previa
+impide iniciar la escritura; un COMMITTED o FAILED ya conocido prevalece sobre
+una cancelación tardía. PostgreSQL interno y el motor receptor no participan en
+2PC: perder la confirmación exige expresar incertidumbre, no repetir.
+
+### P. Estados del intento y del Run
+
+@diagram delivery-states
+
+| Hecho verificable | Attempt | Run / decisión |
+| --- | --- | --- |
+| Preflight o preparación local fallidos | No se inicia intento | FAILED_PRECONDITION / FAILED |
+| Marcador durable previo al remoto | STARTED | RUNNING |
+| Commit remoto confirmado y persistido | COMMITTED | SUCCESS / COMMITTED |
+| Rechazo o rollback conocido | FAILED | FAILED / FAILED |
+| Confirmación perdida o STARTED recuperado sin prueba | UNKNOWN | UNKNOWN / UNKNOWN |
+| Commit conocido; publicación local incompleta | COMMITTED | SUCCESS / COMMITTED + PENDING_REPAIR |
+
+UNKNOWN no es una forma de FAILED. El sistema no afirma rollback ni commit cuando
+no puede demostrarlos. La recuperación de un attempt ya UNKNOWN no completa ni
+corrige retrospectivamente sus campos históricos. La revisión operacional es un
+registro aparte.
+
+### Q. UNKNOWN: revisión operacional append-only
+
+GET y POST /api/v1/delivery/runs/{run_id}/reviews consultan/anexan observaciones.
+El cuerpo exige delivery_attempt_id, outcome y note; verified_at es opcional,
+con zona, no futuro ni anterior al inicio del intento. Si se omite, el servidor
+registra el instante actual. La nota debe contener texto y tiene un máximo de
+4.000 caracteres.
+
+| outcome | Interpretación, nunca nuevo estado del intento |
+| --- | --- |
+| REMOTE_COMMIT_OBSERVED | El operador aporta una observación externa compatible con commit. |
+| REMOTE_NOT_COMMITTED_OBSERVED | El operador aporta una observación externa de ausencia de commit. |
+| INCONCLUSIVE | La comprobación no permite decidir. |
+
+DeliveryOperationalReview conserva org, Run, attempt, reviewer_id, snapshot de
+nombre, outcome, nota, verified_at y created_at. La migración nueva
+0009_delivery_reviews crea sólo esta tabla con FKs, índices y CHECK de outcomes.
+No modifica 0001..0008. No hay PATCH/DELETE de revisiones: una corrección se anexa
+como nueva observación. No existe aprobación de cuatro ojos ni validación remota
+automática de lo escrito por el operador.
+
+La UI muestra historial y advertencia de incertidumbre. Guardar una revisión
+no cambia Run/attempt a COMMITTED o FAILED, no encola un Job, no crea otro Run y
+no llama al DataSink. Si luego procede una nueva entrega, debe crearse
+deliberadamente con una nueva decisión operativa; no hay botón de replay ciego.
+
+### R. COMMITTED + PENDING_REPAIR: sólo evidencia local
+
+POST /api/v1/delivery/runs/{run_id}/repair-evidence reconstruye receipt/manifest
+cuando existe Run DELIVERY SUCCESS/COMMITTED y un único attempt COMMITTED
+coherente. No se admite reparar UNKNOWN, FAILED, otro módulo o una identidad
+ajena. El resultado es REPAIRED o ALREADY_VALID con los IDs de ambos artifacts.
+
+La operación bloquea la Run, valida organización, configuración/hash, identidad
+del destino/version, source schema/hash, artifact canónico y métricas persistidas.
+Usa los datos ya confirmados; no solicita contraseña, no descifra secretos, no
+instancia DataSink, no abre conexión remota y no repite DDL/DML/commit.
+
+Los IDs nuevos de evidencia se derivan de org/Run/kind. Se reutilizan bytes y
+enlaces válidos; las restricciones de linaje y la publicación sin reemplazo
+evitan duplicación. Ante publicación parcial puede completar lo ausente. Un
+archivo registrado ausente sólo se reconstruye si los bytes coinciden con su
+SHA histórico; un archivo corrupto o una discrepancia no se sobrescribe para
+ocultar el problema. El servicio falla cerrado y registra el fallo.
+
+Los planes 0.5.1 fijan además source_identity y la versión del motor de evidencia.
+Planes 0.5.0 que no contienen ese bloque se verifican con los registros retenidos;
+no se inventa un hash independiente que nunca fue almacenado. Artefactos 0.5.0
+válidos se conservan byte por byte. La UI ofrece “Reparar evidencia”, nunca
+“Reintentar entrega”, y mantiene visible el commit confirmado.
+
+Existe una ventana normal entre el commit durable y la publicación local. Si
+SUCCESS/COMMITTED todavía no incluye receipt_artifact_id ni PENDING_REPAIR, la
+UI muestra “Publicando evidencia local”, deshabilita descargas y consulta el Run
+cada 1,5 segundos durante hasta 60 segundos. Una respuesta lenta no se cancela
+para iniciar otra. Al vencer ese plazo ofrece Actualizar estado, sólo lectura;
+no marca la entrega como fallida ni ejecuta reparación o replay automáticamente.
+Si llega PENDING_REPAIR, pasa a la acción explícita de reparación con su permiso.
+
+### S. Idempotencia y concurrencia
+
+Idempotency-Key identifica una solicitud de ejecución con el mismo payload y
+scope; repetirla devuelve la misma Run, no otra transacción. No es una clave de
+deduplicación de negocio remota ni autoriza repetir UNKNOWN. Configuración,
+DatasetVersion y destino versionado forman el contexto verificable.
+
+La reparación es idempotente respecto a artifacts, enlaces y resultado; cada
+petición puede añadir auditoría de la acción, que no debe confundirse con otra
+entrega. La serialización local, los IDs estables y los guards de publicación
+protegen incluso una interrupción entre bytes y metadata. La revisión UNKNOWN,
+en cambio, es un historial de observaciones: cada POST válido añade un registro.
+
+### T. Métricas: significado y límites
+
+| Campo | Significado 0.5.1 |
+| --- | --- |
+| rows_attempted | Filas fuente preparadas para el intento. |
+| rows_written | Filas fuente enviadas sin error en una operación cuyo commit fue confirmado. No es COUNT(*) remoto. |
+| rows_inserted | Acciones INSERT fiables reportadas por el adaptador; null cuando no puede garantizarlas. |
+| rows_updated | Acciones UPDATE fiables reportadas por el adaptador; null cuando no puede garantizarlas. |
+| bytes_sent | Tamaño UTF-8 preparado de valores no null; no bytes de red/TLS ni tamaño final de la base. |
+| preflight_seconds | Duración monotónica del preflight del worker en runs nuevos. |
+| write_seconds | Duración monotónica de deliver_prepared, incluida confirmación remota, excluida publicación local. |
+
+null se muestra como N/D. Cero es un conteo conocido, nunca una sustitución
+cosmética de null. Los nuevos DTOs/evidencias añaden metric_semantics versión 1;
+la lectura de manifests 0.5.0 sin el bloque sigue siendo válida y no reescribe
+bytes. Los timings históricos ausentes no se rellenan con cero.
+
+### U. Receipt y manifest: ejemplo abreviado
+
+Ejemplo de forma, no resultado de una certificación. IDs y hashes son marcadores;
+los conteos elegidos ilustran UPSERT PostgreSQL 16 con desglose no disponible.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "DELIVERY_RECEIPT",
+  "run_id": "<run>",
+  "dataset_version_id": "<snapshot>",
+  "canonical_artifact_id": "<artifact>",
+  "canonical_sha256": "<sha256>",
+  "destination_id": "<destino>",
+  "destination_version_id": "<revision>",
+  "sink_type": "POSTGRESQL",
+  "target": {
+    "mode": "EXISTING_TABLE",
+    "schema_name": "public",
+    "table_name": "records",
+    "create_schema": false
+  },
+  "write_strategy": "UPSERT",
+  "delivery_attempt_id": "<attempt>",
+  "attempt_number": 1,
+  "rows_attempted": 3,
+  "rows_written": 3,
+  "rows_inserted": null,
+  "rows_updated": null,
+  "result": "COMMITTED"
+}
+```
+
+El receipt completo añade fuente, destino/config_hash, nombres/versiones, fechas,
+bytes y metric_semantics. El manifest schema 2 incluye inputs, configuration,
+processing, actor, engine_version, metrics y result_artifacts. Su sección delivery
+incluye destination, target, write_strategy, metrics y attempt. Repara con los
+valores persistidos del commit, no con un nuevo timestamp de ejecución.
+
+### V. Linaje persistido y auditoría
+
+@diagram delivery-lineage
+
+| source_type -> target_type | relation real |
+| --- | --- |
+| DATASET_VERSION -> RUN | DELIVERY_INPUT |
+| RUN -> DELIVERY_DESTINATION_VERSION | DELIVERED_TO |
+| RUN -> ARTIFACT (receipt) | DELIVERY_RECEIPT |
+| ARTIFACT (receipt) -> DELIVERY_ATTEMPT | EVIDENCE_OF |
+| RUN -> ARTIFACT (receipt o manifest) | RUN_OUTPUT |
+
+DELIVERY_DESTINATION_VERSION es un tipo de entidad, no la relación. Esta
+corrección documental no migra enlaces históricos ni cambia sus direcciones.
+Los tests contrastan los triples persistidos y la reconstrucción de evidencia.
+El backfill legacy de arranque no añade RUN_INPUT genérico a Runs Delivery;
+preserva los vínculos históricos que ya existan y no reemplaza la reparación
+explícita. El restore compara el grafo completo, sin omitir enlaces para aprobar.
+
+Auditoría conserva DESTINATION_CREATED/TESTED, DELIVERY_CONFIGURATION_PUBLISHED,
+DELIVERY_RUN_QUEUED, DELIVERY_STARTED/COMMITTED/FAILED/UNKNOWN y, en 0.5.1,
+DELIVERY_EVIDENCE_REPAIR_STARTED, DELIVERY_EVIDENCE_REPAIRED,
+DELIVERY_EVIDENCE_REPAIR_FAILED y DELIVERY_UNKNOWN_REVIEWED. No se incluye la nota libre de revisión en metadata de audit,
+aunque permanece accesible en su recurso autorizado.
+
+### W. Permisos, secretos y aislamiento
+
+Se reutilizan connections:read/manage/use, configurations:write,
+runs:read/execute y artifacts:download. Reparar y registrar revisión exigen
+runs:execute; leer revisiones exige runs:read. Las mutaciones conservan CSRF,
+sesión y scope de organización en backend. No se añaden roles ni permisos nuevos.
+
+No se permite cruzar un attempt de otra Run u organización. El nombre visible
+del revisor es snapshot y su UUID estable se conserva. UI oculta acciones no
+autorizadas, pero el backend sigue siendo la autoridad. RBAC granular por
+destino/estrategia y aprobación de cuatro ojos quedan fuera de alcance.
+
+### X. Backup, restauración y compatibilidad
+
+El backup conserva PostgreSQL, artifacts, secretos fuente/destino y ambas claves.
+Manifest de backup sigue en versión 2 porque la topología no cambia; la huella de
+estado pasa a 4 para incluir delivery_reviews. El restore nativo exige igualdad
+exacta de registros, hashes, secretos y relaciones.
+
+Los backups 0.5.0 (state 3, 0008) se migran a 0009 y se comparan mediante
+snapshot-legacy-v3, que excluye únicamente la nueva tabla vacía. Los 0.4.x
+(state 2, 0007) conservan la proyección legacy-v2, excluyendo tablas Delivery
+vacías y el lane DEFAULT añadido. No se omiten filas de revisiones para fingir
+compatibilidad: si existen en un upgrade legacy, la normalización falla.
+
+El drill 0.5.1 preservó nueve artifacts, dos secretos, 164 relaciones, dos
+intentos y una revisión. Antes del backup, dos peticiones de reparación
+concurrentes devolvieron REPAIRED/ALREADY_VALID con los mismos IDs y bytes.
+Después del restore, otra reparación devolvió ALREADY_VALID; el target original
+conservó cuatro filas y no se repitió la escritura. Se destruyó el origen
+desechable antes de restaurar en un proyecto nuevo. La revisión UNKNOWN fue un
+fixture explícito SIMULATED_UNKNOWN_NO_REMOTE_IO: no certifica una pérdida real
+exacta de confirmación post-commit; ese escenario se reporta separadamente,
+sin convertir NOT_RUN en PASS.
+
+### Y. Benchmark dedicado y operación en UI
+
+scripts/tests/delivery_benchmark_cycle.py levanta destinos PostgreSQL y SQL Server
+reales y desechables, usa contenido SHAKE256 determinista variado y recorre
+CREATE_AND_LOAD, APPEND, OVERWRITE y UPSERT. Smoke: 1 MiB y 1.000 filas.
+Representativo acotado: 8 MiB y 20.000 filas. Ninguno certifica capacidad de
+producción. Los límites habituales de 10 MiB/100.000 filas no aumentan.
+
+Registra bytes/filas/columnas/hash de origen; tiempo total, preflight y escritura;
+filas/s y MB/s; CPU, memoria, I/O y crecimiento de storage/temporales; outcome,
+conteos y motivo real de parada. Los picos muestreados pueden omitir ráfagas
+breves y los contadores cgroup incluyen actividad incidental del contenedor.
+Recurso insuficiente produce NOT_RUN_RESOURCE_LIMIT, nunca PASS. Los resultados
+medidos se publican en el informe específico y JSON sanitizados 0.5.1.
+
+#### Resultados locales del 25 de septiembre de 2026
+
+El smoke real de 1.074.923 bytes / 1.000 filas aprobó las ocho combinaciones en
+143,59 s de wall time. El representativo de 8.917.809 bytes / 20.000 filas también
+aprobó ocho de ocho en 207,70 s. Ambos tienen cuatro columnas y payload distinto
+por fila; el representativo usa celdas de 420 caracteres, frente a 1.049 en smoke.
+No son repeticiones estadísticas ni una progresión a ancho de fila constante.
+
+| Motor / estrategia | Escritura smoke s | Escritura 20.000 filas s | Filas/s representativo |
+| --- | --- | --- | --- |
+| PostgreSQL 16 / CREATE_AND_LOAD | 0,0255 | 0,2082 | 96.071 |
+| PostgreSQL 16 / APPEND | 0,0168 | 0,1945 | 102.807 |
+| PostgreSQL 16 / OVERWRITE | 0,0247 | 0,2191 | 91.273 |
+| PostgreSQL 16 / UPSERT | 0,0392 | 0,6329 | 31.599 |
+| SQL Server 2022 / CREATE_AND_LOAD | 0,4034 | 7,1269 | 2.806 |
+| SQL Server 2022 / APPEND | 0,4097 | 7,1833 | 2.784 |
+| SQL Server 2022 / OVERWRITE | 0,4727 | 7,2688 | 2.751 |
+| SQL Server 2022 / UPSERT | 1,7187 | 31,7338 | 630 |
+
+Escritura incluye conexión, locks/checks, DML y commit dentro de deliver_prepared;
+no incluye el preflight anterior, cola ni publicación local. El total de caso sí
+incluye esos pasos y polling, pero excluye arranque, upload y SQL independiente
+de verificación. El informe dedicado contiene ambos preflights, total, MB/s,
+CPU/I/O por contenedor y método, sin mezclar estas ventanas.
+
+En la carga representativa se prepararon/enviaron 20.000 filas por caso; UPSERT
+SQL Server reportó 10.000 insertadas y 10.000 actualizadas. PostgreSQL 16 devolvió
+null/null, aunque el SQL independiente verificó la mezcla esperada. APPEND dejó
+40.000 filas físicas; las demás estrategias dejaron 20.000. Esto confirma por
+qué filas enviadas no significa tamaño final de la tabla.
+
+El pico de memoria agregado muestreado fue 1.251.307.681 bytes en smoke y
+2.050.125.461 en representativo; CPU agregada máxima 141,38 % y 213,85 % de un
+núcleo, respectivamente, sobre 16 CPU lógicas asignadas a Docker. Hubo 28 y 40
+muestras, sin OOM ni corte del watchdog. El delivery-worker alcanzó 217.186.304
+bytes en el representativo; storage de artifacts creció de 15.325.905 a
+15.407.176 bytes. El temporal observado fue cero, sin garantizar ausencia de
+picos entre muestras. El cgroup memory.peak es acumulado, no exclusivo del caso.
+
+Los tiers de 100/500 MiB y 1/2/5 GiB quedan NOT_RUN_RESOURCE_LIMIT por el límite
+vigente de entrada de 10 MiB, no por una medición de incapacidad del hardware.
+El primer smoke falló antes de escribir porque el mapping del fixture usaba
+INT64 donde la inferencia produjo DECIMAL; se conserva como FAIL y su repetición
+es un resultado separado. La corrección no alteró tipos ni límites del producto.
+
+Evidencia: docs/development/delivery-benchmark-results-0.5.1.md y los directorios
+delivery-benchmark-smoke, delivery-benchmark-smoke-retry y
+delivery-benchmark-representative bajo docs/development/evidence/0.5.1.
+
+#### Recorrido funcional de la interfaz
+
+Pasos de UI: crear/probar destino; escoger versión; configurar target/mapping;
+revisar preview/preflight; publicar; ejecutar y abrir detalle. El detalle muestra
+intento, filas enviadas/N/D, receipt y manifest. Ante PENDING_REPAIR, comprobar el
+commit y pulsar Reparar evidencia. Ante UNKNOWN, verificar externamente, elegir
+outcome, explicar la observación y guardar; revisar el historial sin ejecutar
+una entrega adicional implícita.
+
+### Z. Límites y criterio de aceptación
+
+No hay garantía exactly-once distribuida, replay automático de UNKNOWN, SQL
+arbitrario, transformación funcional, scheduling Delivery, nuevo conector,
+SHIST, correo, SSO, HA ni certificación de volumen productivo. Los efectos
+secundarios del receptor quedan fuera del conteo físico de Trackvance.
+
+La aceptación exige tests nuevos de reparación sin DataSink, historial UNKNOWN
+inmutable, semántica nullable, conteos reales por versión de motor, temporalidad
+sin coerción, linaje exacto, benchmark y code splitting. Además se repiten las
+suites base, migraciones, conexiones, Delivery, recovery, navegador y CI. El
+apartado de validación contiene resultados ejecutados; este diseño no sustituye
+esa evidencia.
 
 ## 6. Carga, esquema y versionado
 
@@ -317,6 +802,19 @@ DatasetVersion conserva dataset_id, version, filename, source_type, SHA-256, sch
 ingestion_metadata incluye reader.key/version, source_format, format_label, reader_options efectivas, esquema nativo y política de numeración. Los históricos reciben un objeto vacío y siguen el adaptador compatible sin recalcular sus perfiles.
 
 GET /datasets/{id}/schema usa por defecto el perfil persistido. refresh=true vuelve a leer el footer canónico y conserva tipos lógicos declarados; devuelve scan_mode/scanned_rows y no aplica transforms ni reescribe historia. El control SHA-256 puede leer bytes para integridad aunque no procese filas de negocio.
+
+### Caso operativo: snapshot, refresh e historial
+
+Una carga crea DatasetVersion v1 y registra original y canónico. Un refresh de
+fuente crea v2 con otro ID y REFRESH_OF hacia v1, aunque el nombre del dataset
+sea el mismo. Abrir un Run antiguo sigue leyendo v1 y sus hashes, no la tabla
+externa actual. Si la fuente deja de estar disponible, su historial materializado
+continúa legible, siempre que los artifacts conservados superen la integridad.
+
+Corregir valores no modifica el archivo anterior: cargar/refrescar una nueva
+versión y ejecutar otra configuración/Run permite comparar el antes y después.
+Una pérdida o corrupción canónica no se corrige recalculando el SHA esperado;
+debe recuperarse desde un respaldo verificable o declararse no disponible.
 
 ## 7. Profiling, identificadores y transforms
 
@@ -397,6 +895,19 @@ Intake devuelve total_rows, valid_rows, error_rows, warning_rows, acceptance_rat
 
 El output reutilizable se guarda como Parquet INTAKE_ACCEPTED, con source_type=INTAKE_OUTPUT, canonical_artifact_id, parent_version_id y source_run_id. No tiene upload original ficticio. La UI muestra Artefacto derivado/Fuente de la versión y el linaje enlaza el input y el IntakeRun.
 
+### Caso operativo: aceptación y evidencia reutilizable
+
+Para un archivo de pagos, required valida identificación, positive exige monto
+positivo y reference compara la cuenta con una versión del catálogo. El usuario
+declara cuando corresponda trim o decimal_parse; el motor nunca los añade por
+su cuenta. Se publica el contrato y se ejecuta sobre una versión concreta.
+
+SUCCESS + REJECTED significa que la evaluación terminó y encontró incumplimientos;
+no debe repetirse como si hubiera ocurrido un error de infraestructura. La fila
+rechazada queda explicada por regla/valor/motivo. Las aceptadas generan una
+versión derivada trazable; su entrega posterior no necesita consultar de nuevo
+el archivo ni el catálogo remoto. Una regla WARNING no elimina la fila.
+
 ## 9. ReconOps y normalización declarada
 
 ReconOps compara versiones inmutables de origen y destino. key_columns admite una o varias columnas. El control conserva key_normalization en su versión, config hash, manifest, plan y diagnostics.
@@ -448,6 +959,20 @@ metrics incluye source_rows/target_rows, matched, mismatched, faltantes, duplica
 
 La precisión monetaria se implementa con Decimal y contexto suficiente para sumas, diferencias y porcentajes. Las expresiones tienen pruebas de paridad Polars/DuckDB donde se declara soporte. No se infiere equivalencia de todo el pipeline entre motores a partir de estas pruebas.
 
+### Caso operativo: claves, tolerancia y diferencias
+
+Un control de conciliación puede fijar (cuenta, fecha) como clave compuesta y
+comparar importe con tolerancia Decimal. Antes de ejecutar se eligen los dos
+snapshots y se revisan transforms y null_policy. Una clave duplicada en origen
+no se empareja arbitrariamente con la primera fila destino; conserva la
+clasificación de duplicidad y su evidencia.
+
+El resultado puede ser SUCCESS + WITH_FINDINGS. MATCH no implica igualdad de
+texto cuando se eligió tolerancia numérica; EXACT_COMPARE sí conserva la
+representación después de las transforms declaradas. Para temporales STRING,
+una prueba de igualdad no los convierte en instantes; DATE_TOLERANCE requiere
+su propio contrato temporal compatible.
+
 ## 10. Sentinel y métricas históricas
 
 Sentinel ejecuta monitores sobre una DatasetVersion y produce checks explicables. Los controles legacy SCHEMA_REQUIRED, NULL_RATE, FRESHNESS y VOLUME_CHANGE permanecen compatibles. Una columna ausente se distingue de una columna presente con nulls.
@@ -489,6 +1014,19 @@ En cada despacho se fija la última DatasetVersion registrada. No se consulta ni
 COALESCE_LATEST agrupa intervalos vencidos tras una pausa; SKIP_WHILE_ACTIVE evita solapar runs del mismo monitor. NO_DATASET_VERSION documenta la ausencia de entrada. Cursor, ocurrencia, Run, Job y auditoría se confirman en una sola transacción con compare-and-swap y unicidad por fecha prevista. El actor es SYSTEM / trackvance:local-scheduler.
 
 Mientras Docker o el worker están detenidos no hay ejecución. Un job largo puede retrasar el siguiente tick; la diferencia entre fecha prevista e inicio real queda visible. Las series agrupan muestras por métrica, dimensiones, método y versión, con un máximo de 2000 muestras recientes. Las alertas internas son Findings y aparecen en Sentinel y Centro de Control. NotificationDelivery prepara una interfaz futura; Email, Teams, Slack y Webhook no están integrados.
+
+### Caso operativo: monitoreo y comparación histórica
+
+Un monitor fija columnas, tasas permitidas y checks. Ejecutarlo contra un nuevo
+snapshot conserva ambos IDs y la definición exacta de cada métrica. Una alerta
+de null rate conduce al detalle del Run y al Finding, no modifica la versión
+observada. Deshabilitar una programación impide próximos despachos, sin borrar
+ocurrencias ni series ya registradas.
+
+Al cambiar la definición de una métrica no se mezclan valores incompatibles
+bajo una sola tendencia. El lector agrupa por método/versión/dimensiones.
+En 0.5.1 los temporales sin zona siguen siendo STRING en los checks de schema;
+la apariencia de fecha en una celda no autoriza reinterpretar la columna.
 
 ## 11. Excepciones con validación técnica
 
@@ -532,6 +1070,19 @@ Las mutaciones usan version para concurrencia optimista. Timeline conserva actor
 
 Si el Run candidato no contiene métricas suficientes para identificar y probar la regla histórica, el nuevo cierre queda bloqueado con motivo de evidencia insuficiente. Se requiere ejecutar nuevamente el mismo control y obtener evidencia verificable. Esto no modifica casos ya RESOLVED ni sus timelines históricos; endurece únicamente las nuevas decisiones de resolución.
 
+### Caso operativo: cierre respaldado por nueva ejecución
+
+Asignar una excepción a una persona no cambia la severidad del Finding original.
+El responsable documenta causa, corrección y evidencia; PENDING_VALIDATION espera
+un nuevo Run elegible de la misma configuración. Una ejecución anterior a la
+corrección o una regla con cero filas evaluadas no demuestra resolución.
+
+Resolver conserva vínculo al Run confirmatorio. Descartar, aceptar o marcar no
+aplicable es un cierre administrativo con motivo, no una aprobación técnica.
+Una reapertura deja historia y exige nueva validación posterior. Estos estados
+son distintos de la revisión UNKNOWN de Delivery: no se recicla Exception como
+sustituto de su registro operacional específico.
+
 ## 12. Centro de Control y navegación
 
 El Centro de Control es un cockpit operativo calculado por backend. El usuario puede identificar qué falla, qué requiere atención y abrir la acción correspondiente. Las cifras no son constantes de presentación.
@@ -560,6 +1111,20 @@ sin mantener una pantalla autenticada en el historial inmediato.
 
 Los detalles de dataset separan archivo original, fuente derivada, esquema/perfil y linaje. Los detalles de run separan Completada de Rechazado/Con hallazgos/Alerta. Los labels de negocio acompañan reason codes técnicos en resultados y evidencia. La numeración se muestra como Línea del archivo cuando representa línea física o Registro de la versión cuando corresponde.
 
+### Carga diferida y continuidad de la navegación
+
+React.lazy y Suspense separan las rutas pesadas sin introducir librerías. El
+shell, identidad y navegación permanecen disponibles mientras se descarga el
+módulo. El detalle Delivery se carga por separado para evitar que Runs importe
+todo el builder de salida. La frontera de error ofrece recuperación visible
+si falla la carga de un chunk; no deja una región vacía como éxito aparente.
+
+La medición 0.5.1 reduce el JavaScript inicial de 611,41 kB/179,47 kB gzip a
+364,97 kB/116,77 kB gzip: aproximadamente 40,3% y 34,9% respectivamente. Es una
+reducción del arranque, no de la suma de todos los assets; las features siguen
+descargándose al usarlas. El build deja de emitir la advertencia de chunk mayor
+que 500 kB. Las rutas directas, recarga y permisos se prueban en navegador.
+
 ## 13. StorageProvider, artefactos y linaje
 
 StorageProvider es el puerto de almacenamiento interno. temporary_path asigna staging local temporal; put_file publica bytes y metadata inmutables; materialize/materialize_reference obtiene un archivo verificable para el motor local; open_read/exists completan el acceso. Un adaptador remoto deberá administrar su cache materializado y su ciclo de limpieza.
@@ -580,7 +1145,7 @@ FileArtifactStore confina las rutas al root configurado, verifica tamaño/SHA-25
 | EXCEPTION_ATTACHMENT | Evidencia documental adjunta a un caso, inmutable y con hash. |
 | GENERATED_DEMO / legacy | Datos ficticios o artefactos históricos identificados explícitamente. |
 
-Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM, RUN_REFERENCE, EXCEPTION_EVIDENCE, SOURCE_SNAPSHOT, REFRESH_OF, DELIVERY_INPUT, DELIVERY_DESTINATION_VERSION, DELIVERY_RECEIPT, EVIDENCE_OF y EXPORT_OF entre versiones, runs, fuentes, destinos, intentos y artefactos.
+Artifact guarda id, organization_id, kind, name, path interno, sha256, size_bytes, media_type y fecha. ArtifactLink registra relaciones dirigidas DERIVED_FROM, RUN_INPUT, RUN_OUTPUT, INTAKE_ACCEPTED_FROM, RUN_REFERENCE, EXCEPTION_EVIDENCE, SOURCE_SNAPSHOT, REFRESH_OF, DELIVERY_INPUT, DELIVERED_TO, DELIVERY_RECEIPT, EVIDENCE_OF y EXPORT_OF entre versiones, runs, fuentes, destinos, intentos y artefactos.
 
 Antes de procesar o descargar, se comprueba la identidad registrada y su integridad. ARTIFACT_HASH_MISMATCH/ARTIFACT_INTEGRITY_ERROR impide usar bytes corruptos; no recalcula silenciosamente el hash histórico. El backfill aditivo registra archivos legacy verificables, cuenta ausentes/corruptos y conserva historia.
 
@@ -672,7 +1237,7 @@ La presencia de timeout_seconds en el plan no equivale a un límite duro por pro
 
 ## 17. Modelo persistente y migraciones
 
-PostgreSQL mantiene 24 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
+PostgreSQL mantiene 25 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
 
 | Tabla | Identidad / relación principal |
 | --- | --- |
@@ -700,6 +1265,7 @@ PostgreSQL mantiene 24 tablas de aplicación, además del control de revisión d
 | monitor_schedules | Monitor único, revisión vigente, habilitación, cursor y fecha de actualización. |
 | monitor_schedule_versions | Revisión inmutable del intervalo, inicio, activación y actor de una programación. |
 | monitor_occurrences | Programación/revisión, monitor, versión evaluada, fecha prevista/real, estado, motivo y Run. |
+| delivery_reviews | Run/attempt UNKNOWN, revisor estable y nombre, outcome, nota, fecha de verificación y creación. |
 
 ### Cadena de trazabilidad
 
@@ -715,15 +1281,16 @@ Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Find
 | 0006_local_identity_exceptions | Versionado de usuarios, fechas, campos operativos de excepciones y exception_attachments. |
 | 0007_monitor_scheduling | Programaciones, revisiones inmutables y ocurrencias Sentinel; unicidad e índices de despacho. |
 | 0008_data_delivery | Destinos/revisiones/intentos de entrega, lane persistida e índices/constraints de Data Delivery. |
+| 0009_delivery_reviews | Tabla append-only de revisiones operacionales UNKNOWN; FKs, índices y CHECK de outcomes. |
 
-La revisión vigente es 0008_data_delivery. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
+La revisión vigente es 0009_delivery_reviews. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
 
 ## 18. API y errores
 
 La base es /api/v1. El runtime FastAPI y backend/API_CONTRACT.md describen los
 campos exactos implementados. El inventario siguiente se genera desde
-backend/openapi.json; el snapshot regenerado declara 0.5.0, 81 paths y 14 paths
-de Data Delivery. La tabla siguiente forma parte del inventario ejecutable
+backend/openapi.json; el snapshot 0.5.1 añade reparación y revisión operacional
+al inventario de Data Delivery. La tabla siguiente forma parte del inventario ejecutable
 revisado antes de construir el PDF.
 
 @openapi
@@ -797,7 +1364,13 @@ El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y res
 
 scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiquetas Compose verificables y los seis volúmenes esperados. Detiene temporalmente web, scheduler y ambos workers, captura el estado consistente, detiene API y produce pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials, connection_keys, delivery_credentials y delivery_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que estaban activos al comenzar.
 
-El formato actual usa `backup-manifest.json` schema 2 y `state.json` schema 3. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
+El formato nativo 0.5.1 usa `backup-manifest.json` schema 2 y `state.json` schema 4. El verificador etiqueta la huella según la revisión real y el inventario congelado del runtime: 0007/state 2, 0008/state 3 o 0009/state 4; no según la versión del script copiado. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
+
+Reconocer la huella 0007 no amplía la topología del CLI de backup actual: exige
+seis volúmenes y dos workers. Para crear un respaldo sobre una instalación
+todavía en 0007 se emplean las herramientas archivadas de esa release. El restore
+actual sí acepta sus backups verificables; para runtime 0008 el tooling nuevo
+conserva la huella nativa state 3.
 
 La transferencia de archivos usa streaming: el helper escribe el tar por stdout hacia un archivo abierto por el proceso del host; la restauración envía ese archivo por stdin. No carga el archivo completo en RAM ni necesita un bind mount del directorio del host o elevar el helper a root. En POSIX se crean directorios de backup 0700 y archivos 0600; los contenidos restaurados conservan los modos verificados. El helper sólo monta el volumen necesario y permanece sin red.
 
@@ -852,7 +1425,7 @@ Como antecedente operativo de 0.4.0, la instalación principal se actualizó ent
 
 scripts/tests/benchmark_cycle.py ejecuta un proyecto Docker aislado con archivos sintéticos, fuentes PostgreSQL/SQL Server reales, materialización canónica, Intake, ReconOps y Sentinel. Registra bytes, filas, duración, throughput, CPU, memoria, I/O, snapshots, plan y éxito/fallo; watchdog detiene su proyecto si supera recursos o tiempo. La progresión exige preflight y termina ante una restricción de recursos. Los tamaños no ejecutados se marcan como tales.
 
-### Medición real disponible
+### Antecedente de volumen 0.4.0; no certifica 0.5.1
 
 El ciclo principal trackvance-bench-22852-894497 terminó PASS. Su fixture nominal de 100 MiB mide 106.194.531 bytes, 50.000 filas y cuatro columnas, con payload determinista variado SHAKE256_URLSAFE_V1. Docker Desktop 29.1.3 dispuso de 16 CPU y 16.326.524.928 bytes de memoria. La duración total fue 79,46 segundos. Las duraciones siguientes son tiempos de pared del runner, incluyendo transporte/espera cuando corresponde; no son microbenchmarks puros del motor.
 
@@ -917,7 +1490,15 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 @validation
 
-### Certificación incremental 0.5.0
+### Certificación incremental 0.5.1
+
+La evidencia de esta edición proviene de nuevas ejecuciones. Cada suite, motor,
+migración, benchmark y job CI tiene resultado propio; un escenario no ejecutado
+mantiene NOT_RUN con motivo. La prueba determinista de UNKNOWN no se presenta
+como reproducción física de una pérdida exacta de confirmación remota. La
+revisión visual del PDF se realiza después de incorporar los resultados finales.
+
+### Antecedente certificado 0.5.0 (no certifica 0.5.1)
 
 Ningún éxito de 0.4.1 se hereda como certificación de 0.5.0. La aceptación debe
 cubrir suite backend/scripts, calidad estática, frontend, migración 0008,
@@ -1022,7 +1603,7 @@ PySpark, conectores/fuentes/sinks adicionales, scheduler y RBAC granular de Deli
 
 Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones/roles, librerías no instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa.
 
-Se actualizan arquitectura local/final, esquema real de 24 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
+Se actualizan arquitectura local/final, esquema real de 25 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
 
 El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de semántica requiere ADR, pruebas, actualización de esta fuente y del PDF; un cambio de base de datos requiere Alembic nuevo. Las versiones de configs/manifests/métricas se gestionan separadas de la versión del producto.
 
@@ -1036,5 +1617,146 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | 19-09-2026 | v1.1, implementación 0.4.0 | Maduración funcional del roadmap local; resultados y límites según evidencia de esta revisión. |
 | 21-09-2026 | v1.1, implementación 0.4.1 | Configuración guiada por esquema, previews informativos, catálogo de responsables y cierre de sesión corregido; contratos del motor sin cambios. |
 | 23-09-2026 | v1.1, implementación 0.5.0 | Data Delivery PostgreSQL/SQL Server, destinos/configuraciones versionados, lanes, UNKNOWN, exactitud de tipos, locks/guardias transaccionales, secretos/evidencia/backup compatible y UI; validación local cerrada y CI informado por separado. |
+| 25-09-2026 | v1.1, implementación 0.5.1 | Ocho endurecimientos focales, capítulo Delivery A-Z, nueva certificación y benchmark propio; límites y resultados según evidencia 0.5.1. |
 
-La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.0 fue regenerado; el PDF corresponde a la certificación local y a los siete jobs de GitHub Actions aprobados, con revisión visual completa antes de publicarse. Los resultados 0.5.0 son una entrada explícita del generador; el documento no reutiliza números de una entrega anterior como certificación de 0.5.0.
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.1, el informe validation_results_0.5.1.json y esta fuente son entradas explícitas del generador. Publicar exige candidato y revisión visual completa; la tabla de validación conserva resultados locales y CI separados. Los archivos de resultados 0.5.0 y anteriores permanecen como antecedentes, nunca como certificación 0.5.1.
+
+
+## 24. Cambios funcionales y técnicos 0.5.1
+
+### 1. Reparación local de evidencia COMMITTED
+
+Antes: el worker preservaba COMMITTED y marcaba PENDING_REPAIR, pero el operador
+no tenía una acción segura para completar receipt/manifest. Riesgo: confundir
+evidencia ausente con entrega fallida y volver a escribir.
+
+Solución funcional: “Reparar evidencia” conserva el commit. Solución técnica:
+validación local estricta, bloqueo de Run, artifacts deterministas, publicación
+sin reemplazo y reutilización de enlaces. Archivos: delivery_service.py,
+delivery_api.py, delivery_schemas.py, DeliveryOperations.tsx y tests operacionales.
+Modelo: no añade tabla para reparar. API: POST repair-evidence con runs:execute.
+
+Compatibilidad: conserva bytes 0.5.0 y no altera intentos ni migraciones anteriores.
+Pruebas: negar DataSink/SecretStore, repetición/concurrencia, parcial/ausente,
+tampering, organización, permisos y restore. Se cubre también la ventana normal
+COMMITTED anterior a receipt/manifest: UI y runners esperan publicación con
+límite, sólo por GET y sin ocultar PENDING_REPAIR. Límite: no puede inventar evidencia
+independiente ausente ni corregir bytes corruptos sobrescribiendo su hash.
+
+### 2. Revisión operacional de UNKNOWN
+
+Antes: UNKNOWN expresaba correctamente la incertidumbre, pero carecía de un
+historial estructurado de verificación externa. Riesgo: sobrescribir el intento
+original o esconder la conclusión en un comentario no consultable.
+
+Solución funcional: observaciones append-only con tres outcomes, nota y revisor.
+Solución técnica: DeliveryOperationalReview y 0009_delivery_reviews, FKs/CHECK,
+scope y fecha validada; el worker deja intacto un attempt ya UNKNOWN. Archivos:
+models.py, migration 0009, delivery_service/api/schemas.py, worker.py y UI.
+
+API: GET/POST reviews. UI: formulario e historial con advertencia de no replay.
+Compatibilidad: ninguna fila previa cambia. Pruebas: actor/fecha/organización,
+outcomes, historial, intento inmutable, sin Job nuevo, upgrade/downgrade y recovery.
+Límite: una afirmación humana no es confirmación automática ni aprobación dual.
+
+### 3. Semántica uniforme de métricas
+
+Antes: algunas descripciones trataban rows_written como filas físicas y podían
+dar a null apariencia de cero. Riesgo: inferir una población remota incorrecta,
+especialmente con UPSERT, triggers o filas preexistentes.
+
+Solución funcional: mostrar filas enviadas y N/D explícito. Solución técnica:
+delivery_metrics.py centraliza metric_semantics versión 1; servicio, DTO,
+receipt, manifest y UI conservan null. Run nuevo persiste tiempos separados de
+preflight y escritura. Modelo: sin nuevas columnas ni reinterpretación histórica.
+
+Pruebas: valores conocidos/desconocidos/cero, recibos históricos sin metadata
+aditiva y formato UI. Archivos: data_sinks.py, delivery_metrics.py,
+delivery_service.py y feature delivery. Límite: bytes preparados no son tráfico
+de red y filas enviadas no equivalen a inventario físico post-trigger.
+
+### 4. Desglose UPSERT PostgreSQL por capacidades
+
+Antes: el conteo diferenciado no podía garantizarse en todas las versiones.
+Riesgo: usar un SELECT previo sujeto a carreras o un detalle interno como xmax.
+
+Solución: PostgreSQL 18 RETURNING OLD/NEW, preservando ON CONFLICT, locks y
+constraint nombrada; PostgreSQL 16 conserva null cuando no sabe. No modifica
+el servidor metadata ni exige actualización de destinos. Archivos: data_sinks.py,
+delivery_metrics_probe.py, delivery_cycle.py y overlay de destinos de pruebas.
+
+API/UI reciben enteros o null existentes; no hay migración. Pruebas reales:
+inserción, actualización, mezcla, clave compuesta, vacío, rollback, drift,
+supresión por trigger y registro OLD totalmente null. Límite: acciones reportadas
+no incluyen un censo de efectos secundarios del receptor.
+
+### 5. Regresión temporal exhaustiva
+
+Antes: existía la política conservadora, con cobertura parcial de precisiones y
+tránsito entre módulos. Riesgo: que un cambio en driver/lector pierda fracción,
+invente zona o convierta un texto sólo porque parece una fecha.
+
+Solución: matrices de precisión PostgreSQL y SQL Server, casos null/offset y
+valores exactos, refresh e historia, Intake/Sentinel/Recon y entrega. Archivos:
+test_dataset_sources.py, test_data_sinks.py, connections_cycle.py y fixtures.
+No cambia modelo, API ni política temporal como parte de la regresión.
+
+Compatibilidad: snapshots anteriores permanecen inmutables. La UI conserva su
+tipo lógico y no ofrece coerción prohibida en mapping. Pruebas reales y
+unitarias se registran separadas. Límite: TIMESTAMP llega hasta microsegundos;
+el séptimo dígito o ausencia de zona se conserva como STRING. La adquisición
+SQLServer estilo127 puede normalizar a UTC; no se promete preservar la forma
+numérica original del offset anterior a materializar el snapshot.
+
+### 6. Linaje canónico sin migración histórica
+
+Antes: documentación confundía DELIVERED_TO con el tipo de entidad
+DELIVERY_DESTINATION_VERSION. Riesgo: lectores/documentación dibujando un grafo
+distinto del persistido.
+
+Solución: tabla y diagrama exactos de source_type, relation y target_type; se
+mantienen DELIVERY_INPUT, DELIVERED_TO, DELIVERY_RECEIPT, EVIDENCE_OF y RUN_OUTPUT.
+Archivos: especificación, ADR0015, API_CONTRACT, services.py y pruebas de linaje.
+Modelo/API: ningún rename de datos ni backfill destructivo.
+
+La reparación reconstruye los mismos enlaces faltantes y no inventa una relación
+nueva. El drill detectó que el backfill legacy de arranque añadía RUN_INPUT a
+Runs Delivery; ahora los excluye, sin borrar vínculos históricos preexistentes.
+Pruebas contrastan triples, ausencia de duplicados y preservación exacta tras
+reinicio/restore. Límite: este grafo
+describe evidencia interna; no representa linaje a nivel fila en el sistema
+receptor.
+
+### 7. Benchmark exclusivo de Delivery
+
+Antes: el benchmark general cubría adquisición/calidad, no aislaba estrategias
+de salida. Riesgo: usar su throughput como si midiera Delivery.
+
+Solución: runner dedicado, fixture variado determinista, ocho combinaciones
+motor/estrategia, smoke y representativo acotado, watchdog y recursos observados.
+Archivos: delivery_benchmark_cycle.py, overlay delivery-benchmark, tests,
+workflow CI, informe y evidencia JSON 0.5.1. API: utiliza contratos públicos;
+modelo/UI de producto no cambian por el benchmark.
+
+Pruebas: guard de proyecto, límites sin aumento, generación determinista,
+mediciones reales y limpieza. Compatibilidad: no usa main ni datos del usuario.
+Límite: NOT_RUN_RESOURCE_LIMIT se conserva; no se extrapola a producción ni
+se afirma una precisión temporal/espacial mayor que la del muestreo.
+
+### 8. División del frontend en módulos de carga diferida
+
+Antes: rutas pesadas compartían un bundle inicial de 611,41 kB. Riesgo: coste de
+arranque y advertencia de tamaño, aunque la pantalla solicitada fuera pequeña.
+
+Solución: React.lazy/Suspense, imports dinámicos y frontera de error; separación
+del detalle Delivery del builder. Archivos: App.tsx, RouteContent.tsx, Runs.tsx,
+DeliveryRunDetail.tsx y pruebas. Modelo/API: sin cambio de contratos por splitting.
+Compatibilidad: rutas, sesión, permisos, callbacks y navegación directa conservados.
+
+Pruebas: Vitest incluye una promesa lazy rechazada para el fallo de carga;
+Playwright intercepta la API para rutas/deep links y se ejecuta por separado con
+backend real. No se atribuye al navegador una inyección de fallo de red del
+chunk. Build medido antes/después: bundle inicial nuevo de 364,97 kB;
+la suma de todos los chunks se informa por separado. Límite: la primera apertura
+de una feature puede requerir su descarga; una caché o red defectuosa debe mostrar
+error recuperable, no una pantalla vacía.

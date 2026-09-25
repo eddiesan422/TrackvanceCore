@@ -1,4 +1,80 @@
-# Validación de Trackvance Core 0.5.0
+# Validación de Trackvance Core 0.5.1
+
+Corte de trabajo: 25 de septiembre de 2026, America/Bogota. Baseline
+`e7838c3c86b2117605a889f23242e75d9b09577d`, rama `feat/local-prototype`.
+No se heredan éxitos 0.5.0. El código final `8927ea0` completó los ocho jobs de CI.
+La publicación documental posterior se verifica también por CI antes de entregar;
+se distingue del commit de código para evitar referencias circulares en el PDF.
+
+| Gate 0.5.1 | Evidencia ejecutada hasta este corte |
+| --- | --- |
+| Python backend + scripts | Pasada completa sobre 8927ea0: 1.091 PASS en 65,97 s; dos avisos Starlette/AnyIO existentes. Incluye las esperas de publicación de evidencia y sus regresiones. |
+| Ruff / Mypy | PASS; Mypy 39 archivos fuente. |
+| Frontend | ESLint, TypeScript, build PASS. 154 Vitest/17 archivos PASS en 10,96 s. |
+| Bundle | 611.407→364.966 bytes iniciales; gzip 179.471→116.768; 19 JS / 4 CSS; advertencia >500 kB eliminada. |
+| Playwright interceptado | 7/7 PASS en 13,6 s sobre build real de preview; API simulada, no certifica SQL. Incluye receipt tardío y PENDING_REPAIR tardío. |
+| Conexiones reales | 96 comprobaciones PASS, smoke 84 PASS, Playwright 28 PASS / 2 opt-in omitidos; matriz temporal PG 14 columnas / SQL Server 18 y tránsito completo por módulos. |
+| Delivery real | 114 comprobaciones PASS incluidas 22 pruebas de métricas PostgreSQL 16/18; navegador focal 1/1 PASS, reinicio y búsqueda de secretos PASS. |
+| Migraciones / recovery | PASS real: 0008→0009→0008 con 24 tablas históricas y ocho enlaces preservados. Backup nativo recuperó 9 artifacts, 2 secretos, 164 relaciones, 2 intentos y 1 revisión; reparación concurrente y post-restore sin reenvío (4 filas remotas invariantes). |
+| Compose integral local | PASS: doctor, migraciones, smoke API 84/84 (10,9 s), Playwright 24 PASS / 6 opt-in omitidos (2,0 min); 206 artifacts / 1.605 relaciones y huella exacta tras restart, state 4 / 0009. Este ciclo precede los dos escenarios UI de publicación tardía; el CI del código final se informa separadamente. |
+| Benchmark general smoke | PASS acotado: 1.074.923 bytes / 1.000 filas / cuatro columnas, 39,4225 s; memoria agregada pico 379.479.652 bytes, sin OOM ni corte. No certifica volumen. |
+| Benchmark Delivery | Smoke real 8/8 PASS: 1.074.923 bytes / 1.000 filas / 143,59 s. Representativo 8/8 PASS: 8.917.809 bytes / 20.000 filas / 207,70 s. Primer intento falló por mapping del fixture y quedó conservado, no contado como éxito. |
+| Compatibilidad 0.4.x/0.5.0 | PASS nuevo: backup auténtico 0.4.1 state 2/0007, 7 artifacts/1 secreto; runtime auténtico 0.5.0 state 3/0008, 9 artifacts/2 secretos. Ambos llegan a state 4/0009 con proyección exacta; DTOs y bytes históricos Delivery intactos. Tooling nuevo sobre 0008 produce exactamente la misma huella y cinco inventarios de volúmenes que el antiguo. |
+| GitHub Actions | SUCCESS: ocho jobs sobre 8927ea0, [workflow 36194431770](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770). Pytest 1.091/62,78 s; Vitest 154/17 archivos. Cada resultado está en [ci.json](evidence/0.5.1/ci.json). |
+| Playwright del código final en CI | Compose 26 PASS/6 opt-in omitidos, más clean-demo 1/1; Conexiones 30 PASS/2 omitidos; Delivery 1/1. Deduplicación de archivo/título parametrizado: 32 escenarios distintos con PASS, siete de API interceptada y 25 restantes. Los SKIP no se suman como éxito. |
+| PDF | Publicado tras inspección visual de las 52 páginas; 111 marcadores/27 secciones. Hash idéntico al candidato revisado y 52 PNG publicados idénticos: [verificación](evidence/0.5.1/pdf-verification.json). |
+
+Evidencia nueva en [evidence/0.5.1](evidence/0.5.1). No se suben backups, claves,
+contraseñas, CSV de población ni volcados de base como evidencia pública.
+
+## Cobertura y límites nuevos 0.5.1
+
+Reparación local valida COMMITTED, hashes/identidades/métricas, no toca DataSink
+ni SecretStore, es idempotente y conserva evidencia 0.5.0. UNKNOWN mantiene Run e
+intento y anexa revisión independiente. La única migración nueva es 0009; los
+hashes de 0001..0008 se contrastan contra la baseline. OpenAPI runtime 0.5.1 tiene
+83 paths / 71 schemas, incluidos 16 paths Delivery; un test compara el JSON con runtime.
+
+Los conteos PostgreSQL 18 provienen de RETURNING OLD/NEW dentro de la transacción.
+PostgreSQL 16 conserva N/D cuando el desglose no es fiable. La matriz temporal
+descubrió una expectativa incorrecta del harness: SQL Server estilo 127 normaliza
+datetimeoffset(7) a UTC. Se corrigió la expectativa y se mantuvo la política
+0.5.0, conservando el séptimo dígito como STRING. Otro fallo del harness fue
+null_policy ubicado fuera de parameters en el nuevo control Recon; se corrigió
+y se repitió el ciclo completo. Ninguno se presentó como defecto de producto
+ni como prueba aprobada antes de repetirlo.
+
+El recovery encontró dos incidencias y repitió el ciclo completo tras corregirlas:
+transporte stdin CP1252 en Windows, ahora UTF-8 explícito; y backfill genérico de
+arranque que añadía RUN_INPUT no canónico a Runs Delivery, ahora excluidos de esa
+rutina legacy. No se borran enlaces históricos ni se relaja la comparación exacta.
+El verificador distingue state 2/3/4 por revisión real e inventario congelado,
+sin etiquetar un runtime antiguo como si ya hubiese migrado a 0009.
+
+Los intentos CI fallidos se conservan en [ci-attempts.json](evidence/0.5.1/ci-attempts.json).
+El primero detectó permisos ejecutables de dos scripts Linux. Otro benchmark
+detectó `RECEIPT_NOT_READY`: SUCCESS/COMMITTED se persiste antes del receipt.
+Los runners ahora esperan su referencia sólo con GET y fallan ante PENDING_REPAIR;
+no reparan ni reenvían para lograr PASS. La UI espera hasta 60 segundos y permite
+actualizar estado manualmente. El CI completo posterior aprobó sin relajar
+verificaciones. La causa exacta de los fallos recovery de diagnóstico suprimido
+no pudo establecerse y no se atribuye retrospectivamente a esa misma carrera.
+
+En los drills legacy, dos intentos iniciales fallaron; el segundo precisó un GET
+de configuración individual inexistente en el harness, corregido por el listado
+público. Un tercer intento falló durante creación Compose antes del arranque API;
+su diagnóstico suprimido no permite atribuir una causa exacta. El cuarto ciclo
+completo aprobó ambos orígenes. Todos limpiaron recursos propios y conservaron
+el inventario de la instalación principal. No se cuentan los intentos fallidos
+como PASS ni se atribuyen automáticamente a defectos del producto.
+
+La pérdida exacta post-commit de confirmación remota conserva
+NOT_RUN_NONDETERMINISTIC; tests deterministas y fixture UNKNOWN de recovery no
+prueban esa ventana física. La revisión humana no demuestra commit por sí sola.
+El benchmark no cuenta filas físicas a partir de rows_written ni publica ceros
+en lugar de métricas desconocidas. Volumen fuera de límites mantiene NOT_RUN.
+
+## Antecedente 0.5.0, no certificación 0.5.1
 
 Corte documental del 23 de septiembre de 2026 (America/Bogota). La implementación
 0.5.0 añade Data Delivery y cambia código, migración, topología Compose y contratos;

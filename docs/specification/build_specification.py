@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.5.0"
-EDITION_DATE = "23 septiembre 2026"
+VERSION = "0.5.1"
+EDITION_DATE = "25 septiembre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -70,6 +70,8 @@ STYLES = {
                          textColor=NAVY, spaceAfter=12, keepWithNext=True),
     "h2": ParagraphStyle("h2", fontName="ArialBold", fontSize=11, leading=15,
                          textColor=TEAL, spaceBefore=7, spaceAfter=6, keepWithNext=True),
+    "h3": ParagraphStyle("h3", fontName="ArialBold", fontSize=9.5, leading=13,
+                         textColor=NAVY, spaceBefore=7, spaceAfter=5, keepWithNext=True),
     "cell": ParagraphStyle("cell", fontName="Arial", fontSize=8.3, leading=10.8,
                            textColor=INK),
     "head": ParagraphStyle("head", fontName="ArialBold", fontSize=8.3, leading=10.8,
@@ -84,6 +86,8 @@ STYLES = {
 
 
 def escaped(text: str) -> str:
+    # Portable PDF typography: avoid non-breaking / Unicode dash glyph fallbacks.
+    text = re.sub("[\u2010-\u2015]", "-", text)
     text = html.escape(text)
     return re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', text)
 
@@ -177,13 +181,61 @@ class Diagram(Flowable):
                     self.arrow(x + (w - 36) / 4 + 1, 155, x + (w + 12) / 4 - 2, 155)
             self.box(0, 70, w, 43, "Validación técnica posterior de la misma configuración", "Resolución humana o política automática por caso, deshabilitada por defecto")
             self.box(0, 7, w, 48, "Cierre administrativo / Reapertura", "Descartada, aceptada y no aplica requieren motivo; reabrir exige comentario")
-        else:
+        elif self.kind == "delivery-flow":
+            titles = [("DatasetVersion", "Parquet + hash"), ("Configuración", "Destino + mapping"),
+                      ("Preflight", "Solo lectura"), ("Run DELIVERY", "Cola aislada")]
+            for i, (title, detail) in enumerate(titles):
+                x = i * (w + 12) / 4
+                self.box(x, 126, (w - 36) / 4, 52, title, detail)
+                if i < 3:
+                    self.arrow(x + (w - 36) / 4 + 1, 152, x + (w + 12) / 4 - 2, 152)
+            self.box(0, 39, 163, 60, "Transacción remota", "Prepare -> STARTED -> DataSink")
+            self.box(181, 39, 163, 60, "Resultado durable", "COMMITTED / FAILED / UNKNOWN")
+            self.box(362, 39, 164, 60, "Evidencia local", "Receipt + manifest + linaje")
+            self.arrow(460, 125, 460, 110)
+            self.arrow(460, 110, 80, 110)
+            self.arrow(80, 110, 80, 100)
+            self.arrow(164, 70, 179, 70)
+            self.arrow(345, 70, 360, 70)
+        elif self.kind == "delivery-lanes":
+            self.box(0, 128, w, 47, "API -> JobQueue durable", "Autorización + snapshots + idempotencia")
+            self.box(0, 54, 247, 53, "Worker DEFAULT", "Intake / Recon / Sentinel + scheduler")
+            self.box(279, 54, 247, 53, "Worker DELIVERY", "Solo salidas; secretos de destino")
+            self.arrow(122, 127, 122, 109)
+            self.arrow(402, 127, 402, 109)
+            self.box(0, 0, w, 45, "Metadata y StorageProvider compartidos", "No hay transacción distribuida con la base externa")
+        elif self.kind == "delivery-states":
+            self.box(173, 137, 180, 42, "STARTED", "Marcador persistido antes del remoto")
+            outcomes = [("FAILED", "Fallo / rollback conocido"), ("COMMITTED", "Commit confirmado"),
+                        ("UNKNOWN", "Confirmación indeterminada")]
+            for i, (title, detail) in enumerate(outcomes):
+                x = i * 179
+                self.box(x, 59, 168, 51, title, detail)
+                self.arrow(263, 136, x + 84, 111)
+            self.box(0, 0, 250, 45, "PENDING_REPAIR", "Solo evidencia; no repite COMMITTED")
+            self.box(276, 0, 250, 45, "Revisión operacional", "Anexa observación; conserva UNKNOWN")
+            self.arrow(263, 58, 125, 46)
+            self.arrow(442, 58, 402, 46)
+        elif self.kind == "delivery-lineage":
+            self.box(0, 137, 156, 43, "DatasetVersion", "Input inmutable")
+            self.box(186, 137, 155, 43, "Run DELIVERY", "Configuración fija")
+            self.box(371, 137, 155, 43, "DestinationVersion", "Revisión inmutable")
+            self.arrow(157, 157, 184, 157)
+            self.arrow(342, 157, 369, 157)
+            self.box(0, 54, 250, 47, "Artifact DELIVERY_RECEIPT", "RUN_OUTPUT + DELIVERY_RECEIPT")
+            self.box(277, 54, 249, 47, "DeliveryAttempt", "Artifact --EVIDENCE_OF--> intento")
+            self.arrow(263, 136, 125, 103)
+            self.arrow(251, 77, 275, 77)
+            self.box(0, 0, w, 45, "DatasetVersion --DELIVERY_INPUT--> Run --DELIVERED_TO--> destino", "DELIVERY_DESTINATION_VERSION es target_type, no relation")
+        elif self.kind == "product":
             self.box(0, 128, w, 48, "Kubernetes / AKS / EKS / OpenShift", "Web + réplicas API y workers del monolito modular")
             titles = [("Metadata", "PostgreSQL administrado"), ("Storage", "S3 / Azure Blob"), ("Jobs / compute", "Redis-Celery / Polars-PySpark")]
             for i, (title, detail) in enumerate(titles):
                 self.box(i * (w + 10) / 3, 60, (w - 20) / 3, 49, title, detail)
                 self.arrow(i * (w + 10) / 3 + (w - 20) / 6, 127, i * (w + 10) / 3 + (w - 20) / 6, 111)
             self.box(0, 3, w, 42, "OIDC · Secrets Manager · OpenTelemetry · CI/CD", "Terraform + Helm | Infraestructura objetivo")
+        else:
+            raise ValueError(f"Diagrama desconocido: {self.kind}")
 
 
 class SpecDocument(BaseDocTemplate):
@@ -191,7 +243,8 @@ class SpecDocument(BaseDocTemplate):
         super().__init__(str(path), pagesize=letter, leftMargin=MARGIN, rightMargin=MARGIN,
                          topMargin=58, bottomMargin=49,
                          title="Trackvance Core - Especificación Técnica v1.1",
-                         author="Trackvance Colombia SAS", subject=f"Implementación {VERSION} - {EDITION_DATE}")
+                         author="Trackvance Colombia SAS", subject=f"Implementación {VERSION} - {EDITION_DATE}",
+                         invariant=1)
         frame = Frame(MARGIN, 49, CONTENT, HEIGHT - 107, leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
         self.addPageTemplates(PageTemplate(id="normal", frames=frame, onPage=self.decorate))
 
@@ -214,12 +267,17 @@ class SpecDocument(BaseDocTemplate):
         c.drawRightString(WIDTH - MARGIN, 24, str(doc.page))
 
     def afterFlowable(self, flowable):
-        if isinstance(flowable, Paragraph) and flowable.style.name == "h1":
+        if self.page == 1:
+            return
+        if isinstance(flowable, Paragraph) and flowable.style.name in {"h1", "h2"}:
             title = flowable.getPlainText()
-            key = "section-" + title.split(".")[0]
+            level = 0 if flowable.style.name == "h1" else 1
+            if level == 0:
+                self._section_key = title.split(".")[0]
+            key = "section-" + self._section_key + "-" + hashlib.sha256(title.encode()).hexdigest()[:12]
             self.canv.bookmarkPage(key)
-            self.canv.addOutlineEntry(title, key, 0, False)
-            self.notify("TOCEntry", (0, title, self.page, key))
+            self.canv.addOutlineEntry(title, key, level, False)
+            self.notify("TOCEntry", (level, title, self.page, key))
 
 
 def openapi_table():
@@ -257,7 +315,10 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(PageBreak())
     story.append(Paragraph("Contenido", ParagraphStyle("toc-title", parent=STYLES["h1"])))
     toc = TableOfContents()
-    toc.levelStyles = [ParagraphStyle("toc", fontName="Arial", fontSize=9, leading=11.5, textColor=INK, spaceBefore=0)]
+    toc.levelStyles = [
+        ParagraphStyle("toc", fontName="ArialBold", fontSize=9, leading=12, textColor=INK, spaceBefore=5),
+        ParagraphStyle("toc-detail", fontName="Arial", fontSize=8, leading=10.2, leftIndent=13, textColor=MUTED, spaceBefore=0),
+    ]
     story.extend([toc, PageBreak()])
     lines = SOURCE.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("## "))
@@ -277,6 +338,8 @@ def build(candidate: Path, results: dict, draft: bool):
             story.append(paragraph(line[3:], "h1"))
         elif line.startswith("### "):
             story.append(paragraph(line[4:], "h2"))
+        elif line.startswith("#### "):
+            story.append(paragraph(line[5:], "h3"))
         elif line.startswith("@diagram "):
             story.extend([Diagram(line.split()[1]), Spacer(1, 8)])
         elif line == "@openapi":
@@ -298,8 +361,9 @@ def build(candidate: Path, results: dict, draft: bool):
             while i < len(lines) and not lines[i].startswith("```"):
                 code.append(Paragraph(html.escape(lines[i]).replace(" ", "&nbsp;"), STYLES["code"]))
                 i += 1
-            block = Table([[code]], colWidths=[CONTENT])
-            block.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE), ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+            # Each line is a row: long JSON/examples may split across pages.
+            block = Table([[item] for item in code], colWidths=[CONTENT])
+            block.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE), ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
             story.extend([block, Spacer(1, 10)])
         elif line.startswith("- ") or re.match(r"\d+\. ", line):
             story.append(paragraph(line, "bullet"))
@@ -345,9 +409,15 @@ def main():
     build(candidate, results, args.draft)
     reader = PdfReader(candidate)
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    if "\ufffd" in text or len(reader.pages) < 20 or len(reader.outline) < 25:
+    def count_bookmarks(entries):
+        return sum(count_bookmarks(item) if isinstance(item, list) else 1 for item in entries)
+    bookmarks = count_bookmarks(reader.outline)
+    top_level = sum(not isinstance(item, list) for item in reader.outline)
+    if "\ufffd" in text or len(reader.pages) < 20 or top_level < 25:
         raise RuntimeError("El PDF no supera la validación estructural.")
-    print(json.dumps({"candidate": str(candidate), "pages": len(reader.pages), "bookmarks": len(reader.outline), "sha256": hashlib.sha256(candidate.read_bytes()).hexdigest()}, ensure_ascii=False))
+    print(json.dumps({"candidate": str(candidate), "pages": len(reader.pages), "bookmarks": bookmarks,
+                      "top_level_sections": top_level,
+                      "sha256": hashlib.sha256(candidate.read_bytes()).hexdigest()}, ensure_ascii=False))
     if args.publish:
         shutil.copy2(candidate, original)
         extracted = "\n\n".join(f"--- PAGE {i + 1} ---\n{page.extract_text()}" for i, page in enumerate(reader.pages))

@@ -82,10 +82,10 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual llega a `0008_data_delivery`, precedida por
+La revisión actual llega a `0009_delivery_reviews`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
-`0006_local_identity_exceptions`, `0007_monitor_scheduling`. Las
+`0006_local_identity_exceptions`, `0007_monitor_scheduling` y `0008_data_delivery`. Las
 correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
 puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
 En bases SQLite previas sin tabla Alembic, el adaptador
@@ -331,11 +331,80 @@ completa de security policies falla cerrado. No habilites `IGNORE_DUP_KEY` en
 `row_security_active` es verdadero para la cuenta. SQL Server UPSERT necesita
 `INSERT+UPDATE+SELECT`; la creación de `#temp` depende de la política de `tempdb`.
 
-El restore actual acepta backups 0.4.1 manifest 1/state 2/0007 y los migra a 0008.
-La certificación real preservó exactamente 21 tablas legacy, dejó vacías las tres
+El restore 0.5.0 aceptaba backups 0.4.1 manifest 1/state 2/0007 y los migraba a 0008.
+Aquella certificación preservó exactamente 21 tablas legacy, dejó vacías las tres
 tablas Delivery y convirtió 19 jobs históricos a lane DEFAULT. Los directorios de
 backup se preparan con permisos privados y cada copia se valida por tamaño/hash
 antes de abrirla; no uses un backup cuyo inventario cambie durante la operación.
+
+## Endurecimiento 0.5.1: reparación, revisión y recuperación
+
+La migración vigente es `0009_delivery_reviews`; no se modifican 0001..0008.
+Los comandos habituales aplican la migración al arrancar API. Nunca se ejecuta
+un downgrade sobre la instalación operativa para probar compatibilidad.
+
+### Entrega COMMITTED con evidencia pendiente
+
+1. Abrir la Run: verificar SUCCESS/COMMITTED y aviso PENDING_REPAIR.
+2. Con permiso `runs:execute`, pulsar **Reparar evidencia**. La acción llama
+   `POST /api/v1/delivery/runs/{id}/repair-evidence` con sesión y CSRF.
+3. REPAIRED completa receipt/manifest; ALREADY_VALID confirma que están íntegros.
+   Repetir la acción no vuelve a entregar filas ni crea artifacts duplicados.
+4. Ante 409 de evidencia no verificable, conservar error/request_id y revisar
+   artifact/hash/configuración local. No lanzar otra entrega para fabricar receipt.
+   Un archivo corrupto no se sobreescribe automáticamente: recuperar evidencia
+   verificable desde backup requiere intervención específica.
+
+La reparación no solicita contraseña ni llama al destino. Un fallo de red del
+receptor no impide reparar datos locales válidos. UNKNOWN y FAILED nunca se
+reparan como COMMITTED.
+
+### Revisión externa de UNKNOWN
+
+Comprobar el destino mediante herramientas y permisos propios del operador;
+registrar outcome, nota y fecha en el detalle de Run. Outcomes permitidos:
+REMOTE_COMMIT_OBSERVED, REMOTE_NOT_COMMITTED_OBSERVED e INCONCLUSIVE. Evitar
+credenciales o datos personales innecesarios en la nota; es visible a lectores
+autorizados del Run. El historial es append-only: una corrección se anexa.
+
+UNKNOWN sigue UNKNOWN después de guardar. No hay aprobación automática, otro
+Job ni replay. Si la revisión justifica una nueva entrega, debe iniciarse como
+una acción deliberada distinta y considerar la estrategia/población del destino.
+
+### Backup 0.5.1 y upgrades compatibles
+
+El backup nativo usa manifest 2/state 4/0009 y conserva 25 tablas, artifacts, ambas
+familias de secretos y claves. Restore de 0.5.0 / manifest 2 / state 3 / 0008 verifica
+una proyección legacy-v3 exacta y que delivery_reviews está vacía. Restore de 0.4.x
+/ manifest 1 / state 2 / 0007 conserva proyección legacy-v2, cuatro tablas Delivery vacías
+y jobs DEFAULT. No se reescriben backups fuente ni datos originales durante
+la comparación. La evidencia de cada drill 0.5.1 vive en validation.md.
+
+El verificador reconoce huellas 0007/state 2, pero el CLI actual de creación de
+backup exige la topología Delivery de seis volúmenes y dos workers. Para crear
+un respaldo de una instalación todavía en 0007 se utiliza su tooling archivado;
+aceptar y restaurar ese respaldo no implica que el CLI nuevo pueda crearlo sobre
+la topología antigua. Para runtime 0008 sí conserva la huella nativa state 3.
+
+### Medición Delivery separada del benchmark general
+
+```powershell
+python scripts/tests/delivery_benchmark_cycle.py --smoke --max-wall-seconds 1200
+python scripts/tests/delivery_benchmark_cycle.py --max-wall-seconds 1800
+```
+
+El segundo comando usa 8 MiB/20.000 filas variadas; el primero, 1 MiB/1.000 filas.
+El runner crea un proyecto `trackvance-delivery-bench-*` fresco, descarta nombres
+ajenos/preexistentes y elimina sólo recursos propios. Cuenta cuatro estrategias
+en PostgreSQL16 y SQLServer reales. No eleva límites de upload/filas del producto.
+Guarda tiempos preflight/write/total, filas/s, MB/s, CPU, memoria, I/O y storage;
+NOT_RUN_RESOURCE_LIMIT o STOPPED_RESOURCE_LIMIT no son PASS ni certificación de
+capacidad productiva. Consulte delivery-benchmark-results-0.5.1.md.
+
+Code splitting requiere servir el build frontend nuevo; construir código no
+actualiza por sí solo un contenedor ya ejecutándose. Los runners certificados
+usan proyectos separados; la instalación principal de localhost:3100 no se
+reconstruye como parte de las pruebas de 0.5.1.
 
 ## Revisión de arquitectura - 16 de septiembre de 2026
 

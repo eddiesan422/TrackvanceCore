@@ -1,0 +1,182 @@
+{
+  "cases": [],
+  "cleanup": "PASS",
+  "error": "El fixture ingerido no conserva filas y tipos l\u00f3gicos esperados.",
+  "fixture": {
+    "actual_bytes": 1074923,
+    "column_count": 4,
+    "fixture_mode": "varied",
+    "payload_bytes": 1049,
+    "payload_method": "SHAKE256_URLSAFE_V1",
+    "rows": 1000,
+    "seed_sha256": "67a2e732138a1a7abb17635cc23f3647ca803f297ca6cdceefa23a35d2707fcc",
+    "sha256": "1214a61a8b7c53cebd613447febd9845b50786130e625ec36f8351f5fcd0fd7d",
+    "target_bytes": 1048576
+  },
+  "larger_tiers": [
+    {
+      "max_rows": 100000,
+      "max_upload_bytes": 10485760,
+      "minimum_docker_memory_bytes": 6442450944,
+      "minimum_host_disk_bytes": 12884901888,
+      "reasons": [
+        "UNCHANGED_PRODUCT_UPLOAD_OR_ROW_LIMIT"
+      ],
+      "rows": 100000,
+      "status": "NOT_RUN_RESOURCE_LIMIT",
+      "target_mib": 100
+    },
+    {
+      "max_rows": 100000,
+      "max_upload_bytes": 10485760,
+      "minimum_docker_memory_bytes": 6442450944,
+      "minimum_host_disk_bytes": 12884901888,
+      "reasons": [
+        "UNCHANGED_PRODUCT_UPLOAD_OR_ROW_LIMIT"
+      ],
+      "rows": 100000,
+      "status": "NOT_RUN_RESOURCE_LIMIT",
+      "target_mib": 500
+    },
+    {
+      "max_rows": 100000,
+      "max_upload_bytes": 10485760,
+      "minimum_docker_memory_bytes": 6442450944,
+      "minimum_host_disk_bytes": 12884901888,
+      "reasons": [
+        "UNCHANGED_PRODUCT_UPLOAD_OR_ROW_LIMIT"
+      ],
+      "rows": 100000,
+      "status": "NOT_RUN_RESOURCE_LIMIT",
+      "target_mib": 1024
+    },
+    {
+      "max_rows": 100000,
+      "max_upload_bytes": 10485760,
+      "minimum_docker_memory_bytes": 6442450944,
+      "minimum_host_disk_bytes": 12884901888,
+      "reasons": [
+        "UNCHANGED_PRODUCT_UPLOAD_OR_ROW_LIMIT"
+      ],
+      "rows": 100000,
+      "status": "NOT_RUN_RESOURCE_LIMIT",
+      "target_mib": 2048
+    },
+    {
+      "max_rows": 100000,
+      "max_upload_bytes": 10485760,
+      "minimum_docker_memory_bytes": 6442450944,
+      "minimum_host_disk_bytes": 12884901888,
+      "reasons": [
+        "UNCHANGED_PRODUCT_UPLOAD_OR_ROW_LIMIT"
+      ],
+      "rows": 100000,
+      "status": "NOT_RUN_RESOURCE_LIMIT",
+      "target_mib": 5120
+    }
+  ],
+  "machine": {
+    "docker": {
+      "architecture": "x86_64",
+      "cpus": 16,
+      "memory_bytes": 16326520832,
+      "operating_system": "Docker Desktop",
+      "server_version": "29.1.3",
+      "storage_driver": "overlayfs"
+    },
+    "host": {
+      "disk_free_bytes": 1429297217536,
+      "disk_total_bytes": 1999329292288,
+      "logical_cpus": 16,
+      "platform": "Windows-11-10.0.26200-SP0"
+    }
+  },
+  "measurement": "SMOKE",
+  "not_run_cases": [
+    {
+      "engine": "POSTGRESQL",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "CREATE_AND_LOAD"
+    },
+    {
+      "engine": "POSTGRESQL",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "APPEND"
+    },
+    {
+      "engine": "POSTGRESQL",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "OVERWRITE"
+    },
+    {
+      "engine": "POSTGRESQL",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "UPSERT"
+    },
+    {
+      "engine": "SQLSERVER",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "CREATE_AND_LOAD"
+    },
+    {
+      "engine": "SQLSERVER",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "APPEND"
+    },
+    {
+      "engine": "SQLSERVER",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "OVERWRITE"
+    },
+    {
+      "engine": "SQLSERVER",
+      "status": "NOT_RUN_AFTER_FAILURE",
+      "strategy": "UPSERT"
+    }
+  ],
+  "production_capacity_certification": false,
+  "project": "trackvance-delivery-bench-28640-41d2593d",
+  "requested": {
+    "max_wall_seconds": 1200,
+    "rows": 1000,
+    "target_mib": 1
+  },
+  "resource_measurement": "Cgroup deltas include incidental same-container activity; memory peak is cumulative. Sampling may miss short peaks.",
+  "resource_policy": {
+    "max_rows": 100000,
+    "max_upload_bytes": 10485760,
+    "minimum_docker_memory_bytes": 6442450944,
+    "minimum_host_disk_bytes": 12884901888,
+    "reasons": [],
+    "status": "PLANNED"
+  },
+  "resources": {
+    "breached": null,
+    "disk_stop_bytes": 10737418240,
+    "memory_stop_bytes": 15252779008,
+    "peak_block_io_bytes": 271886389,
+    "peak_cpu_percent": 69.32,
+    "peak_memory_by_service": {
+      "api": 128974848,
+      "delivery-worker": 78118912,
+      "destination-postgres": 32275169,
+      "destination-sqlserver": 694052454,
+      "postgres": 45623541,
+      "web": 13432258,
+      "worker": 78590771
+    },
+    "peak_total_memory_bytes": 1070690465,
+    "samples": 6
+  },
+  "schema_version": 1,
+  "status": "FAIL",
+  "stop_reason": null,
+  "timing_semantics": {
+    "source_mb_per_second_write": "Original CSV bytes / 1,000,000 / write_seconds, not database wire throughput.",
+    "total_seconds": "Explicit preflight + configuration publication + enqueue/poll + evidence GETs; excludes ingestion/startup, strategy preparation and independent SQL verification.",
+    "worker_preflight_seconds": "Worker perf_counter around preflight_delivery, separate from explicit HTTP preflight.",
+    "write_seconds": "Worker perf_counter around deliver_prepared: connection, transactional checks/locks, DML and commit; excludes worker preflight and local preparation."
+  },
+  "version": "0.5.1",
+  "wall_seconds": 35.5581987000005
+}

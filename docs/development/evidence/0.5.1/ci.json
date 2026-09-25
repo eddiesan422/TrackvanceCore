@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "release": "0.5.1",
+  "workflow": "Trackvance local checks",
+  "branch": "feat/local-prototype",
+  "source_commit": "8927ea00703ff090708c302d7755dae20a7687b9",
+  "run_id": 36194431770,
+  "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770",
+  "status": "completed",
+  "conclusion": "success",
+  "observed_completed_at": "2026-09-25T22:07:31Z",
+  "jobs": [
+    {
+      "id": 108266922213,
+      "name": "frontend",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108266922406,
+      "name": "backend",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421355,
+      "name": "backup-restore-e2e",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421409,
+      "name": "delivery-benchmark-smoke",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421465,
+      "name": "delivery-e2e",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421479,
+      "name": "compose-e2e",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421596,
+      "name": "connections-e2e",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 108267421605,
+      "name": "benchmark-smoke",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "results": {
+    "backend": {
+      "pytest_passed": 1091,
+      "warnings": 2,
+      "duration_seconds": 62.78,
+      "ruff": "PASS",
+      "mypy_source_files": 39,
+      "mypy": "PASS",
+      "postgres_migration_roundtrip": "PASS"
+    },
+    "frontend": {
+      "vitest_passed": 154,
+      "test_files": 17,
+      "duration_seconds": 14.5,
+      "eslint": "PASS",
+      "typescript": "PASS",
+      "build": "PASS"
+    },
+    "compose": {
+      "api_smoke_passed": 84,
+      "api_smoke_seconds": 10.6,
+      "playwright_passed": 26,
+      "playwright_skipped": 6,
+      "playwright_reported_duration": "2.1m",
+      "clean_demo_passed": 1,
+      "clean_demo_seconds": 2.4,
+      "restart_exact": "PASS"
+    },
+    "connections": {
+      "real_checks_passed": 96,
+      "api_smoke_passed": 84,
+      "playwright_passed": 30,
+      "playwright_skipped": 2,
+      "playwright_reported_duration": "2.8m"
+    },
+    "delivery": {
+      "real_checks_passed": 114,
+      "playwright_passed": 1,
+      "playwright_seconds": 7.1
+    },
+    "recovery": {
+      "status": "PASS",
+      "artifacts": 9,
+      "secrets": 2,
+      "relationships": 164,
+      "reviews": 1,
+      "remote_rows_unchanged": 4,
+      "unknown_fixture": "SIMULATED_UNKNOWN_NO_REMOTE_IO"
+    },
+    "benchmark_smoke": {
+      "status": "PASS",
+      "certification": false
+    },
+    "delivery_benchmark_smoke": {
+      "status": "PASS",
+      "cases_passed": 8,
+      "cases_total": 8,
+      "certification": false
+    },
+    "playwright_unique": {
+      "passed": 32,
+      "api_intercepted": 7,
+      "other_scenarios": 25,
+      "method": "Deduplicated test file, parameterized title and line from successful CI log entries; no summing repeated scenarios across jobs.",
+      "scenarios": [
+        "tests-e2e/demo-access-clean.spec.ts:8:1 › el acceso demo funciona sin sembrar datos sintéticos",
+        "tests-e2e/advanced-rules.spec.ts:42:1 › Intake declara referencia inmutable desde esquema y exporta evidencia",
+        "tests-e2e/advanced-rules.spec.ts:69:1 › Recon concilia N:1 con transformación explícita y SUM/COUNT independientes",
+        "tests-e2e/corrections.spec.ts:53:1 › upload → Intake fecha no futura → Recon diferencia → excepción → Sentinel cambio de esquema y Excel",
+        "tests-e2e/corrections.spec.ts:127:1 › los módulos existentes siguen ejecutándose desde la interfaz sobre una instalación limpia",
+        "tests-e2e/corrections.spec.ts:165:1 › un nombre de dataset existente se carga como una versión nueva",
+        "tests-e2e/corrections.spec.ts:192:1 › corrige esquema e identificadores, crea área y usa Todos en Data Intake",
+        "tests-e2e/corrections.spec.ts:283:1 › la carga JSON detecta formato, aplana columnas y conserva metadata",
+        "tests-e2e/corrections.spec.ts:322:1 › la tabla de datasets ordena sus columnas en ambas direcciones",
+        "tests-e2e/corrections.spec.ts:343:1 › el Centro de control permite filtrar y actuar sobre la operación",
+        "tests-e2e/delivery-operations.spec.ts:39:1 › lazy navigation retains shell, deep links, reload and read-only builder permissions",
+        "tests-e2e/delivery-operations.spec.ts:61:1 › PENDING_REPAIR repairs evidence through the explicit action without replay",
+        "tests-e2e/delivery-operations.spec.ts:75:3 › COMMITTED settles into VALID without reload or replay",
+        "tests-e2e/delivery-operations.spec.ts:75:3 › COMMITTED settles into PENDING_REPAIR without reload or replay",
+        "tests-e2e/delivery-operations.spec.ts:100:1 › UNKNOWN review remains external, survives reload, and never creates a new Run",
+        "tests-e2e/delivery-operations.spec.ts:120:3 › read-only UNKNOWN exposes status without operational mutations",
+        "tests-e2e/delivery-operations.spec.ts:120:3 › read-only PENDING_REPAIR exposes status without operational mutations",
+        "tests-e2e/exception-validation.spec.ts:87:1 › una excepción requiere validación posterior y el cierre administrativo permanece separado",
+        "tests-e2e/local-identity-exceptions.spec.ts:14:1 › administrador crea, edita, restablece y desactiva un usuario local desde la interfaz",
+        "tests-e2e/local-identity-exceptions.spec.ts:62:1 › cada rol local recibe accesos permitidos y denegados por el servidor",
+        "tests-e2e/local-identity-exceptions.spec.ts:99:1 › asignación, SLA, adjuntos, resolución automática y reapertura conservan evidencia",
+        "tests-e2e/multiformat-navigation.spec.ts:40:1 › CSV, XLSX, JSON, Parquet y TXT convergen al mismo contrato de Intake",
+        "tests-e2e/multiformat-navigation.spec.ts:147:1 › la navegación principal abre todos los módulos operativos sin errores de página",
+        "tests-e2e/rule-builders.spec.ts:68:1 › el formulario Intake publica y ejecuta una regla de fecha no futura",
+        "tests-e2e/rule-builders.spec.ts:108:1 › el formulario Recon publica igualdad exacta con normalización declarada de claves y valores",
+        "tests-e2e/rule-builders.spec.ts:145:1 › el formulario Sentinel publica tipo de esquema comparado con la versión anterior",
+        "tests-e2e/sentinel-schedule.spec.ts:13:1 › Sentinel: programación real → snapshot nuevo → anomalía → alerta → histórico",
+        "tests-e2e/connections.spec.ts:21:3 › PostgreSQL: conexión → exploración → snapshot → Data Intake → evidencia",
+        "tests-e2e/connections.spec.ts:21:3 › SQL Server: conexión → exploración → snapshot → Data Intake → evidencia",
+        "tests-e2e/roadmap-source-cycle.spec.ts:57:3 › PostgreSQL: fuente → regla condicional → excepción con SLA → fuente corregida → resolución técnica",
+        "tests-e2e/roadmap-source-cycle.spec.ts:57:3 › SQL Server: fuente → regla condicional → excepción con SLA → fuente corregida → resolución técnica",
+        "tests-e2e/delivery.spec.ts:9:1 › destino real → builder → preflight → publicación → receipt"
+      ]
+    }
+  },
+  "limits": [
+    "NOT_RUN_NONDETERMINISTIC: exact remote post-commit acknowledgement loss.",
+    "NOT_RUN_RESOURCE_LIMIT: Delivery tiers 100/500 MiB and 1/2/5 GiB exceed unchanged input cap.",
+    "Source-code certification, followed by a separate documentation publication commit whose complete CI is checked before the final handoff."
+  ]
+}

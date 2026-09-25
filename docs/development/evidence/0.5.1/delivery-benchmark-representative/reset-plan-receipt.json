@@ -1,0 +1,11 @@
+{
+  "completed_at": "2026-09-25T21:28:08.439539Z",
+  "plan_sha256": "0693f0eafea1962b88a926e2c092cd618e5fab6c6bb9d660a716b5c627c7b234",
+  "project": "trackvance-delivery-bench-28040-1e3384e5",
+  "removed": {
+    "containers": 7,
+    "networks": 1,
+    "volumes": 8
+  },
+  "schema_version": 1
+}

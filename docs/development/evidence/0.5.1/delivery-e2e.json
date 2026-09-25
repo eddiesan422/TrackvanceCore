@@ -1,0 +1,465 @@
+{
+  "status": "PASS",
+  "project": "trackvance-delivery-e2e-hardening051-a",
+  "dataset_version_id": "f92deaeb-2b04-4294-ad9e-1150d7797005",
+  "destinations": [
+    {
+      "sink_type": "POSTGRESQL",
+      "destination_id": "bc13686f-73a4-45ad-9908-307b3d807d7d",
+      "destination_version_id": "bef5c4c5-23fe-4efa-99e3-0c9f8252f514",
+      "runs": [
+        {
+          "configuration_id": "4b1a4b89-a721-495d-8f8a-e14c614bfa57",
+          "run_id": "4d00a21b-b78f-4662-b719-31d1b2d7f3e3",
+          "attempt_id": "94066561-bd94-40c5-90ab-3b9172c77704",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "f24402f2-e5b6-4e3b-a439-ef12a5be84be",
+          "run_id": "f59cbfd8-c4d4-4357-b59f-4b98ce14dcdd",
+          "attempt_id": "5f597a1e-6238-4206-b767-094682108e16",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "14bc44b5-f9ad-4f9b-adfa-d05fcee6b032",
+          "run_id": "9914dc4d-c981-4799-a85b-948b9845fb4d",
+          "attempt_id": "cf952b78-be37-442a-a58b-ff71c6b2ac38",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "1304aaab-62a3-4a2e-beb8-6f5faa27b547",
+          "run_id": "0f96abfd-af95-4469-8772-7772097519f4",
+          "attempt_id": "fad7a931-be52-42e8-9bf6-984f28b8d492",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "8142c0f3-c8df-4c32-8700-04b89ba9fda0",
+        "attempt_id": "80674bf7-2079-495b-aef9-15f02393328e",
+        "status": "FAILED"
+      },
+      "collation_guard": null,
+      "status": "PASS"
+    },
+    {
+      "sink_type": "SQLSERVER",
+      "destination_id": "5937895b-d347-492f-8215-2a8165fa1775",
+      "destination_version_id": "cdbcb991-ea01-4303-8eb7-abcdafbe9137",
+      "runs": [
+        {
+          "configuration_id": "b534f110-490a-45ef-84ea-3a6aacd83723",
+          "run_id": "30cc68d9-a341-42d8-ae04-700833141791",
+          "attempt_id": "092f24c1-5e7b-4b98-9f4a-0128b86ef2ea",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "5380e9c1-40e4-4940-9670-9b2c6d189190",
+          "run_id": "37dd7c46-0153-47e5-86e9-e1b2a065e1ff",
+          "attempt_id": "a4e388f6-abed-42b2-9cf4-3496661654c7",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "6db32542-c9b0-414e-8639-fead87335ddf",
+          "run_id": "8b1d3aa5-4b7d-437f-828a-c75629ed65c9",
+          "attempt_id": "51a48b16-8c27-4e60-ba84-9b2837e2320d",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "e29d925b-0b82-4e7f-9e4f-836447fc446f",
+          "run_id": "fb6dbc77-aa86-44cb-9519-165e402a97db",
+          "attempt_id": "8095dbfd-1be3-44a0-ae07-ec76c7778b55",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "5debe217-b77d-4301-9220-1555e4ddff4e",
+        "attempt_id": "41f6a82e-e93d-4079-92b5-f9d176fb0231",
+        "status": "FAILED"
+      },
+      "collation_guard": {
+        "run_id": "61ac0aca-433a-4d68-8a2a-7533790e36e3",
+        "attempt_id": "58f02114-f538-4768-b577-a5fde79e7657",
+        "status": "FAILED"
+      },
+      "status": "PASS"
+    }
+  ],
+  "checks": [
+    "DatasetVersion inmutable de entrada contiene las filas certificadas",
+    "POSTGRESQL: prueba credencial real de escritura",
+    "POSTGRESQL: destino versionado recupera su secreto segregado",
+    "POSTGRESQL: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "POSTGRESQL CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: crea schema/tabla y carga exactamente la DatasetVersion",
+    "POSTGRESQL APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: APPEND deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture stale preparado antes de OVERWRITE",
+    "POSTGRESQL OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: OVERWRITE deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture update/insert preparado antes de UPSERT",
+    "POSTGRESQL UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: UPSERT deja el conjunto remoto esperado",
+    "POSTGRESQL: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "POSTGRESQL: preflight rechaza target inexistente sin modificarlo",
+    "POSTGRESQL: preflight detecta permisos insuficientes sin escribir",
+    "POSTGRESQL: preflight previo es v\u00e1lido",
+    "POSTGRESQL: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "SQLSERVER: prueba credencial real de escritura",
+    "SQLSERVER: destino versionado recupera su secreto segregado",
+    "SQLSERVER: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "SQLSERVER CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: crea schema/tabla y carga exactamente la DatasetVersion",
+    "SQLSERVER APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: APPEND deja el conjunto remoto esperado",
+    "SQLSERVER: fixture stale preparado antes de OVERWRITE",
+    "SQLSERVER OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: OVERWRITE deja el conjunto remoto esperado",
+    "SQLSERVER: fixture update/insert preparado antes de UPSERT",
+    "SQLSERVER UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: UPSERT deja el conjunto remoto esperado",
+    "SQLSERVER: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "SQLSERVER: preflight rechaza target inexistente sin modificarlo",
+    "SQLSERVER: preflight detecta permisos insuficientes sin escribir",
+    "SQLSERVER: preflight previo es v\u00e1lido",
+    "SQLSERVER: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "SQLSERVER: preflight conserva deduplicaci\u00f3n exacta de la fuente",
+    "SQLSERVER: collation nativa rechaza claves UPSERT equivalentes",
+    "SQLSERVER: colisi\u00f3n UPSERT hace rollback antes de mutar el target",
+    "PostgreSQL 16: m\u00e9tricas all_insert_composite",
+    "PostgreSQL 16: m\u00e9tricas all_update_composite",
+    "PostgreSQL 16: m\u00e9tricas mixed_composite",
+    "PostgreSQL 16: m\u00e9tricas empty",
+    "PostgreSQL 16: m\u00e9tricas key_only_do_nothing",
+    "PostgreSQL 16: m\u00e9tricas rollback",
+    "PostgreSQL 16: m\u00e9tricas constraint_drift",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_insert",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_update",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_append",
+    "PostgreSQL 16: m\u00e9tricas old_all_null_row_not_insert",
+    "PostgreSQL 18: m\u00e9tricas all_insert_composite",
+    "PostgreSQL 18: m\u00e9tricas all_update_composite",
+    "PostgreSQL 18: m\u00e9tricas mixed_composite",
+    "PostgreSQL 18: m\u00e9tricas empty",
+    "PostgreSQL 18: m\u00e9tricas key_only_do_nothing",
+    "PostgreSQL 18: m\u00e9tricas rollback",
+    "PostgreSQL 18: m\u00e9tricas constraint_drift",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_insert",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_update",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_append",
+    "PostgreSQL 18: m\u00e9tricas old_all_null_row_not_insert",
+    "POSTGRESQL: credencial destino persiste cifrada tras reinicio",
+    "SQLSERVER: credencial destino persiste cifrada tras reinicio",
+    "Auditor\u00eda cubre destino, cola, inicio, commit y fallo de Delivery",
+    "Secretos ausentes de logs, metadata, auditor\u00eda y evidencia"
+  ],
+  "playwright": "PASS",
+  "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
+  "postgres_metrics_matrix": [
+    {
+      "engine": "POSTGRESQL",
+      "major_version": 16,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "all_insert_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 15,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "all_update_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 18,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "mixed_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 12,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "empty",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 0,
+            "rows_written": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 0,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "key_only_do_nothing",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 0,
+            "bytes_sent": 4,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "rollback",
+          "status": "PASS",
+          "error_code": "DESTINATION_CONSTRAINT_VIOLATION"
+        },
+        {
+          "case": "constraint_drift",
+          "status": "PASS",
+          "error_code": "UPSERT_CONSTRAINT_DRIFT"
+        },
+        {
+          "case": "trigger_suppressed_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 6,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "trigger_suppressed_update",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 13,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "trigger_suppressed_append",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "old_all_null_row_not_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 9,
+            "remote_reference": null
+          }
+        }
+      ]
+    },
+    {
+      "engine": "POSTGRESQL",
+      "major_version": 18,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "all_insert_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 2,
+            "rows_updated": 0,
+            "bytes_sent": 15,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "all_update_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 0,
+            "rows_updated": 2,
+            "bytes_sent": 18,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "mixed_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 1,
+            "bytes_sent": 12,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "empty",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 0,
+            "rows_written": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 0,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "key_only_do_nothing",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 0,
+            "bytes_sent": 4,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "rollback",
+          "status": "PASS",
+          "error_code": "DESTINATION_CONSTRAINT_VIOLATION"
+        },
+        {
+          "case": "constraint_drift",
+          "status": "PASS",
+          "error_code": "UPSERT_CONSTRAINT_DRIFT"
+        },
+        {
+          "case": "trigger_suppressed_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "trigger_suppressed_update",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 13,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "trigger_suppressed_append",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null
+          }
+        },
+        {
+          "case": "old_all_null_row_not_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 1,
+            "bytes_sent": 9,
+            "remote_reference": null
+          }
+        }
+      ]
+    }
+  ]
+}
