@@ -19,6 +19,7 @@ import socket
 import subprocess
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -118,6 +119,178 @@ GO
 """, capture=True)
     checks.verify("SELECT_ONLY_CONFIRMED" in sqlserver,
                   "SQLSERVER: cuenta externa sin permiso de escritura")
+
+
+def temporal_fixture(source_type):
+    """Explicit precision fixtures, avoiding any cast that rounds input values."""
+    columns, expected, logical = [], {}, {}
+    for precision in range(7 if source_type == "POSTGRESQL" else 8):
+        fraction = "." + "1234567"[:precision] if precision else ""
+        naive = f"2026-09-23T10:00:00{fraction}"
+        for aware in (False, True):
+            name = f"{'aware' if aware else 'naive'}_{precision}"
+            native = (
+                f"timestamp({precision}) {'with' if aware else 'without'} time zone"
+                if source_type == "POSTGRESQL" else
+                f"{'datetimeoffset' if aware else 'datetime2'}({precision})"
+            )
+            value = naive + ("-05:00" if aware else "")
+            columns.append((name, native, value))
+            expected[name] = (
+                (datetime.fromisoformat(value).astimezone(UTC) if aware
+                 else datetime.fromisoformat(value)).isoformat()
+                if source_type == "POSTGRESQL" else
+                # DatasetSource already asks SQL Server for style 127. It
+                # normalizes datetimeoffset to UTC without losing digit 7;
+                # exact STRING preservation applies to this canonical text.
+                f"2026-09-23T15:00:00{fraction}Z" if aware else value
+            )
+            logical[name] = "TIMESTAMP" if aware and precision <= 6 else "STRING"
+    if source_type == "SQLSERVER":
+        for name, native, value in (
+            ("legacy_datetime", "datetime", "2026-09-23T10:00:00.123"),
+            ("legacy_small", "smalldatetime", "2026-09-23T10:00:00"),
+        ):
+            columns.append((name, native, value))
+            expected[name], logical[name] = value, "STRING"
+    return columns, expected, logical
+
+
+def certify_temporal_snapshots(api, checks, source_type, connection_id, admin_password, run):
+    """Exercise actual SQL readers, refresh, all snapshot consumers and Delivery."""
+    columns, expected, logical = temporal_fixture(source_type)
+    postgres = source_type == "POSTGRESQL"
+    service = "source-postgres" if postgres else "source-sqlserver"
+
+    def sql(statement):
+        if postgres:
+            return run(["exec", "-T", service, "psql", "-U", "source_admin", "-d",
+                        "trackvance_source", "-v", "ON_ERROR_STOP=1"], input_text=statement)
+        return run(["exec", "-T", service, "sh", "-c",
+            ('SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd '
+             '-S localhost -U sa -C -b')], input_text="USE trackvance_source;\n" + statement + "\nGO\n")
+
+    key_type = "varchar(20)" if postgres else "nvarchar(20)"
+    sql(f"CREATE TABLE source_data.temporal_regression (record_key {key_type} NOT NULL, " +
+        ", ".join(f"{name} {native} NULL" for name, native, _ in columns) + ");\n" +
+        "INSERT INTO source_data.temporal_regression VALUES ('baseline'," +
+        ",".join(f"'{value}'" for _, _, value in columns) + "),('nulls'," +
+        ",".join("NULL" for _ in columns) + ");\n" +
+        "GRANT SELECT ON source_data.temporal_regression TO tv_reader;")
+    path = f"/api/v1/connections/{connection_id}"
+    registration = api.post(path + "/datasets", {
+        "name": f"Temporal regression {source_type}", "schema_name": "source_data",
+        "object_name": "temporal_regression",
+    })
+    dataset, original = registration["dataset"], registration["version"]
+    original_profile = api.get(f"/api/v1/dataset-versions/{original['id']}/profile")
+    observed = next(row for row in original_profile["sample"] if row["record_key"] == "baseline")
+    observed_nulls = next(row for row in original_profile["sample"] if row["record_key"] == "nulls")
+    mismatches = {name: {"expected": value, "actual": observed[name]}
+                  for name, value in expected.items() if observed[name] != value}
+    checks.verify(all(observed[name] == value for name, value in expected.items())
+                  and all(observed_nulls[name] is None for name in expected),
+                  f"{source_type}: todas las precisiones temporales conservan valores exactos"
+                  + (f" ({json.dumps(mismatches)})" if mismatches else ""))
+    schema = {item["name"]: item["logical_type"] for item in original["schema"]}
+    checks.verify(all(schema[name] == value for name, value in logical.items()),
+                  f"{source_type}: tipos temporales con/sin offset y precisión 7 explícitos")
+    artifact_url = f"/api/v1/artifacts/{original['canonical_artifact_id']}/download"
+    original_bytes = api.request("GET", artifact_url).body
+    refreshed = api.post(f"/api/v1/datasets/{dataset['id']}/refresh-source", {})
+    checks.verify(refreshed["version"] == 2 and refreshed["schema"] == original["schema"]
+                  and api.request("GET", artifact_url).body == original_bytes
+                  and api.get(f"/api/v1/dataset-versions/{original['id']}/profile")["sample"]
+                  == original_profile["sample"],
+                  f"{source_type}: refresh coherente y snapshot temporal histórico íntegro")
+
+    def wait_run(queued):
+        return smoke.wait_until("Temporal regression", lambda: api.get(
+            f"/api/v1/runs/{queued['id']}"), lambda current: current["status"] in {
+                "SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN"}, timeout=90, interval=0.3)
+
+    contract = api.post("/api/v1/intake/contracts", {
+        "name": f"Temporal Intake {source_type}", "dataset_id": dataset["id"],
+        "config": {"required_columns": ["record_key"], "max_error_rate": 0},
+    })
+    intake = wait_run(api.post("/api/v1/intake/runs", {
+        "contract_id": contract["id"], "dataset_version_id": original["id"],
+    }, expected=(202,)))
+    accepted = api.get(f"/api/v1/dataset-versions/{intake['output_version_id']}/profile")
+    checks.verify(intake["status"] == "SUCCESS" and intake["decision"] == "APPROVED"
+                  and accepted["sample"] == original_profile["sample"],
+                  f"{source_type}: Intake conserva texto temporal sin reinterpretación implícita")
+    monitor = api.post("/api/v1/monitors", {
+        "name": f"Temporal Sentinel {source_type}", "dataset_id": dataset["id"],
+        "config": {"required_columns": list(logical), "null_columns": [],
+                   "rules": [{"type": "schema_type", "column": name,
+                              "parameters": {"expected_type": value}}
+                             for name, value in logical.items()]},
+    })
+    sentinel = wait_run(api.post(f"/api/v1/monitors/{monitor['id']}/runs", {
+        "dataset_version_id": original["id"],
+    }, expected=(202,)))
+    checks.verify(sentinel["status"] == "SUCCESS" and sentinel["decision"] == "HEALTHY",
+                  f"{source_type}: Sentinel monitoriza todas las columnas temporales")
+    control = api.post("/api/v1/recon/controls", {
+        "name": f"Temporal Recon {source_type}", "dataset_id": dataset["id"],
+        "target_dataset_id": dataset["id"], "config": {"key_columns": ["record_key"],
+            "comparison_rules": [{"type": "EXACT_COMPARE", "source_column": name,
+                                  "target_column": name,
+                                  "parameters": {"null_policy": "MATCH_NULLS"}}
+                                 for name in logical]},
+    })
+    recon = wait_run(api.post("/api/v1/recon/runs", {
+        "control_id": control["id"], "source_version_id": original["id"],
+        "target_version_id": refreshed["id"],
+    }, expected=(202,)))
+    checks.verify(recon["status"] == "SUCCESS" and recon["metrics"]["matched"] == 2,
+                  f"{source_type}: Recon exacto conserva temporales y nulls entre snapshots")
+    destination = api.post("/api/v1/delivery/destinations", {
+        "name": f"Temporal roundtrip {source_type}", "sink_type": source_type,
+        "host": service, "port": 5432 if postgres else 1433,
+        "database": "trackvance_source", "username": "source_admin" if postgres else "sa",
+        "password": admin_password,
+        "options": {"sslmode": "disable"} if postgres else {"encryption": "off"},
+    })
+    mapping = [{"source_name": name, "target_name": name, "target_type": value,
+                "ordinal": index, "nullable": True}
+               for index, (name, value) in enumerate(schema.items())]
+    draft = {"dataset_version_id": original["id"], "destination_id": destination["id"],
+             "destination_version_id": destination["destination_version_id"],
+             "target": {"mode": "CREATE_TABLE", "schema_name": "source_data",
+                        "table_name": "temporal_delivered", "create_schema": False},
+             "columns": mapping, "write_strategy": "CREATE_AND_LOAD", "upsert_keys": []}
+    for name, logical_type in logical.items():
+        if logical_type == "STRING":
+            invalid = {**draft, "columns": [
+                {**item, "target_type": "TIMESTAMP"} if item["source_name"] == name else item
+                for item in mapping]}
+            rejected = api.request("POST", "/api/v1/delivery/preflight", invalid,
+                                   expected=(412,)).json()
+            checks.verify("SOURCE_TYPE_PRESERVATION" in json.dumps(rejected),
+                          f"{source_type}: Delivery rechaza STRING temporal {name} → TIMESTAMP")
+    configuration = api.post("/api/v1/delivery/configurations", {
+        **draft, "name": f"Temporal delivery {source_type}",
+    })
+    delivered = wait_run(api.post("/api/v1/delivery/runs", {
+        "configuration_id": configuration["id"], "dataset_version_id": original["id"],
+    }, expected=(202,)))
+    checks.verify(delivered["status"] == "SUCCESS" and delivered["decision"] == "COMMITTED",
+                  f"{source_type}: Delivery confirma snapshot temporal sin convertir familias")
+    sql("GRANT SELECT ON source_data.temporal_delivered TO tv_reader;")
+    roundtrip = api.post(path + "/datasets", {"name": f"Temporal delivered {source_type}",
+        "schema_name": "source_data", "object_name": "temporal_delivered"})["version"]
+    output = api.get(f"/api/v1/dataset-versions/{roundtrip['id']}/profile")
+    row = next(item for item in output["sample"] if item["record_key"] == "baseline")
+    null_row = next(item for item in output["sample"] if item["record_key"] == "nulls")
+    checks.verify(all(row[name] == expected[name] if logical[name] == "STRING" else
+        datetime.fromisoformat(row[name]) == datetime.fromisoformat(expected[name])
+        for name in logical) and all(null_row[name] is None for name in logical),
+        f"{source_type}: roundtrip real preserva STRING exacto e instante/microsegundos TIMESTAMP")
+    return {"engine": source_type, "status": "PASS", "temporal_columns": len(logical),
+            "source_version_id": original["id"], "refreshed_version_id": refreshed["id"],
+            "delivery_run_id": delivered["id"]}
 
 
 def certify_source(api, checks, source_type: str, password: str, credentials: list[str], run):
@@ -349,6 +522,8 @@ def main() -> int:
         api.csrf = auth["csrf_token"]
         results = [certify_source(api, checks, source, password, credentials, run)
                    for source in ["POSTGRESQL", "SQLSERVER"]]
+        temporal_results = [certify_temporal_snapshots(api, checks, item["source_type"],
+            item["connection_id"], admin_password, run) for item in results]
         if not args.skip_regression:
             command([sys.executable, "scripts/smoke_test.py", "--base-url", base_url])
         if not args.skip_playwright:
@@ -378,6 +553,7 @@ def main() -> int:
         assert_no_credentials(audits, credentials, "Secreto filtrado en auditoría")
         checks.verify(True, "Contraseñas ausentes de logs, auditoría y metadata interna")
         result = {"status": "PASS", "project": project, "sources": results,
+                  "temporal_regressions": temporal_results,
                   "checks": checks.completed, "playwright": "SKIPPED" if args.skip_playwright else "PASS",
                   "regression_smoke": "SKIPPED" if args.skip_regression else "PASS"}
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")

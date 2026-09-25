@@ -32,10 +32,12 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 3
+VERIFY_SCHEMA_VERSION = 4
+DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION = 3
+DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0008_data_delivery"
+CURRENT_MIGRATION = "0009_delivery_reviews"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
@@ -107,6 +109,11 @@ LEGACY_STATE_FIELDS = frozenset(
         "migration",
     }
 )
+DELIVERY_BASELINE_STATE_TABLES = LEGACY_STATE_TABLES | DELIVERY_TABLES
+CURRENT_STATE_TABLES = DELIVERY_BASELINE_STATE_TABLES | {"delivery_reviews"}
+DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
+    "verified_source_secrets", "verified_delivery_secrets",
+}
 SHA256_PATTERN = re.compile(r"[a-f0-9]{64}")
 PROJECT_LABEL = "com.docker.compose.project"
 SERVICE_LABEL = "com.docker.compose.service"
@@ -452,7 +459,7 @@ def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     execute(["docker", "cp", str(VERIFY_SCRIPT), f"{api_id}:/tmp/verify_storage.py"])
     output = execute(
@@ -610,6 +617,36 @@ def validate_legacy_state(state: Mapping[str, Any]) -> None:
         raise OperationError("La huella 0.4.1 contiene contadores inválidos.")
 
 
+def validate_delivery_state(state: Mapping[str, Any]) -> None:
+    """Reject incomplete native 0.5.0/0.5.1 fingerprints before Docker mutation."""
+    expected_tables = (
+        DELIVERY_BASELINE_STATE_TABLES
+        if state.get("schema_version") == DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
+        else CURRENT_STATE_TABLES
+    )
+    tables = state.get("tables")
+    if (set(state) != DELIVERY_STATE_FIELDS or not isinstance(tables, Mapping)
+            or set(tables) != expected_tables):
+        raise OperationError("La huella Delivery no tiene el inventario esperado.")
+    for hashes in tables.values():
+        if not isinstance(hashes, Mapping):
+            raise OperationError("La huella Delivery contiene hashes inválidos.")
+        if any(not isinstance(identity, str) or not identity
+               or not isinstance(value, str) or SHA256_PATTERN.fullmatch(value) is None
+               for identity, value in hashes.items()):
+            raise OperationError("La huella Delivery contiene hashes inválidos.")
+    for field in ("verified_artifacts", "verified_secrets", "verified_source_secrets",
+                  "verified_delivery_secrets", "validated_relationships"):
+        if type(state.get(field)) is not int or state[field] < 0:
+            raise OperationError("La huella Delivery contiene contadores inválidos.")
+    if (state["verified_artifacts"] != len(tables["artifacts"])
+            or state["verified_source_secrets"] != len(tables["external_connection_versions"])
+            or state["verified_delivery_secrets"] != len(tables["delivery_destination_versions"])
+            or state["verified_secrets"]
+            != state["verified_source_secrets"] + state["verified_delivery_secrets"]):
+        raise OperationError("La huella Delivery contiene contadores inválidos.")
+
+
 def verify_backup(source: Path) -> dict[str, Any]:
     try:
         if source.is_symlink():
@@ -673,11 +710,14 @@ def verify_backup(source: Path) -> dict[str, Any]:
         state = json.loads((root / "state.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise OperationError("La huella persistente no es JSON válido.") from error
-    expected_state_schema = (
-        VERIFY_SCHEMA_VERSION
-        if schema_version == BACKUP_SCHEMA_VERSION
-        else LEGACY_VERIFY_SCHEMA_VERSION
-    )
+    if schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
+        expected_state_schema = LEGACY_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == DELIVERY_BASELINE_MIGRATION:
+        expected_state_schema = DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == CURRENT_MIGRATION:
+        expected_state_schema = VERIFY_SCHEMA_VERSION
+    else:
+        raise OperationError("Revisión de migración del respaldo no soportada.")
     if not isinstance(state, Mapping):
         raise OperationError("La huella persistente no tiene una estructura válida.")
     if state.get("schema_version") != expected_state_schema or state.get(
@@ -691,6 +731,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         raise OperationError("El backup v1 no corresponde a la baseline 0.4.1 soportada.")
     if schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
         validate_legacy_state(state)
+    else:
+        validate_delivery_state(state)
     return manifest
 
 
@@ -733,6 +775,17 @@ def validate_restored_state(
 ) -> None:
     schema_version = manifest.get("schema_version")
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION:
+            tables = restored_state.get("tables")
+            if (
+                restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                or restored_state.get("migration") != CURRENT_MIGRATION
+                or not isinstance(tables, Mapping)
+                or tables.get("delivery_reviews") != {}
+                or normalized_legacy_state != expected_state
+            ):
+                raise OperationError("La huella 0.5.0 normalizada no coincide con el respaldo.")
+            return
         if restored_state != expected_state:
             raise OperationError("La huella restaurada no coincide con el respaldo.")
         return
@@ -745,7 +798,7 @@ def validate_restored_state(
     # backups.  A future backup schema must record that evidence at backup time.
     tables = restored_state.get("tables")
     delivery_empty = isinstance(tables, Mapping) and all(
-        tables.get(table) == {} for table in DELIVERY_TABLES
+        tables.get(table) == {} for table in DELIVERY_TABLES | {"delivery_reviews"}
     )
     if (
         restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
@@ -915,14 +968,21 @@ def _restore_verified(
             )
         expected_state = json.loads((source.resolve() / "state.json").read_text(encoding="utf-8"))
         normalized_legacy_state = None
-        if backup_schema_version == LEGACY_BACKUP_SCHEMA_VERSION:
+        legacy_command = (
+            "snapshot-legacy-v2"
+            if backup_schema_version == LEGACY_BACKUP_SCHEMA_VERSION
+            else "snapshot-legacy-v3"
+            if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
+            else None
+        )
+        if legacy_command:
             with tempfile.TemporaryDirectory(
                 prefix="trackvance-restored-legacy-state-"
             ) as temporary:
                 normalized_legacy_state = _copy_snapshot(
                     str(api["id"]),
                     Path(temporary) / "state.json",
-                    command="snapshot-legacy-v2",
+                    command=legacy_command,
                 )
         validate_restored_state(
             manifest,

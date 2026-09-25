@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -225,6 +226,25 @@ class DeliveryAttempt(Record, Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DeliveryOperationalReview(Record, Base):
+    """Append-only human observation; never revises the remote attempt outcome."""
+
+    __tablename__ = "delivery_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('REMOTE_COMMIT_OBSERVED', 'REMOTE_NOT_COMMITTED_OBSERVED', 'INCONCLUSIVE')",
+            name="ck_delivery_review_outcome",
+        ),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    delivery_attempt_id: Mapped[str] = mapped_column(ForeignKey("delivery_attempts.id"), index=True)
+    reviewer_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewer_name: Mapped[str] = mapped_column(String(200))
+    outcome: Mapped[str] = mapped_column(String(40))
+    note: Mapped[str] = mapped_column(String(4000))
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Finding(Record, Base):

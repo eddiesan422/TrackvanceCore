@@ -46,6 +46,7 @@ _AUDIT_KEYS = frozenset({
     "destination_id", "destination_version_id", "sink_type", "write_strategy", "target",
     "attempt_number", "rows_attempted", "rows_written", "rows_inserted", "rows_updated",
     "bytes_sent",
+    "delivery_attempt_id", "review_id", "outcome", "verified_at",
     "schedule_id", "schedule_version_id", "planned_at", "dispatched_at", "coalesced_intervals",
     "interval_seconds", "assigned_user_id", "priority", "sla_hours", "due_at",
     "auto_resolve_enabled", "closure_type", "changed_fields", "active", "sessions_revoked", "policy",

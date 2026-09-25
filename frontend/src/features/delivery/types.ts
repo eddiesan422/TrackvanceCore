@@ -5,6 +5,25 @@ export type TargetMode = 'EXISTING_TABLE' | 'CREATE_TABLE'
 export type WriteStrategy = 'APPEND' | 'OVERWRITE' | 'UPSERT' | 'CREATE_AND_LOAD'
 export type DeliveryColumnType = 'STRING' | 'INT64' | 'DECIMAL' | 'DATE' | 'TIMESTAMP' | 'BOOLEAN'
 
+export type DeliveryReviewOutcome = 'REMOTE_COMMIT_OBSERVED' | 'REMOTE_NOT_COMMITTED_OBSERVED' | 'INCONCLUSIVE'
+export interface DeliveryReview {
+  id: string
+  run_id: string
+  delivery_attempt_id: string
+  reviewer_id: string
+  reviewer_name: string
+  outcome: DeliveryReviewOutcome
+  note: string
+  verified_at: string
+  created_at: string
+}
+export interface EvidenceRepair {
+  run_id: string
+  status: 'REPAIRED' | 'ALREADY_VALID'
+  receipt_artifact_id: string
+  manifest_artifact_id: string
+}
+
 export interface DestinationConfig {
   host: string
   port: number

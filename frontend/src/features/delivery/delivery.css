@@ -121,6 +121,11 @@
 .delivery-builder-footer>span { color:#83949d; font-size:11px; }
 .delivery-unknown { margin-bottom:22px; border-color:#e8cc9e; }
 .delivery-run-metrics small { font-size:15px; }
+.delivery-metric-help { margin:0 0 22px; color:#627987; font-size:12px; line-height:1.6; }
+.delivery-operation-notice .button { margin-top:12px; }
+.delivery-operational-reviews { margin-bottom:22px; }
+.delivery-operational-reviews td { vertical-align:top; }
+.delivery-review-note { min-width:180px; max-width:440px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .delivery-run-overview,.delivery-attempts,.delivery-receipt,.delivery-audit { margin-bottom:22px; }
 .delivery-run-overview>.delivery-review-grid { margin:0 21px 21px; }
 .delivery-attempts td { vertical-align:top; }

@@ -52,3 +52,20 @@ def test_connections_runner_failure_cleans_only_new_project_and_redacts_secrets(
     evidence = (tmp_path / "result.json").read_text(encoding="utf-8")
     assert "never-persist-this-credential" not in evidence
     assert "[REDACTED]" in evidence
+
+
+@pytest.mark.parametrize("source_type,count", [("POSTGRESQL", 14), ("SQLSERVER", 18)])
+def test_temporal_fixture_covers_every_precision_and_timezone_policy(source_type, count):
+    columns, expected, logical = runner.temporal_fixture(source_type)
+    assert len(columns) == len(expected) == len(logical) == count
+    assert len({name for name, _, _ in columns}) == count
+    assert all(logical[f"aware_{precision}"] == "TIMESTAMP" for precision in range(7))
+    assert all(logical[f"naive_{precision}"] == "STRING" for precision in range(7))
+    if source_type == "POSTGRESQL":
+        assert expected["aware_6"] == "2026-09-23T15:00:00.123456+00:00"
+        assert expected["naive_6"] == "2026-09-23T10:00:00.123456"
+    else:
+        assert logical["aware_7"] == logical["naive_7"] == "STRING"
+        assert expected["aware_7"] == "2026-09-23T15:00:00.1234567Z"
+        assert expected["naive_7"] == "2026-09-23T10:00:00.1234567"
+        assert logical["legacy_datetime"] == logical["legacy_small"] == "STRING"

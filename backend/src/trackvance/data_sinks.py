@@ -103,6 +103,13 @@ class DestinationSettings:
 
 @dataclass(frozen=True)
 class DeliveryResult:
+    """Confirmed-operation metrics, never a post-trigger physical row inventory.
+
+    ``rows_written`` preserves the 0.5.0 contract: submitted source rows, even
+    when the engine suppresses DML. Insert/update counters describe top-level
+    DML actions reported by the adapter, or None if not reliably available.
+    """
+
     rows_attempted: int
     rows_written: int
     rows_inserted: int | None
@@ -454,6 +461,11 @@ def serialized_size(rows: Sequence[tuple]) -> int:
         for value in row
         if value is not None
     )
+
+
+def _reported_rowcount(cursor: Any) -> int | None:
+    count = cursor.rowcount
+    return count if type(count) is int and count >= 0 else None
 
 
 def _safe_driver_error(exc: Exception, *, ambiguous: bool = False) -> DeliveryError:
@@ -827,9 +839,9 @@ class PostgreSQLDataSink(DatabaseDataSink):
         table_name: str,
         columns: list[dict[str, Any]],
         rows: Sequence[tuple],
-    ) -> None:
+    ) -> int | None:
         if not rows:
-            return
+            return 0
         for column in columns:
             validate_postgresql_identifier(column["target_name"])
         query = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
@@ -838,6 +850,9 @@ class PostgreSQLDataSink(DatabaseDataSink):
             sql.SQL(", ").join(sql.Placeholder() for _ in columns),
         )
         cursor.executemany(query, rows)
+        # psycopg sums command-tag counts for executemany without RETURNING.
+        # BEFORE triggers may suppress a row; len(rows) would fabricate inserts.
+        return _reported_rowcount(cursor)
 
     @staticmethod
     def _reject_active_row_security(
@@ -867,7 +882,8 @@ class PostgreSQLDataSink(DatabaseDataSink):
         rows: Sequence[tuple],
         upsert_keys: list[str],
         constraint_name: str,
-    ) -> None:
+        server_version: int = 0,
+    ) -> tuple[int | None, int | None]:
         for column in columns:
             validate_postgresql_identifier(column["target_name"])
         for name in upsert_keys:
@@ -963,8 +979,34 @@ class PostgreSQLDataSink(DatabaseDataSink):
             sql.Identifier(constraint_name),
             action,
         )
-        if rows:
+        if not rows:
+            return 0, 0
+        if not updates:
             cursor.executemany(query, rows)
+            return _reported_rowcount(cursor), 0
+        if server_version < 180000:
+            cursor.executemany(query, rows)
+            # PostgreSQL <=17's command tag merges INSERT and UPDATE. Do not
+            # infer an action from xmax or from a racy pre-write lookup.
+            return None, None
+        # PostgreSQL 18 documents OLD/NEW in RETURNING, including ON CONFLICT.
+        # Test the whole OLD row against scalar NULL: `old.key IS NULL` and
+        # `old IS NULL` misclassify a real all-null row / nullable unique key.
+        query += sql.SQL(
+            " RETURNING WITH (OLD AS trackvance_old) "
+            "trackvance_old IS NOT DISTINCT FROM NULL"
+        )
+        cursor.executemany(query, rows, returning=True)
+        inserted = updated = 0
+        while True:
+            for (was_inserted,) in cursor.fetchall():
+                if was_inserted:
+                    inserted += 1
+                else:
+                    updated += 1
+            if not cursor.nextset():
+                break
+        return inserted, updated
 
     def deliver_prepared(self, payload: PreparedDelivery) -> DeliveryResult:
         schema_name = payload.schema_name
@@ -974,6 +1016,8 @@ class PostgreSQLDataSink(DatabaseDataSink):
         target = payload.target
         strategy = payload.strategy
         upsert_keys = payload.upsert_keys
+        inserted: int | None
+        updated: int | None
         connection = None
         try:
             with self._connection() as connection, connection.cursor() as cursor:
@@ -1016,8 +1060,8 @@ class PostgreSQLDataSink(DatabaseDataSink):
                             self._qualified(schema_name, table_name), definitions
                         )
                     )
-                    self._insert(cursor, schema_name, table_name, columns, rows)
-                    inserted, updated = len(rows), 0
+                    inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                    updated = 0
                 else:
                     # Establish target existence and freeze DDL even for an
                     # empty DatasetVersion, where INSERT/UPSERT would otherwise
@@ -1033,8 +1077,8 @@ class PostgreSQLDataSink(DatabaseDataSink):
                         )
                     )
                     if strategy == "APPEND":
-                        self._insert(cursor, schema_name, table_name, columns, rows)
-                        inserted, updated = len(rows), 0
+                        inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                        updated = 0
                     elif strategy == "OVERWRITE":
                         self._reject_active_row_security(
                             cursor, schema_name, table_name
@@ -1044,10 +1088,10 @@ class PostgreSQLDataSink(DatabaseDataSink):
                                 self._qualified(schema_name, table_name)
                             )
                         )
-                        self._insert(cursor, schema_name, table_name, columns, rows)
-                        inserted, updated = len(rows), 0
+                        inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                        updated = 0
                     else:
-                        self._upsert(
+                        inserted, updated = self._upsert(
                             cursor,
                             schema_name,
                             table_name,
@@ -1055,8 +1099,8 @@ class PostgreSQLDataSink(DatabaseDataSink):
                             rows,
                             upsert_keys,
                             str(target.get("_upsert_constraint", "")),
+                            getattr(getattr(connection, "info", None), "server_version", 0),
                         )
-                        inserted, updated = None, None
                 try:
                     connection.commit()
                 except psycopg.Error as exc:
@@ -1395,9 +1439,9 @@ class SQLServerDataSink(DatabaseDataSink):
         table_name: str,
         columns: list[dict[str, Any]],
         rows: Sequence[tuple],
-    ) -> None:
+    ) -> int | None:
         if not rows:
-            return
+            return 0
         names = ", ".join(quote_sqlserver_identifier(column["target_name"]) for column in columns)
         placeholders = ", ".join("%s" for _ in columns)
         cursor.executemany(
@@ -1405,6 +1449,9 @@ class SQLServerDataSink(DatabaseDataSink):
             f"VALUES ({placeholders})",
             rows,
         )
+        # pymssql reports -1 when it cannot aggregate affected-row counts (for
+        # example larger executemany batches). Unknown must remain null.
+        return _reported_rowcount(cursor)
 
     def _upsert(
         self,
@@ -1480,12 +1527,14 @@ class SQLServerDataSink(DatabaseDataSink):
                     "La clave UPSERT dejó de identificar una única fila; no se confirmó ningún cambio.",
                 )
             if matched:
-                updated += 1
+                # A key-only UPSERT performs no UPDATE for an existing key.
+                updated += int(bool(update_names))
             else:
                 cursor.execute(
-                    f"INSERT INTO {locator} ({insert_names}) VALUES ({insert_values})", row
+                    f"INSERT INTO {locator} ({insert_names}) VALUES ({insert_values}); "
+                    "SELECT @@ROWCOUNT", row
                 )
-                inserted += 1
+                inserted += int(cursor.fetchone()[0])
         return inserted, updated
 
     def deliver_prepared(self, payload: PreparedDelivery) -> DeliveryResult:
@@ -1534,16 +1583,16 @@ class SQLServerDataSink(DatabaseDataSink):
                     cursor.execute(
                         f"CREATE TABLE {self._qualified(schema_name, table_name)} ({definitions})"
                     )
-                    self._insert(cursor, schema_name, table_name, columns, rows)
-                    inserted, updated = len(rows), 0
+                    inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                    updated = 0
                 else:
                     self._lock_existing_target(cursor, schema_name, table_name)
                     self._reject_ignore_duplicate_keys(
                         cursor, schema_name, table_name
                     )
                     if strategy == "APPEND":
-                        self._insert(cursor, schema_name, table_name, columns, rows)
-                        inserted, updated = len(rows), 0
+                        inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                        updated = 0
                     elif strategy == "OVERWRITE":
                         self._reject_filter_security_policy(
                             cursor, schema_name, table_name
@@ -1551,8 +1600,8 @@ class SQLServerDataSink(DatabaseDataSink):
                         cursor.execute(
                             f"DELETE FROM {self._qualified(schema_name, table_name)}"
                         )
-                        self._insert(cursor, schema_name, table_name, columns, rows)
-                        inserted, updated = len(rows), 0
+                        inserted = self._insert(cursor, schema_name, table_name, columns, rows)
+                        updated = 0
                     else:
                         inserted, updated = self._upsert(
                             cursor,

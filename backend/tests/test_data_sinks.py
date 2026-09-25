@@ -92,8 +92,10 @@ class FakeCursor:
         if self._rowcounts:
             self.rowcount = self._rowcounts.popleft()
 
-    def executemany(self, statement: Any, rows: Any) -> None:
-        self.executemany_calls.append((render_sql(statement), list(rows)))
+    def executemany(self, statement: Any, rows: Any, *, returning=False) -> None:
+        materialized = list(rows)
+        self.executemany_calls.append((render_sql(statement), materialized))
+        self.rowcount = len(materialized)
         if self.executemany_error is not None:
             raise self.executemany_error
 
@@ -102,6 +104,9 @@ class FakeCursor:
 
     def fetchall(self) -> Any:
         return self._fetchall.popleft()
+
+    def nextset(self) -> bool:
+        return bool(self._fetchall)
 
 
 class FakeConnection:
@@ -1243,7 +1248,7 @@ def test_postgresql_upsert_collation_collision_rolls_back_before_target_mutation
 def test_sqlserver_upsert_uses_composite_keys_and_reports_update_insert_counts(monkeypatch):
     adapter = SQLServerDataSink(settings("SQLSERVER"))
     cursor = FakeCursor(
-        fetchone=((0,), (1,), (0,)),
+        fetchone=((0,), (1,), (0,), (1,)),
         # A trigger using SET NOCOUNT ON may leave DB-API rowcount at -1;
         # the adapter must use its explicit SELECT @@ROWCOUNT result instead.
         rowcounts=(-1, -1, -1, -1, -1),
@@ -1272,7 +1277,7 @@ def test_sqlserver_upsert_uses_composite_keys_and_reports_update_insert_counts(m
     )
     insert = (
         "INSERT INTO [crm].[customers] ([tenant_id], [external_id], [display_name]) "
-        "VALUES (%s, %s, %s)"
+        "VALUES (%s, %s, %s); SELECT @@ROWCOUNT"
     )
     assert cursor.executions[2:4] == [
         (

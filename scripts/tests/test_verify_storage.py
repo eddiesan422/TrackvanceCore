@@ -350,3 +350,84 @@ def test_legacy_v2_report_requires_exact_post_migration_revision():
             verified_artifacts=0,
             verified_source_secrets=0,
         )
+
+
+def reviewed_rows():
+    rows = delivery_rows()
+    rows["runs"][0]["status"] = "UNKNOWN"
+    rows["runs"][0]["decision"] = "UNKNOWN"
+    rows["delivery_attempts"][0]["status"] = "UNKNOWN"
+    rows["users"] = [{"id": "reviewer", "organization_id": "org"}]
+    rows["delivery_reviews"] = [{
+        "id": "review", "organization_id": "org", "run_id": "run",
+        "delivery_attempt_id": "attempt", "reviewer_id": "reviewer",
+        "outcome": "INCONCLUSIVE",
+    }]
+    return rows
+
+
+@pytest.mark.parametrize("outcome", sorted(verify_storage.REVIEW_OUTCOMES))
+def test_review_relationships_preserve_unknown_and_organization(outcome):
+    rows = reviewed_rows()
+    rows["delivery_reviews"][0]["outcome"] = outcome
+    assert verify_storage.validate_relationships(rows, []) == 5
+
+
+@pytest.mark.parametrize("mutation", [
+    "attempt", "run", "reviewer", "attempt_state", "run_state", "outcome", "organization",
+])
+def test_review_relationships_reject_inconsistent_review(mutation):
+    rows = reviewed_rows()
+    review = rows["delivery_reviews"][0]
+    if mutation in {"attempt", "run", "reviewer"}:
+        field = {"attempt": "delivery_attempt_id", "run": "run_id", "reviewer": "reviewer_id"}
+        review[field[mutation]] = "missing"
+    elif mutation == "attempt_state":
+        rows["delivery_attempts"][0]["status"] = "COMMITTED"
+    elif mutation == "run_state":
+        rows["runs"][0]["status"] = "SUCCESS"
+    elif mutation == "outcome":
+        review["outcome"] = "COMMITTED"
+    else:
+        review["organization_id"] = "other-org"
+    with pytest.raises(ValueError, match="UNKNOWN|organización"):
+        verify_storage.validate_relationships(rows, [])
+
+
+def v3_report(rows):
+    return verify_storage.legacy_v3_report(
+        rows, [], current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=2, verified_source_secrets=1, verified_delivery_secrets=1,
+    )
+
+
+def test_legacy_v3_preserves_delivery_payload_and_excludes_only_empty_review_table():
+    rows = delivery_rows()
+    rows["delivery_reviews"] = []
+    report = v3_report(rows)
+    assert report["schema_version"] == 3
+    assert report["migration"] == "0008_data_delivery"
+    assert report["verified_secrets"] == 2
+    assert report["verified_delivery_secrets"] == 1
+    assert "delivery_reviews" not in report["tables"]
+    assert report["tables"]["delivery_attempts"]["attempt"] == verify_storage._canonical_hash(
+        rows["delivery_attempts"][0]
+    )
+    before = deepcopy(report)
+    rows["delivery_attempts"][0]["status"] = "UNKNOWN"
+    with pytest.raises(ValueError, match="delivery_attempts"):
+        verify_storage.compare(before, v3_report(rows))
+
+
+def test_legacy_projections_reject_reviews_and_current_state_includes_them():
+    rows = reviewed_rows()
+    with pytest.raises(ValueError, match="revisiones vacías"):
+        v3_report(rows)
+    legacy = legacy_compatible_rows()
+    legacy["delivery_reviews"] = rows["delivery_reviews"]
+    with pytest.raises(ValueError, match="registros de Data Delivery"):
+        verify_storage.legacy_v2_report(
+            legacy, [], current_migration=verify_storage.CURRENT_MIGRATION,
+            verified_artifacts=0, verified_source_secrets=0,
+        )
+    assert verify_storage._table_hashes(rows)["delivery_reviews"]["review"]

@@ -254,3 +254,22 @@ jobs:
             .codex-local/benchmarks/**/cleanup.json
           include-hidden-files: true
           if-no-files-found: ignore
+  delivery-benchmark-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Measure all four Delivery strategies on real disposable targets
+        run: python scripts/tests/delivery_benchmark_cycle.py --smoke --max-wall-seconds 1200
+      - name: Upload sanitized measurements (not production capacity certification)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: delivery-benchmark-smoke-results
+          path: .codex-local/delivery-benchmarks/**/result.json
+          include-hidden-files: true
+          if-no-files-found: ignore

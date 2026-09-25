@@ -1,5 +1,5 @@
 import { MonitorSchedulePanel } from './MonitorSchedulePanel'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowRight, ArrowUpRight, CheckCheck, CircleAlert, ClipboardList, Download, FileCheck2, GitCompareArrows, Play, Plus, ShieldCheck, Square, Timer, Upload } from 'lucide-react'
@@ -10,7 +10,7 @@ import { RunsTable } from '../../routes/Dashboard'
 import { ConfigDialog } from './ConfigDialog'
 import { usePermission } from '../../app/session'
 import { SampleValue } from '../datasets/VersionIdentity'
-import { DeliveryRunDetail } from '../delivery/Delivery'
+const DeliveryRunDetail = lazy(() => import('../delivery/DeliveryRunDetail').then(module => ({ default: module.DeliveryRunDetail })))
 
 type Module = 'intake' | 'recon' | 'sentinel'
 const modules = {
@@ -65,7 +65,7 @@ export function RunDetail() {
   const exception = useMutation({ mutationFn: (finding: string) => post(`/findings/${finding}/exceptions`), onSuccess: data => { cache.invalidateQueries({ queryKey: ['run', id] }); cache.invalidateQueries({ queryKey: ['exceptions'] }); cache.invalidateQueries({ queryKey: ['dashboard'] }); navigate(`/exceptions?id=${data.id}`) } })
   if (run.isPending) return <Loading text="Cargando ejecución y evidencia…"/>
   if (run.error) return <ErrorState error={run.error} retry={() => run.refetch()}/>
-  if (deliveryRun) return <DeliveryRunDetail data={run.data}/>
+  if (deliveryRun) return <Suspense fallback={<Loading text="Cargando Data Delivery…"/>}><DeliveryRunDetail key={run.data.id} data={run.data}/></Suspense>
   const data = run.data, metrics = data.metrics || {}, module = data.module as Module, pending = activeRun(data.status), rows = results.data?.items || [], findings: RecordData[] = data.findings || []
   const summary = module === 'intake' ? [{ title: 'Filas evaluadas', value: metrics.total_rows }, { title: 'Filas válidas', value: metrics.valid_rows }, { title: 'Filas con error', value: metrics.error_rows }, { title: 'Aceptación', value: metrics.acceptance_rate, percent: true }] : module === 'recon' ? [{ title: 'Registros en origen', value: metrics.source_rows }, { title: 'Registros en destino', value: metrics.target_rows }, { title: 'Coincidencias', value: metrics.matched }, { title: 'Coincidencia', value: metrics.match_rate, percent: true }] : [{ title: 'Registros evaluados', value: metrics.row_count }, { title: 'Controles evaluados', value: metrics.total_checks }, { title: 'Controles fallidos', value: metrics.failed_checks }, { title: 'Salud del dataset', value: metrics.health_score, percent: true }]
   const classifications = module === 'recon' ? ['MATCH', 'VALUE_MISMATCH', 'SOURCE_ONLY', 'TARGET_ONLY', 'DUPLICATE_SOURCE', 'DUPLICATE_TARGET', 'INVALID'] : module === 'sentinel' ? ['PASS', 'FAIL'] : ['ERROR', 'WARNING']

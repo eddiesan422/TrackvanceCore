@@ -20,6 +20,10 @@ from .delivery_schemas import (
     DeliveryDraft,
     DeliveryPreflightResponse,
     DeliveryPreviewResponse,
+    DeliveryRepairResponse,
+    DeliveryReviewBody,
+    DeliveryReviewResponse,
+    DeliveryReviewsResponse,
     DeliveryRunBody,
     DestinationBody,
     DestinationListResponse,
@@ -36,11 +40,15 @@ from .delivery_service import (
     delivery_config_dto,
     destination_dto,
     enqueue_delivery,
+    owned_delivery_run,
     owned_destination,
     preflight_delivery,
     preview_delivery,
     receipt_artifact,
+    record_delivery_review,
+    repair_delivery_evidence,
     require_password_for_destination_change,
+    review_dto,
     save_destination,
     settings_for,
     test_saved_destination,
@@ -50,6 +58,7 @@ from .models import (
     DatasetVersion,
     DeliveryAttempt,
     DeliveryDestination,
+    DeliveryOperationalReview,
     IdempotencyKey,
     Run,
     User,
@@ -535,3 +544,39 @@ def delivery_receipt(
         media_type="application/json",
         filename=f"trackvance_{run.id}_delivery_receipt.json",
     )
+
+
+@router.post("/runs/{run_id}/repair-evidence", response_model=DeliveryRepairResponse)
+def repair_evidence(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Reconstruct verified local evidence of COMMITTED; never replay a delivery."""
+    return repair_delivery_evidence(db, user, run_id)
+
+
+@router.get("/runs/{run_id}/reviews", response_model=DeliveryReviewsResponse)
+def delivery_reviews(
+    run_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Read structured external observations separately from historical outcomes."""
+    run = owned_delivery_run(db, user, run_id)
+    items = db.scalars(select(DeliveryOperationalReview).where(
+        DeliveryOperationalReview.run_id == run.id,
+        DeliveryOperationalReview.organization_id == user.organization_id,
+    ).order_by(DeliveryOperationalReview.created_at, DeliveryOperationalReview.id)).all()
+    return {"items": [review_dto(item) for item in items], "total": len(items)}
+
+
+@router.post("/runs/{run_id}/reviews", status_code=201, response_model=DeliveryReviewResponse)
+def review_delivery_outcome(
+    run_id: str,
+    body: DeliveryReviewBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Record a human observation; original UNKNOWN and Run/Job identity are unchanged."""
+    return review_dto(record_delivery_review(db, user, run_id, body))

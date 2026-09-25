@@ -1,0 +1,16 @@
+# Resource ceilings only: never raises upload/row/planner defaults.
+services:
+  postgres:
+    mem_limit: 384m
+  api:
+    mem_limit: 1g
+  worker:
+    mem_limit: 768m
+  delivery-worker:
+    mem_limit: 1g
+  web:
+    mem_limit: 128m
+  destination-postgres:
+    mem_limit: 384m
+  destination-sqlserver:
+    mem_limit: 2560m

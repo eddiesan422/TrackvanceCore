@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
+import math
+import time
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any, cast
+from uuid import NAMESPACE_URL, uuid5
 
 import polars as pl
 from sqlalchemy import select, update
@@ -14,7 +17,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from . import __version__
-from .artifactstore import artifact_dto, link_artifact, storage_provider
+from .artifactstore import ArtifactIntegrityError, artifact_dto, link_artifact, storage_provider
 from .audit_context import Actor
 from .config import MAX_ROWS
 from .credential_store import SecretStoreError
@@ -34,7 +37,8 @@ from .data_sinks import (
 )
 from .db import iso, require_record, utcnow
 from .delivery_credential_store import destination_secret_store
-from .delivery_schemas import DeliveryDraft
+from .delivery_metrics import delivery_metric_semantics
+from .delivery_schemas import DeliveryDraft, DeliveryReviewBody
 from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
 from .models import (
@@ -46,6 +50,7 @@ from .models import (
     DeliveryAttempt,
     DeliveryDestination,
     DeliveryDestinationVersion,
+    DeliveryOperationalReview,
     Job,
     Run,
     User,
@@ -1169,6 +1174,9 @@ def enqueue_delivery(
             "FAILED_PRECONDITION",
             "La identidad versionada del destino ya no está disponible.",
         )
+    canonical = db.get(Artifact, source.canonical_artifact_id)
+    if canonical is None or canonical.organization_id != config.organization_id:
+        raise DeliveryOperationError(412, "FAILED_PRECONDITION", "El artifact canónico no está disponible.")
     run = Run(
         id=uid(),
         organization_id=config.organization_id,
@@ -1191,6 +1199,12 @@ def enqueue_delivery(
             "target": draft.target.model_dump(),
             "write_strategy": draft.write_strategy,
             "config_hash": configuration_hash(draft.snapshot()),
+            "evidence_engine_version": __version__,
+            "source_identity": {
+                "dataset_version_id": source.id, "source_sha256": source.sha256,
+                "schema_hash": source.schema_hash, "canonical_artifact_id": canonical.id,
+                "canonical_sha256": canonical.sha256,
+            },
             "allowed": True,
             "reason_code": "DELIVERY_PREFLIGHT_REQUIRED_AT_EXECUTION",
         },
@@ -1368,20 +1382,133 @@ def _write_json_artifact(
     kind: str,
     name: str,
     payload: dict[str, Any],
+    *,
+    artifact_id: str | None = None,
+    newline: str = "\n",
 ) -> Artifact:
     temporary = storage_provider.temporary_path(".json")
     try:
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2).replace("\n", newline)
+        temporary.write_bytes(serialized.encode("utf-8"))
         return storage_provider.put_file(
             db,
             temporary,
             kind,
             run.organization_id,
             name,
+            artifact_id=artifact_id,
             media_type="application/json",
         )
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def _evidence_metrics(run: Run) -> dict[str, Any]:
+    """Evidence describes the remote operation, not its publication/recovery state."""
+    return {
+        key: value for key, value in (run.metrics or {}).items()
+        if key not in {"evidence_status", "receipt_artifact_id", "manifest_artifact_id"}
+    }
+
+
+def _evidence_identity(run: Run, kind: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"trackvance:delivery:{run.organization_id}:{run.id}:{kind}"))
+
+
+def _evidence_problem(reason: str) -> DeliveryOperationError:
+    return DeliveryOperationError(409, "DELIVERY_EVIDENCE_UNVERIFIABLE", reason)
+
+
+def _evidence_candidates(db: Session, run: Run, kind: str) -> list[Artifact]:
+    identities = {_evidence_identity(run, kind)}
+    links = db.scalars(select(ArtifactLink).where(
+        ArtifactLink.organization_id == run.organization_id,
+        ArtifactLink.source_type == "RUN", ArtifactLink.source_id == run.id,
+        ArtifactLink.target_type == "ARTIFACT",
+        ArtifactLink.relation.in_({"RUN_OUTPUT", "DELIVERY_RECEIPT"}),
+    )).all()
+    identities.update(link.target_id for link in links)
+    if run.metrics.get("receipt_artifact_id"):
+        identities.add(run.metrics["receipt_artifact_id"])
+    query = select(Artifact).where(
+        Artifact.organization_id == run.organization_id, Artifact.kind == kind,
+        (Artifact.id.in_(identities)) | (Artifact.path == run.evidence_path),
+    )
+    return list(db.scalars(query).all())
+
+
+def _equivalent_evidence(actual: dict[str, Any], expected: dict[str, Any], kind: str) -> bool:
+    # Cosmetic display names and additive descriptions do not invalidate 0.5.0
+    # evidence. All operation identities, hashes, configuration and measured
+    # values must still match; old bytes are never rewritten just to add fields.
+    if kind == "DELIVERY_RECEIPT":
+        ignored = {"destination_name", "metric_semantics"}
+        return all(actual.get(key) == value for key, value in expected.items() if key not in ignored)
+    if actual.get("schema_version") != SCHEMA_VERSION or actual.get("module") != "DELIVERY":
+        return False
+    for key in ("run_id", "started_at", "finished_at", "initiated_by", "inputs", "configuration"):
+        if actual.get(key) != expected.get(key):
+            return False
+    actual_plan, expected_plan = actual.get("processing"), expected.get("processing")
+    if actual_plan != expected_plan:
+        return False
+    actual_delivery, expected_delivery = actual.get("delivery", {}), expected["delivery"]
+    if not isinstance(actual_delivery, dict):
+        return False
+    for key in ("target", "write_strategy", "attempt"):
+        if actual_delivery.get(key) != expected_delivery[key]:
+            return False
+    for key, value in expected_delivery["destination"].items():
+        if key != "destination_name" and actual_delivery.get("destination", {}).get(key) != value:
+            return False
+    for metrics in (actual.get("metrics"), actual_delivery.get("metrics")):
+        if not isinstance(metrics, dict):
+            return False
+        if any(metrics.get(key) != value for key, value in expected["metrics"].items()
+               if key != "metric_semantics"):
+            return False
+    return actual.get("result_artifacts") == expected["result_artifacts"]
+
+
+def _publish_evidence_artifact(
+    db: Session, run: Run, kind: str, name: str, payload: dict[str, Any],
+) -> Artifact:
+    candidates = _evidence_candidates(db, run, kind)
+    if len(candidates) > 1:
+        raise _evidence_problem("Hay más de un artifact de evidencia asociado a esta entrega.")
+    if candidates:
+        candidate = candidates[0]
+        if storage_provider.exists(candidate):
+            try:
+                actual = json.loads(storage_provider.materialize(candidate).read_text(encoding="utf-8"))
+            except (ArtifactIntegrityError, OSError, ValueError):
+                raise _evidence_problem("La evidencia existente está corrupta; no se sobrescribe.") from None
+            if not isinstance(actual, dict) or not _equivalent_evidence(actual, payload, kind):
+                raise _evidence_problem("La evidencia existente no coincide con la operación persistida.")
+            return candidate
+        # Recreate missing bytes only when the exact registered hash is derivable.
+        variants = [payload]
+        legacy = json.loads(json.dumps(payload))
+        legacy.pop("metric_semantics", None)
+        if kind == "RUN_MANIFEST":
+            legacy["engine_version"] = "0.5.0"
+            legacy["processing"].pop("evidence_engine_version", None)
+            legacy["metrics"].pop("metric_semantics", None)
+            legacy["delivery"]["metrics"].pop("metric_semantics", None)
+        variants.append(legacy)
+        for variant in variants:
+            # 0.5.0's text writer used platform-native newlines. Both are
+            # reconstructible, while all new evidence uses portable LF bytes.
+            for newline in ("\n", "\r\n"):
+                encoded = json.dumps(variant, ensure_ascii=False, indent=2).replace("\n", newline).encode("utf-8")
+                if hashlib.sha256(encoded).hexdigest() == candidate.sha256:
+                    return _write_json_artifact(
+                        db, run, kind, name, variant, artifact_id=candidate.id, newline=newline,
+                    )
+        raise _evidence_problem("No se pueden reconstruir los bytes del hash histórico registrado.")
+    return _write_json_artifact(
+        db, run, kind, name, payload, artifact_id=_evidence_identity(run, kind),
+    )
 
 
 def _publish_delivery_evidence(
@@ -1396,7 +1523,9 @@ def _publish_delivery_evidence(
     attempt: DeliveryAttempt,
 ) -> tuple[Artifact, Artifact]:
     target = draft.target.model_dump()
-    receipt_payload = {
+    metrics = _evidence_metrics(run)
+    destination_name = run.execution_plan.get("destination_name", destination.name)
+    receipt_payload: dict[str, Any] = {
         "schema_version": 1,
         "kind": "DELIVERY_RECEIPT",
         "run_id": run.id,
@@ -1405,7 +1534,7 @@ def _publish_delivery_evidence(
         "canonical_artifact_id": source_artifact.id,
         "canonical_sha256": source_artifact.sha256,
         "destination_id": destination.id,
-        "destination_name": destination.name,
+        "destination_name": destination_name,
         "destination_version_id": destination_version.id,
         "destination_version": destination_version.version,
         "sink_type": destination.sink_type,
@@ -1422,8 +1551,10 @@ def _publish_delivery_evidence(
         "result": attempt.status,
         "delivery_attempt_id": attempt.id,
         "attempt_number": attempt.attempt_number,
+        "metric_semantics": delivery_metric_semantics(),
+        **{key: metrics[key] for key in ("preflight_seconds", "write_seconds") if key in metrics},
     }
-    receipt = _write_json_artifact(
+    receipt = _publish_evidence_artifact(
         db, run, "DELIVERY_RECEIPT", "delivery-receipt.json", receipt_payload
     )
     link_artifact(
@@ -1452,7 +1583,7 @@ def _publish_delivery_evidence(
         "finished_at": iso(run.finished_at),
         "initiated_by": run_actor(run).as_dict(),
         "initiated_by_legacy": run.initiated_by_legacy,
-        "engine_version": __version__,
+        "engine_version": run.execution_plan.get("evidence_engine_version", "0.5.0"),
         "processing": run.execution_plan,
         "inputs": [
             {
@@ -1477,7 +1608,7 @@ def _publish_delivery_evidence(
         "delivery": {
             "destination": {
                 "destination_id": destination.id,
-                "destination_name": destination.name,
+                "destination_name": destination_name,
                 "destination_version_id": destination_version.id,
                 "destination_version": destination_version.version,
                 "sink_type": destination.sink_type,
@@ -1485,13 +1616,14 @@ def _publish_delivery_evidence(
             },
             "target": target,
             "write_strategy": draft.write_strategy,
-            "metrics": run.metrics,
+            "metrics": metrics,
             "attempt": attempt_dto(attempt),
         },
-        "metrics": run.metrics,
+        "metrics": metrics,
+        "metric_semantics": delivery_metric_semantics(),
         "result_artifacts": [artifact_dto(receipt)],
     }
-    evidence = _write_json_artifact(db, run, "RUN_MANIFEST", "evidence.json", manifest)
+    evidence = _publish_evidence_artifact(db, run, "RUN_MANIFEST", "evidence.json", manifest)
     link_artifact(
         db,
         run.organization_id,
@@ -1574,6 +1706,7 @@ def execute_delivery_run(
         )
         db.commit()
         return
+    preflight_started = time.perf_counter()
     try:
         preflight = preflight_delivery(db, run.organization_id, draft)
     except (DeliveryOperationError, DeliveryError) as error:
@@ -1597,6 +1730,7 @@ def execute_delivery_run(
         )
         db.commit()
         return
+    preflight_seconds = time.perf_counter() - preflight_started
     destination = require_record(db, DeliveryDestination, draft.destination_id)
     destination_version = exact_destination_version(
         db, destination, draft.destination_version_id
@@ -1690,12 +1824,14 @@ def execute_delivery_run(
     # From this durable marker onward an abrupt worker loss cannot prove whether
     # the immediately following remote transaction started or committed.
     db.commit()
+    write_started = time.perf_counter()
     try:
         result = sink.deliver_prepared(prepared)
     except DeliveryError as error:
         _fence_delivery_result(db, run, attempt, lease_owner)
         _record_remote_failure(db, run, attempt, error, actor)
         return
+    write_seconds = time.perf_counter() - write_started
     # A successful remote return is not authority to overwrite an outcome that
     # another worker already reconciled. Fence the queue projection and refresh
     # the attempt before recording COMMITTED.
@@ -1721,6 +1857,9 @@ def execute_delivery_run(
         "sink_type": destination.sink_type,
         "target": draft.target.model_dump(),
         "write_strategy": draft.write_strategy,
+        "metric_semantics": delivery_metric_semantics(),
+        "preflight_seconds": preflight_seconds,
+        "write_seconds": write_seconds,
     }
     run.status = "SUCCESS"
     run.decision = "COMMITTED"
@@ -1795,3 +1934,221 @@ def receipt_artifact(db: Session, run: Run) -> Artifact:
         )
     storage_provider.materialize(artifact)
     return artifact
+
+
+def owned_delivery_run(db: Session, user: User, run_id: str, *, lock: bool = False) -> Run:
+    scope = (
+        Run.id == run_id, Run.organization_id == user.organization_id, Run.module == "DELIVERY",
+    )
+    if lock:
+        # A no-op row write obtains the same transaction-level serialization on
+        # SQLite (whose SELECT FOR UPDATE is ignored) and PostgreSQL. Do this
+        # before reading the repair projection; concurrent requests re-read the
+        # winner's committed evidence instead of racing to publish another copy.
+        db.execute(update(Run).where(*scope).values(id=Run.id).execution_options(synchronize_session=False))
+    run = db.scalar(select(Run).where(*scope).execution_options(populate_existing=True))
+    if run is None:
+        raise DeliveryOperationError(404, "NOT_FOUND", "No se encontró la entrega.")
+    return run
+
+
+def _repair_context(db: Session, run: Run) -> tuple[
+    Configuration, DatasetVersion, Artifact, DeliveryDestination,
+    DeliveryDestinationVersion, DeliveryDraft, DeliveryAttempt,
+]:
+    if run.status != "SUCCESS" or run.decision != "COMMITTED":
+        raise DeliveryOperationError(
+            409, "DELIVERY_REPAIR_NOT_ALLOWED",
+            "Sólo se repara evidencia de una entrega SUCCESS con commit remoto confirmado.",
+        )
+    attempts = db.scalars(select(DeliveryAttempt).where(DeliveryAttempt.run_id == run.id)).all()
+    if (len(attempts) != 1 or attempts[0].status != "COMMITTED"
+            or attempts[0].organization_id != run.organization_id):
+        raise _evidence_problem("Se requiere un único DeliveryAttempt COMMITTED verificable.")
+    attempt = attempts[0]
+    config = db.get(Configuration, run.config_id)
+    if config is None or config.organization_id != run.organization_id or config.module != "DELIVERY":
+        raise _evidence_problem("La Configuration DELIVERY original no está disponible.")
+    try:
+        draft = DeliveryDraft.model_validate(config.config)
+    except ValueError:
+        raise _evidence_problem("La Configuration original no es legible.") from None
+    if (configuration_hash(draft.snapshot()) != run.execution_plan.get("config_hash")
+            or draft.dataset_version_id != run.dataset_version_id):
+        raise _evidence_problem("El hash o la DatasetVersion de la Configuration no coincide con el Run.")
+    source, dataset, source_artifact, frame = _owned_version(db, run.dataset_version_id, run.organization_id)
+    source_identity = {
+        "dataset_version_id": source.id, "source_sha256": source.sha256,
+        "schema_hash": source.schema_hash, "canonical_artifact_id": source_artifact.id,
+        "canonical_sha256": source_artifact.sha256,
+    }
+    if ("source_identity" in run.execution_plan
+            and run.execution_plan["source_identity"] != source_identity):
+        raise _evidence_problem("La identidad o los hashes del snapshot difieren del Run original.")
+    signature = [{"name": column["name"], "logical_type": column["logical_type"]}
+                 for column in source.schema_json]
+    schema_hash = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+    if (dataset.id != config.dataset_id or frame.height != source.row_count
+            or frame.width != source.column_count or source.canonical_path != source_artifact.path
+            or schema_hash != source.schema_hash
+            or [column["name"] for column in source.schema_json] != frame.columns
+            or _source_type_mismatches(source, draft)):
+        raise _evidence_problem("El snapshot canónico no coincide con la Configuration persistida.")
+    destination = db.get(DeliveryDestination, draft.destination_id)
+    destination_version = db.get(DeliveryDestinationVersion, draft.destination_version_id)
+    if (destination is None or destination_version is None
+            or destination.organization_id != run.organization_id
+            or destination_version.organization_id != run.organization_id
+            or destination_version.destination_id != destination.id):
+        raise _evidence_problem("La DestinationVersion original no está disponible en la organización.")
+    if destination_version.config_hash != configuration_hash({
+        **destination_version.config, "credential_revision": destination_version.secret_reference,
+    }):
+        raise _evidence_problem("El hash de la DestinationVersion original no coincide.")
+    plan_checks = {
+        "destination_id": destination.id, "destination_version_id": destination_version.id,
+        "destination_version": destination_version.version, "sink_type": destination.sink_type,
+        "target": draft.target.model_dump(), "write_strategy": draft.write_strategy,
+    }
+    if any(run.execution_plan.get(key) != value for key, value in plan_checks.items()):
+        raise _evidence_problem("El plan persistido no coincide con el destino y la estrategia originales.")
+    if (attempt.destination_version_id != destination_version.id
+            or attempt.target_locator != f"{draft.target.schema_name}.{draft.target.table_name}"
+            or attempt.idempotency_key != _delivery_idempotency(run, config)
+            or not attempt.started_at or not attempt.finished_at
+            or not run.started_at or not run.finished_at):
+        raise _evidence_problem("La identidad, target o fechas del intento COMMITTED no son verificables.")
+    metric_checks = {
+        **{key: value for key, value in plan_checks.items() if key != "destination_version"},
+        "delivery_attempt_id": attempt.id, "attempt_number": attempt.attempt_number,
+    }
+    for key in ("rows_attempted", "rows_written", "rows_inserted", "rows_updated", "bytes_sent"):
+        value = getattr(attempt, key)
+        if value is not None and (type(value) is not int or value < 0):
+            raise _evidence_problem("El intento contiene métricas no verificables.")
+        metric_checks[key] = value
+    if (attempt.rows_attempted != source.row_count
+            or any(key not in run.metrics or run.metrics[key] != value
+                   for key, value in metric_checks.items())):
+        raise _evidence_problem("Las métricas persistidas no coinciden con el intento COMMITTED.")
+    for key in ("preflight_seconds", "write_seconds"):
+        if key in run.metrics:
+            value = run.metrics[key]
+            if type(value) not in {float, int} or not math.isfinite(value) or value < 0:
+                raise _evidence_problem("Las duraciones persistidas no son verificables.")
+    return config, source, source_artifact, destination, destination_version, draft, attempt
+
+
+def repair_delivery_evidence(db: Session, user: User, run_id: str) -> dict[str, Any]:
+    """Reconstruct local evidence only. This path never obtains a sink or secret."""
+    run = owned_delivery_run(db, user, run_id, lock=True)
+    actor = Actor("USER", user.id, user.name)
+    audit(db, "DELIVERY_EVIDENCE_REPAIR_STARTED", "run", run.id,
+          "Reparación de evidencia local solicitada", actor, run.organization_id, run_id=run.id)
+    try:
+        # A failed publication rolls back its metadata, but retains the STARTED
+        # audit event and the outer Run lock until FAILED can be committed.
+        with db.begin_nested():
+            context = _repair_context(db, run)
+            before = {
+                artifact.id: storage_provider.exists(artifact)
+                for kind in ("DELIVERY_RECEIPT", "RUN_MANIFEST")
+                for artifact in _evidence_candidates(db, run, kind)
+            }
+            links_before = db.scalars(select(ArtifactLink).where(
+                ArtifactLink.organization_id == run.organization_id,
+                ((ArtifactLink.source_type == "RUN") & (ArtifactLink.source_id == run.id))
+                | ((ArtifactLink.target_type == "DELIVERY_ATTEMPT")
+                   & (ArtifactLink.target_id == context[-1].id)),
+            )).all()
+            old_link_ids = {link.id for link in links_before}
+            old_path, old_metrics = run.evidence_path, dict(run.metrics)
+            receipt, manifest = _publish_delivery_evidence(db, run, *context)
+            links_after = db.scalars(select(ArtifactLink).where(
+                ArtifactLink.organization_id == run.organization_id,
+                ((ArtifactLink.source_type == "RUN") & (ArtifactLink.source_id == run.id))
+                | ((ArtifactLink.target_type == "DELIVERY_ATTEMPT")
+                   & (ArtifactLink.target_id == context[-1].id)),
+            )).all()
+            already_valid = (
+                before.get(receipt.id) is True and before.get(manifest.id) is True
+                and old_path == manifest.path and old_metrics.get("receipt_artifact_id") == receipt.id
+                and old_metrics.get("evidence_status") != "PENDING_REPAIR"
+                and old_link_ids == {link.id for link in links_after}
+            )
+            # Clear the marker only after both immutable artifacts are materialized
+            # and their links have been flushed successfully.
+            storage_provider.materialize(receipt)
+            storage_provider.materialize(manifest)
+            run.evidence_path = manifest.path
+            metrics = {**run.metrics, "receipt_artifact_id": receipt.id}
+            metrics.pop("evidence_status", None)
+            run.metrics = metrics
+            run.progress_percent, run.progress_stage = 100, "Completado"
+            result = {
+                "run_id": run.id, "status": "ALREADY_VALID" if already_valid else "REPAIRED",
+                "receipt_artifact_id": receipt.id, "manifest_artifact_id": manifest.id,
+            }
+        audit(db, "DELIVERY_EVIDENCE_REPAIRED", "run", run.id,
+              "Evidencia local verificada; no se contactó el destino", actor, run.organization_id,
+              {"status": result["status"], "artifact_ids": [receipt.id, manifest.id]}, run_id=run.id)
+        db.commit()
+        return result
+    except Exception as error:  # noqa: BLE001 - sanitize provider errors; never repeat remote I/O.
+        controlled = error if isinstance(error, DeliveryOperationError) else DeliveryOperationError(
+            409, "DELIVERY_EVIDENCE_REPAIR_FAILED",
+            "No fue posible publicar evidencia local válida. No se contactó el destino.",
+        )
+        audit(db, "DELIVERY_EVIDENCE_REPAIR_FAILED", "run", run.id,
+              "Reparación local detenida; resultado remoto conservado", actor, run.organization_id,
+              {"error_code": controlled.code}, run_id=run.id)
+        db.commit()
+        raise controlled from None
+
+
+def review_dto(review: DeliveryOperationalReview) -> dict[str, Any]:
+    return {
+        "id": review.id, "run_id": review.run_id, "delivery_attempt_id": review.delivery_attempt_id,
+        "reviewer_id": review.reviewer_id, "reviewer_name": review.reviewer_name,
+        "outcome": review.outcome, "note": review.note,
+        "verified_at": iso(review.verified_at), "created_at": iso(review.created_at),
+    }
+
+
+def record_delivery_review(
+    db: Session, user: User, run_id: str, body: DeliveryReviewBody,
+) -> DeliveryOperationalReview:
+    run = owned_delivery_run(db, user, run_id, lock=True)
+    attempt = db.scalar(select(DeliveryAttempt).where(
+        DeliveryAttempt.id == body.delivery_attempt_id,
+        DeliveryAttempt.run_id == run.id,
+        DeliveryAttempt.organization_id == user.organization_id,
+    ))
+    reviewer = db.scalar(select(User).where(
+        User.id == user.id, User.organization_id == run.organization_id, User.active.is_(True),
+    ))
+    if attempt is None or reviewer is None:
+        raise DeliveryOperationError(404, "NOT_FOUND", "No se encontró el intento o revisor.")
+    if run.status != "UNKNOWN" or run.decision != "UNKNOWN" or attempt.status != "UNKNOWN":
+        raise DeliveryOperationError(
+            409, "DELIVERY_REVIEW_NOT_ALLOWED", "La revisión operacional sólo documenta intentos UNKNOWN.",
+        )
+    verified_at = body.verified_at or utcnow()
+    if verified_at < attempt.started_at.replace(tzinfo=UTC):
+        raise DeliveryOperationError(
+            422, "INVALID_VERIFICATION_TIME", "La verificación no puede preceder al intento remoto.",
+        )
+    review = DeliveryOperationalReview(
+        organization_id=run.organization_id, run_id=run.id, delivery_attempt_id=attempt.id,
+        reviewer_id=reviewer.id, reviewer_name=reviewer.name,
+        outcome=body.outcome, note=body.note, verified_at=verified_at,
+    )
+    db.add(review)
+    db.flush()
+    audit(db, "DELIVERY_UNKNOWN_REVIEWED", "delivery_review", review.id,
+          "Verificación externa documentada; el intento original conserva UNKNOWN",
+          Actor("USER", reviewer.id, reviewer.name), run.organization_id,
+          {"delivery_attempt_id": attempt.id, "review_id": review.id,
+           "outcome": review.outcome, "verified_at": iso(review.verified_at)}, run_id=run.id)
+    db.commit()
+    return review

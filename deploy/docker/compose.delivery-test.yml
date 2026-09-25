@@ -35,6 +35,24 @@ services:
       retries: 50
     restart: "no"
 
+  # A second disposable destination exercises PostgreSQL 18 RETURNING OLD/NEW.
+  # Metadata and the baseline destination deliberately remain PostgreSQL 16.
+  destination-postgres18:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: trackvance_delivery
+      POSTGRES_USER: delivery_admin
+      POSTGRES_PASSWORD: ${DELIVERY_POSTGRES_ADMIN_PASSWORD:?Use scripts/tests/delivery_cycle.py}
+    volumes:
+      - destination_postgres18_data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U delivery_admin -d trackvance_delivery']
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: "no"
+
 volumes:
   destination_postgres_data:
   destination_sqlserver_data:
+  destination_postgres18_data:

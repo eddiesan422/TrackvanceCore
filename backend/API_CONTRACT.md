@@ -232,7 +232,7 @@ indica que Trackvance no puede confirmar el commit remoto; no equivale a fallo n
 decidir una ejecución explícita. Receipt y manifest no contienen secretos ni filas
 completas y enlazan Run, DatasetVersion, DestinationVersion y DeliveryAttempt.
 
-RBAC 0.5.0 reutiliza provisionalmente `connections:read/manage/use`,
+RBAC 0.5.1 conserva provisionalmente `connections:read/manage/use`,
 `configurations:write`, `runs:read/execute` y `artifacts:download`. Permisos
 granulares propios de Delivery permanecen pendientes; no deben inferirse del
 nombre de las rutas.
@@ -378,6 +378,76 @@ estable. Las colecciones se limitan a la organización y las acciones se
 validan por permiso del rol. Más detalles en
 [ADR de evidencia](../docs/adr/0002-evidence-and-artifacts.md).
 
+
+## Endurecimiento Data Delivery 0.5.1
+
+Se mantienen los endpoints existentes y se añaden dos paths (tres operaciones):
+
+- `POST /delivery/runs/{run_id}/repair-evidence`, sesión + CSRF + `runs:execute`.
+  Sin body obligatorio. Devuelve 200 `{run_id,status:'REPAIRED'|'ALREADY_VALID',
+  receipt_artifact_id,manifest_artifact_id}`. Sólo Run DELIVERY SUCCESS/COMMITTED
+  con un único intento COMMITTED verificable. Valida scope, configuración y hashes,
+  DatasetVersion/canónico, revisión destino y métricas; nunca accede a secretos,
+  DataSink o conexión/transacción remota. Reutiliza IDs/bytes/enlaces válidos.
+  409 `DELIVERY_REPAIR_NOT_ALLOWED`, `DELIVERY_EVIDENCE_UNVERIFIABLE` o
+  `DELIVERY_EVIDENCE_REPAIR_FAILED` ante estado o evidencia no reparables; 404 para
+  recurso ajeno/inexistente. No transforma UNKNOWN/FAILED en éxito.
+- `GET /delivery/runs/{run_id}/reviews`, `runs:read`: `{items:[DeliveryReview],total}`.
+- `POST /delivery/runs/{run_id}/reviews`, sesión + CSRF + `runs:execute`:
+  `{delivery_attempt_id,outcome,note,verified_at?}` → `DeliveryReview`, 201.
+  outcome es `REMOTE_COMMIT_OBSERVED`, `REMOTE_NOT_COMMITTED_OBSERVED` o
+  `INCONCLUSIVE`; nota no vacía, máximo 4000 caracteres. verified_at acepta ISO
+  con zona, no epoch numérico, no futuro ni anterior al inicio del intento.
+  Omitirlo usa el instante del servidor. 409 `DELIVERY_REVIEW_NOT_ALLOWED` si
+  Run/attempt no conservan UNKNOWN; 422 fecha/cuerpo inválidos y 404 scope ajeno.
+
+`DeliveryReview = {id,run_id,delivery_attempt_id,reviewer_id,reviewer_name,outcome,
+note,verified_at,created_at}`. Organization es un scope interno, no un campo
+seleccionable por el cliente. El revisor procede de la sesión y se conserva su
+nombre al crear la observación. Historial append-only, sin PATCH/DELETE. Registrar
+una revisión nunca cambia el intento, no crea Jobs ni Runs ni invoca DataSink.
+
+La tabla `delivery_reviews` se incorpora sólo mediante `0009_delivery_reviews`:
+FKs a Run/Attempt/User, índices y CHECK de los tres outcomes. No se modifica
+ninguna migración anterior ni hay nuevos permisos granulares.
+
+### Métricas y compatibilidad de evidencia
+
+`rows_attempted` cuenta filas fuente preparadas. `rows_written` cuenta filas
+fuente enviadas en una operación confirmada, **no** población física remota ni
+efectos de triggers. `rows_inserted`/`rows_updated` son acciones reportadas con
+certeza por el adaptador o `null`; UI muestra N/D. Cero siempre significa cero
+conocido. `bytes_sent` mide representación UTF-8 preparada, no tráfico de red.
+
+UPSERT PostgreSQL 18 usa RETURNING OLD/NEW documentado dentro de la misma
+transacción, sin pre-SELECT ni xmax. PostgreSQL 16/17 conserva null para desglose
+no fiable; una entrada vacía permite cero. Los guards ON CONFLICT/constraints/locks
+siguen vigentes. No se requiere actualizar el servidor metadata PostgreSQL16.
+
+Runs nuevos persistirán `preflight_seconds` y `write_seconds`, medidos con reloj
+monotónico en el worker. El segundo incluye deliver_prepared/commit remoto,
+excluye persistencia de resultado y publicación de evidencia. Receipt/manifest
+reutilizan esos valores; los históricos ausentes no reciben ceros inventados.
+`metric_semantics` (version1) es metadata aditiva en nueva evidencia. Receipt
+sigue schema1 y manifest schema2; lectores aceptan 0.5.0 sin el bloque. Reparar
+no reescribe artifacts históricos válidos, incluso si carecen de estos campos.
+
+### Linaje y auditoría canónicos
+
+| source_type | relation | target_type |
+| --- | --- | --- |
+| DATASET_VERSION | DELIVERY_INPUT | RUN |
+| RUN | DELIVERED_TO | DELIVERY_DESTINATION_VERSION |
+| RUN | DELIVERY_RECEIPT | ARTIFACT |
+| ARTIFACT | EVIDENCE_OF | DELIVERY_ATTEMPT |
+| RUN | RUN_OUTPUT | ARTIFACT |
+
+`DELIVERY_DESTINATION_VERSION` no es una relation. No se renombra ningún enlace
+histórico. Reparación emite `DELIVERY_EVIDENCE_REPAIR_STARTED`,
+`DELIVERY_EVIDENCE_REPAIRED` o `DELIVERY_EVIDENCE_REPAIR_FAILED`; revisión emite
+`DELIVERY_UNKNOWN_REVIEWED`. Audit incluye referencias/resultado/fecha sanitizados,
+nunca nota libre, credenciales ni filas de negocio. La nota sí vive en el recurso
+de revisión, con su autorización normal de lectura de Run.
 
 ## Ajustes de interfaz 0.4.1
 

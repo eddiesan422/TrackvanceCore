@@ -41,11 +41,40 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.5\.0/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.5\.1/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
     expect(await screen.findByRole('button', { name: 'Entrar al entorno demo' })).toBeInTheDocument()
     expect(screen.getByTestId('current-location')).toHaveTextContent('/')
+  })
+
+  it.each([
+    ['/datasets', 'Datasets'],
+    ['/delivery', 'Data Delivery'],
+    ['/intake', 'Data Intake'],
+    ['/recon', 'ReconOps'],
+    ['/sentinel', 'Sentinel'],
+  ])('loads the lazy route %s from a direct link', async (path, heading) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('heading', { name: heading })).toBeVisible()
+    expect(screen.getByLabelText('Cerrar sesión')).toBeVisible()
+    expect(screen.queryByText('No se pudo cargar esta sección')).not.toBeInTheDocument()
+  })
+
+  it('preserves permission checks on the lazy Delivery builder deep link', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/delivery/new']}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText('No tienes permiso para publicar configuraciones de entrega.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Publicar configuración' })).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('preserves destination permissions on a nested lazy deep link', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/delivery/destinations/hidden']}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText('No tienes permisos para consultar este destino.')).toBeVisible()
+    expect(api).not.toHaveBeenCalledWith('/delivery/destinations/hidden')
   })
 })

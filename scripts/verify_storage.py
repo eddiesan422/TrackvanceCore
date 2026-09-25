@@ -15,10 +15,16 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+DELIVERY_BASELINE_SCHEMA_VERSION = 3
 LEGACY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0008_data_delivery"
+DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
+CURRENT_MIGRATION = "0009_delivery_reviews"
+REVIEW_TABLE = "delivery_reviews"
+REVIEW_OUTCOMES = frozenset({
+    "REMOTE_COMMIT_OBSERVED", "REMOTE_NOT_COMMITTED_OBSERVED", "INCONCLUSIVE",
+})
 ACTIVE_STATUSES = frozenset({"QUEUED", "RUNNING"})
 JOB_LANES = frozenset({"DEFAULT", "DELIVERY"})
 DELIVERY_ATTEMPT_STATUSES = frozenset({"STARTED", "COMMITTED", "FAILED", "UNKNOWN"})
@@ -177,6 +183,25 @@ def validate_relationships(
             if run is not None and str(run.get("module", "")).upper() != "DELIVERY":
                 raise ValueError("Un DeliveryAttempt debe pertenecer a un Run DELIVERY.")
             checks += 1
+        for review in rows.get(REVIEW_TABLE, []):
+            attempt = index.get("delivery_attempts", {}).get(
+                str(review.get("delivery_attempt_id"))
+            )
+            run = index.get("runs", {}).get(str(review.get("run_id")))
+            reviewer = index.get("users", {}).get(str(review.get("reviewer_id")))
+            if (
+                attempt is None or run is None or reviewer is None
+                or attempt.get("status") != "UNKNOWN"
+                or run.get("status") != "UNKNOWN"
+                or run.get("decision") != "UNKNOWN"
+                or str(run.get("module", "")).upper() != "DELIVERY"
+                or attempt.get("run_id") != run.get("id")
+                or review.get("outcome") not in REVIEW_OUTCOMES
+            ):
+                raise ValueError("Revisión operacional de UNKNOWN inválida.")
+            for entity in (attempt, run, reviewer):
+                _require_same_organization(review, entity, "delivery_reviews")
+            checks += 1
     return checks
 
 
@@ -200,9 +225,10 @@ def legacy_v2_report(
     """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
 
     foreign_keys = list(foreign_keys)
-    if current_migration != CURRENT_MIGRATION:
-        raise ValueError("La compatibilidad 0.4.1 requiere la migración 0008 aplicada.")
-    if any(rows.get(table) for table in DELIVERY_TABLES):
+    if current_migration not in {DELIVERY_BASELINE_MIGRATION, CURRENT_MIGRATION}:
+        raise ValueError("La compatibilidad 0.4.1 requiere la migración 0008 o 0009 aplicada.")
+    excluded = DELIVERY_TABLES | {REVIEW_TABLE}
+    if any(rows.get(table) for table in excluded):
         raise ValueError("Un backup 0.4.1 no puede contener registros de Data Delivery.")
     if any(str(run.get("module", "")).upper() == "DELIVERY" for run in rows.get("runs", [])):
         raise ValueError("Un backup 0.4.1 no puede contener Runs DELIVERY.")
@@ -214,7 +240,7 @@ def legacy_v2_report(
 
     legacy_rows: dict[str, list[Mapping[str, Any]]] = {}
     for name, table_rows in rows.items():
-        if name in DELIVERY_TABLES:
+        if name in excluded:
             continue
         if name == "jobs":
             legacy_rows[name] = [
@@ -226,8 +252,8 @@ def legacy_v2_report(
     legacy_foreign_keys = [
         foreign_key
         for foreign_key in foreign_keys
-        if foreign_key[0] not in DELIVERY_TABLES
-        and foreign_key[2] not in DELIVERY_TABLES
+        if foreign_key[0] not in excluded
+        and foreign_key[2] not in excluded
     ]
     return {
         "schema_version": LEGACY_SCHEMA_VERSION,
@@ -240,6 +266,31 @@ def legacy_v2_report(
             compatibility_v2=True,
         ),
         "migration": LEGACY_MIGRATION,
+    }
+
+
+def legacy_v3_report(
+    rows: Mapping[str, list[Mapping[str, Any]]],
+    foreign_keys: Iterable[tuple[str, str, str, str]],
+    *, current_migration: str | None, verified_artifacts: int,
+    verified_source_secrets: int, verified_delivery_secrets: int,
+) -> dict[str, Any]:
+    """Project a fresh 0009 upgrade onto the exact, unchanged 0.5.0 state."""
+    if current_migration != CURRENT_MIGRATION or rows.get(REVIEW_TABLE):
+        raise ValueError("La proyección 0.5.0 requiere 0009 y revisiones vacías.")
+    foreign_keys = list(foreign_keys)
+    validate_relationships(rows, foreign_keys)
+    previous = {name: values for name, values in rows.items() if name != REVIEW_TABLE}
+    previous_fks = [fk for fk in foreign_keys if REVIEW_TABLE not in (fk[0], fk[2])]
+    return {
+        "schema_version": DELIVERY_BASELINE_SCHEMA_VERSION,
+        "tables": _table_hashes(previous),
+        "verified_artifacts": verified_artifacts,
+        "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets,
+        "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(previous, previous_fks),
+        "migration": DELIVERY_BASELINE_MIGRATION,
     }
 
 
@@ -350,10 +401,18 @@ def snapshot_legacy_v2() -> dict[str, Any]:
     )
 
 
+def snapshot_legacy_v3() -> dict[str, Any]:
+    migration, rows, fks, artifacts, source_secrets, delivery_secrets = _snapshot_inputs()
+    return legacy_v3_report(
+        rows, fks, current_migration=migration, verified_artifacts=artifacts,
+        verified_source_secrets=source_secrets, verified_delivery_secrets=delivery_secrets,
+    )
+
+
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
-    if before.get("schema_version") != SCHEMA_VERSION:
+    if before.get("schema_version") not in {DELIVERY_BASELINE_SCHEMA_VERSION, SCHEMA_VERSION}:
         raise ValueError("Versión del informe previo no reconocida.")
-    if after.get("schema_version") != SCHEMA_VERSION:
+    if after.get("schema_version") != before.get("schema_version"):
         raise ValueError("Versión del informe posterior no reconocida.")
     if before == after:
         return
@@ -372,6 +431,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("snapshot")
     commands.add_parser("snapshot-legacy-v2")
+    commands.add_parser("snapshot-legacy-v3")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -381,6 +441,8 @@ def main() -> int:
             print(json.dumps(snapshot(), indent=2, sort_keys=True))
         elif args.command == "snapshot-legacy-v2":
             print(json.dumps(snapshot_legacy_v2(), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v3":
+            print(json.dumps(snapshot_legacy_v3(), indent=2, sort_keys=True))
         else:
             compare(
                 json.loads(args.before.read_text(encoding="utf-8-sig")),

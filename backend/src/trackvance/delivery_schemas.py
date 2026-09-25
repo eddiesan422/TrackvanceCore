@@ -1,8 +1,17 @@
 """Typed HTTP contracts for Data Delivery; secret references never leave storage."""
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from .data_sinks import DeliveryError, validate_identifier
 
@@ -201,3 +210,59 @@ class DeliveryRunBody(StrictModel):
 class DeliveryAttemptsResponse(BaseModel):
     items: list[dict[str, Any]]
     total: int
+
+
+DeliveryReviewOutcome = Literal[
+    "REMOTE_COMMIT_OBSERVED", "REMOTE_NOT_COMMITTED_OBSERVED", "INCONCLUSIVE"
+]
+
+
+class DeliveryReviewBody(StrictModel):
+    delivery_attempt_id: str = Field(min_length=1, max_length=64)
+    outcome: DeliveryReviewOutcome
+    note: str = Field(min_length=1, max_length=4000)
+    verified_at: datetime | None = Field(default=None, strict=False)
+
+    @field_validator("verified_at", mode="before")
+    @classmethod
+    def require_iso_time(cls, value):
+        if value is not None and not isinstance(value, (str, datetime)):
+            raise ValueError("Usa una fecha ISO con zona horaria, no un epoch numérico.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_review(self):
+        self.note = self.note.strip()
+        if not self.note:
+            raise ValueError("Documenta el motivo de la revisión externa.")
+        if self.verified_at is not None:
+            if self.verified_at.tzinfo is None or self.verified_at.utcoffset() is None:
+                raise ValueError("La fecha de verificación debe incluir zona horaria.")
+            self.verified_at = self.verified_at.astimezone(UTC)
+            if self.verified_at > datetime.now(UTC):
+                raise ValueError("La verificación no puede estar en el futuro.")
+        return self
+
+
+class DeliveryReviewResponse(BaseModel):
+    id: str
+    run_id: str
+    delivery_attempt_id: str
+    reviewer_id: str
+    reviewer_name: str
+    outcome: DeliveryReviewOutcome
+    note: str
+    verified_at: str
+    created_at: str
+
+
+class DeliveryReviewsResponse(BaseModel):
+    items: list[DeliveryReviewResponse]
+    total: int
+
+
+class DeliveryRepairResponse(BaseModel):
+    run_id: str
+    status: Literal["REPAIRED", "ALREADY_VALID"]
+    receipt_artifact_id: str
+    manifest_artifact_id: str

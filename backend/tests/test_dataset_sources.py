@@ -79,6 +79,38 @@ def test_naive_database_temporals_remain_publishable_as_exact_text(native):
     assert _column("observed_at", native, True)["logical_type"] == "STRING"
 
 
+@pytest.mark.parametrize("precision", range(8))
+def test_sqlserver_all_datetimeoffset_precisions_preserve_text_and_contract(monkeypatch, precision):
+    fraction = "." + "1234567"[:precision] if precision else ""
+    value = f"2026-09-23T10:00:00{fraction}-05:00"
+    native = f"datetimeoffset({precision})"
+    source, _, _ = fake_source(monkeypatch, [(value,), (None,)],
+        [_column("observed_at", native, True)])
+    snapshot = source.read()
+    assert snapshot.frame["observed_at"].to_list() == [value, None]
+    assert snapshot.metadata["source_native_schema"][0]["logical_type"] == (
+        "TIMESTAMP" if precision <= 6 else "STRING"
+    )
+
+
+@pytest.mark.parametrize("precision", range(7))
+@pytest.mark.parametrize("aware", [False, True])
+def test_postgresql_all_timestamp_precisions_preserve_instant_or_naive_text(
+    monkeypatch, precision, aware,
+):
+    fraction = "." + "123456"[:precision] if precision else ""
+    value = f"2026-09-23T10:00:00{fraction}" + ("-05:00" if aware else "")
+    native = f"timestamp({precision}) {'with' if aware else 'without'} time zone"
+    source, _, _ = fake_source(monkeypatch, [(datetime.fromisoformat(value),)],
+        [_column("observed_at", native, True)])
+    snapshot = source.read()
+    # Python datetime emits all six fractional digits without losing the value.
+    assert snapshot.frame["observed_at"][0] == datetime.fromisoformat(value).isoformat()
+    assert snapshot.metadata["source_native_schema"][0]["logical_type"] == (
+        "TIMESTAMP" if aware else "STRING"
+    )
+
+
 def fake_source(monkeypatch, rows, columns=None):
     source = source_registry.create(settings(), "source_data", "records")
     assert isinstance(source, DatasetSource)

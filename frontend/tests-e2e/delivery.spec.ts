@@ -89,6 +89,13 @@ test('destino real → builder → preflight → publicación → receipt', asyn
   await expect(page.getByText('Confirmado', { exact: true }).first()).toBeVisible({ timeout: 90_000 })
   await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
   await expect(page.getByText(`existing_delivery.${tableName}`, { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Filas preparadas', { exact: true })).toBeVisible()
+  await expect(page.locator('.delivery-run-metrics').getByText('Filas enviadas', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Filas enviadas no significa filas físicas finales/)).toBeVisible()
+  // A direct reload of the generic Run URL must load the Delivery feature chunk.
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
+  await expect(page.getByText(`existing_delivery.${tableName}`, { exact: true }).first()).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('delivery-receipt.png'), fullPage: true })
   expect(pageErrors).toEqual([])
 })

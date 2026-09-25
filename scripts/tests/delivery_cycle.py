@@ -798,7 +798,7 @@ def main() -> int:
         started = True
         run(
             ["up", "-d", "--wait", "--wait-timeout", "300",
-             "destination-postgres", "destination-sqlserver"]
+             "destination-postgres", "destination-postgres18", "destination-sqlserver"]
         )
         postgres_sql = (FIXTURES / "delivery-postgresql.sql").read_text(encoding="utf-8")
         sqlserver_sql = (FIXTURES / "delivery-sqlserver.sql").read_text(encoding="utf-8")
@@ -843,6 +843,16 @@ def main() -> int:
             )
             for engine in ("POSTGRESQL", "SQLSERVER")
         ]
+        metrics_probe = (ROOT / "scripts/tests/delivery_metrics_probe.py").read_text(encoding="utf-8")
+        metrics_matrix = json.loads(run(["exec", "-T", "api", "python", "-"],
+            input_text=metrics_probe + "\nimport json\nprint(json.dumps([" +
+            ",".join(f"certify_postgres_metrics({host!r}, {admin_password!r})"
+                     for host in ("destination-postgres", "destination-postgres18")) + "]))\n",
+            capture=True))
+        for engine_result in metrics_matrix:
+            for case in engine_result["cases"]:
+                checks.verify(case["status"] == "PASS",
+                    f"PostgreSQL {engine_result['major_version']}: métricas {case['case']}")
 
         run(["restart", "postgres", "api", "worker", "delivery-worker", "web"])
         run(["up", "-d", "--wait", "--wait-timeout", "180"])
@@ -896,6 +906,7 @@ def main() -> int:
             "checks": checks.completed,
             "playwright": playwright,
             "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
+            "postgres_metrics_matrix": metrics_matrix,
         }
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(f"OK: {len(checks.completed)} comprobaciones Data Delivery reales.", flush=True)

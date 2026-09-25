@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.5.0"
+    "version": "0.5.1"
   },
   "paths": {
     "/health": {
@@ -4608,6 +4608,213 @@
         "x-required-permission": "artifacts:download"
       }
     },
+    "/api/v1/delivery/runs/{run_id}/repair-evidence": {
+      "post": {
+        "tags": [
+          "Data Delivery"
+        ],
+        "summary": "Repair Evidence",
+        "description": "Reconstruct verified local evidence of COMMITTED; never replay a delivery.",
+        "operationId": "repair_evidence_api_v1_delivery_runs__run_id__repair_evidence_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryRepairResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:execute"
+      }
+    },
+    "/api/v1/delivery/runs/{run_id}/reviews": {
+      "get": {
+        "tags": [
+          "Data Delivery"
+        ],
+        "summary": "Delivery Reviews",
+        "description": "Read structured external observations separately from historical outcomes.",
+        "operationId": "delivery_reviews_api_v1_delivery_runs__run_id__reviews_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReviewsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
+      },
+      "post": {
+        "tags": [
+          "Data Delivery"
+        ],
+        "summary": "Review Delivery Outcome",
+        "description": "Record a human observation; original UNKNOWN and Run/Job identity are unchanged.",
+        "operationId": "review_delivery_outcome_api_v1_delivery_runs__run_id__reviews_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryReviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryReviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:execute"
+      }
+    },
     "/api/v1/users": {
       "get": {
         "tags": [
@@ -7427,6 +7634,162 @@
           "sampled_rows"
         ],
         "title": "DeliveryPreviewResponse"
+      },
+      "DeliveryRepairResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REPAIRED",
+              "ALREADY_VALID"
+            ],
+            "title": "Status"
+          },
+          "receipt_artifact_id": {
+            "type": "string",
+            "title": "Receipt Artifact Id"
+          },
+          "manifest_artifact_id": {
+            "type": "string",
+            "title": "Manifest Artifact Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "receipt_artifact_id",
+          "manifest_artifact_id"
+        ],
+        "title": "DeliveryRepairResponse"
+      },
+      "DeliveryReviewBody": {
+        "properties": {
+          "delivery_attempt_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Delivery Attempt Id"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "REMOTE_COMMIT_OBSERVED",
+              "REMOTE_NOT_COMMITTED_OBSERVED",
+              "INCONCLUSIVE"
+            ],
+            "title": "Outcome"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Note"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "delivery_attempt_id",
+          "outcome",
+          "note"
+        ],
+        "title": "DeliveryReviewBody"
+      },
+      "DeliveryReviewResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "delivery_attempt_id": {
+            "type": "string",
+            "title": "Delivery Attempt Id"
+          },
+          "reviewer_id": {
+            "type": "string",
+            "title": "Reviewer Id"
+          },
+          "reviewer_name": {
+            "type": "string",
+            "title": "Reviewer Name"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "REMOTE_COMMIT_OBSERVED",
+              "REMOTE_NOT_COMMITTED_OBSERVED",
+              "INCONCLUSIVE"
+            ],
+            "title": "Outcome"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "verified_at": {
+            "type": "string",
+            "title": "Verified At"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "delivery_attempt_id",
+          "reviewer_id",
+          "reviewer_name",
+          "outcome",
+          "note",
+          "verified_at",
+          "created_at"
+        ],
+        "title": "DeliveryReviewResponse"
+      },
+      "DeliveryReviewsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryReviewResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "DeliveryReviewsResponse"
       },
       "DeliveryRunBody": {
         "properties": {

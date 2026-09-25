@@ -23,7 +23,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from typing import Any
 from uuid import uuid4
 
@@ -78,6 +80,7 @@ class RecoveryApi:
     """Standard-library authenticated client; never renders response/error bodies."""
 
     def __init__(self, port: int, credentials: tuple[str, ...]) -> None:
+        self.port = port
         self.base_url = f"http://127.0.0.1:{port}/api/v1"
         self.credentials = credentials
         self.csrf = ""
@@ -197,6 +200,9 @@ CREATE TABLE recovery_delivery.records (
     booked_on date NOT NULL, recorded_at timestamptz, active boolean NOT NULL
 );
 ALTER TABLE recovery_delivery.records OWNER TO tv_recovery_writer;
+CREATE TABLE recovery_delivery.operational_records
+(LIKE recovery_delivery.records INCLUDING ALL);
+ALTER TABLE recovery_delivery.operational_records OWNER TO tv_recovery_writer;
 GRANT CONNECT ON DATABASE recovery_source TO tv_recovery_writer;
 GRANT USAGE ON SCHEMA recovery_delivery TO tv_recovery_writer;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA recovery_delivery
@@ -451,29 +457,15 @@ def destroy_before_restore(source: str, database: str, evidence: Path) -> None:
            "La fuente PostgreSQL debe sobrevivir a la destrucción de Trackvance.")
 
 
-def validate_delivery_restoration(
-    api: RecoveryApi,
-    original: dict[str, Any],
-    compose: list[str],
-    environment: dict[str, str],
-    credentials: tuple[str, ...],
-) -> dict[str, Any]:
-    saved = original["destination"]
-    tested = api.json("POST", f"/delivery/destinations/{saved['id']}/test", {})
-    ensure(tested["status"] == "SUCCESS",
-           "La credencial destino restaurada no permite reconectar.")
-    destination = api.json("GET", f"/delivery/destinations/{saved['id']}")
-    ensure(destination["version"] == saved["version"]
-           and destination["destination_version_id"] == saved["destination_version_id"]
-           and destination["config_hash"] == saved["config_hash"],
-           "La configuración destino cambió durante la recuperación.")
-    draft = {
+def delivery_draft(original: dict[str, Any], table_name: str) -> dict[str, Any]:
+    destination = original["destination"]
+    return {
         "schema_version": 1,
         "dataset_version_id": original["version"]["id"],
         "destination_id": destination["id"],
         "destination_version_id": destination["destination_version_id"],
         "target": {"mode": "EXISTING_TABLE", "schema_name": "recovery_delivery",
-                   "table_name": "records", "create_schema": False},
+                   "table_name": table_name, "create_schema": False},
         "columns": [
             {"source_name": "record_id", "target_name": "record_id",
              "target_type": "STRING", "ordinal": 0, "nullable": False, "length": 20},
@@ -491,6 +483,193 @@ def validate_delivery_restoration(
         "write_strategy": "APPEND",
         "upsert_keys": [],
     }
+
+
+def operational_remote_count(compose: list[str], environment: dict[str, str],
+                             credentials: tuple[str, ...]) -> int:
+    return int(execute(
+        [*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
+         "-d", "recovery_source", "-At", "-c",
+         "SELECT COUNT(*) FROM recovery_delivery.operational_records"],
+        environment, credentials=credentials,
+    ).strip())
+
+
+def prepare_delivery_operations(
+    api: RecoveryApi, original: dict[str, Any], application: list[str],
+    fixture: list[str], environment: dict[str, str], credentials: tuple[str, ...],
+) -> None:
+    """Real COMMITTED write; local evidence loss; explicitly simulated UNKNOWN.
+
+    The injection runs only inside the guarded disposable project. UNKNOWN is a
+    durable test fixture with no remote I/O, not a claimed network/commit failure.
+    """
+    configuration = api.json("POST", "/delivery/configurations", {
+        **delivery_draft(original, "operational_records"),
+        "name": "Entrega previa al respaldo y reparación local", "owner": "Recovery drill",
+        "description": "Escritura real; pérdida controlada exclusivamente de evidencia local",
+    }, expected=201)
+    queued = api.json("POST", "/delivery/runs", {
+        "configuration_id": configuration["id"],
+        "dataset_version_id": original["version"]["id"],
+    }, expected=202)
+    committed = wait_existing_run(api, queued["id"])
+    ensure(committed["decision"] == "COMMITTED", "La entrega real inicial no quedó confirmada.")
+    receipt_before = api.request("GET", f"/delivery/runs/{committed['id']}/receipt")
+    manifest_before = api.request("GET", f"/runs/{committed['id']}/evidence")
+    ensure(operational_remote_count(fixture, environment, credentials) == 4,
+           "La fixture operativa requiere exactamente cuatro filas reales.")
+    # Input contains only generated IDs. No credential or business value enters argv.
+    injection = '''
+import json
+from sqlalchemy import select
+from trackvance.artifactstore import storage_provider
+from trackvance.db import SessionLocal, utcnow
+from trackvance.delivery_service import enqueue_delivery, _delivery_idempotency
+from trackvance.models import Artifact, Configuration, DatasetVersion, DeliveryAttempt, Job, Run, User, uid
+
+identity = json.loads(INPUT)
+with SessionLocal() as db:
+    committed = db.get(Run, identity["run_id"])
+    assert committed.module == "DELIVERY" and committed.status == "SUCCESS"
+    assert committed.decision == "COMMITTED"
+    known = db.scalar(select(DeliveryAttempt).where(DeliveryAttempt.run_id == committed.id))
+    assert known.status == "COMMITTED"
+    evidence = [db.get(Artifact, committed.metrics["receipt_artifact_id"]),
+                db.scalar(select(Artifact).where(Artifact.path == committed.evidence_path))]
+    assert {item.kind for item in evidence} == {"DELIVERY_RECEIPT", "RUN_MANIFEST"}
+    # materialize checks storage ownership, exact hash and size before these two
+    # fixture-owned files alone are removed. Metadata and original hashes remain.
+    for item in evidence:
+        assert item.organization_id == committed.organization_id
+        storage_provider.materialize(item).unlink()
+    committed.metrics = {**committed.metrics, "evidence_status": "PENDING_REPAIR"}
+    config = db.get(Configuration, committed.config_id)
+    source = db.get(DatasetVersion, committed.dataset_version_id)
+    actor = db.get(User, identity["user_id"])
+    unknown = enqueue_delivery(db, config, source, actor)
+    now = utcnow()
+    unknown.status = unknown.decision = "UNKNOWN"
+    unknown.started_at = unknown.finished_at = now
+    unknown.progress_stage = "Fixture UNKNOWN simulada"
+    unknown.error = "Fixture explícita: no se realizó I/O remoto para este intento."
+    unknown.execution_plan = {**unknown.execution_plan,
+                              "recovery_fixture": "SIMULATED_UNKNOWN_NO_REMOTE_IO"}
+    job = db.scalar(select(Job).where(Job.run_id == unknown.id))
+    job.status = "UNKNOWN"
+    job.attempts = 1
+    attempt = DeliveryAttempt(id=uid(), organization_id=unknown.organization_id,
+        run_id=unknown.id, destination_version_id=known.destination_version_id,
+        attempt_number=1, idempotency_key=_delivery_idempotency(unknown, config),
+        status="UNKNOWN", target_locator=known.target_locator, rows_attempted=source.row_count,
+        rows_written=None, rows_inserted=None, rows_updated=None, bytes_sent=None,
+        error_code="TEST_SIMULATED_UNKNOWN", error_message=unknown.error,
+        started_at=now, finished_at=now)
+    db.add(attempt)
+    db.commit()
+    print(json.dumps({"unknown_run_id": unknown.id, "unknown_attempt_id": attempt.id}))
+'''.replace("INPUT", repr(json.dumps({"run_id": committed["id"], "user_id": api.user_id})))
+    injected = json.loads(execute(
+        [*application, "exec", "-T", "api", "python", "-"], environment,
+        input_text=injection, credentials=credentials,
+    ))
+    clients = [RecoveryApi(api.port, credentials) for _ in range(2)]
+    barrier = Barrier(2)
+
+    def concurrent_repair(client: RecoveryApi) -> dict[str, Any]:
+        barrier.wait(timeout=30)
+        return client.json("POST", f"/delivery/runs/{committed['id']}/repair-evidence", {})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        repaired = list(executor.map(concurrent_repair, clients))
+    ensure(sorted(item["status"] for item in repaired) == ["ALREADY_VALID", "REPAIRED"],
+           "La reparación concurrente PostgreSQL no fue idempotente.")
+    ensure(repaired[0]["receipt_artifact_id"] == repaired[1]["receipt_artifact_id"]
+           and repaired[0]["manifest_artifact_id"] == repaired[1]["manifest_artifact_id"],
+           "La reparación concurrente generó identidades duplicadas.")
+    ensure(api.request("GET", f"/delivery/runs/{committed['id']}/receipt") == receipt_before
+           and api.request("GET", f"/runs/{committed['id']}/evidence") == manifest_before,
+           "La reparación no reconstruyó exactamente los bytes registrados.")
+    unknown_id = injected["unknown_run_id"]
+    unknown_before = api.json("GET", f"/runs/{unknown_id}")
+    attempts_before = api.json("GET", f"/delivery/runs/{unknown_id}/attempts")
+    review = api.json("POST", f"/delivery/runs/{unknown_id}/reviews", {
+        "delivery_attempt_id": injected["unknown_attempt_id"], "outcome": "INCONCLUSIVE",
+        "note": "Fixture UNKNOWN simulada sin I/O remoto; prueba de recuperación, no fallo real de commit.",
+    }, expected=201)
+    ensure(api.json("GET", f"/runs/{unknown_id}") == unknown_before
+           and api.json("GET", f"/delivery/runs/{unknown_id}/attempts") == attempts_before,
+           "La revisión operativa alteró el UNKNOWN histórico.")
+    ensure(operational_remote_count(fixture, environment, credentials) == 4,
+           "La reparación/revisión duplicó o cambió filas remotas.")
+    original["delivery_operations"] = {
+        "committed_run": api.json("GET", f"/runs/{committed['id']}"),
+        "committed_attempts": api.json("GET", f"/delivery/runs/{committed['id']}/attempts"),
+        "repair": repaired[0], "concurrent_repair_statuses": sorted(item["status"] for item in repaired),
+        "receipt_sha256": hashlib.sha256(receipt_before).hexdigest(),
+        "manifest_sha256": hashlib.sha256(manifest_before).hexdigest(),
+        "unknown_run": unknown_before, "unknown_attempts": attempts_before,
+        "review": review, "reviews": api.json("GET", f"/delivery/runs/{unknown_id}/reviews"),
+        "unknown_fixture": "SIMULATED_UNKNOWN_NO_REMOTE_IO", "remote_rows": 4,
+    }
+    # Delivery adds real canonical lineage edges after the earlier Intake capture.
+    details = api.json("GET", f"/datasets/{original['dataset_id']}")
+    original["version"] = next(item for item in details["versions"]
+                               if item["id"] == original["version"]["id"])
+
+
+def validate_operational_delivery_restoration(
+    api: RecoveryApi, saved: dict[str, Any], compose: list[str],
+    environment: dict[str, str], credentials: tuple[str, ...],
+) -> dict[str, Any]:
+    for prefix in ("committed", "unknown"):
+        run_id = saved[f"{prefix}_run"]["id"]
+        ensure(api.json("GET", f"/runs/{run_id}") == saved[f"{prefix}_run"],
+               "El Run Delivery histórico cambió durante el restore.")
+        ensure(api.json("GET", f"/delivery/runs/{run_id}/attempts") == saved[f"{prefix}_attempts"],
+               "El intento Delivery histórico cambió durante el restore.")
+    committed_id, unknown_id = saved["committed_run"]["id"], saved["unknown_run"]["id"]
+    for path, digest in (
+        (f"/delivery/runs/{committed_id}/receipt", saved["receipt_sha256"]),
+        (f"/runs/{committed_id}/evidence", saved["manifest_sha256"]),
+    ):
+        ensure(hashlib.sha256(api.request("GET", path)).hexdigest() == digest,
+               "La evidencia reparada cambió durante el restore.")
+    ensure(api.json("GET", f"/delivery/runs/{unknown_id}/reviews") == saved["reviews"],
+           "La revisión estructurada del UNKNOWN cambió durante el restore.")
+    repeated = api.json("POST", f"/delivery/runs/{committed_id}/repair-evidence", {})
+    ensure(repeated == {**saved["repair"], "status": "ALREADY_VALID"},
+           "La reparación posterior al restore dejó de ser idempotente.")
+    ensure(operational_remote_count(compose, environment, credentials) == saved["remote_rows"],
+           "El restore o la reparación repitió escritura remota.")
+    return {
+        "committed_run_id": committed_id, "unknown_run_id": unknown_id,
+        "review_id": saved["review"]["id"], "unknown_fixture": saved["unknown_fixture"],
+        "receipt_sha256": saved["receipt_sha256"], "manifest_sha256": saved["manifest_sha256"],
+        "concurrent_repair_statuses": saved["concurrent_repair_statuses"],
+        "post_restore_repair_status": repeated["status"], "remote_rows_before_and_after": 4,
+        "historical_unknown_unchanged": True, "review_exactly_preserved": True,
+        "repaired_evidence_exactly_preserved": True, "remote_replay": False,
+    }
+
+
+def validate_delivery_restoration(
+    api: RecoveryApi,
+    original: dict[str, Any],
+    compose: list[str],
+    environment: dict[str, str],
+    credentials: tuple[str, ...],
+) -> dict[str, Any]:
+    saved = original["destination"]
+    tested = api.json("POST", f"/delivery/destinations/{saved['id']}/test", {})
+    ensure(tested["status"] == "SUCCESS",
+           "La credencial destino restaurada no permite reconectar.")
+    destination = api.json("GET", f"/delivery/destinations/{saved['id']}")
+    ensure(destination["version"] == saved["version"]
+           and destination["destination_version_id"] == saved["destination_version_id"]
+           and destination["config_hash"] == saved["config_hash"],
+           "La configuración destino cambió durante la recuperación.")
+    draft = delivery_draft(original, "records")
     preflight = api.json("POST", "/delivery/preflight", draft)
     ensure(preflight["status"] == "PASS",
            "El destino restaurado no superó el preflight de solo lectura.")
@@ -559,6 +738,8 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
     ensure(restored_case == original["exception"], "La excepción y su historial cambiaron durante el restore.")
     attachment_hash(api, restored_case)
     monitor_report = validate_monitor_restoration(api, original["monitor"])
+    operational_delivery_report = validate_operational_delivery_restoration(
+        api, original["delivery_operations"], compose, environment, credentials)
     delivery_report = validate_delivery_restoration(
         api, original, compose, environment, credentials)
     execute([*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
@@ -603,6 +784,7 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
         "restored_credential_used": True,
         "restored_destination_credential_used": True,
         "exception": case_report, "sentinel": monitor_report, "delivery": delivery_report,
+        "delivery_operations": operational_delivery_report,
     }
 
 
@@ -648,7 +830,7 @@ def main() -> int:
     # Claim only proven-empty projects immediately before attempting their creation.
     claimed: list[str] = []
     result: dict[str, Any] = {
-        "status": "FAIL", "schema_version": 3, "source_project": source,
+        "status": "FAIL", "schema_version": 4, "source_project": source,
         "target_project": target, "external_database_project": database,
         "source_port": source_port, "target_port": target_port,
         "source_destroyed_before_restore": False,
@@ -673,9 +855,20 @@ def main() -> int:
         if not options.skip_build:
             up.append("--build")
         execute(up, environment, credentials=credentials)
+        stage = "postgres_migration"
+        result["postgres_migration"] = json.loads(execute(
+            [*compose, "exec", "-T", "api", "python", "-"], environment,
+            input_text=(ROOT / "scripts" / "check_postgres_migrations.py").read_text(encoding="utf-8"),
+            credentials=credentials,
+        ))
+        ensure(result["postgres_migration"].get("status") == "PASS",
+               "La migración aditiva no preservó los registros históricos.")
+        stage = "source_trackvance_fixtures"
         attach_external_network(source, database, environment)
-        original = capture_original(
-            RecoveryApi(source_port, credentials), reader_password, delivery_password)
+        source_api = RecoveryApi(source_port, credentials)
+        original = capture_original(source_api, reader_password, delivery_password)
+        stage = "delivery_operational_fixtures"
+        prepare_delivery_operations(source_api, original, compose, fixture, environment, credentials)
         stage = "backup"
         execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "backup",
                  "--project", source, "--destination", str(backup)], environment,
@@ -687,7 +880,7 @@ def main() -> int:
                "No se verificaron por separado las credenciales de fuente y destino.")
         counts = {name: len(state["tables"].get(name, {})) for name in (
             "exceptions", "exception_attachments", "monitor_schedules", "monitor_schedule_versions",
-            "monitor_occurrences", "metric_history",
+            "monitor_occurrences", "metric_history", "delivery_attempts", "delivery_reviews",
         )}
         ensure(all(counts.values()) and counts["monitor_schedule_versions"] == 2,
                "El respaldo no contiene todos los registros operativos del ciclo.")

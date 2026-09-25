@@ -110,10 +110,11 @@ def _reconcile_durable_delivery_state(db, job: Job, run: Run) -> bool:
             attempt.error_message
             or "Trackvance no pudo confirmar el resultado del intento remoto."
         )
-        attempt.status = "UNKNOWN"
-        attempt.error_code = attempt.error_code or "WORKER_CONFIRMATION_LOST"
-        attempt.error_message = message
-        attempt.finished_at = attempt.finished_at or utcnow()
+        if was_started:
+            attempt.status = "UNKNOWN"
+            attempt.error_code = attempt.error_code or "WORKER_CONFIRMATION_LOST"
+            attempt.error_message = message
+            attempt.finished_at = attempt.finished_at or utcnow()
         job.status, job.last_error, job.lease_until = "UNKNOWN", message, None
         run.status, run.decision, run.error = "UNKNOWN", "UNKNOWN", message
         run.finished_at = run.finished_at or utcnow()

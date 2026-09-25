@@ -266,6 +266,76 @@ def test_destroy_verifies_source_absent_and_external_database_alive(monkeypatch,
         runner.destroy_before_restore("trackvance-recovery-src-unit", "trackvance-recovery-db-unit", tmp_path)
 
 
+@pytest.mark.parametrize("changed", [
+    None, "committed_run", "unknown_run", "committed_attempts", "unknown_attempts",
+    "reviews", "receipt", "manifest", "repair", "remote_rows",
+])
+def test_operational_recovery_preserves_unknown_reviews_hashes_and_no_remote_replay(monkeypatch, changed):
+    receipt, manifest = b"committed receipt", b"committed manifest"
+    saved = {
+        "committed_run": {"id": "committed", "status": "SUCCESS", "decision": "COMMITTED"},
+        "unknown_run": {"id": "unknown", "status": "UNKNOWN", "decision": "UNKNOWN"},
+        "committed_attempts": {"items": [{"id": "attempt-c", "status": "COMMITTED"}], "total": 1},
+        "unknown_attempts": {"items": [{"id": "attempt-u", "status": "UNKNOWN"}], "total": 1},
+        "reviews": {"items": [{"id": "review", "outcome": "INCONCLUSIVE"}], "total": 1},
+        "review": {"id": "review"}, "unknown_fixture": "SIMULATED_UNKNOWN_NO_REMOTE_IO",
+        "repair": {"run_id": "committed", "status": "REPAIRED",
+                   "receipt_artifact_id": "receipt", "manifest_artifact_id": "manifest"},
+        "concurrent_repair_statuses": ["ALREADY_VALID", "REPAIRED"],
+        "receipt_sha256": hashlib.sha256(receipt).hexdigest(),
+        "manifest_sha256": hashlib.sha256(manifest).hexdigest(), "remote_rows": 4,
+    }
+    expected = {
+        "/runs/committed": "committed_run", "/runs/unknown": "unknown_run",
+        "/delivery/runs/committed/attempts": "committed_attempts",
+        "/delivery/runs/unknown/attempts": "unknown_attempts",
+        "/delivery/runs/unknown/reviews": "reviews",
+    }
+    calls = []
+
+    def request_json(method, path, payload=None):
+        calls.append((method, path))
+        if method == "POST":
+            assert path == "/delivery/runs/committed/repair-evidence"
+            return {**saved["repair"], "status": "REPAIRED" if changed == "repair" else "ALREADY_VALID"}
+        key = expected[path]
+        return {"changed": True} if changed == key else deepcopy(saved[key])
+
+    def request_bytes(method, path):
+        assert method == "GET"
+        key = "receipt" if path.endswith("/receipt") else "manifest"
+        return b"changed" if changed == key else receipt if key == "receipt" else manifest
+
+    monkeypatch.setattr(runner, "operational_remote_count",
+                        lambda *args: 8 if changed == "remote_rows" else 4)
+    api = SimpleNamespace(json=request_json, request=request_bytes)
+    if changed is not None:
+        with pytest.raises(RuntimeError):
+            runner.validate_operational_delivery_restoration(api, saved, [], {}, ())
+    else:
+        report = runner.validate_operational_delivery_restoration(api, saved, [], {}, ())
+        assert report["historical_unknown_unchanged"]
+        assert report["review_exactly_preserved"]
+        assert report["repaired_evidence_exactly_preserved"]
+        assert report["remote_replay"] is False
+        assert report["remote_rows_before_and_after"] == 4
+        assert report["unknown_fixture"] == "SIMULATED_UNKNOWN_NO_REMOTE_IO"
+        assert [path for method, path in calls if method == "POST"] == [
+            "/delivery/runs/committed/repair-evidence"]
+
+
+def test_delivery_operational_target_is_separate_from_post_restore_credential_test():
+    original = {"version": {"id": "snapshot"}, "destination": {
+        "id": "destination", "destination_version_id": "revision"}}
+    operational = runner.delivery_draft(original, "operational_records")
+    restored = runner.delivery_draft(original, "records")
+    assert operational["target"]["table_name"] == "operational_records"
+    assert restored["target"]["table_name"] == "records"
+    assert operational["write_strategy"] == restored["write_strategy"] == "APPEND"
+    assert operational["dataset_version_id"] == restored["dataset_version_id"] == "snapshot"
+    assert operational["columns"] == restored["columns"]
+
+
 def setup_main(monkeypatch, tmp_path):
     evidence = tmp_path / "evidence"
     source, target, database = (f"trackvance-recovery-{part}-unit" for part in ("src", "dst", "db"))
@@ -305,11 +375,15 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner, "attach_external_network", lambda *args: None)
     monkeypatch.setattr(runner, "RecoveryApi", lambda *args: object())
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
+    monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
     monkeypatch.setattr(runner, "destroy_before_restore", lambda *args: calls.append(("destroy", source)))
     monkeypatch.setattr(runner, "validate_restored", lambda *args: {"restored_credential_used": True})
     monkeypatch.setattr(runner.docker_state, "digest", lambda path: "a" * 64)
 
     def execute(args, env, **kwargs):
+        if args[-3:] == ["api", "python", "-"]:
+            assert "seed_delivery_baseline" in kwargs["input_text"]
+            return json.dumps({"status": "PASS"})
         if "backup" in args:
             (evidence / "backup").mkdir()
             (evidence / "backup" / "state.json").write_text(json.dumps({
@@ -318,7 +392,8 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
                 "verified_artifacts": 4, "validated_relationships": 8,
                 "tables": {name: {"one": "hash", **({"two": "hash"} if name == "monitor_schedule_versions" else {})}
                            for name in ("exceptions", "exception_attachments", "monitor_schedules",
-                                        "monitor_schedule_versions", "monitor_occurrences", "metric_history")}}))
+                                        "monitor_schedule_versions", "monitor_occurrences", "metric_history",
+                                        "delivery_attempts", "delivery_reviews")}}))
             calls.append(("backup", source))
         if "restore" in args:
             assert ("destroy", source) in calls

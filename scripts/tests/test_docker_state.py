@@ -238,6 +238,85 @@ def rewrite_legacy_state(root: Path, manifest: dict, state: dict) -> None:
     )
 
 
+def write_delivery_backup(root: Path, *, current: bool = False):
+    manifest, state = write_legacy_backup(root)
+    manifest["schema_version"] = 2
+    manifest["migration"] = "0009_delivery_reviews" if current else "0008_data_delivery"
+    state["schema_version"] = 4 if current else 3
+    state["migration"] = manifest["migration"]
+    for name in docker_state.DELIVERY_TABLES:
+        state["tables"][name] = {}
+    if current:
+        state["tables"]["delivery_reviews"] = {}
+    state["tables"]["delivery_destinations"] = {"destination": "a" * 64}
+    state["tables"]["delivery_destination_versions"] = {"revision": "b" * 64}
+    state["tables"]["delivery_attempts"] = {"committed": "c" * 64, "unknown": "d" * 64}
+    state["verified_source_secrets"] = 0
+    state["verified_delivery_secrets"] = state["verified_secrets"] = 1
+    for logical in set(docker_state.ARCHIVED_VOLUMES) - set(docker_state.LEGACY_ARCHIVED_VOLUMES):
+        relative = f"volumes/{logical}.tar.gz"
+        path = root / relative
+        path.write_bytes(archive_bytes(f"{logical}.txt", b"ciphertext-fixture"))
+        manifest["components"][relative] = {
+            "path": relative, "sha256": docker_state.digest(path),
+            "size_bytes": path.stat().st_size, "entries": docker_state.inspect_archive(path),
+        }
+    rewrite_legacy_state(root, manifest, state)
+    return manifest, state
+
+
+@pytest.mark.parametrize("current", [False, True])
+def test_verify_backup_accepts_frozen_complete_delivery_format(tmp_path, current):
+    root = tmp_path / "backup"
+    manifest, _state = write_delivery_backup(root, current=current)
+    assert docker_state.verify_backup(root) == manifest
+
+
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("damage", [
+    "missing_table", "extra_table", "invalid_hash", "boolean_counter",
+    "source_count", "delivery_count", "total_count", "artifact_count",
+])
+def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_path, current, damage):
+    root = tmp_path / "backup"
+    manifest, state = write_delivery_backup(root, current=current)
+    if damage == "missing_table":
+        state["tables"].pop("delivery_attempts")
+    elif damage == "extra_table":
+        state["tables"]["unexpected"] = {}
+    elif damage == "invalid_hash":
+        state["tables"]["delivery_attempts"]["unknown"] = "not-a-sha256"
+    elif damage == "boolean_counter":
+        state["verified_artifacts"] = False
+    elif damage == "source_count":
+        state["verified_source_secrets"] = 1
+    elif damage == "delivery_count":
+        state["verified_delivery_secrets"] = 0
+    elif damage == "total_count":
+        state["verified_secrets"] = 2
+    else:
+        state["verified_artifacts"] = 1
+    rewrite_legacy_state(root, manifest, state)
+    with pytest.raises(docker_state.OperationError, match="inventario|hashes|contadores"):
+        docker_state.verify_backup(root)
+
+
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3"])
+def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
+    calls = []
+    expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
+
+    def execute(arguments, **kwargs):
+        calls.append(arguments)
+        return json.dumps(expected) if arguments[:2] == ["docker", "exec"] else ""
+
+    monkeypatch.setattr(docker_state, "execute", execute)
+    destination = tmp_path / "state.json"
+    assert docker_state._copy_snapshot("fixture-api", destination, command=command) == expected
+    assert json.loads(destination.read_text()) == expected
+    assert calls[-1] == ["docker", "exec", "fixture-api", "python", "/tmp/verify_storage.py", command]
+
+
 def test_verify_backup_accepts_exact_041_format_and_routes_only_legacy_volumes(
     tmp_path,
 ):
@@ -342,11 +421,11 @@ def test_verify_backup_rejects_delivery_component_in_v1_even_with_valid_hash(tmp
         docker_state.verify_backup(root)
 
 
-def restored_0008_state():
+def restored_current_state():
     return {
-        "schema_version": 3,
-        "migration": "0008_data_delivery",
-        "tables": {table: {} for table in docker_state.DELIVERY_TABLES},
+        "schema_version": docker_state.VERIFY_SCHEMA_VERSION,
+        "migration": docker_state.CURRENT_MIGRATION,
+        "tables": {table: {} for table in docker_state.DELIVERY_TABLES | {"delivery_reviews"}},
         "verified_secrets": 0,
         "verified_source_secrets": 0,
         "verified_delivery_secrets": 0,
@@ -359,7 +438,7 @@ def test_validate_restored_state_accepts_exact_normalized_041_upgrade(tmp_path):
     docker_state.validate_restored_state(
         manifest,
         expected,
-        restored_0008_state(),
+        restored_current_state(),
         normalized_legacy_state=expected,
     )
 
@@ -377,7 +456,7 @@ def test_validate_restored_state_rejects_incomplete_or_changed_041_upgrade(
     tmp_path, mutation, message
 ):
     manifest, expected = write_legacy_backup(tmp_path / "backup")
-    restored = restored_0008_state()
+    restored = restored_current_state()
     normalized = json.loads(json.dumps(expected))
     if mutation == "migration":
         restored["migration"] = "0007_monitor_scheduling"
@@ -429,7 +508,7 @@ def test_restore_v1_uses_legacy_archives_and_post_migration_normalization(
 
     def snapshot(_api, _destination, *, command="snapshot"):
         snapshot_commands.append(command)
-        return restored_0008_state() if command == "snapshot" else expected
+        return restored_current_state() if command == "snapshot" else expected
 
     monkeypatch.setattr(docker_state, "_copy_snapshot", snapshot)
 
@@ -442,6 +521,70 @@ def test_restore_v1_uses_legacy_archives_and_post_migration_normalization(
         for logical in docker_state.LEGACY_ARCHIVED_VOLUMES
     ]
     assert not any("delivery_" in archive for archive in extracted)
+
+
+def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes(monkeypatch, tmp_path):
+    source = tmp_path / "backup"
+    manifest, expected = write_delivery_backup(source)
+    manifest["source_project"] = "trackvance-source-test"
+    rewrite_legacy_state(source, manifest, expected)
+    restored = json.loads(json.dumps(expected))
+    restored.update(schema_version=4, migration="0009_delivery_reviews")
+    restored["tables"]["delivery_reviews"] = {}
+    state = sample_inventory("trackvance-restore-test")
+    extracted, snapshot_commands = [], []
+    monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _source: None)
+    monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _project: None)
+    monkeypatch.setattr(docker_state, "compose_services", lambda *_args: list(docker_state.PRIMARY_SERVICES))
+    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: "")
+    monkeypatch.setattr(docker_state, "inventory", lambda _project: state)
+    monkeypatch.setattr(docker_state, "_extract_volume",
+                        lambda _root, archive, _volume, _image: extracted.append(archive))
+
+    def execute(arguments, **kwargs):
+        if arguments[:2] == ["docker", "exec"] and arguments[-1] in {"snapshot", "snapshot-legacy-v3"}:
+            snapshot_commands.append(arguments[-1])
+            return json.dumps(restored if arguments[-1] == "snapshot" else expected)
+        return ""
+
+    # Keep _copy_snapshot real so its allowlist and actual command construction
+    # are exercised, not hidden behind the orchestration fixture.
+    monkeypatch.setattr(docker_state, "execute", execute)
+    receipt = docker_state.restore(source, "trackvance-restore-test")
+    assert receipt["status"] == "STOPPED_VERIFIED"
+    assert snapshot_commands == ["snapshot", "snapshot-legacy-v3"]
+    assert extracted == [f"volumes/{name}.tar.gz" for name in docker_state.ARCHIVED_VOLUMES]
+
+
+def test_validate_restored_050_keeps_delivery_and_projects_only_empty_review_table():
+    manifest = {"schema_version": 2, "migration": "0008_data_delivery"}
+    expected = restored_current_state()
+    expected["schema_version"] = 3
+    expected["migration"] = "0008_data_delivery"
+    expected["tables"].pop("delivery_reviews")
+    expected["tables"]["delivery_attempts"] = {"committed": "immutable-hash"}
+    restored = restored_current_state()
+    restored["tables"]["delivery_attempts"] = expected["tables"]["delivery_attempts"].copy()
+    docker_state.validate_restored_state(manifest, expected, restored, expected)
+    restored["tables"]["delivery_reviews"]["unexpected"] = "hash"
+    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada"):
+        docker_state.validate_restored_state(manifest, expected, restored, expected)
+
+
+@pytest.mark.parametrize("mutation", ["migration", "schema", "normalization"])
+def test_validate_restored_050_rejects_partial_or_changed_upgrade(mutation):
+    manifest = {"schema_version": 2, "migration": "0008_data_delivery"}
+    expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
+    restored = restored_current_state()
+    normalized = dict(expected)
+    if mutation == "migration":
+        restored["migration"] = "0008_data_delivery"
+    elif mutation == "schema":
+        restored["schema_version"] = 3
+    else:
+        normalized["verified_artifacts"] = 99
+    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada"):
+        docker_state.validate_restored_state(manifest, expected, restored, normalized)
 
 
 def test_restore_uses_only_private_stage_after_source_changes(monkeypatch, tmp_path):
@@ -492,7 +635,7 @@ def test_restore_uses_only_private_stage_after_source_changes(monkeypatch, tmp_p
         docker_state,
         "_copy_snapshot",
         lambda _api, _destination, *, command="snapshot": (
-            restored_0008_state() if command == "snapshot" else expected
+            restored_current_state() if command == "snapshot" else expected
         ),
     )
 
