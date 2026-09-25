@@ -97,6 +97,19 @@ def test_execute_detects_credentials_without_rendering_them(monkeypatch, capsys,
     assert password not in capsys.readouterr().out
 
 
+def test_execute_transports_migration_and_review_unicode_as_utf8(monkeypatch):
+    observed = {}
+
+    def run(arguments, **kwargs):
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(arguments, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    source = "0008→0009; revisión de confirmación"
+    assert runner.execute(["docker", "exec", "fixture", "python", "-"], {}, input_text=source) == "ok"
+    assert observed["encoding"] == "utf-8" and observed["input"] == source
+
+
 def test_http_error_never_exposes_response_body():
     api = object.__new__(runner.RecoveryApi)
     api.base_url, api.credentials, api.csrf = "http://localhost/api/v1", (), ""

@@ -1079,6 +1079,12 @@ def backfill_artifacts(db: Session) -> dict[str, int]:
         except (OSError, ArtifactIntegrityError):
             counts["unavailable"] += 1
     for run in db.scalars(select(Run)):
+        if run.module.upper() == "DELIVERY":
+            # Delivery was introduced with immutable artifacts and its own
+            # canonical DELIVERY_INPUT graph. Legacy generic backfill would
+            # append unrelated RUN_INPUT edges on restart/restore. Its evidence
+            # is repaired only through the explicit local repair operation.
+            continue
         for identity in [run.dataset_version_id, run.target_version_id]:
             if identity:
                 link_artifact(db, run.organization_id, "RUN_INPUT", "RUN", run.id, "DATASET_VERSION", identity)

@@ -69,7 +69,8 @@ def execute(arguments: list[str], environment: dict[str, str], *, timeout: int =
     assert_no_secrets(" ".join(arguments), credentials)
     print("+ " + " ".join(arguments), flush=True)
     result = subprocess.run(arguments, cwd=ROOT, env=environment, capture_output=True,
-                            text=True, timeout=timeout, check=False, input=input_text)
+                            text=True, encoding="utf-8", errors="replace",
+                            timeout=timeout, check=False, input=input_text)
     assert_no_secrets(result.stdout + result.stderr, credentials)
     ensure(not result.returncode,
            f"Falló {Path(arguments[0]).name} (exit {result.returncode}); salida suprimida.")

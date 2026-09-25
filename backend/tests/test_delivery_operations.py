@@ -40,6 +40,7 @@ from trackvance.models import (
     Run,
     User,
 )
+from trackvance.services import backfill_artifacts
 
 
 def completed_run(authenticated, database, case, monkeypatch, *, pending=False, unknown=False):
@@ -514,3 +515,32 @@ def test_review_utc_normalization_and_database_constraints(
                        "verified_at": utcnow(), **changes},
                 ))
                 db.flush()
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_startup_legacy_backfill_does_not_add_noncanonical_delivery_edges(
+    authenticated, database, delivery_case, monkeypatch, unknown,
+):
+    run_id, attempt_id = completed_run(
+        authenticated, database, delivery_case, monkeypatch, unknown=unknown,
+    )
+    with database() as db:
+        before_run = record_values(db.get(Run, run_id))
+        before_attempt = record_values(db.get(DeliveryAttempt, attempt_id))
+        before_links = [record_values(link) for link in db.scalars(
+            select(ArtifactLink).order_by(ArtifactLink.id),
+        )]
+        before_artifacts = [record_values(artifact) for artifact in db.scalars(
+            select(Artifact).order_by(Artifact.id),
+        )]
+        for _ in range(2):
+            backfill_artifacts(db)
+            db.commit()
+        assert record_values(db.get(Run, run_id)) == before_run
+        assert record_values(db.get(DeliveryAttempt, attempt_id)) == before_attempt
+        assert [record_values(link) for link in db.scalars(
+            select(ArtifactLink).order_by(ArtifactLink.id),
+        )] == before_links
+        assert [record_values(artifact) for artifact in db.scalars(
+            select(Artifact).order_by(Artifact.id),
+        )] == before_artifacts

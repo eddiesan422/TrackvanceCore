@@ -35,6 +35,20 @@ DELIVERY_TABLES = frozenset(
         "delivery_attempts",
     }
 )
+# Frozen inventories identify the running release, not whichever CLI copied this
+# verifier into its container. Never silently omit an unfamiliar model/table.
+LEGACY_TABLES = frozenset({
+    "artifact_links", "artifacts", "audit_events", "configurations",
+    "dataset_source_bindings", "dataset_versions", "datasets", "exception_attachments",
+    "exceptions", "external_connection_versions", "external_connections", "findings",
+    "idempotency_keys", "jobs", "metric_history", "monitor_occurrences",
+    "monitor_schedule_versions", "monitor_schedules", "runs", "sessions", "users",
+})
+FINGERPRINT_TABLES = {
+    LEGACY_MIGRATION: LEGACY_TABLES,
+    DELIVERY_BASELINE_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES,
+    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE},
+}
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
     "DATASET_VERSION": "dataset_versions",
@@ -307,10 +321,8 @@ def _snapshot_inputs() -> tuple[
     from trackvance.artifactstore import artifact_store
     from trackvance.credential_store import secret_store
     from trackvance.db import Base, SessionLocal
-    from trackvance.delivery_credential_store import destination_secret_store
     from trackvance.models import (
         Artifact,
-        DeliveryDestinationVersion,
         ExternalConnectionVersion,
         Job,
         Run,
@@ -347,9 +359,15 @@ def _snapshot_inputs() -> tuple[
             secret_store.get(version.organization_id, version.secret_reference)
             verified_source_secrets += 1
         verified_delivery_secrets = 0
-        for version in session.scalars(select(DeliveryDestinationVersion)):
-            destination_secret_store.get(version.organization_id, version.secret_reference)
-            verified_delivery_secrets += 1
+        if "delivery_destination_versions" in Base.metadata.tables:
+            # Older 0007 runtimes have no Delivery module. Import only after
+            # confirming the running model actually includes the destination.
+            from trackvance.delivery_credential_store import destination_secret_store
+            from trackvance.models import DeliveryDestinationVersion
+
+            for version in session.scalars(select(DeliveryDestinationVersion)):
+                destination_secret_store.get(version.organization_id, version.secret_reference)
+                verified_delivery_secrets += 1
     return (
         migration,
         rows,
@@ -369,16 +387,27 @@ def snapshot() -> dict[str, Any]:
         verified_source_secrets,
         verified_delivery_secrets,
     ) = _snapshot_inputs()
-    return {
-        "schema_version": SCHEMA_VERSION,
+    if migration not in FINGERPRINT_TABLES or set(rows) != FINGERPRINT_TABLES[migration]:
+        raise ValueError("La revisión y el inventario del runtime no coinciden con una baseline soportada.")
+    legacy = migration == LEGACY_MIGRATION
+    if legacy and verified_delivery_secrets:
+        raise ValueError("Un runtime 0007 no puede contener secretos de Data Delivery.")
+    report = {
+        "schema_version": (
+            LEGACY_SCHEMA_VERSION if legacy else
+            DELIVERY_BASELINE_SCHEMA_VERSION if migration == DELIVERY_BASELINE_MIGRATION else
+            SCHEMA_VERSION
+        ),
         "tables": _table_hashes(rows),
         "verified_artifacts": verified_artifacts,
         "verified_secrets": verified_source_secrets + verified_delivery_secrets,
-        "verified_source_secrets": verified_source_secrets,
-        "verified_delivery_secrets": verified_delivery_secrets,
-        "validated_relationships": validate_relationships(rows, foreign_keys),
+        "validated_relationships": validate_relationships(rows, foreign_keys, compatibility_v2=legacy),
         "migration": migration,
     }
+    if not legacy:
+        report.update(verified_source_secrets=verified_source_secrets,
+                      verified_delivery_secrets=verified_delivery_secrets)
+    return report
 
 
 def snapshot_legacy_v2() -> dict[str, Any]:

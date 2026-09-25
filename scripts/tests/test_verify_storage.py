@@ -431,3 +431,34 @@ def test_legacy_projections_reject_reviews_and_current_state_includes_them():
             verified_artifacts=0, verified_source_secrets=0,
         )
     assert verify_storage._table_hashes(rows)["delivery_reviews"]["review"]
+
+
+@pytest.mark.parametrize(("migration", "schema"), [
+    ("0007_monitor_scheduling", 2), ("0008_data_delivery", 3), ("0009_delivery_reviews", 4),
+])
+def test_snapshot_labels_exact_running_revision_not_current_cli_version(monkeypatch, migration, schema):
+    rows = {name: [] for name in verify_storage.FINGERPRINT_TABLES[migration]}
+    rows["jobs"] = [{"id": "job", "status": "SUCCESS", "run_id": "run"}]
+    if schema > 2:
+        rows["jobs"][0]["lane"] = "DEFAULT"
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (migration, rows, [], 0, 0, 0))
+    report = verify_storage.snapshot()
+    assert report["schema_version"] == schema and report["migration"] == migration
+    assert report["tables"]["jobs"]["job"] == verify_storage._canonical_hash(rows["jobs"][0])
+    assert ("verified_delivery_secrets" in report) is (schema > 2)
+    assert ("verified_source_secrets" in report) is (schema > 2)
+
+
+@pytest.mark.parametrize("damage", ["unknown_revision", "missing_table", "unexpected_table"])
+def test_snapshot_refuses_wrong_runtime_inventory_instead_of_mislabeling(monkeypatch, damage):
+    migration = verify_storage.DELIVERY_BASELINE_MIGRATION
+    rows = {name: [] for name in verify_storage.FINGERPRINT_TABLES[migration]}
+    if damage == "unknown_revision":
+        migration = "0010_unrecognized"
+    elif damage == "missing_table":
+        rows.pop("delivery_attempts")
+    else:
+        rows["delivery_reviews"] = []
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (migration, rows, [], 0, 0, 0))
+    with pytest.raises(ValueError, match="revisión y el inventario"):
+        verify_storage.snapshot()

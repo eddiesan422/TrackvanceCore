@@ -421,8 +421,10 @@ conocido. `bytes_sent` mide representación UTF-8 preparada, no tráfico de red.
 
 UPSERT PostgreSQL 18 usa RETURNING OLD/NEW documentado dentro de la misma
 transacción, sin pre-SELECT ni xmax. PostgreSQL 16/17 conserva null para desglose
-no fiable; una entrada vacía permite cero. Los guards ON CONFLICT/constraints/locks
-siguen vigentes. No se requiere actualizar el servidor metadata PostgreSQL16.
+no fiable; una entrada vacía permite cero y un mapping sólo-claves usa DO NOTHING
+con inserciones conocidas y cero actualizaciones. Los guards
+ON CONFLICT/constraints/locks siguen vigentes. No se requiere actualizar el
+servidor metadata PostgreSQL 16.
 
 Runs nuevos persistirán `preflight_seconds` y `write_seconds`, medidos con reloj
 monotónico en el worker. El segundo incluye deliver_prepared/commit remoto,

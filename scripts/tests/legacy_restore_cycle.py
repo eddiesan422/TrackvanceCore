@@ -104,6 +104,26 @@ def restore_and_capture(source: Path, target: str, port: int) -> dict:
             "restore_status": receipt["status"]}
 
 
+def compare_native_backups(archived: Path, current: Path) -> dict:
+    """Both tool versions must describe the same settled 0.5.0 runtime."""
+    manifests = [docker_state.verify_backup(path) for path in (archived, current)]
+    states = [json.loads((path / "state.json").read_text(encoding="utf-8"))
+              for path in (archived, current)]
+    recovery.ensure(states[0] == states[1], "Las herramientas discrepan sobre el estado nativo 0.5.0.")
+    recovery.ensure(states[1]["schema_version"] == 3
+                    and states[1]["migration"] == "0008_data_delivery",
+                    "El tooling actual no conservó la versión nativa de la snapshot.")
+    archives = [{name: component["entries"] for name, component in manifest["components"].items()
+                 if name.startswith("volumes/")} for manifest in manifests]
+    recovery.ensure(bool(archives[0]) and archives[0] == archives[1],
+                    "Las herramientas discrepan sobre los archivos persistentes 0.5.0.")
+    return {"status": "PASS", "native_state_schema": 3, "native_migration": "0008_data_delivery",
+            "state_sha256": docker_state.canonical_hash(states[1]),
+            "exact_archived_tool_state": True, "exact_archived_tool_volume_entries": True,
+            "verified_volume_archives": len(archives[1]),
+            "primary_restore_input": "ARCHIVED_0.5.0_TOOL_BACKUP"}
+
+
 def capture_delivery(api: recovery.RecoveryApi, original: dict) -> dict:
     draft = recovery.delivery_draft(original, "records")
     config = api.json("POST", "/delivery/configurations", {
@@ -238,6 +258,12 @@ def main() -> int:
         api = recovery.RecoveryApi(source_port, credentials)
         original = recovery.capture_original(api, reader, writer)
         historical = capture_delivery(api, original)
+        # Old 0.5.0 startup may add its legacy generic Delivery input edges once.
+        # Settle that authentic behavior before either backup; the upgrade must
+        # preserve these existing edges, not delete or silently normalize them.
+        recovery.execute([*compose, "restart", "api"], environment, credentials=credentials)
+        recovery.execute([*compose, "up", "-d", "--wait", "--no-build", "--pull", "never", "api"],
+                         environment, credentials=credentials)
         stage = "backup_050"
         backup050 = evidence / "backup-050"
         # The archive is not a checkout. Prevent the old tool from attributing
@@ -251,6 +277,11 @@ def main() -> int:
         state = json.loads((backup050 / "state.json").read_text(encoding="utf-8"))
         recovery.ensure(manifest["migration"] == "0008_data_delivery" and state["schema_version"] == 3
                         and bool(state["tables"]["delivery_attempts"]), "El backup 0.5.0 no es auténtico/completo.")
+        stage = "current_tool_backup_050"
+        current_backup050 = evidence / "backup-050-current-tool"
+        with patch.dict(os.environ, environment):
+            docker_state.backup(source, current_backup050)
+        result["current_tool_on_050"] = compare_native_backups(backup050, current_backup050)
         recovery.cleanup(source, evidence)
         claimed.remove(source)
         stage = "restore_050"

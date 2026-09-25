@@ -69,3 +69,40 @@ def test_restore_comparison_captured_before_smoke_mutation(monkeypatch):
     assert report["historical_table_counts"] == {"runs": 1}
     assert report["normalized_state_sha256"] == report["source_state_sha256"]
     assert report["exact_historical_state"] == "PASS"
+
+
+def test_final_inspection_failure_still_persists_result(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner.sys, "argv", ["legacy_restore_cycle.py", "--legacy041-backup",
+        str(tmp_path / "unread-backup"), "--evidence-dir", str(tmp_path / "evidence")])
+    monkeypatch.setattr(runner, "baseline_images", lambda _project: ({"containers": []}, {}))
+    monkeypatch.setattr(runner.recovery, "assert_fresh", lambda _project: (_ for _ in ()).throw(ValueError("existing")))
+    monkeypatch.setattr(runner.docker_state, "inventory", lambda _project: (_ for _ in ()).throw(ValueError("unavailable")))
+    assert runner.main() == 1
+    report = json.loads((tmp_path / "evidence/result.json").read_text(encoding="utf-8"))
+    assert report["status"] == "FAIL"
+    assert report["main_inventory_unchanged"] is False
+    assert report["main_inspection_error"] == "ValueError"
+
+
+@pytest.mark.parametrize("mismatch", [None, "state", "archives"])
+def test_current_tool_backup_matches_native_baseline(monkeypatch, tmp_path, mismatch):
+    backups = [tmp_path / "archived", tmp_path / "current"]
+    for index, path in enumerate(backups):
+        path.mkdir()
+        state = {"schema_version": 3, "migration": "0008_data_delivery",
+                 "tables": {"runs": {"run": "changed" if mismatch == "state" and index else "same"}}}
+        (path / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def verify(path):
+        fingerprint = "different" if mismatch == "archives" and path == backups[1] else "same"
+        return {"components": {"volumes/artifacts.tar.gz": {"entries": {"artifact": fingerprint}}}}
+
+    monkeypatch.setattr(runner.docker_state, "verify_backup", verify)
+    if mismatch:
+        with pytest.raises(RuntimeError, match="discrepan"):
+            runner.compare_native_backups(*backups)
+    else:
+        report = runner.compare_native_backups(*backups)
+        assert report["status"] == "PASS"
+        assert report["native_state_schema"] == 3
+        assert report["exact_archived_tool_state"] is True
