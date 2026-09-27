@@ -1,10 +1,8 @@
 {
   "version": "0.6.0",
   "status": "PASS",
-  "started_at": "2026-09-27T02:24:47.2071843Z",
-  "finished_at": "2026-09-27T02:26:19.2886283Z",
-  "source_head_at_run": "4519ed354202ea8f220682758da234e07b6df3ed",
-  "repository_state": "0.6.0 working tree before product commit; final commit is independently certified by CI",
+  "source_head_at_run": "35c88fa2f0fd0c59dacda7faf76713e064364d25",
+  "repository_state": "Product and CI harness committed; documentation/PDF publication pending separately",
   "commands": {
     "uv_sync": {
       "command": "uv sync --frozen",
@@ -13,11 +11,11 @@
     "pytest": {
       "command": "uv run pytest tests ../scripts/tests",
       "status": "PASS",
-      "passed": 1140,
+      "passed": 1141,
       "failed": 0,
       "skipped": 0,
       "warnings": 2,
-      "duration_seconds": 93.47
+      "duration_seconds": 79.57
     },
     "ruff": {
       "command": "uv run ruff check src tests ../scripts",
@@ -66,7 +64,7 @@
   "openapi_paths": 95,
   "openapi_schemas": 87,
   "file_sha256": {
-    "backend/openapi.json": "9c5ff32c0c3659ba88f296113984b3286228b8e663976afea1ebe72273cb6cbf",
+    "backend/openapi.json": "9ac01551b552eadf02eebf6c84caf60111d6b6eed31f0f5ace6f03629155c9ab",
     "backend/uv.lock": "cb8d7cdf07f3899d5e352b512508f4cdfdaf2b4a8d9bf6dc62b2b7c66bc4c57f",
     "backend/src/trackvance/permissions.py": "621aff513f07beefae833d1d9b7d4462ab64795d29dd0e43d8c2bc2e9d89e979",
     "backend/migrations/versions/0010_dynamic_rbac_identity.py": "3e9680d122595ad04957d2616448ce2b028d15be14012f0d02230cdd61942bb2",
@@ -90,5 +88,8 @@
     "shared routes enforce actual module permissions",
     "populated historical SQLite migration with real foreign-key enforcement"
   ],
-  "final_verification": "Full backend+scripts after browser privacy harness changes; one import-order lint error corrected, full Ruff rerun PASS and two affected tests PASS. Mypy42 PASS."
+  "final_verification": "Full1141backend/scriptsPASS after CI verifier correction; latest full RuffPASS, Mypy42PASS, new20focused runner testsPASS; no app behavior changes after product979cc0f.",
+  "initial_checks_started_at": "2026-09-27T02:24:47.2071843Z",
+  "initial_checks_finished_at": "2026-09-27T02:26:19.2886283Z",
+  "final_pytest_finished_at": "2026-09-27T02:45:42.090310+00:00"
 }

@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "attempt_id": "e95366bf-e0be-40f2-a103-f2ea0fcdeef1",
+      "attempt_id": "a4f65095-ba19-4bce-8037-9dcb8bddbb89",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -24,20 +24,20 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.402442,
+          "cpu_seconds": 0.413422,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
-            "rbytes": 114688,
-            "rios": 3,
+            "rbytes": 0,
+            "rios": 0,
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.924339,
+          "cpu_seconds": 0.907531,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -46,11 +46,11 @@
             "wbytes": 16384,
             "wios": 2
           },
-          "memory_peak_since_container_start_bytes": 155914240,
+          "memory_peak_since_container_start_bytes": 156065792,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.178915,
+          "cpu_seconds": 0.195304,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -59,11 +59,11 @@
             "wbytes": 1343488,
             "wios": 4
           },
-          "memory_peak_since_container_start_bytes": 85106688,
+          "memory_peak_since_container_start_bytes": 84795392,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.108764,
+          "cpu_seconds": 0.121454,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -72,11 +72,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 752734208,
+          "memory_peak_since_container_start_bytes": 754098176,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.127788,
+          "cpu_seconds": 0.136347,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -85,11 +85,11 @@
             "wbytes": 106496,
             "wios": 18
           },
-          "memory_peak_since_container_start_bytes": 93839360,
+          "memory_peak_since_container_start_bytes": 94076928,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.03041,
+          "cpu_seconds": 0.029676,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -98,11 +98,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 17977344,
+          "memory_peak_since_container_start_bytes": 17772544,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.777449,
+          "cpu_seconds": 0.761785,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -111,11 +111,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "480cb856-da4c-4506-a9e1-597df74d5ea2",
+      "run_id": "2a0acc3f-bea0-4137-bf6c-acd8b6c18d0f",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -134,20 +134,20 @@
       },
       "strategy": "CREATE_AND_LOAD",
       "throughput": {
-        "rows_per_second_total": 792.5075700325407,
-        "rows_per_second_write": 42643.71957051595,
-        "source_mb_per_second_write": 45.838714971897716
+        "rows_per_second_total": 721.1514885432575,
+        "rows_per_second_write": 17863.687665534027,
+        "source_mb_per_second_write": 19.202088736498837
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 1.0824283000001742,
-        "explicit_preflight_seconds": 0.04658779999954277,
-        "total_seconds": 1.261817599999631,
-        "worker_preflight_seconds": 0.07086658499974874,
-        "write_seconds": 0.023450111999409273
+        "enqueue_to_terminal_seconds": 1.0796570000002248,
+        "explicit_preflight_seconds": 0.05292149999877438,
+        "total_seconds": 1.3866711999999097,
+        "worker_preflight_seconds": 0.07797286799996073,
+        "write_seconds": 0.055979483000555774
       }
     },
     {
-      "attempt_id": "09c6bdd0-11b6-48d8-9f1e-a44466807d42",
+      "attempt_id": "e6dd6ea7-3e2f-4b6a-914f-df3f13d79327",
       "destination_check": {
         "amount_sum": 995024,
         "distinct_keys": 1000,
@@ -170,7 +170,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.262076,
+          "cpu_seconds": 0.262245,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -179,11 +179,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.826285,
+          "cpu_seconds": 0.914761,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -192,24 +192,24 @@
             "wbytes": 20480,
             "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.178224,
+          "cpu_seconds": 0.203303,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 2318336,
-            "wios": 6
+            "wbytes": 2449408,
+            "wios": 11
           },
-          "memory_peak_since_container_start_bytes": 86335488,
+          "memory_peak_since_container_start_bytes": 85905408,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.124575,
+          "cpu_seconds": 0.131223,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -218,24 +218,24 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 752951296,
+          "memory_peak_since_container_start_bytes": 754438144,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.106763,
+          "cpu_seconds": 0.10855,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 507904,
-            "wios": 47
+            "wbytes": 983040,
+            "wios": 80
           },
-          "memory_peak_since_container_start_bytes": 94945280,
+          "memory_peak_since_container_start_bytes": 95432704,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.03014,
+          "cpu_seconds": 0.027322,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -244,11 +244,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 17793024,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.725417,
+          "cpu_seconds": 0.834912,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -257,11 +257,11 @@
             "wbytes": 4096,
             "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "49025cbb-1bc9-40d0-9f98-3410d9f9988a",
+      "run_id": "98053283-f505-4ee7-b684-be7e87e09aab",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -272,28 +272,28 @@
       "stop_reason": null,
       "storage": {
         "baseline_storage_bytes": 1882251,
-        "peak_storage_bytes": 1892486,
-        "peak_storage_growth_bytes": 10235,
+        "peak_storage_bytes": 1892483,
+        "peak_storage_growth_bytes": 10232,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
-        "samples": 4
+        "samples": 3
       },
       "strategy": "APPEND",
       "throughput": {
-        "rows_per_second_total": 1227.190215465393,
-        "rows_per_second_write": 52960.968297735,
-        "source_mb_per_second_write": 56.92896292550621
+        "rows_per_second_total": 1294.3691962903977,
+        "rows_per_second_write": 45864.547408059596,
+        "source_mb_per_second_write": 49.30085689351365
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 0.569192999999359,
-        "explicit_preflight_seconds": 0.09116929999981949,
-        "total_seconds": 0.8148695999998381,
-        "worker_preflight_seconds": 0.07487333299923193,
-        "write_seconds": 0.018881829999372712
+        "enqueue_to_terminal_seconds": 0.538446099999419,
+        "explicit_preflight_seconds": 0.10173289999875124,
+        "total_seconds": 0.7725771000004897,
+        "worker_preflight_seconds": 0.08960568600014085,
+        "write_seconds": 0.02180333299929771
       }
     },
     {
-      "attempt_id": "b7133417-b106-4bf2-a16e-49223c39f75f",
+      "attempt_id": "b47b7d5c-dd8c-4555-99ee-eb66d2c2c661",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -316,7 +316,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.430218,
+          "cpu_seconds": 0.446747,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -325,11 +325,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.133283,
+          "cpu_seconds": 0.144153,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -338,24 +338,24 @@
             "wbytes": 20480,
             "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.189298,
+          "cpu_seconds": 0.217331,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 1318912,
-            "wios": 7
+            "wbytes": 2654208,
+            "wios": 9
           },
-          "memory_peak_since_container_start_bytes": 87445504,
+          "memory_peak_since_container_start_bytes": 87740416,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.128044,
+          "cpu_seconds": 0.126886,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -364,24 +364,24 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 753774592,
+          "memory_peak_since_container_start_bytes": 755093504,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.091822,
+          "cpu_seconds": 0.100594,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 253952,
-            "wios": 26
+            "wbytes": 155648,
+            "wios": 22
           },
-          "memory_peak_since_container_start_bytes": 96296960,
+          "memory_peak_since_container_start_bytes": 97361920,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.027436,
+          "cpu_seconds": 0.034449,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -390,11 +390,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 18059264,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.733399,
+          "cpu_seconds": 1.004001,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -403,11 +403,11 @@
             "wbytes": 4096,
             "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "9972d825-b037-4d9d-a6e0-c9a73ffbc0d5",
+      "run_id": "7d77da47-9a75-4b8e-8ea4-8f5dc04550e1",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -417,29 +417,29 @@
       "status": "PASS",
       "stop_reason": null,
       "storage": {
-        "baseline_storage_bytes": 1892486,
-        "peak_storage_bytes": 1902742,
+        "baseline_storage_bytes": 1892483,
+        "peak_storage_bytes": 1902739,
         "peak_storage_growth_bytes": 10256,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
-        "samples": 4
+        "samples": 3
       },
       "strategy": "OVERWRITE",
       "throughput": {
-        "rows_per_second_total": 1191.5194792591153,
-        "rows_per_second_write": 41660.41933957291,
-        "source_mb_per_second_write": 44.78174293775173
+        "rows_per_second_total": 1303.4788024360694,
+        "rows_per_second_write": 35954.04785004078,
+        "source_mb_per_second_write": 38.64783297710938
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 0.557338599999639,
-        "explicit_preflight_seconds": 0.10373809999964578,
-        "total_seconds": 0.8392644999994445,
-        "worker_preflight_seconds": 0.07366621799974382,
-        "write_seconds": 0.024003599000025133
+        "enqueue_to_terminal_seconds": 0.5347194000005402,
+        "explicit_preflight_seconds": 0.0925610999984201,
+        "total_seconds": 0.7671778000003542,
+        "worker_preflight_seconds": 0.07634178299940686,
+        "write_seconds": 0.027813280000373197
       }
     },
     {
-      "attempt_id": "cc558a31-956a-46ef-a258-5b6bfab20ed1",
+      "attempt_id": "f1569c74-4f57-47c1-ac9b-9afa08807075",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -462,7 +462,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.437913,
+          "cpu_seconds": 0.477098,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -471,11 +471,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.135468,
+          "cpu_seconds": 0.143809,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -484,11 +484,11 @@
             "wbytes": 16384,
             "wios": 2
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.21831,
+          "cpu_seconds": 0.238652,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -497,11 +497,11 @@
             "wbytes": 1351680,
             "wios": 9
           },
-          "memory_peak_since_container_start_bytes": 91754496,
+          "memory_peak_since_container_start_bytes": 91889664,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.129824,
+          "cpu_seconds": 0.132355,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -510,11 +510,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 753774592,
+          "memory_peak_since_container_start_bytes": 756252672,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.114576,
+          "cpu_seconds": 0.121435,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -523,11 +523,11 @@
             "wbytes": 106496,
             "wios": 20
           },
-          "memory_peak_since_container_start_bytes": 97308672,
+          "memory_peak_since_container_start_bytes": 97361920,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.038402,
+          "cpu_seconds": 0.046561,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -536,11 +536,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 18059264,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.041132,
+          "cpu_seconds": 0.04572,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -549,11 +549,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "70b83538-0ee0-4d21-84fb-b9912647fc6b",
+      "run_id": "9bb13fb3-ebf3-48b2-ba58-f58a7e183dda",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -563,29 +563,29 @@
       "status": "PASS",
       "stop_reason": null,
       "storage": {
-        "baseline_storage_bytes": 1902742,
+        "baseline_storage_bytes": 1902739,
         "peak_storage_bytes": 1913014,
-        "peak_storage_growth_bytes": 10272,
+        "peak_storage_growth_bytes": 10275,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
         "samples": 5
       },
       "strategy": "UPSERT",
       "throughput": {
-        "rows_per_second_total": 752.3260039225066,
-        "rows_per_second_write": 28395.061167464984,
-        "source_mb_per_second_write": 30.522504335314967
+        "rows_per_second_total": 741.2386334769409,
+        "rows_per_second_write": 20753.405913996055,
+        "source_mb_per_second_write": 22.308313345290383
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 1.079092099999798,
-        "explicit_preflight_seconds": 0.11003830000026937,
-        "total_seconds": 1.329211000000214,
-        "worker_preflight_seconds": 0.0729592549996596,
-        "write_seconds": 0.035217392000049585
+        "enqueue_to_terminal_seconds": 1.0599388999999064,
+        "explicit_preflight_seconds": 0.13119100000039907,
+        "total_seconds": 1.349093199998606,
+        "worker_preflight_seconds": 0.08343858899934276,
+        "write_seconds": 0.048184862000198336
       }
     },
     {
-      "attempt_id": "3d38263a-5e44-4c3f-8c01-26c04ffc45a5",
+      "attempt_id": "eb948e5e-4ed3-4516-9247-9be8777cdfa1",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -608,7 +608,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.272299,
+          "cpu_seconds": 0.212964,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -617,11 +617,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.190095,
+          "cpu_seconds": 0.193495,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -630,50 +630,50 @@
             "wbytes": 20480,
             "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.056256,
-          "io_delta": {
-            "dbytes": 0,
-            "dios": 0,
-            "rbytes": 0,
-            "rios": 0,
-            "wbytes": 3211264,
-            "wios": 12
-          },
-          "memory_peak_since_container_start_bytes": 91754496,
-          "oom_killed": false
-        },
-        "destination-sqlserver": {
-          "cpu_seconds": 0.611653,
-          "io_delta": {
-            "dbytes": 0,
-            "dios": 0,
-            "rbytes": 524288,
-            "rios": 8,
-            "wbytes": 2684928,
-            "wios": 64
-          },
-          "memory_peak_since_container_start_bytes": 764166144,
-          "oom_killed": false
-        },
-        "postgres": {
-          "cpu_seconds": 0.109885,
+          "cpu_seconds": 0.063763,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
             "wbytes": 106496,
-            "wios": 20
+            "wios": 6
           },
-          "memory_peak_since_container_start_bytes": 99667968,
+          "memory_peak_since_container_start_bytes": 91889664,
+          "oom_killed": false
+        },
+        "destination-sqlserver": {
+          "cpu_seconds": 0.636995,
+          "io_delta": {
+            "dbytes": 0,
+            "dios": 0,
+            "rbytes": 524288,
+            "rios": 8,
+            "wbytes": 2698240,
+            "wios": 66
+          },
+          "memory_peak_since_container_start_bytes": 764719104,
+          "oom_killed": false
+        },
+        "postgres": {
+          "cpu_seconds": 0.114113,
+          "io_delta": {
+            "dbytes": 0,
+            "dios": 0,
+            "rbytes": 0,
+            "rios": 0,
+            "wbytes": 278528,
+            "wios": 22
+          },
+          "memory_peak_since_container_start_bytes": 97755136,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.041204,
+          "cpu_seconds": 0.046911,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -682,11 +682,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 18853888,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.042413,
+          "cpu_seconds": 0.044377,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -695,11 +695,11 @@
             "wbytes": 4096,
             "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "c09c04e4-d90c-4954-8cad-e41c81283837",
+      "run_id": "daf3ee56-4c93-4a98-a75b-a89eccf849ab",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -710,28 +710,28 @@
       "stop_reason": null,
       "storage": {
         "baseline_storage_bytes": 1913014,
-        "peak_storage_bytes": 1923285,
-        "peak_storage_growth_bytes": 10271,
+        "peak_storage_bytes": 1923288,
+        "peak_storage_growth_bytes": 10274,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
         "samples": 5
       },
       "strategy": "CREATE_AND_LOAD",
       "throughput": {
-        "rows_per_second_total": 769.8698796724734,
-        "rows_per_second_write": 2591.413336357036,
-        "source_mb_per_second_write": 2.7855697977569145
+        "rows_per_second_total": 757.524624663778,
+        "rows_per_second_write": 2589.699988826594,
+        "source_mb_per_second_write": 2.783728081089449
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 1.0760183000002144,
-        "explicit_preflight_seconds": 0.09464029999980994,
-        "total_seconds": 1.2989207999999053,
-        "worker_preflight_seconds": 0.03994929700002103,
-        "write_seconds": 0.3858898100006627
+        "enqueue_to_terminal_seconds": 1.0817103999997926,
+        "explicit_preflight_seconds": 0.1218075000015233,
+        "total_seconds": 1.3200890999996773,
+        "worker_preflight_seconds": 0.04498033199979545,
+        "write_seconds": 0.38614511499963555
       }
     },
     {
-      "attempt_id": "d86c1219-f3b8-48d4-bb37-3f419ccba5fe",
+      "attempt_id": "3e9caff0-ec24-4553-aba7-bd1540fc753d",
       "destination_check": {
         "amount_sum": 995024,
         "distinct_keys": 1000,
@@ -754,7 +754,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.417886,
+          "cpu_seconds": 0.480853,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -763,11 +763,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 0.220068,
+          "cpu_seconds": 0.243213,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -776,11 +776,11 @@
             "wbytes": 20480,
             "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.074987,
+          "cpu_seconds": 0.094384,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -789,24 +789,24 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 91754496,
+          "memory_peak_since_container_start_bytes": 91889664,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.662348,
+          "cpu_seconds": 0.762177,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 90112,
             "rios": 2,
             "wbytes": 2847744,
-            "wios": 73
+            "wios": 71
           },
-          "memory_peak_since_container_start_bytes": 772648960,
+          "memory_peak_since_container_start_bytes": 772489216,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.094815,
+          "cpu_seconds": 0.138538,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -815,11 +815,11 @@
             "wbytes": 106496,
             "wios": 20
           },
-          "memory_peak_since_container_start_bytes": 99667968,
+          "memory_peak_since_container_start_bytes": 99471360,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.042303,
+          "cpu_seconds": 0.044026,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -828,11 +828,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 18853888,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.040141,
+          "cpu_seconds": 0.051602,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -841,11 +841,11 @@
             "wbytes": 4096,
             "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "f9c31223-a47d-4fe6-ab9c-7b261aed145a",
+      "run_id": "5a8d6256-9186-4b74-bcad-2a52f0769fc0",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -855,29 +855,29 @@
       "status": "PASS",
       "stop_reason": null,
       "storage": {
-        "baseline_storage_bytes": 1923285,
+        "baseline_storage_bytes": 1923288,
         "peak_storage_bytes": 1933505,
-        "peak_storage_growth_bytes": 10220,
+        "peak_storage_growth_bytes": 10217,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
-        "samples": 5
+        "samples": 6
       },
       "strategy": "APPEND",
       "throughput": {
-        "rows_per_second_total": 688.0811275174883,
-        "rows_per_second_write": 2559.616403191322,
-        "source_mb_per_second_write": 2.7513905429676258
+        "rows_per_second_total": 505.4122832470935,
+        "rows_per_second_write": 2486.966931665178,
+        "source_mb_per_second_write": 2.673297955086328
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 1.0794316000001345,
-        "explicit_preflight_seconds": 0.18250369999987015,
-        "total_seconds": 1.4533169999995152,
-        "worker_preflight_seconds": 0.07225567600016802,
-        "write_seconds": 0.3906835409998166
+        "enqueue_to_terminal_seconds": 1.5971045999995113,
+        "explicit_preflight_seconds": 0.20780459999878076,
+        "total_seconds": 1.9785826999996061,
+        "worker_preflight_seconds": 0.08425830799933465,
+        "write_seconds": 0.402096218999759
       }
     },
     {
-      "attempt_id": "a577b3ac-5036-4a88-9632-75371076917e",
+      "attempt_id": "507b8007-c6e1-422b-a0ba-b005c54e3af6",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -900,7 +900,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.458865,
+          "cpu_seconds": 0.478122,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -909,63 +909,63 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 1.087079,
+          "cpu_seconds": 1.176289,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 16384,
-            "wios": 2
+            "wbytes": 20480,
+            "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.087903,
+          "cpu_seconds": 0.077997,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 163840,
-            "wios": 1
+            "wbytes": 0,
+            "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 91754496,
+          "memory_peak_since_container_start_bytes": 91889664,
           "oom_killed": false
         },
         "destination-sqlserver": {
-          "cpu_seconds": 0.679812,
+          "cpu_seconds": 0.679752,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 16384,
             "rios": 4,
-            "wbytes": 83961344,
-            "wios": 288
+            "wbytes": 84166656,
+            "wios": 285
           },
-          "memory_peak_since_container_start_bytes": 781217792,
+          "memory_peak_since_container_start_bytes": 779821056,
           "oom_killed": false
         },
         "postgres": {
-          "cpu_seconds": 0.134365,
+          "cpu_seconds": 0.103224,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 262144,
-            "wios": 19
+            "wbytes": 270336,
+            "wios": 21
           },
-          "memory_peak_since_container_start_bytes": 99667968,
+          "memory_peak_since_container_start_bytes": 99733504,
           "oom_killed": false
         },
         "web": {
-          "cpu_seconds": 0.040576,
+          "cpu_seconds": 0.044889,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -974,24 +974,24 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 18993152,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.88321,
+          "cpu_seconds": 0.041496,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
             "rbytes": 0,
             "rios": 0,
-            "wbytes": 0,
-            "wios": 0
+            "wbytes": 4096,
+            "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 155815936,
+          "memory_peak_since_container_start_bytes": 156291072,
           "oom_killed": false
         }
       },
-      "run_id": "686a9e34-94a0-4ef7-9b5a-fa1a30e7d5d6",
+      "run_id": "fcdae19a-4cad-4fc8-bb1d-0f5d10619845",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -1010,20 +1010,20 @@
       },
       "strategy": "OVERWRITE",
       "throughput": {
-        "rows_per_second_total": 761.7001329775849,
-        "rows_per_second_write": 2153.3851458925737,
-        "source_mb_per_second_write": 2.3147232211782836
+        "rows_per_second_total": 766.7799047232821,
+        "rows_per_second_write": 2063.741287114415,
+        "source_mb_per_second_write": 2.2183629755688887
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 1.0801400000000285,
-        "explicit_preflight_seconds": 0.08873200000016368,
-        "total_seconds": 1.312852600000042,
-        "worker_preflight_seconds": 0.07861183600016375,
-        "write_seconds": 0.4643851109995012
+        "enqueue_to_terminal_seconds": 1.047482799998761,
+        "explicit_preflight_seconds": 0.11737520000133372,
+        "total_seconds": 1.3041551999995136,
+        "worker_preflight_seconds": 0.08790546000000177,
+        "write_seconds": 0.4845568609998736
       }
     },
     {
-      "attempt_id": "e8dd1ec6-5c97-411b-8419-3d06b2a990a3",
+      "attempt_id": "4110e5d5-d5a6-4d0f-9caf-c0106aa2407d",
       "destination_check": {
         "amount_sum": 497512,
         "distinct_keys": 1000,
@@ -1046,7 +1046,7 @@
       "remote_commit": "COMMITTED",
       "resources": {
         "api": {
-          "cpu_seconds": 0.439308,
+          "cpu_seconds": 0.674139,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -1055,11 +1055,11 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 183263232,
+          "memory_peak_since_container_start_bytes": 183017472,
           "oom_killed": false
         },
         "delivery-worker": {
-          "cpu_seconds": 1.171624,
+          "cpu_seconds": 1.602423,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -1068,50 +1068,11 @@
             "wbytes": 20480,
             "wios": 3
           },
-          "memory_peak_since_container_start_bytes": 177324032,
+          "memory_peak_since_container_start_bytes": 177000448,
           "oom_killed": false
         },
         "destination-postgres": {
-          "cpu_seconds": 0.076207,
-          "io_delta": {
-            "dbytes": 0,
-            "dios": 0,
-            "rbytes": 0,
-            "rios": 0,
-            "wbytes": 32768,
-            "wios": 1
-          },
-          "memory_peak_since_container_start_bytes": 91754496,
-          "oom_killed": false
-        },
-        "destination-sqlserver": {
-          "cpu_seconds": 1.969018,
-          "io_delta": {
-            "dbytes": 0,
-            "dios": 0,
-            "rbytes": 65536,
-            "rios": 1,
-            "wbytes": 1675776,
-            "wios": 36
-          },
-          "memory_peak_since_container_start_bytes": 895172608,
-          "oom_killed": false
-        },
-        "postgres": {
-          "cpu_seconds": 0.124937,
-          "io_delta": {
-            "dbytes": 0,
-            "dios": 0,
-            "rbytes": 0,
-            "rios": 0,
-            "wbytes": 237568,
-            "wios": 25
-          },
-          "memory_peak_since_container_start_bytes": 99667968,
-          "oom_killed": false
-        },
-        "web": {
-          "cpu_seconds": 0.044656,
+          "cpu_seconds": 0.098262,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -1120,11 +1081,50 @@
             "wbytes": 0,
             "wios": 0
           },
-          "memory_peak_since_container_start_bytes": 19222528,
+          "memory_peak_since_container_start_bytes": 91889664,
+          "oom_killed": false
+        },
+        "destination-sqlserver": {
+          "cpu_seconds": 2.340409,
+          "io_delta": {
+            "dbytes": 0,
+            "dios": 0,
+            "rbytes": 73728,
+            "rios": 2,
+            "wbytes": 1831424,
+            "wios": 94
+          },
+          "memory_peak_since_container_start_bytes": 895217664,
+          "oom_killed": false
+        },
+        "postgres": {
+          "cpu_seconds": 0.147475,
+          "io_delta": {
+            "dbytes": 0,
+            "dios": 0,
+            "rbytes": 0,
+            "rios": 0,
+            "wbytes": 106496,
+            "wios": 20
+          },
+          "memory_peak_since_container_start_bytes": 101191680,
+          "oom_killed": false
+        },
+        "web": {
+          "cpu_seconds": 0.052164,
+          "io_delta": {
+            "dbytes": 0,
+            "dios": 0,
+            "rbytes": 0,
+            "rios": 0,
+            "wbytes": 0,
+            "wios": 0
+          },
+          "memory_peak_since_container_start_bytes": 18993152,
           "oom_killed": false
         },
         "worker": {
-          "cpu_seconds": 0.761296,
+          "cpu_seconds": 1.160771,
           "io_delta": {
             "dbytes": 0,
             "dios": 0,
@@ -1133,11 +1133,11 @@
             "wbytes": 4096,
             "wios": 1
           },
-          "memory_peak_since_container_start_bytes": 156237824,
+          "memory_peak_since_container_start_bytes": 156348416,
           "oom_killed": false
         }
       },
-      "run_id": "15689f1c-72e4-4059-b4cd-96b3f8ac8473",
+      "run_id": "41747f43-e548-4fb3-815e-7aa6907aa03b",
       "source": {
         "actual_bytes": 1074923,
         "column_count": 4,
@@ -1148,24 +1148,24 @@
       "stop_reason": null,
       "storage": {
         "baseline_storage_bytes": 1943746,
-        "peak_storage_bytes": 1953995,
-        "peak_storage_growth_bytes": 10249,
+        "peak_storage_bytes": 1953998,
+        "peak_storage_growth_bytes": 10252,
         "peak_temp_bytes": 0,
         "sample_interval_seconds": 0.2,
         "samples": 9
       },
       "strategy": "UPSERT",
       "throughput": {
-        "rows_per_second_total": 351.3566036577325,
-        "rows_per_second_write": 626.0753967961416,
-        "source_mb_per_second_write": 0.6729828437502989
+        "rows_per_second_total": 336.6572400396724,
+        "rows_per_second_write": 524.3889529017291,
+        "source_mb_per_second_write": 0.5636777464199855
       },
       "timings": {
-        "enqueue_to_terminal_seconds": 2.595528899999408,
-        "explicit_preflight_seconds": 0.1022912999997061,
-        "total_seconds": 2.8461113000003024,
-        "worker_preflight_seconds": 0.0750894539996807,
-        "write_seconds": 1.5972517130003325
+        "enqueue_to_terminal_seconds": 2.629780100000062,
+        "explicit_preflight_seconds": 0.15347400000064226,
+        "total_seconds": 2.9703801999985444,
+        "worker_preflight_seconds": 0.09254315999987739,
+        "write_seconds": 1.9069814389995372
       }
     }
   ],
@@ -1253,7 +1253,7 @@
       "storage_driver": "overlayfs"
     },
     "host": {
-      "disk_free_bytes": 1421044199424,
+      "disk_free_bytes": 1420266553344,
       "disk_total_bytes": 1999329292288,
       "logical_cpus": 16,
       "platform": "Windows-11-10.0.26200-SP0"
@@ -1262,7 +1262,7 @@
   "measurement": "SMOKE",
   "not_run_cases": [],
   "production_capacity_certification": false,
-  "project": "trackvance-delivery-bench-14172-561b4f99",
+  "project": "trackvance-delivery-bench-24012-1f52281c",
   "requested": {
     "max_wall_seconds": 1800,
     "rows": 1000,
@@ -1281,19 +1281,19 @@
     "breached": null,
     "disk_stop_bytes": 10737418240,
     "memory_stop_bytes": 15252783104,
-    "peak_block_io_bytes": 385900488,
-    "peak_cpu_percent": 103.56,
+    "peak_block_io_bytes": 385027388,
+    "peak_cpu_percent": 138.32,
     "peak_memory_by_service": {
-      "api": 144493772,
-      "delivery-worker": 98870231,
-      "destination-postgres": 43285217,
-      "destination-sqlserver": 838965657,
-      "postgres": 51946455,
-      "web": 15130951,
-      "worker": 79408660
+      "api": 143654912,
+      "delivery-worker": 105906176,
+      "destination-postgres": 42079354,
+      "destination-sqlserver": 839385088,
+      "postgres": 54484008,
+      "web": 17060331,
+      "worker": 115028787
     },
-    "peak_total_memory_bytes": 1264079337,
-    "samples": 28
+    "peak_total_memory_bytes": 1269175416,
+    "samples": 29
   },
   "schema_version": 1,
   "source_schema": {
@@ -1310,6 +1310,6 @@
     "worker_preflight_seconds": "Worker perf_counter around preflight_delivery, separate from explicit HTTP preflight.",
     "write_seconds": "Worker perf_counter around deliver_prepared: connection, transactional checks/locks, DML and commit; excludes worker preflight and local preparation."
   },
-  "version": "0.5.1",
-  "wall_seconds": 149.77236650000032
+  "version": "0.6.0",
+  "wall_seconds": 148.8142360999991
 }

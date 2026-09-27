@@ -2,7 +2,7 @@
 
 La evolución funcional local precede a la productización. Este orden sustituye la secuencia anterior que adelantaba almacenamiento remoto, Redis/Celery o Kubernetes.
 
-| Punto | Alcance | Estado certificado vigente |
+| Punto | Alcance | Estado y evidencia por ciclo |
 | --- | --- | --- |
 | 1 | Gestión de conexiones y fuentes externas | Implementado y recertificado |
 | 2 | PostgreSQL y SQL Server como DatasetSource | Implementado y recertificado con ambos motores reales |
@@ -12,8 +12,8 @@ La evolución funcional local precede a la productización. Este orden sustituye
 | 6 | Excepciones con validación, SLA, adjuntos y política automática | Implementado; unitarias, integración y E2E aprobadas |
 | 7 | Administración local de usuarios, roles y permisos | Implementado; unitarias, integración y E2E aprobadas |
 | 8 | Reset, backup/restore integral y diagnóstico | Implementado; reset protegido y backup/restore destructivo aislado aprobados |
-| 9 | Benchmarks reproducibles y límites medidos | Framework general con antecedente 0.4.0 de 106.194.531 bytes / 50.000 filas, no recertificado a ese volumen en 0.5.1; nuevo benchmark Delivery de 8.917.809 bytes / 20.000 filas, ocho casos PASS sin elevar límites |
-| 10 | Data Delivery controlado a PostgreSQL/SQL Server | Hardening operacional 0.5.1 implementado; código 8927ea0 certificado con ocho jobs SUCCESS, límites explícitos en validación |
+| 9 | Benchmarks reproducibles y límites medidos | Antecedentes: general 0.4.0 de 106.194.531 bytes / 50.000 filas y Delivery 0.5.1 de 8.917.809 bytes / 20.000 filas. En 0.6.0 se ejecutan smoke acotados; no recertifican esos volúmenes mayores ni elevan límites. |
+| 10 | Data Delivery controlado a PostgreSQL/SQL Server | Hardening 0.5.1 conservado; 0.6.0 añade auditoría permanente, snapshot de username, drift y permisos propios. SQL real y navegador local aprobados; el HEAD final requiere su propio CI. |
 | 11 | Productización | Fuera del ciclo; objetivo futuro |
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.

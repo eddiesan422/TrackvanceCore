@@ -417,6 +417,11 @@ tablas Delivery vacías, con lane `DEFAULT` en jobs históricos. En 0.5.1 el hea
 era `0009_delivery_reviews`: añadió una cuarta tabla Delivery, inicialmente vacía
 al migrar backups anteriores. La recertificación de ambos orígenes y de las
 revisiones nuevas se informa en validación, sin reutilizar el PASS histórico.
+0.6.0 llega a `0012_delivery_target_audit` y state 5, con roles/permisos, vínculos
+SSO, notificaciones y políticas de auditoría Delivery. Su restore admite también
+0.5.1/state 4; las fuentes anteriores se comparan con su proyección legacy exacta.
+La instalación encontrada en 0.5.0 necesita `snapshot-legacy-v3` al comprobar su
+upgrade; `.env`/`external.env` y secretos SMTP/OAuth se conservan por separado.
 Docker copia cada componente a staging privado/read-only y vuelve a verificar
 tamaño/hash antes de consumirlo. El state 2 legacy no contenía una huella DDL del
 catálogo; la certificación compara su proyección canónica exacta de 21 tablas sin

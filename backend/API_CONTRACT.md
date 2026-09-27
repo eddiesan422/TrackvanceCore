@@ -12,9 +12,9 @@ Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string
 
 - `GET /health` → `{status:'ok',version:'0.6.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
-- `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `{user:{id,name,email,role,permissions:[]},organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
-- `POST /auth/login` `{username,password}` o `{email,password}` → mismo. El campo username acepta usuario o correo; se envía exactamente un identificador.
-- `GET /me` → mismo.
+- `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `AuthenticationResponse={user:UserResponse,organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
+- `POST /auth/login` `{username,password}` o `{email,password}` → AuthenticationResponse. El campo username acepta usuario o correo; se envía exactamente un identificador. `demo_mode` es true sólo para la cuenta demo.
+- `GET /me` → AuthenticationResponse con UserResponse y permisos vigentes.
 - `POST /auth/logout` → `{ok:true}`.
 - `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel|DELIVERY&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `recent_runs` puede incluir Delivery y sus métricas; `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
 - `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen,lane},workers:{DEFAULT:{...},DELIVERY:{...}},limits:{max_upload_mb,max_rows},mode:'local-prototype'}`. `worker` conserva el heartbeat DEFAULT por compatibilidad.
@@ -132,7 +132,7 @@ last_test_message,created_at,updated_at}`.
 `encryption=off|require` para SQL Server. Defaults: 5 s, 60 s y `require`.
 
 - `GET /delivery/destinations` y `GET /delivery/destinations/{id}` → colección y
-  detalle. Requieren `connections:read`.
+  detalle. Requieren `destinations:read`.
 - `POST /delivery/destinations/test` prueba un borrador
   `{name,sink_type,host,port,database,username,password?,options?,destination_id?}`
   sin persistirlo. `destination_id` permite reutilizar el secreto vigente sólo
@@ -148,7 +148,7 @@ last_test_message,created_at,updated_at}`.
   `/table-metadata?schema_name=&table_name=` descubren únicamente objetos
   accesibles. Metadata incluye columnas, tipos nativos/lógicos, nullability,
   defaults/identity/generated y restricciones relevantes. Requiere
-  `connections:use`; no acepta SQL libre.
+  `destinations:use`; no acepta SQL libre.
 
 Un borrador de entrega es:
 
@@ -497,9 +497,9 @@ Los nombres personales legacy pueden ser null; name histórico se conserva.
 | Método/ruta | Entrada y resultado |
 | --- | --- |
 | GET /roles/permissions | Catálogo controlado con code, group, label, dependencies, delegable. |
-| GET /roles y /users/roles | Colección Role; alias histórico devuelve roles persistidos. |
+| GET /roles y /users/roles | Colección Role; search opcional filtra por nombre; alias histórico devuelve roles persistidos. |
 | GET /roles/{id} | Role con user_count de cuentas no eliminadas y protected. |
-| POST /roles | name, description?, permissions[], active?; 201 Role. |
+| POST /roles | name, description?, permissions[]?, active?; permissions omitido equivale a []; 201 Role. |
 | PATCH /roles/{id} | version, name?, description?, permissions[]?, active?; Role. |
 | DELETE /roles/{id} | Cuerpo {version}; baja lógica; rechaza asociados no eliminados y Administrator. |
 | GET /users?active=&include_deleted=&search= | Colección User; filtros opcionales, include_deleted=false predeterminado. |

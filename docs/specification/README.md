@@ -1,8 +1,8 @@
 # Especificación técnica
 
 Esta carpeta versiona la **Especificación Técnica v1.1** y su fuente editable para
-el endurecimiento local `0.5.1`. El nombre v1.1 identifica el documento;
-0.5.1 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
+la evolución funcional local `0.6.0`. El nombre v1.1 identifica el documento;
+0.6.0 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
 en el texto; la productización permanece fuera del roadmap local 1–10.
 
 - `Trackvance_Core_Especificacion_Tecnica_v1.1.md`: fuente editable oficial.
@@ -10,8 +10,9 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
   generar candidato y revisar renderizado.
 - `build_specification.py`: generador portable reportlab/pypdf, separado de las
   dependencias de ejecución del producto.
-- `validation_results_0.5.1.json`: resultados ejecutados y límites explícitos
-  de esta revisión; no reutiliza cifras anteriores como certificación.
+- `validation_results_0.6.0.json`: entrada de resultados de esta revisión,
+  preparada durante el cierre; un archivo o gate pendiente no se presume aprobado.
+- `validation_results_0.5.1.json`: resultados históricos 0.5.1, preservados.
 - `validation_results_0.5.0.json`: resultados históricos 0.5.0, preservados.
 - `validation_results_0.4.1.json`: evidencia histórica de la entrega anterior.
 - `validation_results_0.4.0.json`: evidencia histórica de la entrega anterior.
@@ -19,17 +20,19 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
 
 ## Generación y publicación
 
-La ampliación 0.5.1 desarrolla Delivery en 26 subsecciones A-Z, ocho ajustes con
-antes/después/archivos/contratos/compatibilidad y casos de los otros módulos.
-El generador admite índice y marcadores de dos niveles, cuatro diagramas Delivery
-y bloques JSON paginables. La salida es determinista con los mismos inputs;
+La ampliación 0.6.0 desarrolla RBAC dinámico, usuarios/primer acceso, Microsoft y
+Google OIDC, NotificationDelivery/SMTP y auditoría Delivery permanente. Conserva
+los antecedentes 0.5.1 y añade flujos, tablas de contratos, modelo persistente,
+decisiones de seguridad, guías de configuración y matriz exhaustiva de permisos.
+El generador admite índice y marcadores de dos niveles, diagramas de arquitectura,
+secuencia y estados, y bloques JSON paginables. La salida es determinista con los mismos inputs;
 permite contrastar el hash del candidato revisado con el PDF publicado.
 Mientras los gates estén en curso se usa `--draft` y no se publica.
 
 En un entorno de autoría con Python, reportlab y pypdf, desde el repositorio:
 
 ```sh
-python docs/specification/build_specification.py
+python docs/specification/build_specification.py --draft --results docs/specification/validation_results_0.6.0.json
 ```
 
 El generador usa esta fuente, `backend/openapi.json`, el logo del repositorio y
@@ -42,7 +45,7 @@ El candidato queda en `tmp/pdfs/specification-candidate.pdf`. Revisa las página
 renderizadas, tablas, encabezados, índice y diagramas antes de publicar con:
 
 ```sh
-python docs/specification/build_specification.py --publish
+python docs/specification/build_specification.py --results docs/specification/validation_results_0.6.0.json --publish
 ```
 
 `--draft` marca un candidato cuya certificación sigue en curso e impide combinarlo
@@ -58,9 +61,35 @@ Cuando ese archivo archivado está junto al generador, su hash se valida sin
 sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
-[validación](../development/validation.md) y el [informe A-M](../development/release-report-0.5.1.md).
+[validación](../development/validation.md) y la
+[matriz de aceptación 0.6.0](../development/acceptance-0.6.0.md).
+El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histórico.
 
-## Publicación 0.5.1
+## Publicación 0.6.0
+
+El producto y su harness `35c88fa2f0fd0c59dacda7faf76713e064364d25` completaron
+los nueve jobs SUCCESS del workflow [36289364326](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36289364326), intento 1.
+La edición tiene **77 páginas, 151 marcadores y 37 secciones principales**.
+Todas las páginas se renderizaron a 110 dpi y se inspeccionaron antes de publicar:
+portada, índice, diagramas, tablas, JSON/código, márgenes, headers/footers y saltos.
+Se corrigieron dos negritas en la página 69; los otros 76 PNG permanecieron
+idénticos y la página corregida se volvió a revisar. Sin páginas vacías, texto
+fuera de página, clipping ni solapamientos observados.
+
+SHA-256 candidato revisado y PDF publicado: `3f72c85c90c3d50661373ec46167adf0b87fdbe13b2d61fc8889257b8542bc6a`.
+La publicación mediante `--publish` produjo exactamente los mismos bytes que el
+candidato aprobado. Fuente, generador, resultados, PDF y texto extraído coinciden
+por hash con la copia oficial `ProductOne/Documentación`; las ediciones originales
+y 0.5.1 permanecen archivadas e intactas. El registro completo de hashes,
+procedencia, revisión y avisos de render está en
+[pdf-verification.json](../development/evidence/0.6.0/pdf-verification.json).
+
+Las pruebas externas Microsoft/Google/SMTP conservan NOT_RUN_EXTERNAL_CREDENTIALS;
+OIDC mock y Mailpit no las convierten en PASS. El HEAD documental se certifica de
+nuevo antes de entregar; el informe final identifica su SHA y workflow inmutables
+sin crear una referencia circular dentro del propio PDF.
+
+## Publicación histórica 0.5.1
 
 El código `8927ea00703ff090708c302d7755dae20a7687b9` obtuvo ocho jobs SUCCESS en
 [GitHub Actions 36194431770](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770).

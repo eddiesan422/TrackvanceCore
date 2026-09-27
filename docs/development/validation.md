@@ -1,3 +1,109 @@
+# Validación de Trackvance Core 0.6.0
+
+Baseline real de repositorio `4519ed354202ea8f220682758da234e07b6df3ed`, sin
+commits posteriores al iniciar. Rama `feat/local-prototype`. Producto
+`979cc0f01d0e1ec694886a6f9764a3f856e93315`, harness final
+`35c88fa2f0fd0c59dacda7faf76713e064364d25`. La instalación real detectada tenía
+0.5.0/0008 y se actualizó conservando sus volúmenes; esa diferencia se distingue
+de la baseline de código 0.5.1.
+
+Los resultados siguientes corresponden a ejecuciones nuevas. Los conteos de
+navegador se deduplican por escenario; los opt-in omitidos en una suite se
+comprueban en su proyecto dedicado. No se suman pruebas repetidas ni se afirma
+certificación externa de Microsoft/Google.
+
+| Gate 0.6.0 | Resultado observado |
+| --- | --- |
+| Corte y procedencia | 26 septiembre 2026, rama feat/local-prototype; baseline 4519ed354202ea8f220682758da234e07b6df3ed. Implementación 979cc0f y corrección de harness 35c88fa2f0fd0c59dacda7faf76713e064364d25. Ejecuciones nuevas 0.6.0; no se heredan resultados 0.5.1. |
+| Backend local | 1.141 pytest backend/scripts PASS en 79,57 s, 0 FAIL, 0 SKIP tras la corrección CI. Dos avisos upstream Starlette/httpx y AnyIO. Ruff PASS, Mypy: 42 archivos PASS, uv sync --frozen PASS. Se repitieron 20 pruebas focales del runner tras la corrección. |
+| Frontend local | Instalación pnpm congelada, ESLint, TypeScript y production build PASS. 164 Vitest / 19 archivos PASS en 10,46 s. Cinco capturas sintéticas inspeccionadas sin credenciales. |
+| OpenAPI y permisos | Runtime 0.6.0: 95 paths, 116 operaciones, 87 schemas; snapshot exacto probado. Catálogo: 41 códigos y 104 reglas protegidas, desconocidas denegadas. Nueva cadena 0010/0011/0012; 0001..0009 sin diferencias. |
+| Migraciones PostgreSQL | PostgreSQL 16 real: upgrade/check/downgrade/upgrade PASS, paridad ORM, 24 tablas históricas 0008 y 8 vínculos conservados. SQLite poblada con FK reales también comprobada. |
+| Compose integral | PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 117,646 s. Doctor, migraciones, política restart=no y snapshot exacto tras restart PASS. Volúmenes desechables propios retirados. |
+| Conexiones reales | PASS: 96 comprobaciones PostgreSQL / SQL Server; smoke 84; Playwright 30 PASS / 11 opt-in SKIP / 0 FAIL en 159,572 s. Matriz temporal, adquisición/refresh/historia y módulos; secretos y persistencia tras reinicio PASS. |
+| Identity/SSO | 9/9 Playwright PASS en 42,930 s con el verificador por stdin; total 112,142 s. Local temporal/primer acceso, roles dinámicos y cuatro perfiles OIDC simulados RS256. Expiración, SMTP FAILED/regeneración, ausencia de plaintext DB/log, restart y cleanup PASS. La recreación API no se observó en esta corrida local. CI: 9/9 en 54,267 s; recreación API observada y verificación por stdin PASS. |
+| Clean demo | 1/1 Playwright PASS con Compose base, seed=false y demoaccess=true; colecciones vacías comprobadas. Proyecto nuevo eliminado, 0 recursos restantes. |
+| Cobertura de navegador | 41 escenarios distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio. Las repeticiones de casos comunes no se suman como tests únicos. Los SKIP son opt-in y se ejecutan por separado. |
+| Delivery real | 308 comprobaciones PASS en PostgreSQL 16/18 y SQL Server, audit columns/estrategias/policy/drift/identidad interna. Playwright 1/1 PASS en 6,816 s, scan de credenciales/reinicio PASS. Nueva ejecución final con reporte saneado. |
+| UNKNOWN y límites | PASS para pérdida de acknowledgement inyectada en adapter después de commit SQL real, política required y recuperación deliberada sin replay. Fallo físico de red en ventana exacta: NOT_RUN_NONDETERMINISTIC. No se equiparan ambos escenarios. |
+| Recovery nativo | PASS: 9 artifacts, 2 secretos SQL y 269 relaciones exactas, 6 roles / 95 grants, 1 ExternalIdentity y 1 OIDC attempt consumido de fixture, 1 notificación y 1 target policy. Origen desechable destruido antes de restore; no reenvío SQL. |
+| Restore0.5.1 | PASS desde build auténtico 4519ed3 / 0009 / state 4 hasta 0012 / state 5. 78 artifacts y proyección histórica SHA-256 idéntica; 140,886 s. Restore incluye 5 roles y 1 usuario migrado. |
+| Restore0.4.1/0.5.0 | Nuevos drills PASS de backups auténticos 0007/state 2 y 0008/state 3; 7/9 artifacts y 1/2 secretos respectivamente. DTOs y bytes receipt/manifest/Parquet históricos intactos. Instalación principal y backup original no alterados por drills. |
+| Benchmarks acotados | General file-only PASS: 1.074.923 bytes / 1.000 filas / 4 columnas en 38,665 s, pico 390.311.443 bytes, sin OOM. Delivery smoke 8/8 PASS mismo input en 148,814 s; versión observada 0.6.0. Sin certificación de capacidad ni percentiles. |
+| Proveedores externos | Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS. SMTP externo también NOT_RUN; Mailpit real PASS. Guías de registro/consentimiento/variables y validación separadas; secretos no suministrados ni subidos. |
+| Instalación Docker real | PASS: trackvance-certification, http://localhost:3100. Origen detectado 0.5.0/0008; backup nuevo PASS, upgrade 0.6.0/0012, proyección legacy-v3 exacta y restart state5 exacto. API y ambos workers 0.6.0; cinco servicios saludables, restart=no; doctor, login, footer y paneles PASS. Conservados 3 datasets, 1 usuario, 1 conexión, 1 destino, 4 Runs, 9 artifacts y 2 secretos SQL; 5 roles migrados. Sin mutaciones de negocio. |
+| GitHub Actions producto | SUCCESS: nueve jobs, commit 35c88fa2f0fd0c59dacda7faf76713e064364d25, workflow 36289364326, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e, identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke. https://github.com/eddiesan422/TrackvanceCore/actions/runs/36289364326. Primer workflow de 979cc0f: 8 SUCCESS / 1 FAIL del verificador post-restart; corregido con commit nuevo, sin rerun cosmético. |
+| GitHub Actions publicación | El commit documental se somete de nuevo a los nueve jobs. El informe de entrega identifica su HEAD SHA, workflow inmutable, resultados y duración después de observar SUCCESS. El PDF no incorpora el SHA de su propio commit para evitar una referencia circular. |
+| Publicación PDF | Candidato renderizado e inspeccionado antes de --publish. Páginas, SHA-256, hashes de fuente/OpenAPI/validación, source commit e inspección completa se registran en pdf-verification.json. La edición oficial en Documentación se sincroniza después de revisar y conserva 0.5.1 archivada. |
+
+Evidencia verificable en [evidence/0.6.0](evidence/0.6.0/README.md), [matriz de
+aceptación de los 36 criterios](acceptance-0.6.0.md), [permisos](permission-matrix.md)
+y [revisión de seguridad](security-review-0.6.0.md). Las guías de [SSO](sso-setup.md)
+y [SMTP](smtp-setup.md) documentan configuración real y pruebas opt-in.
+
+## Fallos encontrados y correcciones
+
+- Primer barrido Python: 9 fallos/1.099 aprobados por fixtures de identidad
+  heredados, aislamiento de roles, snapshot OpenAPI y mocks de recovery. El
+  segundo quedó en 1 fallo/1.134 aprobados: un test de locking simulaba User sin
+  los campos requeridos por la autorización dinámica. Se corrigieron fixtures,
+  nunca se relajó la autoridad del backend. La suite final pasó completa.
+- La revisión independiente corrigió la revocación durante first-login, la
+  reasignación errónea tras renombrar un Role, Secure detrás del proxy HTTPS, la
+  carrera del email en primer vínculo SSO y el permiso de lectura del receipt.
+  Cada corrección tiene regresión permanente.
+- La migración SQLite poblada descubrió un default no preservado de sesión y
+  restricciones FK durante batch rebuild. Se corrigió la frontera de migración
+  y se probó upgrade/downgrade/upgrade con FK reales e historia intacta.
+- Playwright Chromium empaquetado de este Windows falló antes de abrir con
+  `spawn UNKNOWN`; las ejecuciones locales usan Chrome instalado. CI usa
+  Chromium. Dos iteraciones de identidad corrigieron selectores ambiguos y una
+  espera que aceptaba también la pantalla restringida; no se contaron como PASS.
+- Primer Compose: 25 PASS/15 SKIP/1 FAIL. El reenvío después de editar usaba una
+  revisión obsoleta; el modal ahora espera la actualización de la consulta. Se
+  añadió una regresión de componente y la suite completa se repitió.
+- Un reporte del benchmark conservaba la etiqueta fija 0.5.1. El runner ahora
+  obtiene la versión de `/health` y se repitieron sus ocho casos reales; el JSON
+  final declara 0.6.0. No se maquilló la evidencia anterior.
+- El último Ruff encontró el orden de imports de la nueva prueba de privacidad;
+  se corrigió, se repitió Ruff completo y las dos pruebas afectadas. Sin cambios
+  funcionales después de la suite completa posterior de 1.141 en 79,57 s.
+
+- El primer workflow de producto tuvo ocho jobs SUCCESS y un FAIL en identity:
+  nueve flujos de navegador pasaron, pero la instantánea posterior al reinicio
+  terminó con exit2. El stderr no se conservaba; la pérdida del archivo temporal
+  por recreación se consideró una inferencia, no una causa demostrada. El runner
+  ahora envía el verificador por stdin en cada instantánea, incluye etapa/exitcode
+  saneados y tiene una regresión que simula un contenedor sin ese archivo. El
+  ciclo local volvió a pasar y el commit nuevo completó los nueve jobs de CI.
+
+Se mantienen dos advertencias upstream: Starlette recomienda migrar de httpx a
+httpx2 para TestClient; AnyIO depreca el alias BlockingPortal. No afectan al
+resultado actual, pero no se ocultan. No se incorporó una actualización amplia
+sin relación con este release para suprimirlas.
+
+## Límites y procedencia
+
+El mock RS256 certifica nuestro flujo Code/PKCE/OIDC, no los proveedores reales.
+Los cuatro casos externos y SMTP externo quedan NOT_RUN_EXTERNAL_CREDENTIALS.
+La inyección de acknowledgement perdido tras commit SQL demuestra UNKNOWN;
+la ventana física exacta de red permanece NOT_RUN_NONDETERMINISTIC.
+
+Los benchmarks smoke de 1.000 filas no certifican 100/500 MiB ni 1/2/5 GiB, percentiles,
+concurrencia o capacidad productiva. Los límites por defecto 10 MiB / 100.000 filas /
+100 columnas no aumentaron. El drill nativo de recovery valida UI HTTP 200 y declara
+browser NOT_RUN_IN_THIS_DRILL; el navegador completo se certifica separadamente.
+
+El PDF conserva nombre técnico v1.1 y cambia IMPLEMENTACIÓN a 0.6.0. El commit de
+producto y el HEAD documental se verifican por separado en Actions. Para evitar
+una referencia circular, la procedencia del PDF usa el commit de producto más
+hashes de fuente/OpenAPI/validación; el informe final identifica el SHA y workflow
+del HEAD publicado.
+
+## Antecedentes conservados
+
+Lo siguiente es histórico. No certifica 0.6.0 ni sustituye los resultados anteriores.
+
 # Validación de Trackvance Core 0.5.1
 
 Corte de trabajo: 25 de septiembre de 2026, America/Bogota. Baseline

@@ -250,7 +250,7 @@ logout y change-password. User/Role activos se resuelven en cada petición.
 | Runs, Findings y dashboard compartidos | Filtrado por módulos con read; un ID exige read del módulo del Run. |
 | Cancelar Run / preview de plan | execute del módulo concreto; preview exige también datasets:read. |
 | Evidencia, exports y artifacts | Scope de organización y read del módulo de origen; adjuntos requieren lectura del caso. |
-| Configurar / ejecutar Delivery | Dataset y destino del mismo scope; destinations:use, delivery:overwrite para OVERWRITE y delivery:alter_target para CREATE o activar columnas. |
+| Configurar / ejecutar Delivery | Dataset y destino del mismo scope; configurar depende de destinations:use. Publicar y ejecutar exigen delivery:overwrite para OVERWRITE y delivery:alter_target para CREATE o materializar auditoría. |
 | Receipt Delivery | delivery:read además de artifacts:download. |
 | Cerrar excepción / cambiar cierre automático | exceptions:close además de exceptions:write. |
 | Roles y usuarios | CAS/version, no delegables, último admin, propio administrador y roles asociados protegidos. |

@@ -2,7 +2,9 @@
 
 Baseline revisada `4519ed354202ea8f220682758da234e07b6df3ed`, rama
 `feat/local-prototype`. Los JSON corresponden a ejecuciones nuevas de esta
-versión. Los IDs de datasets/usuarios son fixtures de proyectos desechables.
+versión. Las suites usan fixtures de proyectos desechables; `local-installation`
+registra aparte conteos, identificadores y hashes de la instalación existente,
+sin nombres de personas ni contenido de sus datos.
 No se publican dumps, backups, claves, cuerpos de email, cookies ni tokens.
 
 | Archivo / directorio | Alcance |
@@ -16,6 +18,12 @@ No se publican dumps, backups, claves, cuerpos de email, cookies ni tokens.
 | delivery-e2e | Motores SQL reales, audit columns, política, SSO interno, drift y UNKNOWN. |
 | native-recovery-identity | Backup 0.6.0 y restore nuevo con todas las clases de estado nuevas presentes. |
 | legacy-restore-051 | Build auténtico 4519ed3/0009/state4 y restore 0012/state5 con proyección exacta. |
+| legacy-restore-041-050 | Nuevos restores de backups auténticos 0.4.1 y 0.5.0; artifacts y secretos verificados. |
+| clean-demo | Arranque vacío sin seed, acceso demo y navegador, con limpieza del proyecto desechable. |
+| local-installation | Backup verificado y actualización no destructiva de 0.5.0 a 0.6.0, doctor y navegador. |
+| ci-product.json | Los nueve jobs SUCCESS del commit de producto 35c88fa, intento 1. |
+| ci-product-initial-979cc0f.json | Primer workflow: ocho SUCCESS y un FAIL del verificador identity, corregido en un commit nuevo. |
+| pdf-verification.json | Revisión visual de todas las páginas antes de publicar, hashes y coincidencia con copia oficial. |
 | benchmark-smoke | 1.000 filas, cuatro columnas, 1.074.923 bytes; harness acotado. |
 | delivery-benchmark-smoke | Cuatro estrategias por motor; ocho mediciones, sin extrapolación productiva. |
 

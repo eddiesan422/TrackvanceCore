@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.5.1"
-EDITION_DATE = "25 septiembre 2026"
+VERSION = "0.6.0"
+EDITION_DATE = "26 septiembre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -89,6 +89,9 @@ def escaped(text: str) -> str:
     # Portable PDF typography: avoid non-breaking / Unicode dash glyph fallbacks.
     text = re.sub("[\u2010-\u2015]", "-", text)
     text = html.escape(text)
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<link href="\2" color="#008B83">\1</link>', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
     return re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', text)
 
 
@@ -227,13 +230,40 @@ class Diagram(Flowable):
             self.arrow(263, 136, 125, 103)
             self.arrow(251, 77, 275, 77)
             self.box(0, 0, w, 45, "DatasetVersion --DELIVERY_INPUT--> Run --DELIVERED_TO--> destino", "DELIVERY_DESTINATION_VERSION es target_type, no relation")
+        elif self.kind == "target-policy":
+            self.box(0, 126, 150, 52, "Ausente", "Publicar audit=true")
+            self.box(182, 126, 158, 52, "Required", "Política local permanente")
+            self.box(372, 126, 154, 52, "Materialized", "Commit remoto confirmado")
+            self.arrow(151, 152, 180, 152)
+            self.arrow(341, 152, 370, 152)
+            self.box(164, 39, 187, 59, "UNKNOWN / rollback", "Required permanece; UNKNOWN no autoriza replay")
+            self.box(370, 39, 156, 59, "Drift detectado", "Falla cerrado; no repara ni desactiva auditoría")
+            self.arrow(261, 125, 261, 100)
+            self.arrow(449, 125, 449, 100)
+        elif self.kind in {"rbac", "role-lifecycle", "permission-request", "first-login", "sso", "notification"}:
+            flows = {
+                "rbac": [("User", "role_id, active, deleted"), ("Role", "estado y version"), ("RolePermission", "codigos del producto"), ("Administrator protegido", "Catalogo completo vigente; usuarios no copian permisos")],
+                "role-lifecycle": [("Activo", "Crear / editar"), ("Inactivo", "Sin usuarios asociados"), ("Baja logica", "Nombre reservado"), ("Bloqueos backend", "Administrator permanente; usuario inactivo tambien bloquea baja")],
+                "permission-request": [("Cookie / User", "Sesion y organizacion"), ("Role vigente", "Permisos actuales"), ("Ruta y recurso", "Matriz + modulo + scope"), ("Autoridad request-by-request", "Denegar ruta desconocida; UI refresca /me y role_version")],
+                "first-login": [("Alta + Argon2", "Temporal 24 horas"), ("SMTP", "SENT / FAILED"), ("Sesion restringida", "Local o SSO"), ("Nueva password + sesion rotada", "Limpiar temporal; revocar sesiones; habilitar permisos actuales")],
+                "sso": [("Proveedor", "Code + PKCE"), ("Validar ID token", "Firma, iss, aud, nonce"), ("ExternalIdentity", "provider / issuer / sub"), ("Trackvance User y Role", "Sin auto-provisioning; sesion HttpOnly local y primer acceso")],
+                "notification": [("NotificationService", "Evento y template"), ("Delivery port", "Mensaje en memoria"), ("SMTP adapter", "TLS + resultado"), ("NotificationDeliveryRecord", "Solo metadata; nunca body, password, tokens ni secretos")],
+            }
+            boxes = flows[self.kind]
+            for index, (title, detail) in enumerate(boxes[:3]):
+                x = index * (w + 12) / 3
+                self.box(x, 116, (w - 24) / 3, 56, title, detail)
+                if index < 2:
+                    self.arrow(x + (w - 24) / 3 + 1, 144, x + (w + 12) / 3 - 2, 144)
+            self.box(0, 16, w, 63, *boxes[3])
+            self.arrow(w / 2, 114, w / 2, 82)
         elif self.kind == "product":
             self.box(0, 128, w, 48, "Kubernetes / AKS / EKS / OpenShift", "Web + réplicas API y workers del monolito modular")
             titles = [("Metadata", "PostgreSQL administrado"), ("Storage", "S3 / Azure Blob"), ("Jobs / compute", "Redis-Celery / Polars-PySpark")]
             for i, (title, detail) in enumerate(titles):
                 self.box(i * (w + 10) / 3, 60, (w - 20) / 3, 49, title, detail)
                 self.arrow(i * (w + 10) / 3 + (w - 20) / 6, 127, i * (w + 10) / 3 + (w - 20) / 6, 111)
-            self.box(0, 3, w, 42, "OIDC · Secrets Manager · OpenTelemetry · CI/CD", "Terraform + Helm | Infraestructura objetivo")
+            self.box(0, 3, w, 42, "Gobierno · Secrets Manager · OpenTelemetry · CI/CD", "Terraform + Helm | Infraestructura objetivo")
         else:
             raise ValueError(f"Diagrama desconocido: {self.kind}")
 

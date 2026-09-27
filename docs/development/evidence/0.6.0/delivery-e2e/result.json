@@ -1,103 +1,104 @@
 {
   "status": "PASS",
-  "project": "trackvance-delivery-e2e-18020-7a4286",
-  "dataset_version_id": "960def2d-068f-4705-ac07-0a34b8476819",
+  "version": "0.6.0",
+  "project": "trackvance-delivery-e2e-7980-b79fb3",
+  "dataset_version_id": "b8a4eb01-0e64-4ba3-b7ec-f9b7f722b601",
   "destinations": [
     {
       "audit_columns": {
         "status": "PASS",
         "runs": [
           {
-            "configuration_id": "2270812f-170d-4423-9a30-398f9ae0ee75",
-            "run_id": "ababaec5-17dd-482f-9132-9192614dadf0",
-            "attempt_id": "fed076c5-4452-4e54-93a3-1ae747c2caec",
+            "configuration_id": "faaf3502-0af5-43d9-97d3-57c469fe7bd3",
+            "run_id": "508873f1-8886-4bc2-9eb4-7f1fbd03b0af",
+            "attempt_id": "3e5502b3-99a0-45ec-922a-858e1aeef353",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           },
           {
-            "configuration_id": "fc90f2eb-3cae-44ab-9c96-b3d58156a54f",
-            "run_id": "ed91b03e-5a53-46df-b5fe-cd330acd3c93",
-            "attempt_id": "39b1c2d2-e720-41aa-9381-eb9db20444dd",
+            "configuration_id": "a619be50-53fd-4335-9085-781c2eea0261",
+            "run_id": "8495df34-c5df-4a20-9bc2-bd053e069296",
+            "attempt_id": "13f35fe8-f2fd-4c81-93e9-477eb11aeef7",
             "status": "COMMITTED",
             "strategy": "APPEND"
           },
           {
-            "configuration_id": "c4c49667-17b6-4f05-9aa9-22bdc1188c26",
-            "run_id": "8194c2da-a9b1-40e3-b4d1-aef4d20c8bc5",
-            "attempt_id": "1d6a38a1-c1a8-4fde-b7f4-20356c512bd6",
+            "configuration_id": "d0c2eec4-90a1-4d0d-b114-15374063ac37",
+            "run_id": "7cc1f4e4-b3ed-47c2-8beb-452ed3620bf9",
+            "attempt_id": "37b8e93d-c052-430c-b686-71fd13434f60",
             "status": "COMMITTED",
             "strategy": "UPSERT"
           },
           {
-            "configuration_id": "238532e3-22d7-4cea-be50-0f34bcbd2829",
-            "run_id": "e46507d9-0f61-4ed2-847e-d42c878d0316",
-            "attempt_id": "7f2b21b7-107f-49b4-b68d-5c20746e4c19",
+            "configuration_id": "a9eb5053-5c9c-40b2-88fe-a45bb42b08e1",
+            "run_id": "95054cc3-805f-448c-86a2-7587d4401c40",
+            "attempt_id": "4e923edb-f6fb-459e-b3cb-0d9ac2d6bb01",
             "status": "COMMITTED",
             "strategy": "OVERWRITE"
           }
         ],
-        "policy_id": "73fd291d-6ffa-4cc7-b8f1-35129dd40d49",
-        "unknown_simulated_ack_loss": "7c4ef659-4a87-45fb-9a49-3a5c75556499",
+        "policy_id": "699b7e6a-b6ad-4e0a-bddc-19f855778821",
+        "unknown_simulated_ack_loss": "18be2bcf-6fd5-42dd-82ea-00473f17aeff",
         "resumed": {
-          "configuration_id": "8265d7b6-4325-4f6e-b76d-1e7e75f0fb8b",
-          "run_id": "9f986ba9-7406-46ff-a7d4-284b07989a7c",
-          "attempt_id": "c9c2948a-c3b2-45ae-8c74-53fae4d80ec9",
+          "configuration_id": "702a39a6-7efe-4986-af90-1b1ba1ddd85f",
+          "run_id": "de5bca92-a22c-46a0-9512-89f1abd27e8b",
+          "attempt_id": "8e982b13-1e31-45b2-a915-caadd34e923d",
           "status": "COMMITTED",
           "strategy": "OVERWRITE"
         },
         "sso_runs": [
           {
-            "configuration_id": "0caba67f-c67f-4116-b562-17658d7eeba3",
-            "run_id": "c3dd5ccf-7bb3-4d46-9dc3-084e2e3a291f",
-            "attempt_id": "d899da5c-7441-4efb-b8dc-59f78d055a8f",
+            "configuration_id": "9574ea89-44ed-4666-939e-0300c5c21a03",
+            "run_id": "eadddf2f-3156-4e80-b677-155e7abcea73",
+            "attempt_id": "2e83e662-1878-4bb0-aae2-04671d4446c6",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           },
           {
-            "configuration_id": "58d5b7b2-cfaa-4f3e-b531-2b8628578954",
-            "run_id": "2f678e98-e5aa-47ac-9810-9b34f426b22f",
-            "attempt_id": "c9333ddf-5778-4819-b4f8-b8577c49a659",
+            "configuration_id": "e0ea985a-478a-4043-a28d-c8dee6ce67ca",
+            "run_id": "e111a759-4074-4695-8c0d-58f6673ce7f3",
+            "attempt_id": "4bbaedfe-8237-4818-b1e9-7c50c302d98f",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           }
         ]
       },
       "sink_type": "POSTGRESQL",
-      "destination_id": "8eaeb6d9-fc6a-4a3a-8d03-d8b7e75392f9",
-      "destination_version_id": "0a56c392-04ab-4dba-b34f-d15df5d948e0",
+      "destination_id": "f93be1d8-2354-4efa-982f-50aaa65c06e5",
+      "destination_version_id": "c5fe24dc-06a4-4b44-bee3-dfb0a9596756",
       "runs": [
         {
-          "configuration_id": "26d95c29-c02e-46cf-906b-095d366bc6bf",
-          "run_id": "5a55a29c-9b19-4cbf-9654-45604636b5fe",
-          "attempt_id": "3abc01d8-f508-4126-9784-599bf06bae88",
+          "configuration_id": "8c9a0b6a-f6f1-4a9f-8efe-b3671665f086",
+          "run_id": "187fbc81-7c51-49ef-a83b-d1227733e119",
+          "attempt_id": "5acb1425-bd04-4d9d-aa74-2cbde35768cd",
           "status": "COMMITTED",
           "strategy": "CREATE_AND_LOAD"
         },
         {
-          "configuration_id": "52e24cc0-6d79-42c6-af8c-04297afa9412",
-          "run_id": "f67adc4e-ae4f-4cf1-aa92-8c24db94a236",
-          "attempt_id": "034871c5-2b7b-45f8-8fcb-6a5de6b0fbb7",
+          "configuration_id": "7cf33340-4363-4fb2-a784-fd869b8e9dc4",
+          "run_id": "acab4470-970c-4640-af9b-d7d46dbce286",
+          "attempt_id": "8bb38a91-cac0-4f9b-bcbc-cac825d85f97",
           "status": "COMMITTED",
           "strategy": "APPEND"
         },
         {
-          "configuration_id": "ebe75d1a-94ba-4e33-9976-bb0ac9befd2e",
-          "run_id": "90550349-e7ea-483f-84a2-7eb32592f525",
-          "attempt_id": "c8da3b49-7089-4e1f-b02b-1595556fa4db",
+          "configuration_id": "8412477e-93e6-422e-8f1a-30ca76c3e369",
+          "run_id": "4578bc74-42d8-47b4-afd9-4d09c6dcb455",
+          "attempt_id": "88f46244-c61b-4b96-b1f0-87bca28df6d3",
           "status": "COMMITTED",
           "strategy": "OVERWRITE"
         },
         {
-          "configuration_id": "3a896110-e6f5-413a-8da4-a60a0414e9c7",
-          "run_id": "2de1ed6b-35dc-44b5-ad1e-e21a2b4c662a",
-          "attempt_id": "5c815adc-d563-4354-9f09-1fc23aa875a2",
+          "configuration_id": "882b1f79-2a89-4dc5-9694-4bcf64471faa",
+          "run_id": "fc86182e-dd85-4400-a927-162a6c6a7b0d",
+          "attempt_id": "22b8e8c6-152f-47c6-8488-2ef18a40d33a",
           "status": "COMMITTED",
           "strategy": "UPSERT"
         }
       ],
       "failed_attempt": {
-        "run_id": "27e900df-f2c3-4bda-97b2-329fc4c4b35b",
-        "attempt_id": "1f4920a2-72aa-47a6-861d-e86e97cddf34",
+        "run_id": "947aacda-26b8-4b03-82ce-cf041d6332f6",
+        "attempt_id": "256b616f-26d3-4ca8-ae4d-fb0407f7682a",
         "status": "FAILED"
       },
       "collation_guard": null,
@@ -108,101 +109,101 @@
         "status": "PASS",
         "runs": [
           {
-            "configuration_id": "c7fe2112-fa6b-4d5d-a99e-b8df91c9b76f",
-            "run_id": "92f1b5dd-5dc3-4495-8ce0-a3fa522159e4",
-            "attempt_id": "748cfa01-5fc5-40bb-8b9f-b23747326d65",
+            "configuration_id": "4da85ede-d2c1-4d8d-ab6a-79ebdf182581",
+            "run_id": "8c47e6bf-cfee-4ebb-9a0a-466858fe8343",
+            "attempt_id": "8f7367c6-a717-4515-8efa-c192bbb34e06",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           },
           {
-            "configuration_id": "ea093763-0b4e-4b53-8c70-f4c582e6e8d8",
-            "run_id": "fd71e3c3-0ef6-410b-9846-e578185c24ad",
-            "attempt_id": "dd1d41ff-daae-4b00-a871-34687613e113",
+            "configuration_id": "0a14a8b1-6bba-4c5b-aebc-bc5a98f30eb7",
+            "run_id": "5a122bbf-2c2e-4ee7-a839-6716e1bc3920",
+            "attempt_id": "f5a06c05-5774-4d17-a7ce-04c236420273",
             "status": "COMMITTED",
             "strategy": "APPEND"
           },
           {
-            "configuration_id": "7e92842f-6cef-40e1-bbc5-0fc776708b7a",
-            "run_id": "eed934ba-8847-41dd-9861-ff758724e585",
-            "attempt_id": "25714ecf-091f-4c55-80e4-020006ed9170",
+            "configuration_id": "e3707f12-8f7a-4ace-bc29-3f6d3844b2fc",
+            "run_id": "6980471f-21ef-4426-ae70-7fb4095215b2",
+            "attempt_id": "0d4e809d-af7c-47e8-92f1-490bf924141f",
             "status": "COMMITTED",
             "strategy": "UPSERT"
           },
           {
-            "configuration_id": "9a1b4ee9-eeeb-4553-b225-f82f08b71d94",
-            "run_id": "9f314570-8642-4787-a702-68f65073f08b",
-            "attempt_id": "cd6e356b-b6b4-43be-bc2a-1ac0c7a22064",
+            "configuration_id": "15162fc4-6eb3-4f82-9ecd-6705f27596ff",
+            "run_id": "cff8ff60-00b9-450c-a2c6-4025a351d95f",
+            "attempt_id": "677bcae7-92dd-4d15-8f81-3c59feddad21",
             "status": "COMMITTED",
             "strategy": "OVERWRITE"
           }
         ],
-        "policy_id": "244de294-66b6-4186-b6c2-e2538ed77025",
-        "unknown_simulated_ack_loss": "f0709451-5569-4abb-b2e9-c77647297809",
+        "policy_id": "05ef90b8-eb69-4329-b3ba-1c3acc04dafb",
+        "unknown_simulated_ack_loss": "11392f28-d4f5-4d03-a0f2-9887a2ccb6de",
         "resumed": {
-          "configuration_id": "035fa469-fb3c-4782-8e76-eec3dcba1b88",
-          "run_id": "e82d9993-3df5-4c73-913a-400b3feb0fde",
-          "attempt_id": "f9a305c2-683f-4adc-b074-30aaf3706464",
+          "configuration_id": "0dd20dbb-e64e-4800-8d18-618a1bfd4f74",
+          "run_id": "5fb36868-dc84-4fb1-b1e1-412ffad18564",
+          "attempt_id": "a84e5af1-600f-46e1-b798-73c669223c5d",
           "status": "COMMITTED",
           "strategy": "OVERWRITE"
         },
         "sso_runs": [
           {
-            "configuration_id": "de7c6792-6257-46fa-ac31-fe3609dbcaf9",
-            "run_id": "72d42f79-8fd6-4105-8b8d-b3679b768c82",
-            "attempt_id": "abc05e8e-de0b-4524-91de-e3e30569dfc3",
+            "configuration_id": "385af90a-d73d-410a-b1f2-296fad888177",
+            "run_id": "8ef3d973-b8d8-4caa-b707-7e62ec8bb6c1",
+            "attempt_id": "ac688028-bf14-4420-a573-ade59d341092",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           },
           {
-            "configuration_id": "2d03d474-7717-4a66-b079-49e70eee28dd",
-            "run_id": "93a03d3d-4ad6-4061-a071-f3b94f0909e6",
-            "attempt_id": "985a67d1-eb8f-419e-9680-f1e5cc6db6eb",
+            "configuration_id": "6c15857b-f4ff-4d46-92b1-46ac8fc31bfb",
+            "run_id": "ba01b69c-8f66-43cf-bdce-9e4b68cd7053",
+            "attempt_id": "e6a33adf-eba6-4c42-88f0-295b4bacef89",
             "status": "COMMITTED",
             "strategy": "CREATE_AND_LOAD"
           }
         ]
       },
       "sink_type": "SQLSERVER",
-      "destination_id": "dd955840-d025-416c-98f8-4d3e08899979",
-      "destination_version_id": "680e43c1-5175-424f-8d13-2057ab3681e3",
+      "destination_id": "d0518d3b-44a0-4efe-b4b6-df5d06316437",
+      "destination_version_id": "5f59d997-8b72-4a22-b9ac-02ab6cbcff6b",
       "runs": [
         {
-          "configuration_id": "6eb2e22e-190e-43b3-a0c6-a031d39e21d9",
-          "run_id": "91ece422-7530-443d-89ab-0ad6450d2604",
-          "attempt_id": "71ca5b5b-0293-41ce-848c-a5296f6e3fed",
+          "configuration_id": "1ab66af9-f1c0-44ac-b876-e014ed220a00",
+          "run_id": "53c83503-95f8-4051-afac-9142da5854c6",
+          "attempt_id": "c3dd207a-5ea2-4fa9-b542-c984d5c46405",
           "status": "COMMITTED",
           "strategy": "CREATE_AND_LOAD"
         },
         {
-          "configuration_id": "7211eb4a-ed02-4651-9ffd-6da0299b6f91",
-          "run_id": "f958a0bb-767e-4c1f-90f6-0f5004fa41f3",
-          "attempt_id": "ef040cef-4e33-4be0-8163-4c3a9f054a4f",
+          "configuration_id": "cb48ca69-192e-4dbe-acea-f6e79b349bdb",
+          "run_id": "0e3a2a60-0954-4953-9972-e9d9b1478425",
+          "attempt_id": "3003eae7-3aa7-4e6d-ab27-98a979e1cc2f",
           "status": "COMMITTED",
           "strategy": "APPEND"
         },
         {
-          "configuration_id": "28b198db-0527-46c0-be7e-401c1b5e93f0",
-          "run_id": "d9fd72e7-ac00-4493-ad02-fff1a5f29e12",
-          "attempt_id": "630dc4fb-023f-4cc6-a95c-23971d5a162e",
+          "configuration_id": "9f275c75-d526-48ba-bbf9-1fd181aaf4a9",
+          "run_id": "2ea69590-c7c8-48fe-9855-8ed7d601fb79",
+          "attempt_id": "2f7ec1b9-8954-4370-b978-889f96c06ecf",
           "status": "COMMITTED",
           "strategy": "OVERWRITE"
         },
         {
-          "configuration_id": "df3751bf-7040-4ad8-afd7-5526edf40e75",
-          "run_id": "52bc0825-b72e-4284-b400-d49cdfac9a0c",
-          "attempt_id": "a1cb6681-ad59-43b2-acc2-9a047d12f19b",
+          "configuration_id": "3690609f-521c-4690-b9f8-17341d37d566",
+          "run_id": "723944d0-10ba-4e91-905a-3e7c29397c92",
+          "attempt_id": "76da9e0a-3e42-4487-b804-61b673061b83",
           "status": "COMMITTED",
           "strategy": "UPSERT"
         }
       ],
       "failed_attempt": {
-        "run_id": "1b22f617-94b1-4a6c-b705-abd379afeafe",
-        "attempt_id": "67abf854-40e4-4aeb-94c9-bff3a00a12d7",
+        "run_id": "e2f20c72-e3a4-4fd4-b320-8c48db8defdd",
+        "attempt_id": "8b23a27e-9620-46fd-b1ed-0088c0943885",
         "status": "FAILED"
       },
       "collation_guard": {
-        "run_id": "74c19d37-85ac-4c79-861d-32334d349e62",
-        "attempt_id": "e3ff6c24-526e-4911-baab-687816e755fb",
+        "run_id": "15d6694a-7ad2-43e2-9769-499436ee41e2",
+        "attempt_id": "5ee82991-eb89-4872-9c2c-1710730dca4c",
         "status": "FAILED"
       },
       "status": "PASS"
@@ -520,6 +521,16 @@
   ],
   "playwright": "PASS",
   "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
+  "unknown_reproduction_scope": "PHYSICAL_NONDETERMINISTIC_NETWORK_FAILURE",
+  "controlled_ack_loss": {
+    "status": "PASS",
+    "mechanism": "ADAPTER_ACK_LOSS_AFTER_REAL_SQL_COMMIT",
+    "engines": [
+      "POSTGRESQL",
+      "SQLSERVER"
+    ],
+    "automatic_replay": false
+  },
   "postgres_metrics_matrix": [
     {
       "engine": "POSTGRESQL",

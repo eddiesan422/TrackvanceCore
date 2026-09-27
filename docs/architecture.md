@@ -402,6 +402,10 @@ vacío y asignó lane DEFAULT a los jobs históricos. En 0.5.1 el restore llega 
 25 tablas/0009; los backups anteriores empiezan sin revisiones UNKNOWN y los
 backups nuevos deben recuperarlas íntegramente. La recertificación de ambos
 orígenes se informa en validación y no se deduce del ensayo histórico.
+En 0.6.0 el destino es 0012/state 5 con 31 tablas; se compara el estado nativo
+completo o las proyecciones legacy-v4/v3/v2 según la versión real del origen.
+Las pruebas nuevas desde 0.4.1, 0.5.0 y 0.5.1 y el drill nativo están enlazadas
+desde [operaciones](development/operations.md).
 El staging de backup verifica
 tamaño/hash antes de consumir cada copia para impedir sustituciones TOCTOU.
 State 2 no incluía hash estructural del catálogo; esa limitación histórica se

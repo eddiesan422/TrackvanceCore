@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-Revisión de implementación 0.5.1 | 25 de septiembre de 2026
+IMPLEMENTACIÓN 0.6.0 | 26 de septiembre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -10,7 +10,7 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps, Sentinel y Data Delivery con Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una configuración inmutable, ejecuta controles o entregas y conserva evidencia verificable del resultado.
 
-Esta especificación describe el endurecimiento local 0.5.1 sobre la baseline 0.5.0. Conserva Data Delivery PostgreSQL/SQL Server y añade reparación de evidencia, revisión operacional UNKNOWN, métricas honestas, conteos UPSERT fiables cuando el motor los proporciona, regresión temporal, linaje preciso, benchmark dedicado y carga diferida del frontend. El documento conserva su nombre v1.1. La tabla de validación informa cada ejecución real y distingue antecedentes, pendientes y limitaciones; no se heredan éxitos de otra versión.
+Esta especificación describe 0.6.0 sobre la baseline de repositorio 0.5.1. Añade RBAC dinámico, username/primer acceso, Microsoft/Google SSO, SMTP reutilizable y fechaIngesta/usuario en Data Delivery. Los capítulos 25 a 34 desarrollan funcional y técnicamente esta evolución. La instalación Docker detectada aún ejecutaba 0.5.0/0008 antes de actualizarse; esa diferencia se conserva en la evidencia de upgrade. Conserva de 0.5.1 Data Delivery PostgreSQL/SQL Server, reparación de evidencia, revisión operacional UNKNOWN, métricas honestas, conteos UPSERT fiables cuando el motor los proporciona, regresión temporal, linaje preciso, benchmark dedicado y carga diferida del frontend. El documento conserva su nombre v1.1. La tabla de validación informa cada ejecución real y distingue antecedentes, pendientes y limitaciones; no se heredan éxitos de otra versión.
 
 | Estado | Significado normativo |
 | --- | --- |
@@ -32,7 +32,7 @@ Esta especificación describe el endurecimiento local 0.5.1 sobre la baseline 0.
 
 ### Qué no se certifica como implementado
 
-PySpark operativo, Redis/Celery productivo, fuentes o destinos distintos de PostgreSQL/SQL Server, object storage remoto, OIDC/SSO, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Data Delivery SQL está implementado, pero no incluye scheduler, transforms de negocio, 2PC, reintento ciego tras UNKNOWN ni RBAC granular propio. El roadmap completa los puntos funcionales 1 a 10; la productización del punto 11 requiere una evolución posterior.
+PySpark operativo, Redis/Celery productivo, fuentes o destinos distintos de PostgreSQL/SQL Server, object storage remoto, Kubernetes, Terraform, Helm, observabilidad distribuida, masking por sensibilidad y escalamiento de producción pertenecen a los estados PREPARADO u OBJETIVO. Data Delivery SQL está implementado, pero no incluye scheduler, transforms de negocio, 2PC, reintento ciego tras UNKNOWN ni aprobación de cuatro ojos. El roadmap completa los puntos funcionales 1 a 10; la productización del punto 11 requiere una evolución posterior.
 
 ## 2. Arquitectura lógica estable
 
@@ -51,7 +51,7 @@ La separación principal es entre adquisición de datos, almacenamiento interno 
 | ProcessingEngine | Compilar/evaluar expresiones portables de reglas y comparaciones. | Polars; DuckDB para paridad cubierta |
 | ExecutionPlanner | Estimar recursos y fijar un plan antes de ejecutar. | Presupuesto de memoria/disco local |
 | JobQueue | Publicar el trabajo asociado a un Run. | DatabaseJobQueue |
-| NotificationDelivery | Contrato para entregar una alerta fuera del sistema. | PREPARADO; las alertas actuales son Findings internos |
+| NotificationDelivery | Puerto real de entrega de mensajes efímeros. | SMTP para credenciales USER; otros eventos/destinatarios preparados |
 
 Las reglas no reciben cadenas de conexión ni conocen CSV, Excel o buckets. Trabajan sobre el modelo común producido por los lectores y el Parquet canónico. La orquestación usa identidades de versiones y configuraciones, genera hallazgos y publica evidencia mediante los puertos.
 
@@ -659,28 +659,27 @@ aunque permanece accesible en su recurso autorizado.
 
 ### W. Permisos, secretos y aislamiento
 
-Se reutilizan connections:read/manage/use, configurations:write,
-runs:read/execute y artifacts:download. Reparar y registrar revisión exigen
-runs:execute; leer revisiones exige runs:read. Las mutaciones conservan CSRF,
-sesión y scope de organización en backend. No se añaden roles ni permisos nuevos.
-
-No se permite cruzar un attempt de otra Run u organización. El nombre visible
-del revisor es snapshot y su UUID estable se conserva. UI oculta acciones no
-autorizadas, pero el backend sigue siendo la autoridad. RBAC granular por
-destino/estrategia y aprobación de cuatro ojos quedan fuera de alcance.
+Delivery usa delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence;
+los destinos usan destinations:read/use/manage. Receipt exige artifacts:download
+y delivery:read. Configuración y ejecución validan dependencias y el recurso real.
+La autoridad está en el backend y el rol persistido; la UI refleja los grants de
+/me. Los capítulos 25 y 30 detallan protección de Administrator, permisos no
+delegables, CSRF, scope, UNKNOWN, DDL y auditoría. Las revisiones conservan actor
+estable y no permiten cruzar attempt/Run/organización.
 
 ### X. Backup, restauración y compatibilidad
 
 El backup conserva PostgreSQL, artifacts, secretos fuente/destino y ambas claves.
-Manifest de backup sigue en versión 2 porque la topología no cambia; la huella de
-estado pasa a 4 para incluir delivery_reviews. El restore nativo exige igualdad
-exacta de registros, hashes, secretos y relaciones.
+Manifest mantiene schema 2; state pasa a 5 para seis tablas nuevas de identidad,
+notificaciones y target policy, además de campos aditivos. El restore nativo exige
+igualdad exacta de filas, hashes, relaciones y secretos. SMTP/OIDC sólo utilizan
+variables externas: .env y client secrets no forman parte del backup.
 
-Los backups 0.5.0 (state 3, 0008) se migran a 0009 y se comparan mediante
-snapshot-legacy-v3, que excluye únicamente la nueva tabla vacía. Los 0.4.x
-(state 2, 0007) conservan la proyección legacy-v2, excluyendo tablas Delivery
-vacías y el lane DEFAULT añadido. No se omiten filas de revisiones para fingir
-compatibilidad: si existen en un upgrade legacy, la normalización falla.
+Backups 0.5.1/0009/state4, 0.5.0/0008/state3 y 0.4.x/0007/state2 se actualizan
+a 0012 y comparan con snapshot-legacy-v4/v3/v2. La proyección valida primero
+integridad y migración de identidad, admite roles/grants sembrados y elimina sólo
+adiciones esperadas. Rechaza actividad nueva en tablas que debían estar vacías;
+no oculta filas, errores de referencias ni alteraciones de campos históricos.
 
 El drill 0.5.1 preservó nueve artifacts, dos secretos, 164 relaciones, dos
 intentos y una revisión. Antes del backup, dos peticiones de reparación
@@ -769,7 +768,7 @@ una entrega adicional implícita.
 
 No hay garantía exactly-once distribuida, replay automático de UNKNOWN, SQL
 arbitrario, transformación funcional, scheduling Delivery, nuevo conector,
-SHIST, correo, SSO, HA ni certificación de volumen productivo. Los efectos
+SHIST/SCD, HA ni certificación de volumen productivo. Los efectos
 secundarios del receptor quedan fuera del conteo físico de Trackvance.
 
 La aceptación exige tests nuevos de reparación sin DataSink, historial UNKNOWN
@@ -1237,12 +1236,18 @@ La presencia de timeout_seconds en el plan no equivale a un límite duro por pro
 
 ## 17. Modelo persistente y migraciones
 
-PostgreSQL mantiene 25 tablas de aplicación, además del control de revisión de Alembic. El esquema real es más compacto que el ERD objetivo inicial: organización se expresa mediante organization_id lógico y roles mediante users.role más política central. No existen tablas dedicadas organizations/roles/permissions; la administración de los cinco roles base está implementada sobre el modelo actual.
+PostgreSQL mantiene 31 tablas de aplicación, además de alembic_version. organization_id expresa el scope lógico. User.role_id apunta a Role; RolePermission referencia códigos del catálogo versionado del producto, sin tabla editable de permisos arbitrarios. users.role permanece sólo como compatibilidad histórica no autoritativa. Los roles sembrados se administran salvo Administrator protegido.
 
 | Tabla | Identidad / relación principal |
 | --- | --- |
-| users | Usuario, organization_id, role, password_hash, active, version y fechas de actualización/cambio de contraseña. |
-| sessions | Token hash, usuario, CSRF y expiración. |
+| users | organization_id, first_name/last_name nullable legacy, username global, email, role_id, active/deleted, hash Argon2, must_change_password, expiración temporal, version y fechas. |
+| sessions | Token hash, usuario, authentication_method, CSRF y expiración; revocables. |
+| roles | Organización, nombre reservado, descripción, system_key, active/deleted y version. |
+| role_permissions | PK compuesta role_id/permission_code; grants sin copia a User. |
+| external_identities | provider/issuer/subject estable, usuario, email_at_link y fechas. Sin tokens. |
+| oidc_login_attempts | State hash, binder hash, nonce/verifier efímeros, expiración y consumo único. |
+| notification_deliveries | Evento/plantilla/canal/destinatario/proveedor, intento/estado y fechas; sin body ni password. |
+| delivery_target_policies | Fingerprint por org/sink/host/port/db/schema/table, requerida y materialización permanente. |
 | datasets | Nombre único por organización, área, owner, criticidad y estado. |
 | dataset_versions | Versión única por dataset, schema/profile, artifacts y lineage. |
 | configurations | Snapshot por módulo; previous_version_id y datasets. |
@@ -1250,7 +1255,7 @@ PostgreSQL mantiene 25 tablas de aplicación, además del control de revisión d
 | jobs | Run único, lane DEFAULT/DELIVERY, estado, intentos y lease. |
 | delivery_destinations | Identidad de destino, organización, motor, revisión vigente, estado y última prueba. |
 | delivery_destination_versions | Configuración inmutable, referencia de secreto y config_hash. |
-| delivery_attempts | Run/destino, número/clave idempotente, estado remoto, target, métricas, referencia/error y fechas. |
+| delivery_attempts | Run/destino, número/clave idempotente, estado remoto, target, métricas, referencia/error, system_audit y fechas. |
 | findings | Run, código, fingerprint único por Run y detalles. |
 | exceptions | Finding único, configuración, origen, validación, asignación, prioridad, SLA, reapertura, política automática y timeline/version. |
 | exception_attachments | Caso, artifact inmutable, autor y descripción. |
@@ -1282,15 +1287,18 @@ Conexión/revisión -> Dataset -> DatasetVersion -> Configuration -> Run -> Find
 | 0007_monitor_scheduling | Programaciones, revisiones inmutables y ocurrencias Sentinel; unicidad e índices de despacho. |
 | 0008_data_delivery | Destinos/revisiones/intentos de entrega, lane persistida e índices/constraints de Data Delivery. |
 | 0009_delivery_reviews | Tabla append-only de revisiones operacionales UNKNOWN; FKs, índices y CHECK de outcomes. |
+| 0010_dynamic_rbac_identity | Roles/grants, User aditivo, usernames deterministas, ExternalIdentity, OIDC attempts y método de sesión. |
+| 0011_notification_delivery | Metadatos de entregas email sin cuerpos/credenciales. |
+| 0012_delivery_target_audit | Policy física irreversible y DeliveryAttempt.system_audit. |
 
-La revisión vigente es 0009_delivery_reviews. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
+La revisión vigente es 0012_delivery_target_audit. Todas las evoluciones son migraciones aditivas nuevas; no se modifican migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrade se prueban en bases temporales, nunca sobre datos operativos.
 
 ## 18. API y errores
 
 La base es /api/v1. El runtime FastAPI y backend/API_CONTRACT.md describen los
 campos exactos implementados. El inventario siguiente se genera desde
-backend/openapi.json; el snapshot 0.5.1 añade reparación y revisión operacional
-al inventario de Data Delivery. La tabla siguiente forma parte del inventario ejecutable
+backend/openapi.json; el snapshot 0.6.0 añade roles, usuarios, primer acceso,
+proveedores/SSO, notificaciones y target policy al inventario existente. La tabla siguiente forma parte del inventario ejecutable
 revisado antes de construir el PDF.
 
 @openapi
@@ -1299,7 +1307,7 @@ revisado antes de construir el PDF.
 
 Las listas comunes devuelven {items,total}; IDs son strings opacos y fechas ISO UTC. El cockpit devuelve un DTO agregado. Los downloads usan el MIME del artefacto verificado y filename sanitizado.
 
-Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticadas requieren X-CSRF-Token y validación de origen. Sesiones duran 12 horas en el prototipo. Passwords se verifican mediante Argon2. El acceso demo es explícito, depende de DEMO_ACCESS_ENABLED y no representa SSO de producción. DEMO_SEED_ENABLED controla por separado la creación de datos sintéticos.
+Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticadas requieren X-CSRF-Token; el origen se valida al establecer la sesión, junto con CORS y cookies SameSite. Sesiones duran 12 horas en el prototipo. Passwords se verifican mediante Argon2. El acceso demo es explícito, depende de DEMO_ACCESS_ENABLED y no representa SSO de producción. DEMO_SEED_ENABLED controla por separado la creación de datos sintéticos.
 
 | Rol | Alcance local |
 | --- | --- |
@@ -1309,17 +1317,32 @@ Autenticación utiliza cookie HttpOnly trackvance_session. Mutaciones autenticad
 | Operations | Lectura/exports y gestión de excepciones según permiso; solo consulta metadata de conexiones. |
 | Auditor | Lectura/exports/auditoría/usuarios/sistema y metadata de conexiones; sin mutaciones operativas. |
 
-permissions.py es la política central; roles desconocidos no reciben permisos. Se distinguen datasets:read/write, configurations:write, runs:read/execute, exceptions:read/write/close, connections:read/use/manage, exports:download, artifacts:download, audit:read, users:read/write y system:read. connections:read permite consultar metadata; use permite probar una conexión guardada, explorar y adquirir snapshots; manage permite crear, editar, deshabilitar, eliminar y probar borradores. Los cierres técnicos y administrativos requieren exceptions:close además del permiso de gestión.
+La tabla anterior describe grants iniciales de migración, editables en los roles
+no protegidos. El catálogo, sus dependencias y la matriz exhaustiva se documentan
+en permission-matrix-0.6.0.md y el capítulo 34. No existe fallback para rutas
+desconocidas. Los módulos compartidos filtran por read y verifican el módulo del
+recurso. Administrator deriva todos los permisos del catálogo; users:manage y
+roles:manage no se delegan a roles custom.
 
-Data Delivery reutiliza provisionalmente esos permisos: destinos usan connections:read/manage/use; preview/preflight y publicación usan configurations:write; consulta/ejecución usan runs:read/execute; receipt usa artifacts:download. No existen aún permisos delivery:* ni gobierno por destino/estrategia. Ese RBAC granular permanece explícitamente pendiente.
+### Administración de identidad implementada
 
-### Administración local implementada
+Administrator administra roles y usuarios con baja lógica, CAS y bloqueo por
+organización para preservar el último admin. Un rol asociado a cualquier usuario
+no eliminado, incluso inactivo, no puede desactivarse ni eliminarse. Cambiar
+permisos afecta inmediatamente a las siguientes peticiones; /me refresca la UI.
+Cambiar Role de un usuario revoca sesiones y exige autenticarse de nuevo.
 
-Administrator puede listar, crear, editar, activar/desactivar usuarios, asignar roles base y restablecer contraseña. Auditor consulta cuentas y permisos efectivos; los demás accesos dependen de users:read/write. Las bajas son desactivaciones para conservar referencias históricas. Data Owner es un alias compatible de Data Owner / Lead; no se admiten roles arbitrarios.
+El alta solicita nombres/apellidos/username/email/role_id y genera una temporal
+de 32 caracteres, hash Argon2 y expiración de 24 horas. El servicio NotificationDelivery
+intenta enviarla por SMTP sin persistir body/password. Un fallo conserva el
+usuario y estado FAILED. Regenerar produce otra temporal y revoca sesiones.
+Login username/email es compatible; primer acceso local y SSO exige definir
+contraseña propia y rota la sesión/CSRF antes de acceder a módulos.
 
-La contraseña explícita usa SecretStr, de 12 a 1024 caracteres, no se recorta y sólo persiste como hash Argon2. El reset define una nueva contraseña y revoca todas las sesiones; cambiar correo, rol o actividad también las revoca. Las respuestas nunca incluyen hash, token, sesión ni contraseña. El administrador entrega la contraseña por un canal seguro fuera de Trackvance.
-
-Las mutaciones requieren version y compare-and-swap. La degradación o desactivación de administradores protege al último administrador activo de la organización mediante bloqueo transaccional en PostgreSQL. Los conflictos de correo no revelan organizaciones ajenas. El middleware verifica rol y actividad actuales en cada solicitud. OIDC/SSO y directorio multi-organización administrable continúan como objetivos posteriores.
+Microsoft common personal/corporativo y Google Gmail/Workspace autentican con
+Code+PKCE/OIDC. No crean usuarios ni conceden roles: sólo vinculan cuentas
+preprovisionadas verificadas a provider/issuer/subject estable. Los capítulos
+25..29 y 32..33 detallan la separación entre autenticación y autorización.
 
 ### Errores operativos
 
@@ -1327,7 +1350,7 @@ El envelope es {error:{code,message,details,request_id}}. Sesión inválida devu
 
 VALIDATION_RUN_REQUIRED, VALIDATION_RUN_OUTDATED, TECHNICAL_VALIDATION_REQUIRED y ADMINISTRATIVE_REASON_REQUIRED protegen las excepciones. VERSION_CONFLICT evita sobrescritura por formularios obsoletos. UNSUPPORTED_FORMAT, INVALID_DATA y UPLOAD_TOO_LARGE explican rechazos de carga. DATASET_NAME_EXISTS distingue el nombre duplicado de un conflicto genérico.
 
-Hardening objetivo: rate limiting, federación OIDC, sensibilidad/masking, política de retención, administración productiva de sesiones y pruebas de penetración. No deben asumirse por existir sesión/RBAC y administración local.
+Hardening objetivo: rate limiting, sensibilidad/masking, política de retención, administración productiva de sesiones y pruebas de penetración. No deben asumirse por existir sesión/RBAC y administración local.
 
 ## 20. Configuración, operación y respaldo
 
@@ -1364,7 +1387,7 @@ El respaldo SQLite usa una copia consistente, integra WAL, verifica hashes y res
 
 scripts/docker_state.py backup requiere proyecto explícito Trackvance, etiquetas Compose verificables y los seis volúmenes esperados. Detiene temporalmente web, scheduler y ambos workers, captura el estado consistente, detiene API y produce pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials, connection_keys, delivery_credentials y delivery_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que estaban activos al comenzar.
 
-El formato nativo 0.5.1 usa `backup-manifest.json` schema 2 y `state.json` schema 4. El verificador etiqueta la huella según la revisión real y el inventario congelado del runtime: 0007/state 2, 0008/state 3 o 0009/state 4; no según la versión del script copiado. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
+El formato nativo 0.6.0 usa `backup-manifest.json` schema 2 y `state.json` schema 5. El verificador etiqueta la huella según la revisión real y el inventario congelado del runtime: 0007/state 2, 0008/state 3, 0009/state 4 o 0012/state 5; no según la versión del script copiado. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva separadamente y no se imprime ni se incluye automáticamente en el backup.
 
 Reconocer la huella 0007 no amplía la topología del CLI de backup actual: exige
 seis volúmenes y dos workers. Para crear un respaldo sobre una instalación
@@ -1425,7 +1448,7 @@ Como antecedente operativo de 0.4.0, la instalación principal se actualizó ent
 
 scripts/tests/benchmark_cycle.py ejecuta un proyecto Docker aislado con archivos sintéticos, fuentes PostgreSQL/SQL Server reales, materialización canónica, Intake, ReconOps y Sentinel. Registra bytes, filas, duración, throughput, CPU, memoria, I/O, snapshots, plan y éxito/fallo; watchdog detiene su proyecto si supera recursos o tiempo. La progresión exige preflight y termina ante una restricción de recursos. Los tamaños no ejecutados se marcan como tales.
 
-### Antecedente de volumen 0.4.0; no certifica 0.5.1
+### Antecedente de volumen 0.4.0; no certifica 0.6.0
 
 El ciclo principal trackvance-bench-22852-894497 terminó PASS. Su fixture nominal de 100 MiB mide 106.194.531 bytes, 50.000 filas y cuatro columnas, con payload determinista variado SHAKE256_URLSAFE_V1. Docker Desktop 29.1.3 dispuso de 16 CPU y 16.326.524.928 bytes de memoria. La duración total fue 79,46 segundos. Las duraciones siguientes son tiempos de pared del runner, incluyendo transporte/espera cuando corresponde; no son microbenchmarks puros del motor.
 
@@ -1467,7 +1490,7 @@ OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales
 | Destinos | PostgreSQL y SQL Server implementados mediante DataSink; otros sinks, aprobación y políticas granulares futuros. |
 | Jobs | Redis + Celery, reintentos/leases e idempotencia; entrega transaccional definida. |
 | Compute | Polars para cargas estándar, PySpark para grandes volúmenes con paridad certificada. |
-| Identidad | OAuth2/OIDC + SSO con Entra ID, Keycloak u otro IdP; RBAC/org scope propios. |
+| Identidad | Implementado OIDC Microsoft/Google + RBAC dinámico y org scope; Keycloak, gobierno de grupos/dominos y otros IdP quedan en backlog. |
 | Secretos | Key Vault, AWS Secrets Manager o Vault; referencias fuera de configs de negocio. |
 | Observabilidad | OpenTelemetry, Prometheus, Grafana y logs centralizados. |
 | Infraestructura | Terraform y configuración por ambiente, redes y permisos mínimos. |
@@ -1490,7 +1513,7 @@ La certificación local ejecuta pytest, Ruff, Mypy, ESLint, TypeScript, Vitest, 
 
 @validation
 
-### Certificación incremental 0.5.1
+### Certificación incremental 0.6.0
 
 La evidencia de esta edición proviene de nuevas ejecuciones. Cada suite, motor,
 migración, benchmark y job CI tiene resultado propio; un escenario no ejecutado
@@ -1498,7 +1521,7 @@ mantiene NOT_RUN con motivo. La prueba determinista de UNKNOWN no se presenta
 como reproducción física de una pérdida exacta de confirmación remota. La
 revisión visual del PDF se realiza después de incorporar los resultados finales.
 
-### Antecedente certificado 0.5.0 (no certifica 0.5.1)
+### Antecedente certificado 0.5.0 (no certifica 0.6.0)
 
 Ningún éxito de 0.4.1 se hereda como certificación de 0.5.0. La aceptación debe
 cubrir suite backend/scripts, calidad estática, frontend, migración 0008,
@@ -1577,7 +1600,7 @@ La corrección quedó certificada en GitHub Actions: workflow 35488848150, commi
 
 ### Pendientes explícitos
 
-PySpark, conectores/fuentes/sinks adicionales, scheduler y RBAC granular de Delivery, rotación automática de claves maestras, Redis/Celery productivo, OIDC/SSO, Kubernetes/Helm/Terraform, observabilidad distribuida y masking/sensibilidad permanecen fuera de este ciclo. La adquisición asíncrona de grandes volúmenes, timeout duro y agrupación multi-finding no se simulan. Los volúmenes no ejecutados, fallos o gates sin certificar se identifican explícitamente en validación y benchmarks; no se reclasifican como éxitos.
+PySpark, conectores/fuentes/sinks adicionales, scheduler de Delivery, rotación automática de claves maestras, Redis/Celery productivo, Kubernetes/Helm/Terraform, observabilidad distribuida y masking/sensibilidad permanecen fuera de este ciclo. La adquisición asíncrona de grandes volúmenes, timeout duro y agrupación multi-finding no se simulan. Los volúmenes no ejecutados, fallos o gates sin certificar se identifican explícitamente en validación y benchmarks; no se reclasifican como éxitos.
 
 ## 23. Decisiones vigentes y control documental
 
@@ -1601,9 +1624,9 @@ PySpark, conectores/fuentes/sinks adicionales, scheduler y RBAC granular de Deli
 
 ### Precedencia y cambios de esta revisión
 
-Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones/roles, librerías no instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa.
+Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones, librerías no instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa. Roles y permisos persistidos sí forman parte de la implementación 0.6.0.
 
-Se actualizan arquitectura local/final, esquema real de 25 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
+Se actualizan arquitectura local/final, esquema real de 31 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel, cockpit, auditoría, persistencia Docker y arranque manual.
 
 El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de semántica requiere ADR, pruebas, actualización de esta fuente y del PDF; un cambio de base de datos requiere Alembic nuevo. Las versiones de configs/manifests/métricas se gestionan separadas de la versión del producto.
 
@@ -1618,11 +1641,10 @@ El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de s
 | 21-09-2026 | v1.1, implementación 0.4.1 | Configuración guiada por esquema, previews informativos, catálogo de responsables y cierre de sesión corregido; contratos del motor sin cambios. |
 | 23-09-2026 | v1.1, implementación 0.5.0 | Data Delivery PostgreSQL/SQL Server, destinos/configuraciones versionados, lanes, UNKNOWN, exactitud de tipos, locks/guardias transaccionales, secretos/evidencia/backup compatible y UI; validación local cerrada y CI informado por separado. |
 | 25-09-2026 | v1.1, implementación 0.5.1 | Ocho endurecimientos focales, capítulo Delivery A-Z, nueva certificación y benchmark propio; límites y resultados según evidencia 0.5.1. |
+| 26-09-2026 | v1.1, IMPLEMENTACIÓN 0.6.0 | RBAC dinámico, local/SSO, SMTP y Delivery audit; capítulos 25..34 y evidencia nueva. |
 
-La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.5.1, el informe validation_results_0.5.1.json y esta fuente son entradas explícitas del generador. Publicar exige candidato y revisión visual completa; la tabla de validación conserva resultados locales y CI separados. Los archivos de resultados 0.5.0 y anteriores permanecen como antecedentes, nunca como certificación 0.5.1.
-
-
-## 24. Cambios funcionales y técnicos 0.5.1
+La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación. README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos y contratos de detalle. OpenAPI 0.6.0, el informe validation_results_0.6.0.json y esta fuente son entradas explícitas del generador. Publicar exige candidato y revisión visual completa; la tabla de validación conserva resultados locales y CI separados. Los archivos de resultados 0.5.0 y anteriores permanecen como antecedentes, nunca como certificación 0.6.0.
+## 24. Antecedente: cambios funcionales y técnicos 0.5.1
 
 ### 1. Reparación local de evidencia COMMITTED
 
@@ -1760,3 +1782,978 @@ chunk. Build medido antes/después: bundle inicial nuevo de 364,97 kB;
 la suma de todos los chunks se informa por separado. Límite: la primera apertura
 de una feature puede requerir su descarga; una caché o red defectuosa debe mostrar
 error recuperable, no una pantalla vacía.
+
+
+## 25. RBAC dinámico y administración real de roles
+
+En 0.5.1 cada usuario contenía una etiqueta de rol y `permissions.py` resolvía un
+diccionario estático. Cambiar accesos exigía un release; el cliente podía retener
+permisos hasta cerrar sesión y una ruta desconocida recibía `runs:read`. En 0.6.0
+la relación persistida es User.role_id → Role → RolePermission. La etiqueta
+histórica `User.role` se conserva por compatibilidad de almacenamiento, pero no
+autoriza peticiones. La API devuelve el nombre vigente desde Role.
+
+El catálogo de códigos pertenece al producto, versionado junto con la matriz de
+rutas. No hay API para inventar códigos. Un rol configura un subconjunto de ese
+catálogo. Incluye Datasets, Conexiones, Intake, ReconOps, Sentinel, Delivery,
+Destinos, Excepciones, Reglas, exports, artifacts, Auditoría, Usuarios, Roles,
+Notificaciones, Sistema y las vistas transversales de Runs. Los permisos de
+consulta, configuración, ejecución, sobrescritura, ALTER, revisión y reparación
+se distinguen. Las rutas compartidas de Runs deben validar además el módulo del
+recurso consultado: un permiso transversal nunca debe abrir datos de un módulo
+que el rol no puede consultar.
+
+@diagram rbac
+
+El backend valida dependencias transitivas. Por ejemplo, sobrescribir exige
+ejecutar y consultar Delivery; alterar exige ejecutar; administrar destinos
+exige consultarlos. La UI puede completar esas dependencias, pero una petición
+manipulada que las omita recibe error. `users:manage` y `roles:manage` son
+exclusivos de Administrator: no pueden asignarse a un rol custom, aunque los
+solicite un administrador. Resolver permisos siempre vuelve a intersectar con
+el catálogo y a excluir capacidades no delegables de los roles ordinarios.
+
+Administrator se reconoce por `system_key=ADMINISTRATOR`, no por el texto visible.
+Es permanente: no se elimina, desactiva, renombra ni pierde permisos. Obtiene el
+catálogo completo en cada resolución; no conserva una copia que envejezca con
+las versiones. Las mutaciones de usuarios se serializan por organización para
+evitar que dos administradores se desactiven simultáneamente dejando cero
+administradores activos. La baja o degradación del último administrador se
+rechaza, igual que una eliminación propia que comprometa la administración.
+
+La migración crea Administrator, Data Owner / Lead, Data Analyst, Operations y
+Auditor por organización. `Data Owner` histórico pasa a referenciar el rol
+equivalente. Se conservan los accesos funcionales anteriores mediante permisos
+granulares; no se reescriben actores, auditorías ni configuraciones históricas.
+Las semillas son sólo valores iniciales: nunca se reaplican sobre un rol que ya
+ha sido administrado. Los roles desconocidos heredados fallan cerrado.
+
+@diagram role-lifecycle
+
+Un usuario desactivado sigue bloqueando la baja de su rol; un usuario eliminado
+lógicamente deja de bloquearla. El nombre normalizado continúa reservado después
+de eliminar el rol. La versión esperada evita sobrescribir una edición
+concurrente. El número de usuarios que muestra la UI cuenta asociaciones no
+eliminadas, independientemente del estado activo.
+
+La sesión identifica al usuario; no almacena permisos autoritativos. Cada petición
+valida usuario activo/no eliminado, rol vigente y organización. Cambiar permisos
+afecta la siguiente petición sin recrear usuarios. `/me` entrega `role_version`
+y permisos vigentes; el frontend refresca periódicamente, al recuperar foco y
+ante un 403. Puede existir un intervalo breve de presentación desactualizada,
+pero la API ya aplica la revocación. Cambiar el rol de un usuario revoca todas
+sus sesiones y exige autenticarse de nuevo.
+
+@diagram permission-request
+
+Las APIs de roles permiten listar/buscar, consultar catálogo, crear, editar y
+eliminar lógicamente. Configuración presenta permisos agrupados y explica la
+protección de Administrator. Los eventos ROLE_CREATED, ROLE_UPDATED,
+ROLE_PERMISSIONS_CHANGED, ROLE_DISABLED y ROLE_DELETED fijan actor, organización,
+identidad y cambio; no guardan credenciales. La matriz explícita de endpoints se
+mantiene junto al contrato y se contrasta con las rutas instaladas por FastAPI.
+
+## 26. Usuarios, login local y primer acceso
+
+El formulario de alta requiere nombres, apellidos, username, email, rol y estado.
+Los nombres/apellidos heredados siguen nulos hasta una edición explícita; no se
+deducen a partir de un display name. Para usuarios nuevos, `name` es la unión de
+nombres y apellidos. Username acepta 3 a 80 caracteres ASCII entre letras,
+números, punto, guion bajo y guion. Se normaliza para unicidad global sin importar
+mayúsculas; el email también se compara normalizado. Las cuentas eliminadas no
+liberan esos identificadores.
+
+La migración obtiene una base determinista del email y resuelve colisiones de
+forma ordenada y reproducible. El username nuevo sirve para login y futuras
+entregas; no reemplaza el actor almacenado en auditorías anteriores. Un cambio
+posterior de username no cambia el snapshot de una Run ya encolada.
+
+La pantalla acepta usuario o correo con contraseña. El error de login es
+genérico para no confirmar si existe una cuenta. La autenticación local sigue
+disponible cuando SSO y SMTP están deshabilitados. La API de alta no acepta una
+contraseña elegida por el administrador: genera una credencial criptográfica de
+al menos 20 caracteres, guarda únicamente Argon2 y establece cambio obligatorio
+con expiración a 24 horas. El plaintext vive en memoria durante el envío SMTP;
+no aparece en DTOs, frontend administrativo, auditoría, logs ni tabla de entregas.
+
+@diagram first-login
+
+Si SMTP falla, el usuario permanece creado y se muestra el estado de entrega.
+Regenerar y reenviar crea otra contraseña, sustituye el hash, renueva la
+expiración, reactiva la obligación y revoca sesiones. No recupera la credencial
+anterior ni permite verla al administrador. La operación necesita versión
+esperada; su evento no contiene el password ni su hash.
+
+Una sesión con `must_change_password=true` únicamente puede usar `/me`, logout y
+el cambio de primer acceso. No puede consultar Datasets, publicar Delivery ni
+invocar endpoints indirectos. La contraseña definitiva tiene mínimo 12
+caracteres y no puede coincidir con la temporal vigente. Tras el cambio se
+actualiza `password_changed_at`, se limpia la expiración y se emite una sesión
+nueva con CSRF nuevo. Las sesiones antiguas dejan de autorizar peticiones.
+
+Desactivar fija active=false y revoca sesiones. Eliminar fija deleted=true,
+active=false y deleted_at, conservando FKs e historia. La UI presenta username,
+nombre, correo, rol, estado, último acceso y métodos vinculados. USER_CREATED,
+USER_UPDATED, USER_ROLE_CHANGED, USER_DISABLED, USER_DELETED,
+USER_CREDENTIALS_REGENERATED y USER_PASSWORD_CHANGED permiten investigar cambios
+sin registrar material secreto.
+
+## 27. SSO Microsoft y Google
+
+@diagram sso
+
+SSO no crea cuentas. El administrador debe preprovisionar User y elegir su rol.
+El primer enlace exige un identificador cuya autoridad haya validado el
+proveedor, coincidente con esa cuenta existente. Después se resuelve únicamente
+por provider + issuer + subject. Un cambio de email externo no reasigna la
+identidad ni puede transferirla a otra cuenta. ExternalIdentity tiene una clave
+única global y vínculo estable a User; no contiene access tokens, refresh
+tokens, ID tokens ni client secrets.
+
+El flujo es server-side Authorization Code con PKCE S256, state aleatorio,
+nonce y binding al navegador. Un intento efímero tiene expiración y consumo
+único. El callback consume el intento, intercambia el code y valida firma,
+algoritmo, issuer, audience, expiración y nonce mediante bibliotecas JOSE/OAuth
+mantenidas. El secreto de cliente sólo sale hacia el token endpoint esperado.
+La URL final es local y controlada, sin un `return_to` arbitrario. La sesión
+resultante usa la cookie HttpOnly normal de Trackvance.
+
+Microsoft usa discovery de la autoridad common y la App Registration debe
+aceptar directorios organizacionales y cuentas personales mediante
+AzureADandPersonalMicrosoftAccount. La validación enlaza tenant, issuer y clave
+de firma; common no significa aceptar cualquier issuer. Outlook/Hotmail/Live y
+cuentas work/school están dentro del flujo. Un email/preferred_username por sí
+solo no prueba propiedad suficiente para enlazar desde un tenant arbitrario:
+el backend aplica la política de autoridad documentada en la guía de SSO.
+La redirect URI se registra como Web y sin query parameters.
+
+Google admite Gmail y Workspace. El primer enlace exige email_verified=true y
+correo Gmail, o Workspace con `hd` adecuado. Una cuenta Google basada en un
+correo externo sin esa autoridad se rechaza para enlace automático incluso si
+Google marcó el email como verificado tiempo atrás. Después del enlace se usa
+issuer/sub, no el email. No se solicita Gmail API, Microsoft Graph, calendarios
+ni scopes de escritura: únicamente openid, profile y email.
+
+SSO como primer acceso no elimina la obligación de contraseña local. Si User
+todavía conserva una temporal, el login externo válido crea una sesión
+restringida y obliga a definir una contraseña local nueva. Sólo completar ese
+paso invalida definitivamente la temporal. Así todas las cuentas mantienen un
+método local en 0.6.0 sin dejar contraseñas de incorporación activas indefinidamente.
+
+Usuarios desactivados/eliminados no pueden acceder por ningún proveedor. Roles y
+permisos continúan resolviéndose en Trackvance; claims de grupos, directorios o
+roles externos nunca elevan privilegios. Un Administrator puede desvincular la
+identidad externa desde Métodos de acceso sin borrar User. Los eventos SSO_LINKED,
+SSO_UNLINKED, SSO_LOGIN_SUCCESS y SSO_LOGIN_FAILED se sanitizan. Se excluyen query
+strings del access log para impedir almacenar códigos OAuth.
+
+Los proveedores deshabilitados o incompletos no muestran botón y no bloquean el
+arranque ni readiness. `/auth/providers` sólo expone estado público. Discovery,
+JWKS y token exchange se hacen durante autenticación, no como requisito de
+salud de workers. El modo de proveedor falso exige un indicador explícito de
+test y vive en un overlay desechable; no está habilitado en Compose base.
+
+## 28. Infraestructura reutilizable de notificaciones
+
+@diagram notification
+
+En 0.5.1 había una frontera preparada sin transporte operativo. En 0.6.0
+NotificationService recibe el evento/template y delega un mensaje efímero en el
+puerto NotificationDelivery. SMTPNotificationDelivery implementa EMAIL. El
+primer template funcional es USER_TEMPORARY_CREDENTIALS: nombre, username,
+contraseña temporal, expiración, URL de Trackvance y avisos de cambio y seguridad.
+
+NotificationDeliveryRecord guarda organización, tipo de evento, template,
+canal, recipient_type, recipient_user_id, email snapshot, provider_key, número de intento,
+estado PENDING/SENT/FAILED, error_code y fechas. No guarda subject/body que
+contengan contraseña, hashes Argon2, cabeceras Authorization ni credenciales
+SMTP. El estado PENDING se confirma antes de enviar; una interrupción del
+proceso puede dejarlo pendiente. Recuperarse exige una regeneración explícita:
+no existe una cola que pueda reenviar un cuerpo secreto persistido.
+
+SMTP acepta STARTTLS y SSL/TLS con validación de certificados; NONE requiere
+habilitación explícita de entorno local/test. Errores de autenticación, conexión
+o configuración se convierten en códigos controlados. La ausencia de proveedor
+produce FAILED/NO_PROVIDER y no interrumpe el arranque. Configuración muestra
+remitente y estado, nunca usuario/password SMTP o secretos OAuth.
+
+El destinatario operativo es USER. El puerto y los metadatos están preparados
+para futuros resolutores USER/USERS/ROLE/DOMAIN/GROUP, pero no se implementan
+envíos masivos ni resolución de grupos en este release. Tampoco se envían aún
+RUN_COMPLETED, DELIVERY_FAILED, DELIVERY_UNKNOWN o SENTINEL_ALERT. Añadir esos
+eventos reutilizará este servicio en lugar de crear otro motor de email.
+
+## 29. Migración de identidad, recuperación y pruebas
+
+`0010_dynamic_rbac_identity` añade roles, role_permissions, external_identities,
+oidc_login_attempts, los nuevos campos de usuarios y el método de sesión.
+`0011_notification_delivery` añade los metadatos de entrega.
+`0012_delivery_target_audit` añade políticas físicas y metadata por intento.
+Las migraciones 0001..0009 permanecen sin modificaciones. Upgrade, downgrade y
+upgrade se prueban únicamente sobre bases desechables. Un downgrade descarta las
+capacidades nuevas; no es un procedimiento de operación para datos 0.6.0 activos.
+
+La verificación de almacenamiento incorpora claves compuestas y una huella nueva
+state 5. Restore de 0.5.1 produce una proyección state 4 que excluye únicamente las
+adiciones definidas; exige identidad exacta de las filas/campos históricos.
+Los formatos anteriores soportados mantienen su proyección propia. `.env` y los
+secretos SMTP/OAuth externos no forman parte del backup: deben restaurarse desde
+la configuración privada del operador.
+
+La certificación debe demostrar autorización con petición manipulada, aislamiento
+de organización, dependencias, protección del último administrador, cambios de
+rol/permisos y revocación. Mailpit permite obtener la temporal exclusivamente
+desde el entorno de test y comprobar expiración, regeneración, primer acceso y
+ausencia de plaintext en DB/logs. El mock OIDC usa code+PKCE y tokens RS256 reales
+para probar navegador, replay, state/nonce, issuer/audience/expiración, usuarios
+inexistentes/desactivados/eliminados y sujeto estable. Estos resultados se
+publican con sus conteos reales; no certifican el servicio externo.
+
+Fuera de 0.6.0: auto-provisioning, group-to-role/domain, dominios administrables,
+gobierno ampliado, notificaciones de ejecución, SMTP OAuth2, secretos cloud,
+SHIST/SCD, masking, retención avanzada y plataformas distribuidas. DatasetVersion
+sigue siendo el versionado inmutable interno.
+
+
+## 30. Auditoría técnica de Data Delivery
+
+### Cambio funcional respecto a 0.5.1
+
+Data Delivery ya publicaba DatasetVersion inmutables a PostgreSQL y SQL Server,
+con destinos versionados, mapping técnico, cuatro estrategias y evidencia de
+cada intento. La tabla receptora no permitía atribuir una fila a su última
+ingesta Trackvance. 0.6.0 agrega una opción conjunta de auditoría de publicación
+y una obligación persistente por target. Los datos de negocio no se transforman
+ni se modifican en origen. No se implementan SHIST, tablas históricas paralelas,
+SCD, fechaDesde/fechaHasta ni detección histórica de cambios.
+
+El riesgo de una simple opción en Configuration sería que otra configuración
+publicara sobre la misma tabla sin auditoría o que una rotación de credenciales
+hiciera desaparecer el requisito. La solución introduce DeliveryTargetPolicy,
+independiente de revisiones del destino y de credenciales. Otro riesgo era
+atribuir retroactivamente la fecha de habilitación a registros previos: las
+columnas agregadas a tablas existentes son nullable, sin default.
+
+### Uso del builder
+
+1. Elegir DatasetVersion y destino, con la revisión correspondiente.
+2. Seleccionar schema/tabla existente o solicitar tabla nueva.
+3. Activar **Incluir campos de auditoría de Trackvance**.
+4. Revisar el mapping de negocio. `fechaIngesta` y `usuario` quedan reservadas y
+   no aceptan valores del mapping. No se solicita username al operador.
+5. Ejecutar preflight. Sobre tabla existente debe haber metadata compatible y,
+   si falta alguna columna, permiso ALTER remoto.
+6. Publicar. Desde ese momento el target queda obligado a usar ambas columnas,
+   incluso si la primera Run no se ejecuta o falla.
+7. Ejecutar una Run con la DatasetVersion publicada. El worker vuelve a comprobar
+   el target y ejecuta DDL/DML juntos cuando corresponde.
+
+Si la política ya existe, el builder muestra ambas columnas activadas y bloquea
+su deshabilitación con el texto: «Esta tabla utiliza auditoría de ingesta de
+Trackvance. Todas las entregas posteriores deben registrar fechaIngesta y usuario».
+La API también rechaza drafts manipulados; ocultar un checkbox no es autorización.
+
+### Qué significan las columnas
+
+| Campo | Valor | Momento de captura |
+|---|---|---|
+| fechaIngesta | Un timestamp UTC por DeliveryAttempt, hasta seis dígitos fraccionales (microsegundos) | Preparación local del intento, antes de STARTED |
+| usuario | Username interno del User que encoló la Run | Creación de la Run, snapshot inmutable |
+
+Una cuenta que entra por Microsoft o Google conserva exactamente el username
+asignado en Trackvance. No se usan display name, email, subject externo ni usuario
+de conexión SQL. Si después se renombra el User, la Run conserva su snapshot.
+Los timestamps corresponden al intento de ingesta, no al instante de commit SQL
+ni a la fecha de creación original del registro de negocio.
+
+| Estrategia | Efecto de auditoría |
+|---|---|
+| CREATE_AND_LOAD | Cada fila insertada recibe timestamp y username del intento |
+| APPEND | Sólo las filas nuevas reciben valores; filas previas quedan intactas |
+| OVERWRITE | DELETE e INSERT transaccionales; todas las filas resultantes reciben valores |
+| UPSERT INSERT | La nueva fila recibe ambos valores |
+| UPSERT UPDATE | La fila coincidente actualiza también ambos valores |
+
+Por tanto, estas columnas representan la **última ingesta Trackvance** que tocó
+la fila. Un actor externo todavía puede escribir en una tabla administrada por
+su organización; Trackvance no instala triggers globales ni intercepta cambios
+externos. La garantía de auditoría se aplica a sus propias entregas.
+
+### Esquemas y compatibilidad de tipos
+
+| Motor | Columna temporal creada | Columna de actor creada |
+|---|---|---|
+| PostgreSQL | `"fechaIngesta" TIMESTAMPTZ(6)` | `"usuario" VARCHAR(128)` |
+| SQL Server | `[fechaIngesta] DATETIMEOFFSET(6)` | `[usuario] NVARCHAR(128)` |
+
+Para CREATE_TABLE las dos son NOT NULL. Para una tabla existente, el ALTER
+declara explícitamente NULL y omite DEFAULT. No se ejecuta un UPDATE de backfill.
+Una fila previa permanece NULL/NULL salvo que la propia estrategia la actualice
+o sustituya: por ejemplo, UPSERT UPDATE registra correctamente la nueva ingesta.
+
+Se adoptan columnas existentes compatibles. El campo temporal debe preservar
+zona/offset y al menos seis dígitos de precisión fraccional (microsegundos). El campo usuario debe ser Unicode/string
+variable con capacidad mínima de 128, o sin límite. Identidades y campos
+generated no se consideran escribibles. Si falta una sola columna, se crea esa
+columna; si una existente es incompatible, no se cambia su tipo, no se renombra
+y no se elimina/recrea la tabla.
+
+PostgreSQL exige identidad exacta del nombre citado. Una columna `fechaingesta`
+creada sin comillas no se adopta silenciosamente como `fechaIngesta`. SQL Server
+compara nombres de auditoría de forma insensible a mayúsculas, conserva el nombre
+real descubierto para DML y rechaza coincidencias ambiguas. El mapping de negocio
+se conserva con los contratos estrictos de tipos de 0.5.1.
+
+### Modelo persistente y migración
+
+`0012_delivery_target_audit` es aditiva y sucede a `0011_notification_delivery`.
+No modifica migraciones históricas. Agrega `delivery_target_policies` y
+`delivery_attempts.system_audit` JSON. Los intentos históricos reciben `{}`; no
+se inventan usernames ni timestamps retrospectivos.
+
+La política contiene identidad estable, organización, destino inicial,
+fingerprint único por organización, motor, host, puerto, base, schema, tabla,
+`audit_columns_required=true`, habilitador user ID/username y fechas de
+habilitación/materialización/creación. La restricción CHECK impide false y no
+hay endpoint de deshabilitación o borrado. El User se conserva con baja lógica,
+de forma que el habilitador y las Runs siguen teniendo identidad histórica.
+
+La huella se deriva de JSON canónico de organización/motor/host/puerto/base/
+schema/tabla. No incluye password, username SQL, secret_reference ni TLS.
+Normaliza host DNS e IP; conserva el case de identificadores PostgreSQL. Para
+SQL Server aplica casefold de base/schema/tabla conservadoramente: aliases de
+mayúsculas no evaden la política, pero dos tablas distintas sólo por mayúsculas
+en un servidor case-sensitive comparten obligación. Aliases DNS diferentes no
+se resuelven como un único servidor físico automáticamente. Ese límite del
+locator configurado requiere gobierno de conexiones, no acceso a credenciales.
+
+@diagram target-policy
+
+### Fronteras transaccionales y permisos
+
+Publicación serializa por fingerprint en PostgreSQL mediante advisory lock de
+transacción, incluyendo la ausencia de fila, y persiste Configuration y policy
+juntas. El unique constraint añade defensa. El preflight no cambia el target.
+El worker persiste STARTED antes de la operación remota de escritura, como en
+0.5.1; el preflight previo sólo consulta metadata y permisos del destino.
+
+El adaptador prepara y valida valores localmente. Para una tabla existente toma
+lock remoto y vuelve a consultar columnas antes de ALTER/DML. PostgreSQL utiliza
+ACCESS EXCLUSIVE en entregas auditadas; SQL Server usa el lock transaccional
+TABLOCKX/HOLDLOCK existente. Un cambio incompatible entre preflight y escritura
+se rechaza. Agregar campos y escribir filas comparten commit/rollback. No se abre
+una transacción DDL independiente previa, ni existe transacción distribuida con
+la metadata de Trackvance.
+
+| Acción | Permiso Trackvance adicional | Privilegio SQL |
+|---|---|---|
+| Publicar/encolar CREATE_TABLE | delivery:alter_target | CREATE TABLE y schema según selección |
+| Activar auditoría sin materialización confirmada | delivery:alter_target | ALTER si falta alguna columna |
+| OVERWRITE | delivery:overwrite | Privilegios de la estrategia y visibilidad de metadata |
+| Entrega auditada ya materializada | Permisos ordinarios de configuración/ejecución | Privilegios de estrategia; campos deben existir |
+
+La dependencia RBAC no convierte delivery:execute en permiso de ALTER. Los
+permisos se comprueban en backend; ser dueño de una conexión o poder leer su
+metadata tampoco equivale a poder administrar roles. El administrador del target
+debe otorgar privilegios SQL apropiados. PostgreSQL ALTER requiere ownership
+efectivo/superusuario; SQL Server consulta HAS_PERMS_BY_NAME para ALTER.
+
+### Drift, fallos y estado UNKNOWN
+
+| Estado observado | Respuesta |
+|---|---|
+| Policy ausente, auditoría false | Comportamiento compatible con 0.5.1 |
+| Policy required, draft false | AUDIT_COLUMNS_REQUIRED |
+| Falta columna, nunca se confirmó materialización | Puede agregarse dentro de la nueva entrega deliberada |
+| Falta columna tras materialización confirmada | AUDIT_COLUMNS_DRIFT; no recreación automática |
+| Tipo externo incompatible | AUDIT_COLUMNS_INCOMPATIBLE; intervención explícita |
+| Mapping intenta escribir campo técnico | AUDIT_MAPPING_COLLISION |
+| ALTER remoto insuficiente | FAILED_PRECONDITION con check AUDIT_ALTER_PERMISSION |
+| Commit remoto no confirmado | UNKNOWN; policy requerida, materialización no afirmada |
+
+UNKNOWN sigue siendo evidencia de incertidumbre, no prueba de rollback ni de
+commit. El intento no se reintenta automáticamente al reiniciar. Su snapshot
+conserva timestamp y username, pero `columns_created` permanece null porque no
+se conoce el resultado confirmado. Una nueva Run deliberada inspecciona el
+target; si adopta campos compatibles y confirma su propio commit, marca policy
+materialized sin reescribir el intento UNKNOWN anterior.
+
+@diagram target-policy
+
+### Contratos y evidencia
+
+El nuevo GET `/api/v1/delivery/destinations/{id}/target-policy` recibe
+schema_name/table_name y destination_version_id opcional. Permite consultar
+policy antes de crear una tabla; no abre conexión SQL ni necesita secretos.
+Devuelve audit_columns_required, policy_id, materialized_at y target_fingerprint.
+Se aplica scope de organización y delivery:read.
+
+DeliveryDraft agrega audit_columns_enabled; preflight devuelve system_audit con
+enabled, policy_id, nombres reales, campos faltantes y materialized_at. Intentos,
+receipt y sección delivery del manifest incluyen un snapshot consistente:
+
+```json
+{
+  "enabled": true,
+  "fecha_ingesta": "2026-09-26T12:34:56.123456+00:00",
+  "username": "operador.interno",
+  "policy_id": "uuid-policy",
+  "columns": {"fecha_ingesta": "fechaIngesta", "usuario": "usuario"},
+  "columns_created": true
+}
+```
+
+COMMITTED y materialized se persisten antes de publicar archivos locales. Un
+fallo de ArtifactStore no provoca replay; reparación local conserva los valores
+persistidos y verifica su consistencia con Run/Attempt. Configuraciones históricas
+sin el nuevo flag mantienen sus hashes canónicos y no se reescriben manifests
+para agregar campos. El linaje añade AUDITED_TARGET entre Run y policy.
+
+La auditoría registra DELIVERY_TARGET_AUDIT_ENABLED,
+DELIVERY_TARGET_AUDIT_COLUMNS_CREATED y DELIVERY_TARGET_AUDIT_DRIFT. La metadata
+permitida incluye IDs y fingerprint, nunca credenciales SQL/SMTP/SSO, bodies de
+notificaciones, tokens ni datos de negocio completos.
+
+### Backup/restore, pruebas y límites
+
+Backups incluyen política y snapshots de intentos en la misma base de metadata,
+junto con roles, usuarios y artifacts. `.env` continúa fuera del archivo; SMTP y
+secretos de cliente SSO siguen configurándose externamente. Un restore debe
+conservar el requisito incluso si el destino configurado rota su password.
+El downgrade controlado de metadata no borra columnas en servidores externos.
+
+Las pruebas de unidad/API comprueban fingerprint, publicación atómica, rechazo
+de deshabilitación, tipos, permisos, snapshots, evidencia, UNKNOWN y rollback.
+El runner `scripts/tests/delivery_cycle.py` usa proyectos/volúmenes exclusivos,
+PostgreSQL y SQL Server reales, Mailpit y OIDC firmado desechable en overlays.
+Certifica CREATE con/sin auditoría, APPEND, OVERWRITE, UPSERT INSERT/UPDATE,
+históricos NULL, adopción parcial/completa, ALTER denegado, mapping reservado,
+drift, receipt/manifest, usuarios local/Microsoft/Google y restart.
+
+La prueba UNKNOWN hace commit real y pierde deliberadamente el acknowledgement
+del adaptador; su nombre y evidencia declaran la simulación. No certifica un
+fallo de red físico ni a Google/Microsoft reales. El resultado ejecutado de cada
+matriz queda en `docs/development/evidence/0.6.0/`; este documento describe casos,
+no convierte escenarios preparados en PASS. Los providers reales requieren
+credenciales externas y su estado se informa por separado.
+
+No se agregan scheduling Delivery, nuevos DataSink, SHIST, masking, retención
+avanzada ni gestores empresariales de secretos. Los límites de volumen y
+métricas de 0.5.1 siguen vigentes: rows_written mide filas fuente enviadas en un
+commit confirmado, no un inventario remoto post-trigger. La inspección y locks
+protegen nuestras transacciones; los cambios fuera de Trackvance pertenecen al
+gobierno del target.
+
+
+## 31. Cambios funcionales y técnicos 0.6.0
+
+Este capítulo une situación anterior, riesgo, decisión y solución con los contratos
+desarrollados en los capítulos anteriores. El estado de pruebas se toma del
+informe ejecutado, nunca de los requisitos o de una certificación histórica.
+
+### A. Roles y catálogo de permisos
+
+| Aspecto | Cambio y evidencia de diseño |
+| --- | --- |
+| 1. Situación 0.5.1 | Un nombre en User resolvía permisos estáticos; rutas desconocidas caían en runs:read. |
+| 2. Problema | No había administración de roles ni propagación fiable a sesiones existentes. |
+| 3. Riesgo | Exceso de privilegios por fallback, sesión con permisos obsoletos o escalación por rol custom. |
+| 4. Decisión funcional | Administrar roles, conservar catálogo de producto y proteger Administrator. |
+| 5. Solución técnica | Matriz explícita, dependencias, resolución request-by-request y /me refrescado. |
+| 6. Persistencia | Role, RolePermission y User.role_id; system_key identifica Administrator. |
+| 7. Migración | 0010 asigna equivalencias y username sin inventar nombres ni reescribir actores. |
+| 8. API | CRUD lógico /roles, catálogo /roles/permissions y DTO role_version. |
+| 9. UI | Roles agrupados por función; dependencias, usuarios asociados y estado protegido visibles. |
+| 10. Seguridad | users:manage/roles:manage no delegables; último admin serializado por organización. |
+| 11. Compatibilidad | Cinco roles base y Data Owner histórico conservan accesos funcionales. |
+| 12. E2E | Rol custom, modificación en sesión activa, revocación al reasignar y API manipulada. |
+| 13. Resultados | Tabla de validación vigente y JSON 0.6.0; no heredar conteos de 0.5.1. |
+| 14. Limitaciones | Permisos por recurso individual, aprobación de cuatro ojos y gobierno ampliado pendientes. |
+| 15. Pendientes | Dominios/grupos administrables y mapeos externos requieren otra decisión de producto. |
+
+### B. Usuarios, credenciales y SSO
+
+| Aspecto | Cambio y evidencia de diseño |
+| --- | --- |
+| 1. Situación 0.5.1 | Login email/password y contraseñas introducidas por administrador, sin federación. |
+| 2. Problema | Incorporación manual, sin expiración temporal ni identidad externa estable. |
+| 3. Riesgo | Passwords expuestas, cuentas externas ambiguas, replay y confundir autenticación con autorización. |
+| 4. Decisión funcional | Username/email local, temporal 24h, primer acceso y proveedores preprovisionados. |
+| 5. Solución técnica | Argon2, sesión restringida, rotación; Code Flow/PKCE y JOSE mantenido. |
+| 6. Persistencia | User aditivo, ExternalIdentity provider/issuer/subject y state efímero consumible. |
+| 7. Migración | Username determinista, colisiones controladas, campos personales legacy nullable. |
+| 8. API | Login compatible, first-login, regeneración, providers/start/callback y desvinculación. |
+| 9. UI | Usuario o correo, botones habilitados por configuración, cambio obligatorio y métodos de acceso. |
+| 10. Seguridad | State/nonce/aud/iss/firma/exp, cookie HttpOnly, CSRF, no auto-provisioning ni roles externos. |
+| 11. Compatibilidad | Email sigue autenticando, todos mantienen contraseña local y actores históricos. |
+| 12. E2E | Mailpit y navegador con Microsoft personal/organizacional y Google Gmail/Workspace simulados. |
+| 13. Resultados | Casos reales externos sin credenciales: NOT_RUN_EXTERNAL_CREDENTIALS. Mock tiene resultado separado. |
+| 14. Limitaciones | Políticas de consentimiento/MFA externas y autoridad del primer identificador requieren configuración. |
+| 15. Pendientes | Gobierno de múltiples organizaciones y mapeo de grupos no se implementan. |
+
+### C. Notificaciones
+
+| Aspecto | Cambio y evidencia de diseño |
+| --- | --- |
+| 1. Situación 0.5.1 | Puerto preparado sin email operativo. |
+| 2. Problema | No existía entrega reutilizable para incorporación segura. |
+| 3. Riesgo | Crear motores paralelos o persistir cuerpos con contraseñas. |
+| 4. Decisión funcional | Un solo servicio/puerto; primera notificación USER_TEMPORARY_CREDENTIALS. |
+| 5. Solución técnica | Mensaje en memoria, adaptador SMTP TLS, errores codificados. |
+| 6. Persistencia | NotificationDeliveryRecord conserva destinatario, intento, estado y fechas, nunca body. |
+| 7. Migración | 0011 crea tabla independiente sin alterar usuarios históricos. |
+| 8. API | Estado de integración y listado de entregas; alta/regeneración devuelve resultado saneado. |
+| 9. UI | Notificaciones y estado de credenciales visibles, sin vista de password. |
+| 10. Seguridad | Secretos sólo en entorno API; no logs de SMTP exception ni cuerpos persistidos. |
+| 11. Compatibilidad | SMTP deshabilitado no bloquea arranque; alta conserva User con FAILED. |
+| 12. E2E | Recepción real Mailpit, uso temporal, regeneración y escaneo DB/log de plaintext. |
+| 13. Resultados | Evidencia ejecutada en identity-sso-e2e; proveedor externo SMTP depende de configuración. |
+| 14. Limitaciones | SENT es aceptación SMTP; interrupción puede dejar PENDING y exige regenerar. |
+| 15. Pendientes | ROLE/USERS/DOMAIN/GROUP, alertas de ejecuciones y SMTP OAuth2. |
+
+### D. Auditoría de publicación
+
+| Aspecto | Cambio y evidencia de diseño |
+| --- | --- |
+| 1. Situación 0.5.1 | Delivery transaccional con evidencia por intento, sin campos técnicos en cada fila. |
+| 2. Problema | El target no atribuía la última ingesta a usuario/instante Trackvance. |
+| 3. Riesgo | Auditoría falseable por mapping, falsa fecha en filas anteriores o deshabilitación desde otra configuración. |
+| 4. Decisión funcional | Activación conjunta e irreversible de fechaIngesta/usuario por target. |
+| 5. Solución técnica | Fingerprint estable, preflight, ALTER+DML remoto único y revisión bajo lock. |
+| 6. Persistencia | DeliveryTargetPolicy y DeliveryAttempt.system_audit; username snapshot de Run. |
+| 7. Migración | 0012 aditiva; intentos históricos con objeto vacío, sin metadata inventada. |
+| 8. API | audit_columns_enabled, target-policy y metadata en preflight/attempt/receipt/manifest. |
+| 9. UI | Checkbox conjunto y bloqueado al existir policy, explicación de columnas reservadas. |
+| 10. Seguridad | delivery:alter_target, overwrite separado y privilegios SQL efectivos. |
+| 11. Compatibilidad | Audit false sin policy conserva semántica y hashes históricos. DatasetVersion no cambia. |
+| 12. E2E | PG/SQL Server reales; estrategias, adopción/drift, identidad local/SSO, UNKNOWN y restore. |
+| 13. Resultados | Runner real con fallo de acknowledgement inyectado; no se declara una pérdida física de red certificada. |
+| 14. Limitaciones | No intercepta escritores externos, aliases DNS no se unifican y SQL Server casefold es conservador. |
+| 15. Pendientes | Scheduling Delivery, SHIST/SCD, targets nuevos y gobierno ampliado fuera de alcance. |
+
+### Resultados ejecutados de la edición
+
+@validation
+
+
+## 32. Configuración y prueba real SSO
+
+Estas instrucciones permiten ejecutar pruebas externas opt-in. El mock de CI
+certifica el cliente OIDC de Trackvance; no certifica cuentas ni servicios reales.
+Mientras no se hayan configurado credenciales y ejecutado cada caso, el resultado
+es `NOT_RUN_EXTERNAL_CREDENTIALS`. Nunca escribas secretos en una captura, ticket,
+commit, comando compartido o archivo de evidencia.
+
+### Preparación común
+
+1. Confirma el origen público real de la instalación. En el equipo revisado es
+   `http://localhost:3100`; otro entorno debe usar su propia URL. Establece
+   `TRACKVANCE_PUBLIC_URL` y `TRACKVANCE_WEB_ORIGIN` coherentes en el `.env` privado.
+   En HTTPS las cookies deben viajar por HTTPS. No uses URLs con credenciales,
+   query strings ni fragmentos como URL pública.
+2. En Configuración → Usuarios crea primero la cuenta con el correo exacto de la
+   identidad que vas a probar y un rol de Trackvance. No existe auto-provisioning.
+   No es necesario que SMTP esté configurado para autenticar por SSO, pero el
+   primer acceso seguirá exigiendo definir una contraseña local.
+3. Registra una aplicación Web con callback exacto para cada proveedor. El secreto
+   permanece sólo en la API, no en React ni en los workers. No habilites implicit
+   grant ni scopes de correo/calendario/Graph.
+4. Configura las variables descritas abajo y recrea la API con Compose. Consulta
+   Configuración → Autenticación o `/api/v1/auth/providers`: sólo debe aparecer
+   un proveedor que esté habilitado y completo. Readiness no prueba Internet.
+5. Utiliza una ventana privada para aislar las cuentas del proveedor. No mezcles
+   `localhost` y `127.0.0.1` durante un mismo flujo: state está ligado al navegador.
+
+### A. Cuenta personal Microsoft: Outlook, Hotmail, Live
+
+1. Abre el [centro de administración de Microsoft Entra](https://entra.microsoft.com/),
+   entra en App registrations y registra una aplicación para Trackvance.
+2. En Supported account types selecciona **Accounts in any organizational directory and personal Microsoft accounts**. La audiencia correspondiente es
+   `AzureADandPersonalMicrosoftAccount`. Una aplicación sólo de un tenant o sólo
+   organizacional no cubre esta prueba.
+3. Añade plataforma **Web**. Para la instalación de ejemplo registra
+   `http://localhost:3100/api/v1/auth/sso/microsoft/callback`. No añadas parámetros
+   de consulta a la URI personal. No registres el callback como SPA.
+4. Copia Application (client) ID. En Certificates & secrets crea un client secret
+   con vigencia administrada y copia su **valor**, no su ID, al `.env` privado.
+5. Configura `TRACKVANCE_SSO_MICROSOFT_ENABLED=true`,
+   `TRACKVANCE_SSO_MICROSOFT_CLIENT_ID` y
+   `TRACKVANCE_SSO_MICROSOFT_CLIENT_SECRET`. Trackvance usa la autoridad `common`
+   para Code Flow + PKCE; no pide Microsoft Graph.
+6. Preprovisiona el correo personal que el proveedor devuelve. Pulsa **Continuar con Microsoft** e inicia sesión con esa cuenta. El primer enlace personal
+   requiere el tenant consumer de Microsoft y un dominio personal reconocido
+   (Outlook/Hotmail/Live/MSN); otras identidades ambiguas se rechazan.
+7. Si es primer acceso, define una contraseña local nueva. Confirma el mismo
+   username/rol interno en `/me`, luego consulta Métodos de acceso en Usuarios:
+   Microsoft vinculado y último acceso. La fecha de enlace está disponible como
+   `external_identities[].linked_at` en el DTO del usuario.
+
+La configuración de registro y audiencia sigue la [guía oficial de registro de
+aplicaciones](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
+
+### B. Microsoft Entra work/school
+
+Usa la misma aplicación con audiencia organizacional + personal y callback Web.
+Preprovisiona el correo de la cuenta organizacional. El primer vínculo exige
+prueba de dominio verificado (`xms_edov`) o que el tenant UUID figure explícitamente
+en `TRACKVANCE_SSO_MICROSOFT_TRUSTED_TENANTS`, separado por comas. Declara únicamente
+tenants cuyo gobierno de identidades controlas o confías: permitir un tenant
+significa confiar en sus afirmaciones de identidad para este primer enlace.
+No uses comodines ni añadas un tenant desconocido para hacer pasar un test.
+
+Pulsa Microsoft, selecciona la cuenta corporativa y completa los requisitos del
+tenant (consentimiento, MFA o políticas de acceso). Trackvance no administra esas
+políticas ni toma roles/grupos de ellas. Confirma User, username y permisos internos.
+El issuer validado corresponde al tenant concreto, aunque discovery inicial use
+common; la firma debe provenir de una clave permitida para ese issuer. Consulta
+las [reglas de validación de claims de Microsoft](https://learn.microsoft.com/en-us/entra/identity-platform/claims-validation).
+
+### C. Gmail personal
+
+1. En [Google Cloud Console](https://console.cloud.google.com/) selecciona un
+   proyecto de integración propio. Configura Google Auth Platform/consent screen:
+   nombre, contacto de soporte y audiencia apropiada. Si el proyecto está en
+   modo de pruebas externo, añade la cuenta Gmail a los test users.
+2. Crea un OAuth client de tipo **Web application**. Añade como Authorized redirect
+   URI `http://localhost:3100/api/v1/auth/sso/google/callback`, sustituyendo origen
+   por el real. Esta integración backend no necesita Gmail API.
+3. Guarda client ID y client secret en el `.env` privado mediante
+   `TRACKVANCE_SSO_GOOGLE_CLIENT_ID` y `TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET`;
+   establece `TRACKVANCE_SSO_GOOGLE_ENABLED=true`.
+4. Preprovisiona el Gmail exacto en Trackvance. Pulsa **Continuar con Google**,
+   selecciona esa cuenta y concede sólo openid/email/profile. Define contraseña
+   local si la sesión es de primer acceso. Confirma Google vinculado y rol local.
+
+El cliente Web y la redirect URI se documentan en el [flujo OAuth para aplicaciones
+Web](https://developers.google.com/identity/protocols/oauth2/web-server). La
+[referencia OIDC](https://developers.google.com/identity/openid-connect/openid-connect)
+describe issuer/sub y los claims de email.
+
+### D. Google Workspace
+
+Reutiliza un cliente Web cuya audiencia/consentimiento permita ese dominio. Una
+aplicación de audiencia Internal puede limitarse a su propia organización; para
+probar también Gmail debe elegirse una configuración que admita ambas cuentas.
+El administrador Workspace puede necesitar aprobar el cliente.
+
+Preprovisiona el email corporativo y autentica desde Google. El enlace inicial
+exige `email_verified=true` y `hd` compatible con el dominio del email. Una
+Google Account creada con un correo externo, sin Gmail ni `hd`, no se vincula
+automáticamente: email_verified por sí solo no garantiza que Google siga siendo
+autoridad sobre ese correo. La razón está en la [guía de autenticación backend
+de Google](https://developers.google.com/identity/sign-in/android/backend-auth).
+
+### Verificación y desvinculación
+
+Después de cada prueba consulta el usuario y los eventos SSO_LINKED y
+SSO_LOGIN_SUCCESS. Compara el user_id interno antes/después; no debe crearse un
+User adicional. Un segundo login debe usar la misma ExternalIdentity. Cambiar
+permisos del Role afecta la próxima petición; cambiar el Role revoca sesión.
+Desactivar o eliminar lógicamente User impide tanto login local como SSO.
+
+Un Administrator abre Configuración → Usuarios → Métodos de acceso y desvincula
+Microsoft o Google. Esto elimina únicamente el vínculo de autenticación, conserva
+User e historia y revoca las sesiones afectadas según el contrato. Para volver a
+enlazar se aplica de nuevo la validación inicial; no se heredan grupos externos.
+
+Guarda por caso una evidencia saneada: proveedor, tipo de cuenta, hora, commit,
+resultado, user_id de fixture, permisos comprobados y error genérico si falló.
+No guardes callback completo, código, tokens, cookies, ID token ni capturas de
+secretos. En `real-provider-results.json` distingue PASS, FAIL y NOT_RUN con motivo.
+
+### Errores frecuentes
+
+| Síntoma | Comprobación |
+| --- | --- |
+| No aparece botón | Enabled=true, client ID y secret presentes, URL pública válida; recrear API. |
+| redirect_uri_mismatch | Esquema, host, puerto y path exactos; cliente Web, no SPA. |
+| Cuenta personal Microsoft rechazada | Audiencia AzureADandPersonalMicrosoftAccount, autoridad common y correo personal permitido. |
+| Cuenta organizacional sin vínculo | Correo preprovisionado y autoridad del dominio; xms_edov o tenant UUID explícitamente confiable. |
+| Google external email rechazado | Falta autoridad Gmail/Workspace; no saltar la validación. |
+| State o nonce inválido | Flujo vencido/reutilizado, cookies ausentes o mezcla de hosts; iniciar un flujo nuevo. |
+| Usuario no habilitado | Cuenta inexistente o desactivada/eliminada; no se auto-crea. Un rol inactivo no concede permisos de negocio. |
+| Sólo aparece cambio de contraseña | Es primer acceso obligatorio, incluso por SSO. |
+| Error de red o firma | Discovery/JWKS accesibles, reloj del host correcto, secret vigente; no desactivar validación. |
+
+La prueba real depende de credenciales y consentimiento externos. La suite
+`identity-sso-e2e` usa un mock desechable y no requiere esas credenciales.
+
+
+## 33. Configuración SMTP y operación de credenciales
+
+SMTP y SSO son integraciones independientes. Un client secret Google/Microsoft
+para login no sirve como contraseña SMTP y el adaptador no reutiliza tokens SSO.
+
+### SMTP genérico
+
+En el `.env` privado establece `TRACKVANCE_SMTP_ENABLED=true`, host, puerto,
+remitente y modo de seguridad. Los nombres completos están en `.env.example`.
+Para submission con STARTTLS utiliza normalmente puerto 587 y
+`TRACKVANCE_SMTP_SECURITY=STARTTLS`; para TLS implícito utiliza el puerto que
+indique el proveedor (habitualmente 465) y `SSL` o `TLS`. El adaptador valida el
+certificado con el almacén de confianza del sistema. Configura username/password
+sólo cuando el servidor los requiera y autorice esa modalidad.
+
+Recrea la API conservando volúmenes. Configuración → Notificaciones muestra
+configurado/no configurado, remitente y estado de entrega. Crear un usuario
+envía una contraseña temporal de 24 horas. Si falla, el usuario se conserva y
+la entrega muestra un código controlado. Una vez corregida la integración, usa
+**Regenerar y reenviar credenciales**; esto crea otra contraseña e invalida la
+anterior. No existe recuperación ni vista administrativa del plaintext.
+
+`NONE` se limita a un entorno local/test explícito con
+`TRACKVANCE_SMTP_ALLOW_INSECURE=true`. No se activa por omitir TLS. Cuando SMTP
+está incompleto o deshabilitado, Trackvance inicia y crea usuarios con entrega
+FAILED/NO_PROVIDER. No se incluyen body/password en notificaciones persistidas.
+
+### Mailpit de pruebas
+
+Los runners añaden `deploy/docker/compose.mailpit-test.yml` a un proyecto nuevo,
+con SMTP interno 1025 y API/UI ligada a loopback. No añadas ese overlay al
+Compose de la instalación habitual. El test obtiene la contraseña desde
+`/api/v1/messages` y `/api/v1/message/{id}` únicamente en memoria para completar
+primer acceso; no la publica en reports, logs o artifacts.
+La [documentación de Mailpit](https://mailpit.axllent.org/docs/api-v1/) describe
+su API y el [uso en Docker](https://mailpit.axllent.org/docs/install/docker/)
+permite reproducir ese entorno desechable.
+
+### Gmail y App Password
+
+Cuando la cuenta y sus políticas lo permiten, activa 2-Step Verification y
+genera una contraseña de aplicación específica para este SMTP. Guarda ese valor
+en TRACKVANCE_SMTP_PASSWORD, con el correo completo como username. No uses la
+contraseña normal de Google ni un secreto OAuth de SSO. La disponibilidad de App
+Passwords depende del tipo de cuenta y sus restricciones; consulta la
+[guía oficial](https://support.google.com/accounts/answer/185833?hl=en). Usa el
+host/puerto/TLS de SMTP que Google documente para tu modalidad de cuenta.
+
+### Microsoft SMTP
+
+Este adaptador implementa SMTP con credenciales y TLS; no implementa SASL OAuth2.
+Sólo puede usar un servidor/relay Microsoft cuya configuración autorice esa
+modalidad. No se afirma compatibilidad general con SMTP AUTH de Microsoft 365:
+las políticas del tenant, Security defaults y evolución de Basic Authentication
+pueden impedirlo. No reduzcas la seguridad del tenant para cumplir la prueba.
+Si exige OAuth, el caso queda NOT_RUN_UNSUPPORTED_SMTP_AUTH hasta incorporar un
+adaptador apropiado. Consulta [SMTP AUTH en Exchange Online](https://learn.microsoft.com/en-us/Exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission)
+y [SMTP con OAuth](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth).
+
+### Operación y recuperación
+
+La tabla conserva sólo destinatario, template, proveedor, intentos, resultado y
+fechas; NOTIFICATION_SENT/FAILED aportan auditoría. SENT significa aceptación por
+el servidor SMTP, no confirmación de lectura o entrega final en la bandeja.
+Una interrupción entre envío y actualización local puede dejar PENDING: no
+reenvíes el mismo secreto; genera credenciales nuevas explícitamente.
+
+`.env` y passwords SMTP/client secrets SSO están fuera del backup. Conserva su
+configuración en el mecanismo privado del operador y reintégrala tras restore.
+Nunca incluyas esos valores ni correos con contraseñas en evidencia de CI.
+En 0.6.0 sólo se envían credenciales USER; alertas de Runs, roles, dominios y
+grupos permanecen pendientes aunque el puerto pueda reutilizarse.
+
+
+## 34. Matriz completa de autorización
+
+
+Inventario explícito generado de `permissions.py`. Prefijo `/api/v1`; los aliases
+absolutos `/health` y `/health/ready` son públicos. Cada ruta protegida desconocida
+devuelve denegación: no existe permiso de fallback. RolePermission es la única
+fuente de grants; Administrator resuelve el catálogo completo vigente por system_key.
+
+### Catálogo y dependencias
+
+El backend exige el cierre transitivo de dependencias al crear/editar un rol.
+Las dependencias no autorizan operaciones inversas. Los permisos no delegables
+no pueden asignarse a roles custom aunque la petición manipule la UI.
+
+| Permiso | Dependencias directas | Delegable |
+| --- | --- | --- |
+| artifacts:download | Ninguna | Sí |
+| audit:read | Ninguna | Sí |
+| connections:manage | connections:read | Sí |
+| connections:read | Ninguna | Sí |
+| connections:use | connections:read | Sí |
+| datasets:read | Ninguna | Sí |
+| datasets:write | datasets:read | Sí |
+| delivery:alter_target | delivery:execute, delivery:read | Sí |
+| delivery:configure | datasets:read, delivery:read, destinations:read, destinations:use | Sí |
+| delivery:execute | datasets:read, delivery:read | Sí |
+| delivery:overwrite | delivery:execute, delivery:read | Sí |
+| delivery:read | Ninguna | Sí |
+| delivery:repair_evidence | delivery:execute, delivery:read | Sí |
+| delivery:review_unknown | delivery:read | Sí |
+| destinations:manage | destinations:read | Sí |
+| destinations:read | Ninguna | Sí |
+| destinations:use | destinations:read | Sí |
+| exceptions:close | exceptions:read, exceptions:write | Sí |
+| exceptions:read | Ninguna | Sí |
+| exceptions:write | exceptions:read | Sí |
+| exports:download | Ninguna | Sí |
+| intake:configure | datasets:read, intake:read | Sí |
+| intake:execute | datasets:read, intake:read | Sí |
+| intake:read | Ninguna | Sí |
+| notifications:manage | notifications:read | Sí |
+| notifications:read | Ninguna | Sí |
+| recon:configure | datasets:read, recon:read | Sí |
+| recon:execute | datasets:read, recon:read | Sí |
+| recon:read | Ninguna | Sí |
+| roles:manage | roles:read | No |
+| roles:read | Ninguna | Sí |
+| rules:read | Ninguna | Sí |
+| runs:execute | runs:read | Sí |
+| runs:read | Ninguna | Sí |
+| sentinel:configure | datasets:read, sentinel:read | Sí |
+| sentinel:execute | datasets:read, sentinel:read | Sí |
+| sentinel:read | Ninguna | Sí |
+| sentinel:schedule | sentinel:execute, sentinel:read | Sí |
+| system:read | Ninguna | Sí |
+| users:manage | users:read | No |
+| users:read | Ninguna | Sí |
+
+### Endpoints públicos y de sesión
+
+| Método | Ruta | Acceso |
+| --- | --- | --- |
+| POST | /auth/demo | Público; controles específicos de login/OIDC/demo |
+| POST | /auth/first-login/change-password | Sesión; permitido durante primer acceso |
+| POST | /auth/login | Público; controles específicos de login/OIDC/demo |
+| POST | /auth/logout | Sesión; permitido durante primer acceso |
+| GET | /auth/providers | Público; controles específicos de login/OIDC/demo |
+| GET | /auth/sso/google/callback | Público; controles específicos de login/OIDC/demo |
+| GET | /auth/sso/google/start | Público; controles específicos de login/OIDC/demo |
+| GET | /auth/sso/microsoft/callback | Público; controles específicos de login/OIDC/demo |
+| GET | /auth/sso/microsoft/start | Público; controles específicos de login/OIDC/demo |
+| GET | /health | Público; controles específicos de login/OIDC/demo |
+| GET | /health/ready | Público; controles específicos de login/OIDC/demo |
+| GET | /me | Sesión; permitido durante primer acceso |
+
+### Endpoints protegidos
+
+| Método | Ruta | Permiso base |
+| --- | --- | --- |
+| GET | /artifacts/{id}/download | artifacts:download |
+| GET | /audit-events | audit:read |
+| GET | /connections | connections:read |
+| POST | /connections | connections:manage |
+| POST | /connections/test | connections:manage |
+| DELETE | /connections/{id} | connections:manage |
+| GET | /connections/{id} | connections:read |
+| PATCH | /connections/{id} | connections:manage |
+| POST | /connections/{id}/datasets | connections:use |
+| GET | /connections/{id}/objects | connections:use |
+| GET | /connections/{id}/preview | connections:use |
+| GET | /connections/{id}/schemas | connections:use |
+| POST | /connections/{id}/test | connections:use |
+| GET | /dashboard | runs:read |
+| GET | /dataset-versions/{id}/profile | datasets:read |
+| GET | /datasets | datasets:read |
+| POST | /datasets | datasets:write |
+| POST | /datasets/uploads/inspect | datasets:write |
+| GET | /datasets/{id} | datasets:read |
+| POST | /datasets/{id}/refresh-source | connections:use |
+| GET | /datasets/{id}/schema | datasets:read |
+| POST | /datasets/{id}/versions/upload | datasets:write |
+| GET | /delivery/configurations | delivery:read |
+| POST | /delivery/configurations | delivery:configure |
+| POST | /delivery/configurations/{id}/versions | delivery:configure |
+| GET | /delivery/destinations | destinations:read |
+| POST | /delivery/destinations | destinations:manage |
+| POST | /delivery/destinations/test | destinations:manage |
+| DELETE | /delivery/destinations/{id} | destinations:manage |
+| GET | /delivery/destinations/{id} | destinations:read |
+| PATCH | /delivery/destinations/{id} | destinations:manage |
+| GET | /delivery/destinations/{id}/schemas | destinations:use |
+| GET | /delivery/destinations/{id}/table-metadata | destinations:use |
+| GET | /delivery/destinations/{id}/tables | destinations:use |
+| GET | /delivery/destinations/{id}/target-policy | delivery:read |
+| POST | /delivery/destinations/{id}/test | destinations:use |
+| POST | /delivery/preflight | delivery:configure |
+| POST | /delivery/preview | delivery:configure |
+| GET | /delivery/runs | delivery:read |
+| POST | /delivery/runs | delivery:execute |
+| GET | /delivery/runs/{id}/attempts | delivery:read |
+| GET | /delivery/runs/{id}/receipt | artifacts:download |
+| POST | /delivery/runs/{id}/repair-evidence | delivery:repair_evidence |
+| GET | /delivery/runs/{id}/reviews | delivery:read |
+| POST | /delivery/runs/{id}/reviews | delivery:review_unknown |
+| GET | /exceptions | exceptions:read |
+| GET | /exceptions/assignees | exceptions:read |
+| GET | /exceptions/{id} | exceptions:read |
+| PATCH | /exceptions/{id} | exceptions:write |
+| POST | /exceptions/{id}/attachments | exceptions:write |
+| GET | /exceptions/{id}/attachments/{attachment_id}/download | artifacts:download |
+| POST | /exceptions/{id}/comments | exceptions:write |
+| POST | /exceptions/{id}/validate | exceptions:write |
+| POST | /execution-plans/preview | runs:execute |
+| GET | /findings | runs:read |
+| POST | /findings/{id}/exceptions | exceptions:write |
+| GET | /intake/contracts | intake:read |
+| POST | /intake/contracts | intake:configure |
+| POST | /intake/contracts/{id}/versions | intake:configure |
+| POST | /intake/runs | intake:execute |
+| GET | /intake/runs/{id}/errors | intake:read |
+| GET | /monitors | sentinel:read |
+| POST | /monitors | sentinel:configure |
+| GET | /monitors/{id}/alerts | sentinel:read |
+| GET | /monitors/{id}/metrics | sentinel:read |
+| GET | /monitors/{id}/occurrences | sentinel:read |
+| POST | /monitors/{id}/runs | sentinel:execute |
+| GET | /monitors/{id}/schedule | sentinel:read |
+| POST | /monitors/{id}/schedule | sentinel:schedule |
+| GET | /monitors/{id}/series | sentinel:read |
+| POST | /monitors/{id}/versions | sentinel:configure |
+| GET | /notifications/deliveries | notifications:read |
+| GET | /notifications/status | notifications:read |
+| GET | /recon/controls | recon:read |
+| POST | /recon/controls | recon:configure |
+| POST | /recon/controls/{id}/versions | recon:configure |
+| POST | /recon/runs | recon:execute |
+| GET | /recon/runs/{id}/results | recon:read |
+| GET | /roles | roles:read |
+| POST | /roles | roles:manage |
+| GET | /roles/permissions | roles:read |
+| DELETE | /roles/{id} | roles:manage |
+| GET | /roles/{id} | roles:read |
+| PATCH | /roles/{id} | roles:manage |
+| GET | /rules | rules:read |
+| GET | /runs | runs:read |
+| GET | /runs/{id} | runs:read |
+| POST | /runs/{id}/cancel | runs:execute |
+| GET | /runs/{id}/diagnostics | runs:read |
+| GET | /runs/{id}/evidence | artifacts:download |
+| GET | /runs/{id}/execution-plan | runs:read |
+| GET | /runs/{id}/export.csv | exports:download |
+| GET | /runs/{id}/export.xlsx | exports:download |
+| GET | /runs/{id}/results | runs:read |
+| GET | /system/engines | system:read |
+| GET | /users | users:read |
+| POST | /users | users:manage |
+| GET | /users/roles | users:read |
+| DELETE | /users/{id} | users:manage |
+| GET | /users/{id} | users:read |
+| PATCH | /users/{id} | users:manage |
+| DELETE | /users/{id}/external-identities/{identity_id} | users:manage |
+| POST | /users/{id}/resend-credentials | users:manage |
+| POST | /users/{id}/reset-password | users:manage |
+
+### Controles adicionales por recurso y operación
+
+La matriz es la puerta de entrada, no reemplaza organización, estado/versionado,
+CSRF ni comprobaciones del objeto. Una sesión first-login sólo accede a /me,
+logout y change-password. User/Role activos se resuelven en cada petición.
+
+| Operación | Comprobación adicional |
+| --- | --- |
+| Runs, Findings y dashboard compartidos | Filtrado por módulos con read; un ID exige read del módulo del Run. |
+| Cancelar Run / preview de plan | execute del módulo concreto; preview exige también datasets:read. |
+| Evidencia, exports y artifacts | Scope de organización y read del módulo de origen; adjuntos requieren lectura del caso. |
+| Configurar / ejecutar Delivery | Dataset y destino del mismo scope; configurar depende de destinations:use. Publicar y ejecutar exigen delivery:overwrite para OVERWRITE y delivery:alter_target para CREATE o materializar auditoría. |
+| Receipt Delivery | delivery:read además de artifacts:download. |
+| Cerrar excepción / cambiar cierre automático | exceptions:close además de exceptions:write. |
+| Roles y usuarios | CAS/version, no delegables, último admin, propio administrador y roles asociados protegidos. |
+| Target audit | Policy irreversible, columnas reservadas, drift y privilegios SQL; manipular audit=false no desactiva policy. |
+
+`notifications:manage` está reservado en el catálogo para evolución del servicio;
+no expone un editor de secretos ni una ruta de envío arbitrario. Configuración
+SMTP/OIDC sigue exclusivamente en el entorno del servidor.

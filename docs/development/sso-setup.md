@@ -49,7 +49,8 @@ commit, comando compartido o archivo de evidencia.
    (Outlook/Hotmail/Live/MSN); otras identidades ambiguas se rechazan.
 7. Si es primer acceso, define una contraseña local nueva. Confirma el mismo
    username/rol interno en `/me`, luego consulta Métodos de acceso en Usuarios:
-   Microsoft vinculado, fecha de enlace y último acceso.
+   Microsoft vinculado y último acceso. La fecha de enlace está disponible como
+   `external_identities[].linked_at` en el DTO del usuario.
 
 La configuración de registro y audiencia sigue la [guía oficial de registro de
 aplicaciones](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
@@ -134,7 +135,7 @@ secretos. En `real-provider-results.json` distingue PASS, FAIL y NOT_RUN con mot
 | Cuenta organizacional sin vínculo | Correo preprovisionado y autoridad del dominio; xms_edov o tenant UUID explícitamente confiable. |
 | Google external email rechazado | Falta autoridad Gmail/Workspace; no saltar la validación. |
 | State o nonce inválido | Flujo vencido/reutilizado, cookies ausentes o mezcla de hosts; iniciar un flujo nuevo. |
-| Usuario no habilitado | Cuenta inexistente, desactivada/eliminada o rol inactivo; no se auto-crea. |
+| Usuario no habilitado | Cuenta inexistente o desactivada/eliminada; no se auto-crea. Un rol inactivo no concede permisos de negocio. |
 | Sólo aparece cambio de contraseña | Es primer acceso obligatorio, incluso por SSO. |
 | Error de red o firma | Discovery/JWKS accesibles, reloj del host correcto, secret vigente; no desactivar validación. |
 
