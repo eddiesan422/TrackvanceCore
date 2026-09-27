@@ -36,6 +36,15 @@ def validated_project(value: str) -> str:
     return value
 
 
+def storage_snapshot(run, compose: list[str]) -> dict:
+    """Submit the verifier anew; a recreated API has no prior /tmp helper file."""
+    return json.loads(run(
+        [*compose, "exec", "-T", "api", "python", "-", "snapshot"], capture=True,
+        input_text=(ROOT / "scripts/verify_storage.py").read_text(encoding="utf-8"),
+        stage="storage_snapshot",
+    ))
+
+
 def main() -> int:
     project = validated_project(f"trackvance-identity-e2e-{uuid4().hex[:12]}")
     port, mail_port, oidc_port = (available_port() for _ in range(3))
@@ -61,11 +70,14 @@ def main() -> int:
     result: dict = {"version": "0.6.0", "project": project, "status": "FAIL",
                     "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS", "mock_provider": True}
 
-    def run(arguments, *, cwd=ROOT, capture=False):
+    def run(arguments, *, cwd=ROOT, capture=False, input_text=None, stage=None):
         completed = subprocess.run(arguments, cwd=cwd, env=environment, text=True,
-                                   encoding="utf-8", errors="replace", capture_output=True, check=False)
+                                   encoding="utf-8", errors="replace", input=input_text,
+                                   capture_output=True, check=False)
         # A failed browser assertion may embed credentials. Never echo raw output.
         if completed.returncode:
+            result["failed_stage"] = stage or arguments[0]
+            result["failed_exit_code"] = completed.returncode
             if "playwright" in arguments:
                 try:
                     report = json.loads(completed.stdout[completed.stdout.index("{"):])
@@ -90,6 +102,11 @@ def main() -> int:
                 except (ValueError, TypeError):
                     result["browser_failure_diagnostics"] = "UNAVAILABLE"
             raise RuntimeError(f"Falló el comando de certificación ({arguments[0]}), exit {completed.returncode}.")
+        if stage == "restart_readiness":
+            result["restart_api_recreated"] = bool(re.search(
+                r"\b" + re.escape(project) + r"-api-1\s+Recreated\b",
+                completed.stdout + completed.stderr,
+            ))
         if not capture:
             print("PASS: " + " ".join(arguments[:4]), flush=True)
         return completed.stdout
@@ -212,12 +229,10 @@ def main() -> int:
             raise RuntimeError("Se detectó persistencia o log de material sensible.")
         result["plaintext_database_and_log_scan"] = "PASS"
         result["mailpit_messages"] = len(messages)
-        run([*compose, "cp", "scripts/verify_storage.py", "api:/tmp/verify_storage.py"])
-        snapshot = [*compose, "exec", "-T", "api", "python", "/tmp/verify_storage.py", "snapshot"]
-        before = json.loads(run(snapshot, capture=True))
+        before = storage_snapshot(run, compose)
         run([*compose, "restart"])
-        run([*compose, "up", "-d", "--wait", "--wait-timeout", "120"])
-        after = json.loads(run(snapshot, capture=True))
+        run([*compose, "up", "-d", "--wait", "--wait-timeout", "120"], stage="restart_readiness")
+        after = storage_snapshot(run, compose)
         if before != after:
             raise RuntimeError("El reinicio modificó el estado persistente de identidad.")
         result.update(status="PASS", restart="PASS", migration=after["migration"],

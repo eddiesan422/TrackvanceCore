@@ -1,12 +1,12 @@
 {
   "version": "0.6.0",
-  "project": "trackvance-identity-e2e-8b7d13d90ff0",
+  "project": "trackvance-identity-e2e-d03092d40f14",
   "status": "PASS",
   "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS",
   "mock_provider": true,
   "playwright": {
-    "startTime": "2026-09-27T02:16:20.500Z",
-    "duration": 43418.283,
+    "startTime": "2026-09-27T02:42:08.312Z",
+    "duration": 42930.024000000005,
     "expected": 9,
     "skipped": 0,
     "unexpected": 0,
@@ -16,6 +16,7 @@
   "smtp_failure_and_regeneration": "PASS",
   "plaintext_database_and_log_scan": "PASS",
   "mailpit_messages": 2,
+  "restart_api_recreated": false,
   "restart": "PASS",
   "migration": "0012_delivery_target_audit",
   "tables": {
@@ -52,5 +53,5 @@
     "users": 12
   },
   "cleanup": "PASS",
-  "duration_seconds": 114.385
+  "duration_seconds": 112.142
 }

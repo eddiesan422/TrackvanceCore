@@ -1,0 +1,130 @@
+{
+  "version": "0.6.0",
+  "repository": "eddiesan422/TrackvanceCore",
+  "commit": "979cc0f01d0e1ec694886a6f9764a3f856e93315",
+  "run_id": 36288878394,
+  "run_attempt": 1,
+  "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394",
+  "status": "FAIL",
+  "conclusion": "failure",
+  "jobs_total": 9,
+  "jobs_passed": 8,
+  "jobs_failed": 1,
+  "jobs": [
+    {
+      "name": "frontend",
+      "id": 108534922663,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:33:56Z",
+      "completed_at": "2026-09-27T02:34:57Z",
+      "duration_seconds": 61.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108534922663",
+      "failed_steps": []
+    },
+    {
+      "name": "backend",
+      "id": 108534922729,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:33:56Z",
+      "completed_at": "2026-09-27T02:35:41Z",
+      "duration_seconds": 105.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108534922729",
+      "failed_steps": []
+    },
+    {
+      "name": "delivery-e2e",
+      "id": 108535169014,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:43Z",
+      "completed_at": "2026-09-27T02:39:48Z",
+      "duration_seconds": 245.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169014",
+      "failed_steps": []
+    },
+    {
+      "name": "backup-restore-e2e",
+      "id": 108535169015,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:44Z",
+      "completed_at": "2026-09-27T02:40:52Z",
+      "duration_seconds": 308.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169015",
+      "failed_steps": []
+    },
+    {
+      "name": "compose-e2e",
+      "id": 108535169022,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:43Z",
+      "completed_at": "2026-09-27T02:40:30Z",
+      "duration_seconds": 287.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169022",
+      "failed_steps": []
+    },
+    {
+      "name": "identity-sso-e2e",
+      "id": 108535169030,
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-09-27T02:35:43Z",
+      "completed_at": "2026-09-27T02:39:23Z",
+      "duration_seconds": 220.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169030",
+      "failed_steps": [
+        "Dynamic RBAC, Mailpit credentials and signed mock OIDC browser flows"
+      ]
+    },
+    {
+      "name": "connections-e2e",
+      "id": 108535169045,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:45Z",
+      "completed_at": "2026-09-27T02:42:21Z",
+      "duration_seconds": 396.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169045",
+      "failed_steps": []
+    },
+    {
+      "name": "benchmark-smoke",
+      "id": 108535169052,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:43Z",
+      "completed_at": "2026-09-27T02:36:58Z",
+      "duration_seconds": 75.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169052",
+      "failed_steps": []
+    },
+    {
+      "name": "delivery-benchmark-smoke",
+      "id": 108535169092,
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-09-27T02:35:43Z",
+      "completed_at": "2026-09-27T02:37:52Z",
+      "duration_seconds": 129.0,
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/36288878394/job/108535169092",
+      "failed_steps": []
+    }
+  ],
+  "identity_failure": {
+    "stage": "Post-restart persistence verifier",
+    "command_exit_code": 2,
+    "browser_passed": 9,
+    "browser_failed": 0,
+    "temporary_password_expiration": "PASS",
+    "smtp_failure_and_regeneration": "PASS",
+    "plaintext_database_and_log_scan": "PASS",
+    "cleanup": "PASS",
+    "diagnosis": "Temporary verifier path missing after restart is inferred; subprocess stderr was suppressed so the exact cause is unconfirmed.",
+    "proposed_fix": "Submit verifier source via stdin independently for each snapshot."
+  },
+  "raw_logs_published": false,
+  "observed_at_utc": "2026-09-27T02:43:01.5038308Z"
+}
