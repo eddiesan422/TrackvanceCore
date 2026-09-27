@@ -7,6 +7,7 @@ from datetime import timedelta
 from argon2 import PasswordHasher
 from sqlalchemy import select
 
+from . import identity_bootstrap  # noqa: F401
 from .config import (
     BACKEND_DIR,
     DEMO_ACCESS_ENABLED,

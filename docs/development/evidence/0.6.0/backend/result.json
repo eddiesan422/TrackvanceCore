@@ -1,0 +1,94 @@
+{
+  "version": "0.6.0",
+  "status": "PASS",
+  "started_at": "2026-09-27T02:24:47.2071843Z",
+  "finished_at": "2026-09-27T02:26:19.2886283Z",
+  "source_head_at_run": "4519ed354202ea8f220682758da234e07b6df3ed",
+  "repository_state": "0.6.0 working tree before product commit; final commit is independently certified by CI",
+  "commands": {
+    "uv_sync": {
+      "command": "uv sync --frozen",
+      "status": "PASS"
+    },
+    "pytest": {
+      "command": "uv run pytest tests ../scripts/tests",
+      "status": "PASS",
+      "passed": 1140,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 2,
+      "duration_seconds": 93.47
+    },
+    "ruff": {
+      "command": "uv run ruff check src tests ../scripts",
+      "status": "PASS"
+    },
+    "mypy": {
+      "command": "uv run mypy src/trackvance --check-untyped-defs --ignore-missing-imports",
+      "status": "PASS",
+      "source_files": 42
+    },
+    "postgres": {
+      "commands": [
+        "uv run alembic upgrade head",
+        "uv run alembic check",
+        "uv run alembic downgrade base",
+        "uv run alembic upgrade head",
+        "uv run python ../scripts/check_postgres_migrations.py"
+      ],
+      "status": "PASS",
+      "engine": "PostgreSQL16-alpine",
+      "isolation": "fresh disposable container; random historical-check database; container and anonymous volumes removed",
+      "result": {
+        "status": "PASS",
+        "historical_tables_preserved": 6,
+        "actor_backfill": "PASS",
+        "model_parity": "PASS",
+        "roundtrip": "PASS",
+        "0008_0012_roundtrip": "PASS",
+        "0008_tables_preserved": 24,
+        "0008_delivery_attempts_preserved": {
+          "COMMITTED": 1,
+          "UNKNOWN": 1
+        },
+        "0008_delivery_lineage_edges_preserved": 8
+      }
+    }
+  },
+  "warnings": [
+    "StarletteDeprecationWarning: using httpx with starlette.testclient is deprecated; upstream recommends httpx2.",
+    "DeprecationWarning: anyio.abc.BlockingPortal alias is deprecated; upstream recommends anyio.from_thread.BlockingPortal."
+  ],
+  "migration_head": "0012_delivery_target_audit",
+  "historical_migrations_0001_0009_unchanged": true,
+  "catalog_codes": 41,
+  "permission_matrix_entries": 104,
+  "openapi_paths": 95,
+  "openapi_schemas": 87,
+  "file_sha256": {
+    "backend/openapi.json": "9c5ff32c0c3659ba88f296113984b3286228b8e663976afea1ebe72273cb6cbf",
+    "backend/uv.lock": "cb8d7cdf07f3899d5e352b512508f4cdfdaf2b4a8d9bf6dc62b2b7c66bc4c57f",
+    "backend/src/trackvance/permissions.py": "621aff513f07beefae833d1d9b7d4462ab64795d29dd0e43d8c2bc2e9d89e979",
+    "backend/migrations/versions/0010_dynamic_rbac_identity.py": "3e9680d122595ad04957d2616448ce2b028d15be14012f0d02230cdd61942bb2",
+    "backend/migrations/versions/0011_notification_delivery.py": "4473f4b966393438019e524ece878812138217b2479d9e0a664268d51fd1157d"
+  },
+  "external_sso": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "security_regressions": [
+    "nondelegable security administration",
+    "unknown endpoints fail closed",
+    "dynamic role effect without logout",
+    "role retirement including disabled users",
+    "temporary credentials and hash-only persistence",
+    "restricted first login and session rotation",
+    "revocation rechecked after identity lock",
+    "same role id preserved after long role rename",
+    "HTTPS public origin secure cookie",
+    "first SSO email rechecked after identity lock",
+    "signed OIDC nonce/state/PKCE/issuer/audience/expiry/signature/replay",
+    "stable external subject after email change",
+    "official Google issuer normalization",
+    "shared routes enforce actual module permissions",
+    "populated historical SQLite migration with real foreign-key enforcement"
+  ],
+  "final_verification": "Full backend+scripts after browser privacy harness changes; one import-order lint error corrected, full Ruff rerun PASS and two affected tests PASS. Mypy42 PASS."
+}

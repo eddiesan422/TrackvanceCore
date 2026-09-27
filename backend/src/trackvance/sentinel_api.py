@@ -19,7 +19,7 @@ from .models import (
     SentinelMetricHistory,
     User,
 )
-from .permissions import permissions_for
+from .permissions import effective_permissions
 from .scheduler import ScheduleError, occurrence_dto, save_schedule, schedule_dto
 from .services import finding_dto
 
@@ -131,7 +131,7 @@ def get_schedule(monitor_id: str, db: Session = Depends(get_db), user: User = De
 @router.post("/monitors/{monitor_id}/schedule", response_model=ScheduleResponse)
 def configure_schedule(monitor_id: str, body: ScheduleBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     monitor = owned_monitor(db, monitor_id, user)
-    if body.enabled and "runs:execute" not in permissions_for(user.role):
+    if body.enabled and "sentinel:execute" not in effective_permissions(db, user):
         raise ScheduleError(403, "FORBIDDEN", "No tienes permiso para programar ejecuciones.")
     schedule = save_schedule(db, monitor, user, **body.model_dump())
     db.commit()

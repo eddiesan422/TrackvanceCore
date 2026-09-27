@@ -237,7 +237,7 @@ def measure_case(api, run, project: str, destination: dict, version: dict,
         if preflight["status"] != "PASS":
             raise RuntimeError(f"{engine}/{strategy}: preflight falló.")
         configuration = api.post("/api/v1/delivery/configurations", {
-            **draft, "name": f"Benchmark {engine} {strategy}", "owner": "Benchmark 0.5.1",
+            **draft, "name": f"Benchmark {engine} {strategy}", "owner": "Benchmark Delivery",
             "description": "Medición desechable, no modifica límites del producto",
         })
         queued_start = time.monotonic()
@@ -326,7 +326,7 @@ def main() -> int:
         return bench.execute([*compose, *arguments], environment, credentials,
                              input_text=input_text, label="Delivery benchmark " + arguments[0])
 
-    result: dict[str, Any] = {"schema_version": 1, "version": "0.5.1", "status": "FAIL",
+    result: dict[str, Any] = {"schema_version": 1, "version": None, "status": "FAIL",
         "project": project, "measurement": "SMOKE" if args.smoke else "BOUNDED_REPRESENTATIVE",
         "production_capacity_certification": False, "cases": [],
         "requested": {"target_mib": target_mib, "rows": rows, "max_wall_seconds": args.max_wall_seconds},
@@ -379,6 +379,7 @@ def main() -> int:
             delivery.target_sql(run, engine, sql.replace("__WRITER_PASSWORD__", credentials[2]),
                                 use_delivery_database=engine != "SQLSERVER")
         api = bench.smoke.Api(base_url, timeout=600)
+        result["version"] = api.get("/api/v1/health")["version"]
         api.csrf = api.post("/api/v1/auth/demo", {}, expected=(200,))["csrf_token"]
         dataset = api.post("/api/v1/datasets", {"name": "Delivery benchmark varied", "domain": "Benchmark"})
         version = bench.stream_upload(api, f"/api/v1/datasets/{dataset['id']}/versions/upload", fixture_path, 600)

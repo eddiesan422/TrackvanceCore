@@ -18,7 +18,22 @@ La evolución funcional local precede a la productización. Este orden sustituye
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.
 
-## Ciclo 0.5.1: fortalecer el punto 10 existente
+## Ciclo 0.6.0: identidad dinámica y auditoría técnica
+
+RBAC administrable, login username/email, credenciales temporales por SMTP,
+primer acceso, Microsoft personal/corporativo y Google Gmail/Workspace mediante
+OIDC, y auditoría fechaIngesta/usuario en Delivery son alcance de esta versión.
+La evidencia concreta se publica en validation.md; no se heredan resultados.
+SHIST/SCD, vigencias y tablas históricas paralelas quedan excluidos. DatasetVersion
+sigue siendo el versionado inmutable interno. SSO no auto-provisiona ni mapea
+grupos/roles externos. SMTP sólo entrega credenciales USER por ahora.
+
+Gobierno ampliado, dominios/grupos administrables, notificaciones de ejecución,
+scheduling Delivery, nuevos Source/Sink, masking, retención avanzada, secretos
+cloud, Redis/Celery, PySpark, Kubernetes/Helm/Terraform y observabilidad
+empresarial permanecen en backlog. No son requisitos para cerrar 0.6.0.
+
+## Antecedente 0.5.1: fortalecer el punto 10 existente
 
 El ciclo no abre un nuevo módulo ni adelanta productización. Cierra ocho áreas:
 reparación local de evidencia, revisión operacional de UNKNOWN, semántica de
@@ -57,9 +72,9 @@ Los entornos Docker destructivos de prueba deben usar proyectos, bases y volúme
 Los puertos permiten añadir fuentes y adaptadores sin acoplar los módulos
 funcionales a proveedores. Data Delivery implementa la primera frontera de salida
 mediante `DataSink`, exclusivamente para PostgreSQL y SQL Server en el prototipo
-local. S3/Blob/REST y otros destinos, orquestación programada, RBAC específico de
-Delivery, secretos administrados, Redis/Celery, object storage, OIDC/SSO,
+local. S3/Blob/REST y otros destinos, orquestación programada de Delivery,
+secretos administrados, Redis/Celery, object storage,
 observabilidad distribuida y despliegue Kubernetes permanecen como evolución de
 producto. La certificación de cada revisión se publica separada de este estado funcional.
 
-Kubernetes, Redis/Celery productivo, S3/Azure Blob como almacenamiento interno, OIDC/SSO, Vault/Key Vault productivo, Terraform, Helm, PySpark operativo y observabilidad distribuida permanecen como objetivos de producto. No deben presentarse como implementados ni añadirse para completar este roadmap funcional local.
+Kubernetes, Redis/Celery productivo, S3/Azure Blob como almacenamiento interno, Vault/Key Vault productivo, Terraform, Helm, PySpark operativo y observabilidad distribuida permanecen como objetivos de producto. No deben presentarse como implementados ni añadirse para completar este roadmap funcional local.

@@ -31,13 +31,43 @@ class Record:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Role(Record, Base):
+    __tablename__ = "roles"
+    __table_args__ = (UniqueConstraint("organization_id", "normalized_name"),
+                      UniqueConstraint("organization_id", "system_key"))
+    name: Mapped[str] = mapped_column(String(120))
+    normalized_name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(2000), default="")
+    system_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), primary_key=True)
+    permission_code: Mapped[str] = mapped_column(String(80), primary_key=True)
+
+
 class User(Record, Base):
     __tablename__ = "users"
     name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(200), unique=True)
     role: Mapped[str] = mapped_column(String(40), default="Administrator")
+    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), index=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     password_hash: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    temporary_password_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -49,6 +79,47 @@ class AuthSession(Record, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     csrf_token: Mapped[str] = mapped_column(String(100))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    authentication_method: Mapped[str] = mapped_column(String(30), default="LOCAL")
+
+
+class ExternalIdentity(Record, Base):
+    __tablename__ = "external_identities"
+    __table_args__ = (UniqueConstraint("provider", "issuer", "subject"),
+                      UniqueConstraint("user_id", "provider"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    issuer: Mapped[str] = mapped_column(String(400))
+    subject: Mapped[str] = mapped_column(String(255))
+    email_at_link: Mapped[str] = mapped_column(String(200))
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OIDCLoginAttempt(Base):
+    __tablename__ = "oidc_login_attempts"
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    browser_hash: Mapped[str] = mapped_column(String(64))
+    nonce: Mapped[str] = mapped_column(String(100))
+    code_verifier: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationDeliveryRecord(Record, Base):
+    __tablename__ = "notification_deliveries"
+    event_type: Mapped[str] = mapped_column(String(80))
+    template_key: Mapped[str] = mapped_column(String(80))
+    channel: Mapped[str] = mapped_column(String(20), default="EMAIL")
+    recipient_type: Mapped[str] = mapped_column(String(20), default="USER")
+    recipient_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    recipient_email_snapshot: Mapped[str] = mapped_column(String(200))
+    provider_key: Mapped[str] = mapped_column(String(40), default="SMTP")
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Dataset(Record, Base):
@@ -140,6 +211,29 @@ class DeliveryDestinationVersion(Record, Base):
     config_hash: Mapped[str] = mapped_column(String(64))
 
 
+class DeliveryTargetPolicy(Record, Base):
+    """Irreversible publication policy, keyed by physical target rather than credentials."""
+
+    __tablename__ = "delivery_target_policies"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "target_fingerprint"),
+        CheckConstraint("audit_columns_required = true", name="ck_delivery_audit_required"),
+    )
+    destination_id: Mapped[str] = mapped_column(ForeignKey("delivery_destinations.id"), index=True)
+    target_fingerprint: Mapped[str] = mapped_column(String(64))
+    sink_type: Mapped[str] = mapped_column(String(30))
+    host_snapshot: Mapped[str] = mapped_column(String(253))
+    port: Mapped[int] = mapped_column(Integer)
+    database: Mapped[str] = mapped_column(String(128))
+    schema_name: Mapped[str] = mapped_column(String(128))
+    table_name: Mapped[str] = mapped_column(String(128))
+    audit_columns_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    enabled_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    enabled_by_username: Mapped[str] = mapped_column(String(128))
+    materialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class DatasetSourceBinding(Record, Base):
     """Selection to refresh; each resulting snapshot records its exact configuration."""
 
@@ -216,6 +310,7 @@ class DeliveryAttempt(Record, Base):
     idempotency_key: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(20), default="STARTED", index=True)
     target_locator: Mapped[str] = mapped_column(String(300))
+    system_audit: Mapped[dict] = mapped_column(JSON, default=dict)
     rows_attempted: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rows_written: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rows_inserted: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

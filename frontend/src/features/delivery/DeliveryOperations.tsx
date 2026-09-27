@@ -15,7 +15,7 @@ const outcomes: Record<DeliveryReviewOutcome, string> = {
 export function DeliveryOperations({ runId, attemptId, pendingRepair, unknown }: {
   runId: string; attemptId?: string; pendingRepair: boolean; unknown: boolean
 }) {
-  const cache = useQueryClient(), canExecute = usePermission('runs:execute')
+  const cache = useQueryClient(), canReview = usePermission('delivery:review_unknown'), canRepair = usePermission('delivery:repair_evidence')
   const [reviewOpen, setReviewOpen] = useState(false)
   const [outcome, setOutcome] = useState<DeliveryReviewOutcome>('INCONCLUSIVE')
   const [note, setNote] = useState(''), [verifiedAt, setVerifiedAt] = useState('')
@@ -38,23 +38,23 @@ export function DeliveryOperations({ runId, attemptId, pendingRepair, unknown }:
     onSuccess: async () => { setReviewOpen(false); setNote(''); setVerifiedAt(''); await refresh() },
   })
   return <>
-    {pendingRepair && <div className="delivery-unknown delivery-operation-notice"><FileCheck2 size={22}/><div><strong>Entrega confirmada. La evidencia local está pendiente de reparación.</strong><p>La reparación reconstruye únicamente receipt y manifest desde información persistida verificable. No conecta con el destino ni vuelve a enviar datos.</p>{canExecute && <button className="button secondary small" disabled={repair.isPending} onClick={() => repair.mutate()}>{repair.isPending ? 'Reparando evidencia…' : 'Reparar evidencia'}</button>}</div></div>}
+    {pendingRepair && <div className="delivery-unknown delivery-operation-notice"><FileCheck2 size={22}/><div><strong>Entrega confirmada. La evidencia local está pendiente de reparación.</strong><p>La reparación reconstruye únicamente receipt y manifest desde información persistida verificable. No conecta con el destino ni vuelve a enviar datos.</p>{canRepair && <button className="button secondary small" disabled={repair.isPending} onClick={() => repair.mutate()}>{repair.isPending ? 'Reparando evidencia…' : 'Reparar evidencia'}</button>}</div></div>}
     {repair.error && <ErrorState error={repair.error}/>}
     {repair.isSuccess && <Notice success>{repair.data.status === 'ALREADY_VALID' ? 'La evidencia local ya era válida.' : 'Evidencia local reparada.'} No se repitió la entrega.</Notice>}
     {unknown && <>
-      <div className="delivery-unknown delivery-operation-notice"><ShieldAlert size={22}/><div><strong>Confirmación remota desconocida</strong><p>Trackvance perdió la confirmación de la transacción. Verifica el destino antes de decidir cualquier nueva ejecución.</p><p>UNKNOWN no equivale a FAILED ni COMMITTED y no se reintentará automáticamente. La revisión sólo documenta lo observado externamente: no cambia el intento histórico, no reenvía datos y no crea una Run.</p>{canExecute && attemptId && <button className="button secondary small" onClick={() => { review.reset(); setReviewOpen(true) }}>Revisar resultado</button>}</div></div>
+      <div className="delivery-unknown delivery-operation-notice"><ShieldAlert size={22}/><div><strong>Confirmación remota desconocida</strong><p>Trackvance perdió la confirmación de la transacción. Verifica el destino antes de decidir cualquier nueva ejecución.</p><p>UNKNOWN no equivale a FAILED ni COMMITTED y no se reintentará automáticamente. La revisión sólo documenta lo observado externamente: no cambia el intento histórico, no reenvía datos y no crea una Run.</p>{canReview && attemptId && <button className="button secondary small" onClick={() => { review.reset(); setReviewOpen(true) }}>Revisar resultado</button>}</div></div>
       <section className="panel delivery-operational-reviews"><div className="panel-heading"><div><h2>Revisiones operacionales</h2><p>Observaciones externas añadidas al historial; no son confirmaciones de commit de Trackvance.</p></div></div>
         {reviews.isPending ? <Loading text="Cargando revisiones…"/> : reviews.error ? <ErrorState error={reviews.error} retry={() => reviews.refetch()}/> : !reviews.data?.items.length ? <Empty title="Sin revisiones registradas" description="Verifica el destino y documenta el resultado antes de considerar una nueva Run deliberada."/> : <div className="table-scroll"><table><thead><tr><th>Resultado observado externamente</th><th>Verificado por</th><th>Fecha de verificación</th><th>Fecha de registro</th><th>Nota / motivo</th></tr></thead><tbody>{reviews.data.items.map(item => <tr key={item.id}><td>{outcomes[item.outcome]}<small className="table-subtitle mono">{item.outcome}</small><small className="table-subtitle mono">Intento: {item.delivery_attempt_id}</small></td><td>{item.reviewer_name}<small className="table-subtitle mono">{item.reviewer_id}</small></td><td>{date(item.verified_at)}</td><td>{date(item.created_at)}</td><td className="delivery-review-note">{item.note}</td></tr>)}</tbody></table></div>}
       </section>
     </>}
     {reviewOpen && <Modal open onOpenChange={open => { if (!review.isPending) setReviewOpen(open) }} title="Revisar resultado" description="Registra una verificación externa. El intento conserva UNKNOWN y no se ejecutará otra entrega.">
-      <form className="form-stack" onSubmit={event => { event.preventDefault(); if (canExecute && attemptId && note.trim()) review.mutate() }}>
+      <form className="form-stack" onSubmit={event => { event.preventDefault(); if (canReview && attemptId && note.trim()) review.mutate() }}>
         <Field label="Resultado observado externamente"><select disabled={review.isPending} value={outcome} onChange={event => setOutcome(event.target.value as DeliveryReviewOutcome)}>{Object.entries(outcomes).map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></Field>
         <Field label="Fecha de verificación externa (opcional)" hint="Hora local. Si se omite, se registra la hora actual del servidor."><input type="datetime-local" disabled={review.isPending} value={verifiedAt} onChange={event => setVerifiedAt(event.target.value)}/></Field>
         <Field label="Nota / motivo" hint="Describe cómo verificaste el destino. No incluyas secretos ni filas de negocio."><textarea required maxLength={4000} rows={4} disabled={review.isPending} value={note} onChange={event => setNote(event.target.value)}/></Field>
         <Notice>Guardar sólo añade una revisión auditable. Para volver a entregar debes crear deliberadamente una nueva Run desde Data Delivery, después de verificar el destino.</Notice>
         {review.error && <ErrorState error={review.error}/>}
-        <div className="modal-footer"><button type="button" className="button secondary" disabled={review.isPending} onClick={() => setReviewOpen(false)}>Cancelar</button><button className="button primary" disabled={!canExecute || !attemptId || !note.trim() || review.isPending}>{review.isPending ? 'Guardando revisión…' : 'Guardar revisión'}</button></div>
+        <div className="modal-footer"><button type="button" className="button secondary" disabled={review.isPending} onClick={() => setReviewOpen(false)}>Cancelar</button><button className="button primary" disabled={!canReview || !attemptId || !note.trim() || review.isPending}>{review.isPending ? 'Guardando revisión…' : 'Guardar revisión'}</button></div>
       </form>
     </Modal>}
   </>

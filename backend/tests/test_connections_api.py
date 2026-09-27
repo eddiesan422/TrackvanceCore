@@ -350,6 +350,8 @@ def test_cross_organization_cannot_discover_test_edit_import_or_refresh(authenti
     result = register(authenticated, connection["id"]).json()
     with database() as db:
         db.get(User, "test-user").organization_id = "other-organization"
+        from trackvance.identity_bootstrap import ensure_roles
+        db.get(User, "test-user").role_id = ensure_roles(db, "other-organization")["Administrator"]
         db.commit()
     url = f"/api/v1/connections/{connection['id']}"
     assert authenticated.get("/api/v1/connections").json()["items"] == []

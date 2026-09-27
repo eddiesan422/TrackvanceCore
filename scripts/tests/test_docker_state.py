@@ -301,7 +301,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -529,8 +529,10 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     manifest["source_project"] = "trackvance-source-test"
     rewrite_legacy_state(source, manifest, expected)
     restored = json.loads(json.dumps(expected))
-    restored.update(schema_version=4, migration="0009_delivery_reviews")
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
+                    migration=docker_state.CURRENT_MIGRATION)
     restored["tables"]["delivery_reviews"] = {}
+    restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
     extracted, snapshot_commands = [], []
     monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _source: None)

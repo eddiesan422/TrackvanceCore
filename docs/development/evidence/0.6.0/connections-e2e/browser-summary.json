@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "startTime": "2026-09-27T02:28:59.143Z",
+  "duration": 159571.972,
+  "expected": 30,
+  "skipped": 11,
+  "unexpected": 0,
+  "flaky": 0,
+  "artifact_credentials_scan": "PASS",
+  "raw_artifacts_published": false
+}

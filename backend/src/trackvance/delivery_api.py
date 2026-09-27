@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .artifactstore import storage_provider
 from .data_sinks import DeliveryError, DestinationSettings, sink_registry
 from .db import get_db, iso, utcnow
+from .delivery_audit import policy_dto, target_policy
 from .delivery_credential_store import destination_secret_store
 from .delivery_schemas import (
     DeliveryAttemptsResponse,
@@ -25,6 +26,7 @@ from .delivery_schemas import (
     DeliveryReviewResponse,
     DeliveryReviewsResponse,
     DeliveryRunBody,
+    DeliveryTargetPolicyResponse,
     DestinationBody,
     DestinationListResponse,
     DestinationPatch,
@@ -40,6 +42,7 @@ from .delivery_service import (
     delivery_config_dto,
     destination_dto,
     enqueue_delivery,
+    exact_destination_version,
     owned_delivery_run,
     owned_destination,
     preflight_delivery,
@@ -64,6 +67,7 @@ from .models import (
     User,
     uid,
 )
+from .permissions import effective_permissions
 from .services import audit, run_dto
 
 router = APIRouter(prefix="/api/v1/delivery", tags=["Data Delivery"])
@@ -283,6 +287,24 @@ def destination_table_metadata(
     }
 
 
+@router.get("/destinations/{destination_id}/target-policy", response_model=DeliveryTargetPolicyResponse)
+def destination_target_policy(
+    destination_id: str,
+    schema_name: str = Query(min_length=1, max_length=128),
+    table_name: str = Query(min_length=1, max_length=128),
+    destination_version_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    destination = owned_destination(db, destination_id, user)
+    version = (exact_destination_version(db, destination, destination_version_id)
+               if destination_version_id else current_destination_version(db, destination))
+    policy, fingerprint, _identity = target_policy(
+        db, destination, version, {"schema_name": schema_name, "table_name": table_name}
+    )
+    return policy_dto(policy, fingerprint)
+
+
 @router.post("/preview", response_model=DeliveryPreviewResponse)
 def delivery_preview(
     body: DeliveryDraft,
@@ -324,7 +346,8 @@ def publish_delivery_configuration(
     user: User = Depends(current_user),
 ):
     draft = DeliveryDraft.model_validate(
-        body.model_dump(exclude={"name", "owner", "description"})
+        {key: value for key, value in body.snapshot().items()
+         if key not in {"name", "owner", "description"}}
     )
     config = create_delivery_configuration(
         db,
@@ -353,7 +376,9 @@ def publish_delivery_configuration_version(
     )
     if previous is None:
         raise DeliveryOperationError(404, "NOT_FOUND", "No se encontró la configuración.")
-    draft = DeliveryDraft.model_validate(body.model_dump(exclude={"description"}))
+    draft = DeliveryDraft.model_validate(
+        {key: value for key, value in body.snapshot().items() if key != "description"}
+    )
     config = create_delivery_configuration(
         db,
         user,
@@ -516,6 +541,8 @@ def delivery_receipt(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
+    if "delivery:read" not in effective_permissions(db, user):
+        raise DeliveryOperationError(403, "FORBIDDEN", "Tu rol no permite consultar Data Delivery.")
     run = db.scalar(
         select(Run).where(
             Run.id == run_id,

@@ -1,0 +1,35 @@
+# Requires compose.mailpit-test.yml, a fresh project and loopback browser ports.
+services:
+  mock-oidc:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ['python', '/test/mock_oidc.py']
+    environment:
+      MOCK_OIDC_PUBLIC_URL: http://127.0.0.1:${MOCK_OIDC_PORT:-9000}
+      MOCK_OIDC_INTERNAL_URL: http://mock-oidc:9000
+      MOCK_OIDC_CLIENT_SECRET: ${MOCK_OIDC_CLIENT_SECRET:-disposable-not-production}
+    volumes:
+      - ./scripts/tests/mock_oidc.py:/test/mock_oidc.py:ro
+    ports:
+      - '127.0.0.1:${MOCK_OIDC_PORT:-9000}:9000'
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: "no"
+  api:
+    environment:
+      TRACKVANCE_SSO_TEST_MODE: 'true'
+      TRACKVANCE_SSO_MICROSOFT_ENABLED: 'true'
+      TRACKVANCE_SSO_MICROSOFT_CLIENT_ID: trackvance-disposable-client
+      TRACKVANCE_SSO_MICROSOFT_CLIENT_SECRET: ${MOCK_OIDC_CLIENT_SECRET:-disposable-not-production}
+      TRACKVANCE_SSO_MICROSOFT_DISCOVERY_URL: http://mock-oidc:9000/microsoft/.well-known/openid-configuration
+      TRACKVANCE_SSO_GOOGLE_ENABLED: 'true'
+      TRACKVANCE_SSO_GOOGLE_CLIENT_ID: trackvance-disposable-client
+      TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET: ${MOCK_OIDC_CLIENT_SECRET:-disposable-not-production}
+      TRACKVANCE_SSO_GOOGLE_DISCOVERY_URL: http://mock-oidc:9000/google/.well-known/openid-configuration
+    depends_on:
+      mock-oidc:
+        condition: service_healthy

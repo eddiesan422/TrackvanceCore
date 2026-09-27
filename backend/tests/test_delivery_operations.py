@@ -430,8 +430,8 @@ def test_review_history_is_append_only_and_reviewer_name_is_a_snapshot(
     assert items == [first, second]
     assert items[0]["reviewer_name"] == "Test User"
     assert items[1]["reviewer_name"] == "Renamed reviewer"
-    assert authenticated.patch(route, json={"outcome": "INCONCLUSIVE"}).status_code == 405
-    assert authenticated.delete(route).status_code == 405
+    assert authenticated.patch(route, json={"outcome": "INCONCLUSIVE"}).status_code == 403
+    assert authenticated.delete(route).status_code == 403  # Unmapped protected method fails closed.
 
 
 @pytest.mark.parametrize("values", [
@@ -472,7 +472,11 @@ def test_operational_endpoints_require_csrf_and_scope_resources(
     assert authenticated.post(f"/api/v1/delivery/runs/{run_id}/reviews", json=review_body(attempt_id)).status_code == 403
     authenticated.headers["X-CSRF-Token"] = token
     with database() as db:
-        db.get(User, "test-user").organization_id = "different-org"
+        from trackvance.identity_bootstrap import ensure_roles
+
+        user = db.get(User, "test-user")
+        user.organization_id = "different-org"
+        user.role_id = ensure_roles(db, user.organization_id)["Administrator"]
         db.commit()
     assert repair(authenticated, run_id).status_code == 404
     assert authenticated.get(f"/api/v1/delivery/runs/{run_id}/reviews").status_code == 404

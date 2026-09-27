@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 from .artifactstore import artifact_dto, link_artifact, storage_provider
 from .audit_context import Actor
 from .db import get_db, iso, utcnow
-from .models import Artifact, ExceptionAttachment, ExceptionCase, Finding, User
+from .models import Artifact, ExceptionAttachment, ExceptionCase, Finding, Role, User
 from .operations_common import OperationError, save_case
-from .permissions import permissions_for
+from .permissions import effective_permissions
 from .services import (
     assess_exception_validation,
     audit,
@@ -120,9 +120,12 @@ def exceptions(state: str | None = None, module: str | None = None, severity: st
 
 @router.get("/assignees")
 def assignees(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    rows = [{"id": candidate.id, "name": candidate.name, "role": candidate.role} for candidate in
-            db.scalars(select(User).where(User.organization_id == user.organization_id, User.active.is_(True)).order_by(User.name))
-            if "exceptions:write" in permissions_for(candidate.role)]
+    rows = []
+    for candidate in db.scalars(select(User).where(User.organization_id == user.organization_id,
+                               User.active.is_(True), User.deleted.is_(False)).order_by(User.name)):
+        if "exceptions:write" in effective_permissions(db, candidate):
+            role = db.get(Role, candidate.role_id)
+            rows.append({"id": candidate.id, "name": candidate.name, "role": role.name if role else ""})
     return {"items": rows, "total": len(rows)}
 
 
@@ -156,7 +159,7 @@ def update_case(case_id: str, body: CasePatch, db: Session = Depends(get_db), us
     values = body.model_dump(exclude={"version", "comment"}, exclude_unset=True)
     changes = {key: value for key, value in values.items() if value is not None or key in {"assigned_user_id", "sla_hours", "due_at"}}
     state = changes.get("state", case.state)
-    permissions = permissions_for(user.role)
+    permissions = effective_permissions(db, user)
     if ((state != case.state and state in CLOSED) or
         ("auto_resolve_enabled" in changes and changes["auto_resolve_enabled"] != case.auto_resolve_enabled)) and "exceptions:close" not in permissions:
         raise OperationError(403, "FORBIDDEN", "No tienes permiso para cerrar excepciones o cambiar su resolución automática.")
@@ -177,7 +180,7 @@ def update_case(case_id: str, body: CasePatch, db: Session = Depends(get_db), us
         candidate = db.get(User, changes["assigned_user_id"]) if changes["assigned_user_id"] else None
         if changes["assigned_user_id"] and (not candidate or candidate.organization_id != user.organization_id
                                              or (changes["assigned_user_id"] != case.assigned_user_id and
-                                                 (not candidate.active or "exceptions:write" not in permissions_for(candidate.role)))):
+                                                 (not candidate.active or candidate.deleted or "exceptions:write" not in effective_permissions(db, candidate)))):
             raise OperationError(422, "INVALID_ASSIGNEE", "Selecciona un responsable activo de esta organización con permiso de gestión.")
         if changes["assigned_user_id"] != case.assigned_user_id:
             changes["owner"] = candidate.name if candidate else "Sin asignar"
@@ -286,7 +289,7 @@ async def upload_attachment(case_id: str, version: int = Form(...), description:
 
 @router.get("/{case_id}/attachments/{attachment_id}/download")
 def attachment_download(case_id: str, attachment_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    if "artifacts:download" not in permissions_for(user.role):
+    if "artifacts:download" not in effective_permissions(db, user):
         raise OperationError(403, "FORBIDDEN", "Tu rol no permite descargar evidencia.")
     case = owned_case(db, case_id, user)
     attachment = db.get(ExceptionAttachment, attachment_id)

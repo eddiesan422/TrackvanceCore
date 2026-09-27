@@ -23,6 +23,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
+from browser_evidence import run_browser
+
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-connections-e2e-"
 FIXTURES = Path(__file__).with_name("fixtures")
@@ -456,6 +458,7 @@ def main() -> int:
     except ValueError as error:
         parser.error(str(error))
     port = args.port or available_port()
+    mailpit_port = available_port()
     if not 1 <= port <= 65535:
         parser.error("--port debe estar entre 1 y 65535")
     password = "TvReader-" + secrets.token_hex(18)
@@ -467,6 +470,8 @@ def main() -> int:
                    "PYTHONIOENCODING": "utf-8",
                    "COMPOSE_PROJECT_NAME": project, "WEB_PORT": str(port),
                    "TRACKVANCE_WEB_ORIGIN": base_url, "TV_E2E_URL": base_url,
+                   "PLAYWRIGHT_BASE_URL": base_url, "MAILPIT_PORT": str(mailpit_port),
+                   "TV_MAILPIT_URL": f"http://127.0.0.1:{mailpit_port}",
                    "POSTGRES_USER": "trackvance", "POSTGRES_DB": "trackvance",
                    "POSTGRES_PASSWORD": internal_password,
                    "SOURCE_POSTGRES_PASSWORD": admin_password,
@@ -474,7 +479,8 @@ def main() -> int:
                    "DEMO_ACCESS_ENABLED": "true", "DEMO_SEED_ENABLED": "false",
                    "TV_CONNECTIONS_E2E": "true", "TV_CONNECTIONS_PASSWORD": password}
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml",
-               "-f", "deploy/docker/compose.connections-test.yml"]
+               "-f", "deploy/docker/compose.connections-test.yml",
+               "-f", "deploy/docker/compose.mailpit-test.yml"]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "connections-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
 
@@ -531,12 +537,7 @@ def main() -> int:
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
             browser_args = [] if args.full_playwright else ["tests-e2e/connections.spec.ts"]
-            command([pnpm, "exec", "playwright", "test", *browser_args],
-                    cwd=ROOT / "frontend")
-            for directory in ("test-results", "playwright-report"):
-                source = ROOT / "frontend" / directory
-                if source.exists():
-                    shutil.copytree(source, evidence / directory, dirs_exist_ok=True)
+            run_browser(pnpm, browser_args, root=ROOT, project=project, environment=environment, evidence=evidence)
         run(["restart", "postgres", "api", "worker", "delivery-worker", "web"])
         run(["up", "-d", "--wait", "--wait-timeout", "180"])
         for result in results:
@@ -572,11 +573,9 @@ def main() -> int:
                      "delivery-worker"],
                     capture=True,
                 )
-                (evidence / "application.log").write_text(redact(logs, credentials), encoding="utf-8")
-                for directory in ("test-results", "playwright-report"):
-                    source = ROOT / "frontend" / directory
-                    if source.exists():
-                        shutil.copytree(source, evidence / directory, dirs_exist_ok=True)
+                local_logs = ROOT / ".codex-local" / "browser-results" / project
+                local_logs.mkdir(parents=True, exist_ok=True)
+                (local_logs / "application.log").write_text(redact(logs, credentials), encoding="utf-8")
             except (OSError, RuntimeError):
                 pass
         return 1

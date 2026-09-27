@@ -1,19 +1,19 @@
-# Contrato prototipo local 0.5.0
+# Contrato Trackvance Core local 0.6.0
 
 El esquema ejecutable se genera desde la aplicación y mantiene base `/api/v1`
 para compatibilidad. El archivo [openapi.json](openapi.json) se regenera y revisa
-como paso documental separado. El snapshot 0.5.0 contiene 81 paths, incluidos
-14 paths bajo Data Delivery, y corresponde a las rutas efectivamente instaladas.
+como paso documental separado. El snapshot 0.6.0 contiene 95 paths, incluidos
+17 paths bajo Data Delivery, y corresponde a las rutas efectivamente instaladas.
 El runtime documenta sesión cookie, CSRF, MIME, DTOs y errores desde ese contrato.
 
-Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string opacos. Fechas ISO UTC. Todos los endpoints salvo `/health`, `/health/ready` y `/auth/demo|login` requieren cookie sesión. Los aliases absolutos `/health` y `/health/ready`, sin el prefijo `/api/v1`, también son públicos para diagnóstico y Compose. Todas las mutaciones autenticadas requieren `X-CSRF-Token` devuelto al iniciar sesión. El proxy Vite preserva cookie; usar `credentials: 'include'`.
+Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string opacos. Fechas ISO UTC. Los endpoints públicos son health/ready, auth/demo|login, auth/providers y los start/callback Microsoft/Google. Los demás requieren cookie de sesión; primer acceso limita la sesión a /me, logout y change-password. Los aliases absolutos `/health` y `/health/ready`, sin el prefijo `/api/v1`, también son públicos para diagnóstico y Compose. Todas las mutaciones autenticadas requieren `X-CSRF-Token` devuelto al iniciar sesión. El proxy Vite preserva cookie; usar `credentials: 'include'`.
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.5.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.6.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `{user:{id,name,email,role,permissions:[]},organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
-- `POST /auth/login` `{email,password}` → mismo.
+- `POST /auth/login` `{username,password}` o `{email,password}` → mismo. El campo username acepta usuario o correo; se envía exactamente un identificador.
 - `GET /me` → mismo.
 - `POST /auth/logout` → `{ok:true}`.
 - `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel|DELIVERY&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `recent_runs` puede incluir Delivery y sus métricas; `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
@@ -208,7 +208,7 @@ Estas son precondiciones de ejecución además de checks de preflight.
 - `POST /delivery/preview?limit=8` con el borrador → muestra acotada de filas de
   origen y destino después del mapping; no escribe.
 - `POST /delivery/preflight` con el borrador → `{status:'PASS',checks,source,
-  destination,target}` o error sanitizado. Valida artifact/hash, versión exacta
+  destination,target,system_audit}` o error sanitizado. Valida artifact/hash, versión exacta
   del destino, mapping/tipos, target, restricciones, permisos y claves UPSERT.
 - `GET /delivery/configurations` → configuraciones Delivery publicadas.
 - `POST /delivery/configurations` añade `name`, `owner` y `description` al
@@ -221,7 +221,7 @@ Estas son precondiciones de ejecución además de checks de preflight.
   inmediatamente antes de escribir.
 - `GET /delivery/runs/{id}/attempts` → `{items:[DeliveryAttempt],total}`.
 - `GET /delivery/runs/{id}/receipt` → JSON descargable sólo tras un commit
-  confirmado y con `artifacts:download`.
+  confirmado y con `delivery:read` además de `artifacts:download`.
 
 `DeliveryAttempt` conserva `{id,run_id,destination_version_id,attempt_number,
 idempotency_key,status,target_locator,rows_attempted,rows_written,rows_inserted,
@@ -232,10 +232,7 @@ indica que Trackvance no puede confirmar el commit remoto; no equivale a fallo n
 decidir una ejecución explícita. Receipt y manifest no contienen secretos ni filas
 completas y enlazan Run, DatasetVersion, DestinationVersion y DeliveryAttempt.
 
-RBAC 0.5.1 conserva provisionalmente `connections:read/manage/use`,
-`configurations:write`, `runs:read/execute` y `artifacts:download`. Permisos
-granulares propios de Delivery permanecen pendientes; no deben inferirse del
-nombre de las rutas.
+RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence. Receipt añade artifacts:download. La matriz exhaustiva y los controles adicionales por módulo/recurso están en [permission-matrix-0.6.0.md](../docs/development/permission-matrix-0.6.0.md).
 
 ## Configuraciones y ejecuciones
 
@@ -326,8 +323,7 @@ reintento automático. Ver [ADR 0015](../docs/adr/0015-data-delivery.md).
 
 Backup/restore y verificación incorporan `delivery_credentials` y `delivery_keys`.
 Los almacenes cifrados y sus claves son material sensible aunque las respuestas y
-manifests no lo muestren. El control de acceso reutiliza permisos existentes en
-0.5.0; un RBAC específico de Delivery no forma parte de este contrato.
+manifests no lo muestren. Desde 0.6.0 el control de acceso usa permisos específicos de Delivery y destinos; no se autoriza con las etiquetas históricas de User.
 
 ## Adiciones y semántica 0.3.0
 
@@ -468,7 +464,7 @@ Recon añade `source_transforms`, `target_transforms` y `aggregations` SUM/COUNT
 ### Sentinel programado
 
 - `GET /monitors/{id}/schedule`: programación actual o `null`; monitor inexistente o de otra organización devuelve 404.
-- `POST /monitors/{id}/schedule`: `{interval_seconds:60..2678400,enabled:true,starts_at?:ISO-con-zona,expected_version?:number}`. Crear omite expected_version; editar requiere la revisión vigente. Devuelve programación con ID, revisión, fecha próxima y políticas. Conflicto 409, fecha inválida 422. Requiere `configurations:write` y `runs:execute` al habilitar, además de CSRF.
+- `POST /monitors/{id}/schedule`: `{interval_seconds:60..2678400,enabled:true,starts_at?:ISO-con-zona,expected_version?:number}`. Crear omite expected_version; editar requiere la revisión vigente. Devuelve programación con ID, revisión, fecha próxima y políticas. Conflicto 409, fecha inválida 422. Requiere `sentinel:schedule`; al habilitar comprueba también `sentinel:execute`, además de CSRF.
 - `GET /monitors/{id}/occurrences?limit=50`: hasta 200 intervalos recientes, con revisión, Configuration, DatasetVersion, Run, fecha prevista/despacho/inicio/finalización, estado técnico, decisión de negocio, métricas y reason code.
 - `GET /monitors/{id}/series?include_versions=true&limit=500`: hasta 2000 muestras del linaje del monitor. Agrupa por clave, dimensiones, método y versión de definición. Cada punto incluye ejecución, configuración, DatasetVersion, fecha, `value` numérico para visualización y `exact_value` textual para conservar precisión. No mezcla series incompatibles.
 - `GET /monitors/{id}/alerts?limit=50`: hasta 200 Findings históricos del monitor, con enlaces al run y excepción si existe.
@@ -489,14 +485,87 @@ El scheduler usa `LATEST_REGISTERED_SNAPSHOT`, `COALESCE_LATEST` y `SKIP_WHILE_A
 
 Flujo `OPEN → ASSIGNED → INVESTIGATING → PENDING_VALIDATION → RESOLVED`; también se permite pasar de OPEN a INVESTIGATING. Resolver exige causa/corrección y validación posterior vigente del mismo control. Reabrir exige comentario y una nueva ejecución creada después de la reapertura. Cierres DISCARDED/ACCEPTED/NOT_APPLICABLE exigen un motivo explícito nuevo en cada petición y nunca equivalen a resolución técnica. Cambiar la política automática o cerrar requiere `exceptions:close`. La política automática está deshabilitada por defecto y conserva SYSTEM, evidencia, run confirmatorio y timeline. Ver ADR 0011.
 
-### Usuarios y roles locales
+### Usuarios, roles y autenticación 0.6.0
 
-`User = {id,name,email,role,active,permissions,version,created_at,updated_at,password_changed_at}`.
+Los DTO exactos `UserResponse`, `RoleResponse`, `ExternalIdentityResponse` y
+`NotificationResponse` están en OpenAPI. Nunca contienen hash, contraseña,
+token OAuth ni secreto SMTP/client. `UserResponse` añade first_name/last_name,
+username, role_id/role_version, active/deleted, must_change_password,
+temporary_password_expires_at, last_login_at, credential_delivery y external_identities.
+Los nombres personales legacy pueden ser null; name histórico se conserva.
 
-- `GET /users?active=true|false` y `GET /users/{id}`: consulta con `users:read`.
-- `GET /users/roles`: roles base y permisos efectivos; Data Owner se conserva como alias histórico de Data Owner / Lead.
-- `POST /users`: `{name,email,role,password,active?}`; requiere `users:write`, contraseña de 12 a 1024 caracteres, hash Argon2; devuelve 201 sin credenciales.
-- `PATCH /users/{id}`: `{version,name?,email?,role?,active?}`; CAS y aislamiento. Cambiar email, rol o estado revoca sesiones.
-- `POST /users/{id}/reset-password`: `{version,password}`; hash nuevo, revocación de sesiones y auditoría.
+| Método/ruta | Entrada y resultado |
+| --- | --- |
+| GET /roles/permissions | Catálogo controlado con code, group, label, dependencies, delegable. |
+| GET /roles y /users/roles | Colección Role; alias histórico devuelve roles persistidos. |
+| GET /roles/{id} | Role con user_count de cuentas no eliminadas y protected. |
+| POST /roles | name, description?, permissions[], active?; 201 Role. |
+| PATCH /roles/{id} | version, name?, description?, permissions[]?, active?; Role. |
+| DELETE /roles/{id} | Cuerpo {version}; baja lógica; rechaza asociados no eliminados y Administrator. |
+| GET /users?active=&include_deleted=&search= | Colección User; filtros opcionales, include_deleted=false predeterminado. |
+| GET /users/{id} | User del scope con estados de credenciales/identidades. |
+| POST /users | first_name,last_name,username,email,role_id,active?; 201 User. Sin password de entrada. |
+| PATCH /users/{id} | version, first_name?,last_name?,username?,email?,role_id?,active?. |
+| DELETE /users/{id} | Cuerpo {version}; baja lógica; reserva identificadores y revoca sesiones. |
+| POST /users/{id}/resend-credentials | {version}; nueva temporal, expiración24h, revocación y entrega SMTP. |
+| POST /users/{id}/reset-password | Alias deprecated de resend, mismo {version}; no acepta password elegida por admin. |
+| DELETE /users/{id}/external-identities/{identity_id} | Sin cuerpo; desvincula identidad del usuario del mismo scope, audita y revoca sesiones. |
+| POST /auth/login | {username,password} o {email,password}; exactamente un identificador, username acepta usuario o correo normalizado. |
+| POST /auth/first-login/change-password | {new_password}; confirmación se valida en UI; devuelve envelope /me con cookie/CSRF nuevos. |
+| GET /auth/providers | {items:[{id,name,start_url}],total,statuses:{microsoft,google},local_enabled:true}; items contiene sólo habilitados/configurados; estados ENABLED/NOT_CONFIGURED/DISABLED, sin client IDs/secrets. |
+| GET /auth/sso/{provider}/start | Redirect a autorización, state/nonce/PKCE y cookie binder. Sólo microsoft/google. |
+| GET /auth/sso/{provider}/callback | code/state o error; consume intento único, valida token y redirige a UI o /login?sso_error. |
+| GET /notifications/status | Estado enabled/configured/provider/security/from_address/from_name, sin configuración sensible. |
+| GET /notifications/deliveries | Lista de metadata de entregas de organización, sin cuerpos. |
 
-No existe borrado de identidades históricas. Se impide desactivar/degradar al último administrador activo bajo bloqueo transaccional por organización. Los roles Administrator, Data Owner / Lead, Data Analyst, Operations y Auditor siguen una política central en backend. La administración es local; no hay OIDC/SSO. Ver ADR 0012.
+Las modificaciones de User/Role administran version/CAS; desvincular identidad externa es una eliminación idempotente por identidad bajo lock, y un vínculo inexistente devuelve404. Dependencias incompletas, códigos
+desconocidos o permisos no delegables se rechazan. Administrator protegido
+resuelve todo el catálogo y no puede perder identidad/actividad/permisos.
+Un rol con usuarios no eliminados no puede desactivarse ni borrarse; se preserva
+el último administrador activo y se protege la eliminación propia.
+
+Un alta genera temporal de 32 caracteres y sólo persiste Argon2. SMTP FAILED
+conserva el usuario; regenerar invalida la anterior. Primer login local y SSO
+con must_change_password restringe acceso hasta definir contraseña. Role/email/
+username/actividad, regeneración y desvinculación revocan sesiones. Editar grants
+no requiere logout: el backend relee Role y la UI refresca /me.
+
+SSO no auto-provisiona ni confía en roles externos. El primer vínculo exige email
+con autoridad verificada y usuario activo preprovisionado; accesos posteriores
+usan provider/issuer/subject. No se guardan access/id/refresh tokens. Ver
+[identidad](../docs/development/identity-060.md), [SSO](../docs/development/sso-setup.md)
+y [SMTP](../docs/development/smtp-setup.md).
+
+### Columnas de auditoría y target policy 0.6.0
+
+Delivery config añade `audit_columns_enabled?:boolean=false`. Sin policy, ambos
+valores mantienen el comportamiento sin auditoría. Omitir el campo conserva el
+hash histórico; enviarlo explícitamente incluye el booleano en el nuevo snapshot.
+true activa conjuntamente
+fechaIngesta/usuario; mapping no puede usar nombres reservados. El preflight
+verifica tipos, columnas existentes, permisos DDL y policy del target físico.
+
+`GET /delivery/destinations/{id}/target-policy?schema_name=&table_name=&destination_version_id=`
+requiere schema_name/table_name (1..128 caracteres); destination_version_id es
+opcional y, ausente, usa la versión vigente del destino. Devuelve
+`{audit_columns_required:boolean,policy_id:string|null,target_fingerprint:string,
+materialized_at:string|null}`. Consulta sólo metadata local y exige delivery:read.
+No puede desactivarse mediante otra configuración o versión de credenciales.
+
+DeliveryAttempt persiste `system_audit` (objeto vacío histórico); DTO, receipt y
+manifest omiten el campo cuando está vacío para conservar el contrato histórico.
+Cuando hay auditoría incluye metadata de policy, columnas, timestamp UTC del
+intento y username interno snapshot. Receipt/manifest
+reutilizan esa metadata sin modificar DatasetVersion ni filas origen. CREATE
+crea columnas NOT NULL; ALTER sobre tabla existente conserva filas anteriores
+NULL y DML nuevo recibe ambos valores. APPEND/OVERWRITE/UPSERT INSERT/UPDATE
+comparten timestamp por intento; ALTER+DML se confirman en una transacción remota.
+
+Preflight devuelve `system_audit={enabled:false}` sin auditoría; cuando está activa
+agrega columns, missing_columns, policy_id y materialized_at. Los tipos creados son
+TIMESTAMPTZ(6)/VARCHAR(128) en PostgreSQL y DATETIMEOFFSET(6)/NVARCHAR(128) en SQL Server.
+Faltantes tras materialización provocan AUDIT_COLUMNS_DRIFT; tipos/nombres no
+adoptables, AUDIT_COLUMNS_INCOMPATIBLE; desactivación exigida por policy,
+AUDIT_COLUMNS_REQUIRED. UNKNOWN no se reintenta automáticamente; la policy sigue
+requerida aunque no haya confirmación local. Ver [Delivery audit](../docs/development/delivery-audit.md)
+para fingerprint, permisos, evidencia, recuperación y límites.

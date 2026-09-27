@@ -22,11 +22,13 @@ from .audit_context import Actor
 from .config import MAX_ROWS
 from .credential_store import SecretStoreError
 from .data_sinks import (
+    AUDIT_NAMES,
     LOGICAL_TYPES,
     DeliveryError,
     DestinationSettings,
     convert_value,
     decimal_capacity_for_native,
+    inspect_audit_columns,
     integer_bounds_for_native,
     sink_registry,
     sqlserver_collation_supports_supplementary,
@@ -36,6 +38,7 @@ from .data_sinks import (
     utf16_code_units,
 )
 from .db import iso, require_record, utcnow
+from .delivery_audit import target_policy
 from .delivery_credential_store import destination_secret_store
 from .delivery_metrics import delivery_metric_semantics
 from .delivery_schemas import DeliveryDraft, DeliveryReviewBody
@@ -51,6 +54,7 @@ from .models import (
     DeliveryDestination,
     DeliveryDestinationVersion,
     DeliveryOperationalReview,
+    DeliveryTargetPolicy,
     Job,
     Run,
     User,
@@ -560,6 +564,11 @@ def _target_compatibility(
         )
     target_columns = {column["name"]: column for column in metadata["columns"]}
     mapped_names = {column.target_name for column in draft.columns}
+    if draft.audit_columns_enabled:
+        mapped_names.update(
+            column["name"] for column in metadata["columns"]
+            if column["name"].casefold() in {name.casefold() for name in AUDIT_NAMES.values()}
+        )
     for mapping in draft.columns:
         target_column = target_columns.get(mapping.target_name)
         if target_column is None:
@@ -827,6 +836,21 @@ def preflight_delivery(
     destination_version = exact_destination_version(
         db, destination, draft.destination_version_id
     )
+    policy, _fingerprint, _identity = target_policy(
+        db, destination, destination_version, draft.target.model_dump()
+    )
+    if policy and not draft.audit_columns_enabled:
+        raise DeliveryOperationError(
+            412, "AUDIT_COLUMNS_REQUIRED",
+            "Esta tabla utiliza auditoría de ingesta de Trackvance; no puede deshabilitarse.",
+        )
+    if draft.audit_columns_enabled and any(
+        column.target_name.casefold() in {name.casefold() for name in AUDIT_NAMES.values()}
+        for column in draft.columns
+    ):
+        raise DeliveryOperationError(
+            412, "AUDIT_MAPPING_COLLISION", "El mapping no puede escribir columnas de auditoría."
+        )
     _check(checks, "DESTINATION", True, "Destino y revisión inmutable disponibles.")
     sink = sink_registry.create(settings_for(destination, destination_version))
     sink.test()
@@ -939,13 +963,37 @@ def preflight_delivery(
             _target_compatibility(
                 draft, metadata, records, checks, destination.sink_type
             )
-        permissions = sink.permissions(target, draft.write_strategy)
+        audit_target = dict(target)
+        if draft.audit_columns_enabled:
+            audit_target["_audit_requires_alter"] = True
+        permissions = sink.permissions(audit_target, draft.write_strategy)
         _check(
             checks,
             "PERMISSIONS",
             bool(permissions.get("allowed")),
             "Permisos de escritura verificados.",
         )
+    system_audit: dict[str, Any] = {"enabled": draft.audit_columns_enabled}
+    if draft.audit_columns_enabled:
+        try:
+            inspected = inspect_audit_columns(
+                destination.sink_type, metadata,
+                materialized=bool(policy and policy.materialized_at),
+            )
+        except DeliveryError as error:
+            if error.code == "AUDIT_COLUMNS_DRIFT":
+                audit(db, "DELIVERY_TARGET_AUDIT_DRIFT", "delivery_target_policy",
+                      policy.id if policy else destination.id, error.message,
+                      "Delivery", organization_id, {"error_code": error.code})
+                db.commit()
+            raise DeliveryOperationError(412, error.code, error.message) from None
+        system_audit.update({
+            **inspected, "policy_id": policy.id if policy else None,
+            "materialized_at": iso(policy.materialized_at) if policy else None,
+        })
+        if target["mode"] == "EXISTING_TABLE" and inspected["missing_columns"]:
+            _check(checks, "AUDIT_ALTER_PERMISSION", bool(permissions.get("alter_table")),
+                   "Se requiere permiso ALTER remoto para agregar los campos de auditoría.")
     prepared_target = dict(target)
     if (
         destination.sink_type == "POSTGRESQL"
@@ -1034,6 +1082,7 @@ def preflight_delivery(
             "config_hash": destination_version.config_hash,
         },
         "target": {**target, "metadata": metadata},
+        "system_audit": system_audit,
     }
     if failures and raise_on_failure:
         raise DeliveryOperationError(
@@ -1043,6 +1092,23 @@ def preflight_delivery(
             {"checks": checks},
         )
     return result
+
+
+def _require_target_permissions(
+    db: Session, user: User, draft: DeliveryDraft, policy: DeliveryTargetPolicy | None,
+) -> None:
+    from .permissions import effective_permissions
+
+    permissions = effective_permissions(db, user)
+    required = set()
+    if draft.write_strategy == "OVERWRITE":
+        required.add("delivery:overwrite")
+    if draft.target.mode == "CREATE_TABLE" or (
+        draft.audit_columns_enabled and (not policy or not policy.materialized_at)
+    ):
+        required.add("delivery:alter_target")
+    if not required.issubset(permissions):
+        raise DeliveryOperationError(403, "FORBIDDEN", "No tienes permiso para modificar este target.")
 
 
 def create_delivery_configuration(
@@ -1055,6 +1121,12 @@ def create_delivery_configuration(
     description: str,
     previous: Configuration | None = None,
 ) -> Configuration:
+    destination = owned_destination(db, draft.destination_id, user)
+    destination_version = exact_destination_version(db, destination, draft.destination_version_id)
+    policy, fingerprint, identity = target_policy(
+        db, destination, destination_version, draft.target.model_dump(), lock=True
+    )
+    _require_target_permissions(db, user, draft, policy)
     preflight_delivery(db, user.organization_id, draft)
     version, dataset, _artifact, _frame = _owned_version(
         db, draft.dataset_version_id, user.organization_id
@@ -1085,6 +1157,21 @@ def create_delivery_configuration(
         previous_version_id=previous_id,
     )
     db.add(config)
+    if draft.audit_columns_enabled and policy is None:
+        policy = DeliveryTargetPolicy(
+            organization_id=user.organization_id, destination_id=destination.id,
+            target_fingerprint=fingerprint, sink_type=destination.sink_type,
+            host_snapshot=identity["host"], port=identity["port"], database=identity["database"],
+            schema_name=identity["schema_name"], table_name=identity["table_name"],
+            enabled_by_user_id=user.id, enabled_by_username=user.username,
+        )
+        db.add(policy)
+        db.flush()
+        audit(db, "DELIVERY_TARGET_AUDIT_ENABLED", "delivery_target_policy", policy.id,
+              "Auditoría de ingesta requerida permanentemente para el target",
+              user.name, user.organization_id,
+              {"destination_id": destination.id, "policy_id": policy.id,
+               "username": user.username, "target_fingerprint": fingerprint})
     db.flush()
     audit(
         db,
@@ -1177,6 +1264,12 @@ def enqueue_delivery(
     canonical = db.get(Artifact, source.canonical_artifact_id)
     if canonical is None or canonical.organization_id != config.organization_id:
         raise DeliveryOperationError(412, "FAILED_PRECONDITION", "El artifact canónico no está disponible.")
+    policy, _fingerprint, _identity = target_policy(
+        db, destination, destination_version, draft.target.model_dump(), lock=True
+    )
+    if policy and not draft.audit_columns_enabled:
+        raise DeliveryOperationError(412, "AUDIT_COLUMNS_REQUIRED", "La política exige auditoría de ingesta.")
+    _require_target_permissions(db, actor, draft, policy)
     run = Run(
         id=uid(),
         organization_id=config.organization_id,
@@ -1188,6 +1281,9 @@ def enqueue_delivery(
         initiated_by_type="USER",
         initiated_by_id=actor.id,
         execution_plan={
+            "initiated_by_username": actor.username,
+            "audit_columns_enabled": draft.audit_columns_enabled,
+            "audit_policy_id": policy.id if policy else None,
             "engine": "DATA_SINK",
             "lane": "DELIVERY",
             "schema_version": draft.schema_version,
@@ -1230,6 +1326,9 @@ def enqueue_delivery(
         "DELIVERY_DESTINATION_VERSION",
         draft.destination_version_id,
     )
+    if policy:
+        link_artifact(db, run.organization_id, "AUDITED_TARGET", "RUN", run.id,
+                      "DELIVERY_TARGET_POLICY", policy.id)
     audit(
         db,
         "DELIVERY_RUN_QUEUED",
@@ -1258,6 +1357,7 @@ def attempt_dto(attempt: DeliveryAttempt) -> dict[str, Any]:
         "idempotency_key": attempt.idempotency_key,
         "status": attempt.status,
         "target_locator": attempt.target_locator,
+        **({"system_audit": attempt.system_audit} if attempt.system_audit else {}),
         "rows_attempted": attempt.rows_attempted,
         "rows_written": attempt.rows_written,
         "rows_inserted": attempt.rows_inserted,
@@ -1458,6 +1558,8 @@ def _equivalent_evidence(actual: dict[str, Any], expected: dict[str, Any], kind:
     for key in ("target", "write_strategy", "attempt"):
         if actual_delivery.get(key) != expected_delivery[key]:
             return False
+    if actual_delivery.get("system_audit") != expected_delivery.get("system_audit"):
+        return False
     for key, value in expected_delivery["destination"].items():
         if key != "destination_name" and actual_delivery.get("destination", {}).get(key) != value:
             return False
@@ -1552,6 +1654,7 @@ def _publish_delivery_evidence(
         "delivery_attempt_id": attempt.id,
         "attempt_number": attempt.attempt_number,
         "metric_semantics": delivery_metric_semantics(),
+        **({"system_audit": attempt.system_audit} if attempt.system_audit else {}),
         **{key: metrics[key] for key in ("preflight_seconds", "write_seconds") if key in metrics},
     }
     receipt = _publish_evidence_artifact(
@@ -1606,6 +1709,7 @@ def _publish_delivery_evidence(
             "stored_config_hash": configuration_hash(config.config),
         },
         "delivery": {
+            **({"system_audit": attempt.system_audit} if attempt.system_audit else {}),
             "destination": {
                 "destination_id": destination.id,
                 "destination_name": destination_name,
@@ -1736,6 +1840,16 @@ def execute_delivery_run(
         db, destination, draft.destination_version_id
     )
     try:
+        attempt_timestamp = utcnow()
+        system_audit: dict[str, Any] = {}
+        if draft.audit_columns_enabled:
+            audit_preflight = preflight["system_audit"]
+            system_audit = {
+                "enabled": True, "fecha_ingesta": iso(attempt_timestamp),
+                "username": run.execution_plan.get("initiated_by_username"),
+                "policy_id": audit_preflight["policy_id"],
+                "columns": audit_preflight["columns"], "columns_created": None,
+            }
         _version, _dataset, source_artifact, frame = _owned_version(
             db, source.id, run.organization_id
         )
@@ -1744,6 +1858,11 @@ def execute_delivery_run(
         ).to_dicts()
         sink = sink_registry.create(settings_for(destination, destination_version))
         prepared_target = draft.target.model_dump()
+        if system_audit:
+            prepared_target["_system_audit"] = {
+                **system_audit,
+                "materialized": bool(preflight["system_audit"]["materialized_at"]),
+            }
         if destination.sink_type == "POSTGRESQL" and draft.write_strategy == "UPSERT":
             metadata = preflight["target"].get("metadata") or {}
             matching = _matching_upsert_constraints(draft, metadata)
@@ -1796,7 +1915,8 @@ def execute_delivery_run(
         status="STARTED",
         target_locator=target_locator,
         rows_attempted=source.row_count,
-        started_at=utcnow(),
+        started_at=attempt_timestamp,
+        system_audit=system_audit,
     )
     db.add(attempt)
     db.flush()
@@ -1844,6 +1964,19 @@ def execute_delivery_run(
     attempt.bytes_sent = result.bytes_sent
     attempt.remote_reference = result.remote_reference
     attempt.finished_at = utcnow()
+    if system_audit:
+        attempt.system_audit = {
+            **system_audit, "columns_created": result.audit_columns_created,
+        }
+        policy = db.get(DeliveryTargetPolicy, system_audit["policy_id"])
+        if policy is None or policy.organization_id != run.organization_id:
+            raise RuntimeError("La política durable de auditoría no está disponible.")
+        policy.materialized_at = policy.materialized_at or attempt.finished_at
+        if result.audit_columns_created:
+            audit(db, "DELIVERY_TARGET_AUDIT_COLUMNS_CREATED", "delivery_target_policy", policy.id,
+                  "Campos de auditoría creados dentro de la transacción confirmada",
+                  actor, run.organization_id,
+                  {"policy_id": policy.id, "delivery_attempt_id": attempt.id}, run_id=run.id)
     run.metrics = {
         "rows_attempted": result.rows_attempted,
         "rows_written": result.rows_written,
@@ -2018,6 +2151,16 @@ def _repair_context(db: Session, run: Run) -> tuple[
             or not attempt.started_at or not attempt.finished_at
             or not run.started_at or not run.finished_at):
         raise _evidence_problem("La identidad, target o fechas del intento COMMITTED no son verificables.")
+    if draft.audit_columns_enabled:
+        snapshot = attempt.system_audit or {}
+        policy = db.get(DeliveryTargetPolicy, snapshot.get("policy_id")) if snapshot.get("policy_id") else None
+        if (not snapshot.get("enabled") or not policy
+                or policy.organization_id != run.organization_id
+                or snapshot.get("username") != run.execution_plan.get("initiated_by_username")
+                or snapshot.get("policy_id") != run.execution_plan.get("audit_policy_id")
+                or snapshot.get("fecha_ingesta") != iso(attempt.started_at)
+                or type(snapshot.get("columns_created")) is not bool):
+            raise _evidence_problem("El snapshot de auditoría del intento no es verificable.")
     metric_checks = {
         **{key: value for key, value in plan_checks.items() if key != "destination_version"},
         "delivery_attempt_id": attempt.id, "attempt_number": attempt.attempt_number,

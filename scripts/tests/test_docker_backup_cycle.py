@@ -529,6 +529,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner, "RecoveryApi", lambda *args: object())
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
     monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
+    monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: None)
     monkeypatch.setattr(runner, "destroy_before_restore", lambda *args: calls.append(("destroy", source)))
     monkeypatch.setattr(runner, "validate_restored", lambda *args: {"restored_credential_used": True})
     monkeypatch.setattr(runner.docker_state, "digest", lambda path: "a" * 64)
@@ -546,7 +547,9 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
                 "tables": {name: {"one": "hash", **({"two": "hash"} if name == "monitor_schedule_versions" else {})}
                            for name in ("exceptions", "exception_attachments", "monitor_schedules",
                                         "monitor_schedule_versions", "monitor_occurrences", "metric_history",
-                                        "delivery_attempts", "delivery_reviews")}}))
+                                        "delivery_attempts", "delivery_reviews", "roles", "role_permissions",
+                                        "notification_deliveries", "delivery_target_policies",
+                                        "external_identities", "oidc_login_attempts")}}))
             calls.append(("backup", source))
         if "restore" in args:
             assert ("destroy", source) in calls

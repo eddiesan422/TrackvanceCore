@@ -11,7 +11,7 @@ import { DestinationDialog, DestinationsPage } from './Destinations'
 
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn(), download: vi.fn() }))
 
-const permissions = ['connections:read', 'connections:manage', 'configurations:write', 'runs:execute', 'artifacts:download']
+const permissions = ['destinations:read', 'destinations:manage', 'delivery:configure', 'delivery:alter_target', 'delivery:overwrite', 'delivery:execute', 'delivery:repair_evidence', 'delivery:review_unknown', 'artifacts:download']
 const destination = {
   id: 'destination-1', name: 'Warehouse', sink_type: 'POSTGRESQL' as const, enabled: true, version: 2,
   destination_version_id: 'destination-version-2', host: 'warehouse.local', port: 5432, database: 'analytics', username: 'writer', options: { connect_timeout: 5, query_timeout: 60, sslmode: 'require' },
@@ -51,7 +51,7 @@ describe('Delivery destinations', () => {
 
   it('keeps read-only access visible and management disabled', async () => {
     vi.mocked(api).mockResolvedValue({ items: [destination], total: 1 })
-    renderApp(<DestinationsPage/>, { permissions: ['connections:read'] })
+    renderApp(<DestinationsPage/>, { permissions: ['destinations:read'] })
     expect(await screen.findByRole('link', { name: 'Warehouse' })).toHaveAttribute('href', '/delivery/destinations/destination-1')
     expect(screen.getByRole('button', { name: 'Nuevo destino' })).toBeDisabled()
     expect(screen.queryByText('disposable-secret')).not.toBeInTheDocument()
@@ -59,7 +59,7 @@ describe('Delivery destinations', () => {
 })
 
 describe('Guided delivery builder', () => {
-  it('uses real metadata, publishes an immutable mapping and requires a passing preflight', async () => {
+  it.each([false, true])('uses real metadata, respects audit policy required=%s and requires a passing preflight', async auditRequired => {
     const publishedConfiguration = { id: 'configuration-1', name: 'Publicar ventas', version: 1, dataset_id: 'dataset-1', config: { schema_version: 1, dataset_version_id: 'version-3', destination_id: 'destination-1', destination_version_id: 'destination-version-2' } }
     let finishPublication: (() => void) | undefined
     const publication = new Promise<typeof publishedConfiguration>(resolve => { finishPublication = () => resolve(publishedConfiguration) })
@@ -72,6 +72,7 @@ describe('Guided delivery builder', () => {
       if (path === '/delivery/destinations/destination-1/schemas') return { items: ['public'], total: 1 }
       if (path.includes('/delivery/destinations/destination-1/tables?')) return { items: [{ name: 'sales' }], total: 1 }
       if (path.includes('/delivery/destinations/destination-1/table-metadata?')) return { schema_name: 'public', table_name: 'sales', columns: [{ name: 'sale_id', native_type: 'numeric', logical_type: 'DECIMAL', nullable: false, has_default: false, identity: false, generated: false, precision: 18, scale: 0 }, { name: 'amount', native_type: 'numeric', logical_type: 'DECIMAL', nullable: true, has_default: false, identity: false, generated: false, precision: 12, scale: 2 }], constraints: [{ type: 'PRIMARY_KEY', columns: ['sale_id'] }], destination_version_id: 'destination-version-2' }
+      if (path.includes('/target-policy?')) return { audit_columns_required: auditRequired, policy_id: null, materialized_at: null, target_fingerprint: 'target' }
       throw new Error(`Unexpected request: ${path}`)
     })
     vi.mocked(post).mockImplementation(async path => {
@@ -95,6 +96,15 @@ describe('Guided delivery builder', () => {
     await user.selectOptions(await screen.findByLabelText('Schema'), 'public')
     await user.selectOptions(await screen.findByLabelText('Tabla existente'), 'sales')
     await screen.findByText('public.sales')
+    const auditOption = await screen.findByRole('checkbox', { name: 'Incluir campos de auditoría de Trackvance' })
+    if (auditRequired) {
+      expect(auditOption).toBeChecked()
+      expect(auditOption).toBeDisabled()
+      expect(screen.getByText(/Todas las entregas posteriores deben registrar fechaIngesta y usuario/)).toBeVisible()
+    } else {
+      expect(auditOption).not.toBeChecked()
+      await user.click(auditOption)
+    }
     await user.click(screen.getByRole('button', { name: /Continuar/ }))
 
     const saleIdType = await screen.findByLabelText('Tipo destino de sale_id')
@@ -135,7 +145,7 @@ describe('Guided delivery builder', () => {
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/delivery/configurations', expect.objectContaining({
       name: 'Publicar ventas', owner: 'Equipo de datos', dataset_version_id: 'version-3', destination_id: 'destination-1', destination_version_id: 'destination-version-2',
-      schema_version: 1, write_strategy: 'UPSERT', upsert_keys: ['sale_id'], target: { mode: 'EXISTING_TABLE', schema_name: 'public', table_name: 'sales', create_schema: false }, columns: expect.arrayContaining([expect.objectContaining({ source_name: 'amount', target_name: 'total_amount', target_type: 'DECIMAL', precision: 12, scale: 2 })]),
+      audit_columns_enabled: true, schema_version: 1, write_strategy: 'UPSERT', upsert_keys: ['sale_id'], target: { mode: 'EXISTING_TABLE', schema_name: 'public', table_name: 'sales', create_schema: false }, columns: expect.arrayContaining([expect.objectContaining({ source_name: 'amount', target_name: 'total_amount', target_type: 'DECIMAL', precision: 12, scale: 2 })]),
     })))
     await act(async () => finishPublication?.())
     expect(await screen.findByText(/Publicada como versión 1/)).toBeInTheDocument()
@@ -149,6 +159,7 @@ describe('Delivery runs and evidence', () => {
       if (path === '/delivery/configurations') return { items: [configuration], total: 1 }
       if (path === '/delivery/destinations') return { items: [destination], total: 1 }
       if (path === '/delivery/runs' && options?.method === 'POST') return { id: 'run-1' }
+      if (path.includes('/target-policy?')) return { audit_columns_required: false, policy_id: null, materialized_at: null, target_fingerprint: 'target' }
       throw new Error(`Unexpected request: ${path}`)
     })
     const user = userEvent.setup()
@@ -160,6 +171,7 @@ describe('Delivery runs and evidence', () => {
   it('keeps UNKNOWN distinct and never presents it as a retryable failure', async () => {
     vi.mocked(api).mockImplementation(async path => {
       if (path === '/delivery/runs/run-unknown/attempts') return { items: [{ id: 'attempt-1', attempt_number: 1, status: 'UNKNOWN', rows_attempted: 2, rows_written: null, started_at: '2026-09-22T12:00:00Z', finished_at: '2026-09-22T12:00:01Z' }], total: 1 }
+      if (path.includes('/target-policy?')) return { audit_columns_required: false, policy_id: null, materialized_at: null, target_fingerprint: 'target' }
       throw new Error(`Unexpected request: ${path}`)
     })
     renderApp(<DeliveryRunDetail data={{ id: 'run-unknown', module: 'DELIVERY', status: 'UNKNOWN', name: 'Publicar ventas', dataset_name: 'Ventas', dataset_version_id: 'version-3', created_at: '2026-09-22T12:00:00Z' }}/>, { permissions })
@@ -181,6 +193,7 @@ describe('Delivery runs and evidence', () => {
       if (path === '/delivery/runs/run-committed/attempts') return { items: [{ id: 'attempt-1', attempt_number: 1, status: 'COMMITTED', rows_attempted: 2, rows_written: 2, rows_inserted: 2, rows_updated: 0 }], total: 1 }
       if (path === '/delivery/runs/run-committed/receipt') return { kind: 'DELIVERY_RECEIPT', run_id: 'run-committed', dataset_version_id: 'version-3', destination_version_id: 'destination-version-2', source_sha256: 'abc123', target: { mode: 'EXISTING_TABLE', schema_name: 'public', table_name: 'sales', create_schema: false }, write_strategy: 'APPEND', result: 'COMMITTED', rows_written: 2 }
       if (path === '/audit-events') return { items: [{ id: 'audit-1', run_id: 'run-committed', event_type: 'DELIVERY_COMMITTED', message: 'Entrega confirmada', actor: 'delivery-worker' }], total: 1 }
+      if (path.includes('/target-policy?')) return { audit_columns_required: false, policy_id: null, materialized_at: null, target_fingerprint: 'target' }
       throw new Error(`Unexpected request: ${path}`)
     })
     renderApp(<DeliveryRunDetail data={{ id: 'run-committed', module: 'DELIVERY', status: 'SUCCESS', name: 'Publicar ventas', dataset_name: 'Ventas', dataset_version_id: 'version-3', created_at: '2026-09-22T12:00:00Z', execution_plan: { destination_name: 'Warehouse', destination_version: 2, destination_version_id: 'destination-version-2', write_strategy: 'APPEND', target: { schema_name: 'public', table_name: 'sales' } } }}/>, { permissions: [...permissions, 'audit:read'] })
@@ -205,6 +218,7 @@ describe('Delivery runs and evidence', () => {
           : { items: [{ id: 'attempt-race', attempt_number: 1, status: 'COMMITTED', rows_attempted: 2, rows_written: 2 }], total: 1 }
       }
       if (path === '/delivery/runs/run-race/receipt') return { kind: 'DELIVERY_RECEIPT', run_id: 'run-race', target_locator: 'public.race_result', result: 'COMMITTED', rows_written: 2 }
+      if (path.includes('/target-policy?')) return { audit_columns_required: false, policy_id: null, materialized_at: null, target_fingerprint: 'target' }
       throw new Error(`Unexpected request: ${path}`)
     })
     function RunTransition() {

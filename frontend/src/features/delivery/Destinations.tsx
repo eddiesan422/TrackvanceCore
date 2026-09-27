@@ -124,7 +124,7 @@ export function DestinationDialog({ destination, close, saved }: { destination?:
 }
 
 export function DestinationsPage() {
-  const canRead = usePermission('connections:read'), canManage = usePermission('connections:manage')
+  const canRead = usePermission('destinations:read'), canManage = usePermission('destinations:manage')
   const [creating, setCreating] = useState(false), [search, setSearch] = useState('')
   const cache = useQueryClient(), navigate = useNavigate()
   const destinations = useQuery({ queryKey: ['delivery-destinations'], queryFn: () => api<{ items: DeliveryDestination[]; total: number }>('/delivery/destinations'), enabled: canRead })
@@ -141,7 +141,7 @@ export function DestinationsPage() {
 
 export function DestinationDetail() {
   const { id } = useParams(), cache = useQueryClient(), navigate = useNavigate()
-  const canRead = usePermission('connections:read'), canManage = usePermission('connections:manage')
+  const canRead = usePermission('destinations:read'), canManage = usePermission('destinations:manage'), canUse = usePermission('destinations:use'), canConfigure = usePermission('delivery:configure')
   const [editing, setEditing] = useState(false), [confirm, setConfirm] = useState<'toggle' | 'delete' | null>(null)
   const destination = useQuery({ queryKey: ['delivery-destination', id], queryFn: () => api<DeliveryDestination>(`/delivery/destinations/${id}`), enabled: canRead && !!id })
   function invalidate() { cache.invalidateQueries({ queryKey: ['delivery-destinations'] }); cache.invalidateQueries({ queryKey: ['delivery-destination', id] }) }
@@ -156,9 +156,9 @@ export function DestinationDetail() {
   if (destination.isPending) return <Loading text="Cargando destino…"/>
   if (destination.error) return <ErrorState error={destination.error} retry={() => destination.refetch()}/>
   const data = destination.data, config = savedConfig(data)
-  return <><DeliveryNavigation/><PageHeading back="/delivery/destinations" eyebrow="DATA DELIVERY / DESTINO" title={data.name} description={`${sinkLabel(data.sink_type)} · ${config.database}`} action={<><button className="button secondary" disabled={!canManage} onClick={() => setEditing(true)}><Pencil size={15}/> Editar destino</button><button className="button primary" disabled={!canManage || !data.enabled || test.isPending} onClick={() => test.mutate()}><Plug size={16}/>{test.isPending ? 'Probando…' : 'Probar destino'}</button></>}/>
+  return <><DeliveryNavigation/><PageHeading back="/delivery/destinations" eyebrow="DATA DELIVERY / DESTINO" title={data.name} description={`${sinkLabel(data.sink_type)} · ${config.database}`} action={<><button className="button secondary" disabled={!canManage} onClick={() => setEditing(true)}><Pencil size={15}/> Editar destino</button><button className="button primary" disabled={!canUse || !data.enabled || test.isPending} onClick={() => test.mutate()}><Plug size={16}/>{test.isPending ? 'Probando…' : 'Probar destino'}</button></>}/>
     <section className="panel delivery-details"><div className="delivery-summary"><div><span>Servidor</span><strong>{config.host}:{config.port}</strong></div><div><span>Cuenta de escritura</span><strong>{config.username}</strong></div><div><span>Revisión</span><strong>{data.version}</strong><small className="mono">{destinationVersionId(data).slice(0, 16) || '—'}</small></div><div><span>Estado</span><Badge value={data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div><div><span>Última prueba</span><strong>{date(data.last_test_at)}</strong><Badge value={data.last_test_status || 'NOT_REQUESTED'}/></div></div>
-      {test.data ? <TestResult result={test.data}/> : data.last_test_message && <p className="delivery-help">{data.last_test_message}</p>}{test.error && <ErrorState error={test.error}/>}<div className="delivery-actions"><button className="text-button" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('toggle') }}>{data.enabled ? 'Deshabilitar destino' : 'Habilitar destino'}</button><button className="text-button delivery-delete" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('delete') }}><Trash2 size={14}/> Dar de baja</button><Link className="button secondary small" to={`/delivery/new?destination=${data.id}`}><Send size={14}/> Preparar entrega</Link></div>
+      {test.data ? <TestResult result={test.data}/> : data.last_test_message && <p className="delivery-help">{data.last_test_message}</p>}{test.error && <ErrorState error={test.error}/>}<div className="delivery-actions"><button className="text-button" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('toggle') }}>{data.enabled ? 'Deshabilitar destino' : 'Habilitar destino'}</button><button className="text-button delivery-delete" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('delete') }}><Trash2 size={14}/> Dar de baja</button>{canConfigure && <Link className="button secondary small" to={`/delivery/new?destination=${data.id}`}><Send size={14}/> Preparar entrega</Link>}</div>
     </section>
     {!data.enabled && <Notice>El destino está deshabilitado. Las configuraciones y entregas históricas se conservan.</Notice>}
     {editing && <DestinationDialog destination={data} close={() => setEditing(false)} saved={() => { invalidate(); test.reset(); setEditing(false) }}/>}

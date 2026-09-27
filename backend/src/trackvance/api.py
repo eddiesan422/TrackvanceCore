@@ -4,15 +4,18 @@ import csv
 import hashlib
 import io
 import json
+import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import polars as pl
 from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError
+from argon2.exceptions import InvalidHashError, VerificationError
 from fastapi import APIRouter, Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +26,10 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from . import __version__
+from . import (
+    __version__,
+    identity_bootstrap,  # noqa: F401
+)
 from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
 from .config import (
@@ -51,11 +57,12 @@ from .db import SessionLocal, get_db, iso, utcnow
 from .delivery_api import router as delivery_router
 from .delivery_service import DeliveryOperationError
 from .exceptions_api import router as exceptions_router
+from .identity_api import UserResponse, user_dto
 from .identity_api import router as identity_router
-from .identity_api import user_dto
 from .migrate import migrate, migration_ready
 from .models import (
     Artifact,
+    ArtifactLink,
     AuditEvent,
     AuthSession,
     Configuration,
@@ -69,7 +76,13 @@ from .models import (
     uid,
 )
 from .operations_common import OperationError
-from .permissions import permissions_for, required_permission
+from .permissions import (
+    PUBLIC_ENDPOINTS,
+    SESSION_ENDPOINTS,
+    effective_permissions,
+    readable_modules,
+    required_permission,
+)
 from .processing import ProcessingError, money, profile_frame
 from .scheduler import ScheduleError
 from .sentinel_api import router as sentinel_router
@@ -90,8 +103,20 @@ from .services import (
     run_dto,
     version_dto,
 )
+from .sso_api import router as sso_router
 
 COOKIE = "trackvance_session"
+_DUMMY_PASSWORD_HASH = PasswordHasher().hash(secrets.token_urlsafe(32))
+
+
+class OIDCAccessLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Uvicorn's request-line args include the query string. Never log callbacks,
+        # including when a developer launches uvicorn directly without our scripts.
+        return "/auth/sso/" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(OIDCAccessLogFilter())
 
 
 
@@ -126,20 +151,28 @@ app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([WEB_ORIGIN,
 @app.middleware("http")
 async def session_boundary(request: Request, call_next):
     request.state.request_id = uid()
-    public = {"/api/v1/health", "/api/v1/health/ready", "/api/v1/auth/demo", "/api/v1/auth/login"}
-    if request.url.path.startswith("/api/v1/") and request.url.path not in public and request.method != "OPTIONS":
+    endpoint = (request.method, request.url.path.removeprefix("/api/v1"))
+    if request.url.path.startswith("/api/v1/") and endpoint not in PUBLIC_ENDPOINTS and request.method != "OPTIONS":
         token = request.cookies.get(COOKIE)
         if not token:
             return error_response(request, 401, "UNAUTHENTICATED", "Inicia sesión para continuar.")
         with SessionLocal() as db:
             session = db.scalar(select(AuthSession).where(AuthSession.token_hash == hashlib.sha256(token.encode()).hexdigest(), AuthSession.expires_at > utcnow()))
             user = db.get(User, session.user_id) if session else None
-            if not session or not user or not user.active:
+            if not session or not user or not user.active or user.deleted:
                 return error_response(request, 401, "UNAUTHENTICATED", "La sesión venció. Inicia sesión nuevamente.")
             if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session.csrf_token):
                 return error_response(request, 403, "CSRF_FAILED", "Token de seguridad ausente o inválido.")
-            permission = required_permission(request.url.path.removeprefix("/api/v1"), request.method)
-            if permission and permission not in permissions_for(user.role):
+            if (user.must_change_password and session.authentication_method == "LOCAL"
+                and (user.temporary_password_expires_at is None or user.temporary_password_expires_at.replace(tzinfo=UTC) <= utcnow())):
+                return error_response(request, 401, "UNAUTHENTICATED", "La sesión venció. Solicita credenciales nuevas.")
+            if user.must_change_password and endpoint not in SESSION_ENDPOINTS:
+                return error_response(request, 403, "PASSWORD_CHANGE_REQUIRED", "Cambia tu contraseña para continuar.")
+            permission = required_permission(endpoint[1], request.method)
+            grants = effective_permissions(db, user)
+            shared_allowed = (permission == "runs:read" and bool(readable_modules(db, user))) or (
+                permission == "runs:execute" and any(f"{module}:execute" in grants for module in ("intake", "recon", "sentinel", "delivery")))
+            if permission and permission not in grants and not shared_allowed:
                 return error_response(request, 403, "PERMISSION_DENIED", "Tu rol no permite realizar esta acción.")
             request.state.user, request.state.session = user, session
     request_token = request_id_context.set(request.state.request_id)
@@ -237,6 +270,10 @@ def owned(db: Session, model, record_id: str, user: User):
     item = db.get(model, record_id)
     if not item or item.organization_id != user.organization_id:
         raise APIError(404, "NOT_FOUND", "No se encontró el registro solicitado.")
+    if isinstance(item, (Run, Configuration)) and item.module not in readable_modules(db, user):
+        raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite consultar este módulo.")
+    if isinstance(item, Finding):
+        owned(db, Run, item.run_id, user)
     return item
 
 
@@ -287,48 +324,119 @@ def ready(db: Session = Depends(get_db)):
     return {"status": "ready", "version": __version__, "database": "ready", "storage": "ready", "migrations": "head"}
 
 
-def establish_session(request, response, db, user):
+def establish_session(request, response, db, user, authentication_method="LOCAL"):
     origin = request.headers.get("origin")
     if origin and origin not in {WEB_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"}:
         raise APIError(403, "ORIGIN_DENIED", "Origen de acceso no permitido.")
     token, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
-    session = AuthSession(organization_id=user.organization_id, token_hash=hashlib.sha256(token.encode()).hexdigest(), user_id=user.id, csrf_token=csrf, expires_at=utcnow() + timedelta(hours=SESSION_HOURS))
+    user.last_login_at = utcnow()
+    previous = request.cookies.get(COOKIE)
+    if previous:
+        from sqlalchemy import delete
+        db.execute(delete(AuthSession).where(AuthSession.token_hash == hashlib.sha256(previous.encode()).hexdigest()))
+    session = AuthSession(organization_id=user.organization_id, token_hash=hashlib.sha256(token.encode()).hexdigest(), user_id=user.id, csrf_token=csrf, expires_at=utcnow() + timedelta(hours=SESSION_HOURS), authentication_method=authentication_method)
     db.add(session)
     audit(db, "SESSION_STARTED", "user", user.id, "Sesión iniciada", Actor("USER", user.id, user.name), user.organization_id)
     db.commit()
-    response.set_cookie(COOKIE, token, httponly=True, secure=request.url.scheme == "https", samesite="lax", max_age=SESSION_HOURS * 3600, path="/")
+    secure = request.url.scheme == "https" or urlparse(os.getenv("TRACKVANCE_PUBLIC_URL", WEB_ORIGIN)).scheme == "https"
+    response.set_cookie(COOKIE, token, httponly=True, secure=secure, samesite="lax", max_age=SESSION_HOURS * 3600, path="/")
     return identity(user, csrf)
 
 
+class OrganizationResponse(BaseModel):
+    id: str
+    name: str
+
+
+class AuthenticationResponse(BaseModel):
+    user: UserResponse
+    organization: OrganizationResponse
+    csrf_token: str
+    demo_mode: bool
+
+
 class LoginBody(BaseModel):
-    email: str = Field(min_length=3, max_length=200)
+    model_config = ConfigDict(extra="forbid")
+    email: str | None = Field(default=None, min_length=3, max_length=200)
+    username: str | None = Field(default=None, min_length=3, max_length=200)
     password: str = Field(min_length=1, max_length=1024)
 
+    @model_validator(mode="after")
+    def identifier_required(self):
+        if bool(self.email) == bool(self.username):
+            raise ValueError("Indica usuario o correo.")
+        return self
 
-@router.post("/auth/demo")
+
+@router.post("/auth/demo", response_model=AuthenticationResponse)
 def demo_login(request: Request, response: Response, db: Session = Depends(get_db)):
     if not DEMO_ACCESS_ENABLED:
         raise APIError(404, "DEMO_DISABLED", "El acceso demo no está habilitado.")
     user = db.get(User, DEMO_USER_ID)
-    if not user or not user.active:
+    if not user or not user.active or user.deleted:
         raise APIError(503, "DEMO_UNAVAILABLE", "El usuario demo aún no está disponible.")
     return establish_session(request, response, db, user)
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", response_model=AuthenticationResponse)
 def login(body: LoginBody, request: Request, response: Response, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == body.email.lower().strip(), User.active.is_(True)))
+
+    from sqlalchemy import func, or_
+    identifier = (body.username or body.email or "").strip().casefold()
+    user = db.scalar(select(User).where(or_(func.lower(User.email) == identifier, func.lower(User.username) == identifier), User.active.is_(True), User.deleted.is_(False)))
+    if user is not None:
+        from .identity_api import lock_organization_identities
+        lock_organization_identities(db, user.organization_id)
+        db.refresh(user)
     try:
-        if not user or not PasswordHasher().verify(user.password_hash, body.password):
+        candidate_hash = user.password_hash if user and user.active and not user.deleted else _DUMMY_PASSWORD_HASH
+        verified = PasswordHasher().verify(candidate_hash, body.password)
+        if (not user or not user.active or user.deleted or not verified
+            or identifier not in {user.email.casefold(), user.username.casefold()}
+            or (user.must_change_password and (not user.temporary_password_expires_at
+                or user.temporary_password_expires_at.replace(tzinfo=UTC) <= utcnow()))):
             raise VerificationError()
-    except VerificationError as exc:
+    except (VerificationError, InvalidHashError) as exc:
         audit(db, "LOGIN_FAILED", "user", user.id if user else "unknown", "Inicio de sesión rechazado", Actor("SYSTEM", "local-auth", "Autenticación"), user.organization_id if user else "org-trackvance-demo")
         db.commit()
-        raise APIError(401, "INVALID_CREDENTIALS", "Correo o contraseña incorrectos.") from exc
+        raise APIError(401, "INVALID_CREDENTIALS", "Usuario o contraseña incorrectos.") from exc
     return establish_session(request, response, db, user)
 
 
-@router.get("/me")
+class FirstLoginPassword(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    new_password: str = Field(min_length=12, max_length=1024)
+
+
+@router.post("/auth/first-login/change-password", response_model=AuthenticationResponse)
+def first_login_password(body: FirstLoginPassword, request: Request, response: Response,
+                         db: Session = Depends(get_db), actor: User = Depends(current_user)):
+    from .identity_api import lock_organization_identities, revoke_sessions
+    lock_organization_identities(db, actor.organization_id)
+    user = db.get(User, actor.id)
+    persisted = db.get(AuthSession, request.state.session.id)
+    if (user is None or not user.active or user.deleted or persisted is None
+        or persisted.user_id != actor.id or persisted.expires_at.replace(tzinfo=UTC) <= utcnow()
+        or (persisted.authentication_method == "LOCAL" and user.must_change_password
+            and (user.temporary_password_expires_at is None or user.temporary_password_expires_at.replace(tzinfo=UTC) <= utcnow()))):
+        raise APIError(401, "UNAUTHENTICATED", "La sesión venció. Inicia sesión nuevamente.")
+    if user is None or not user.must_change_password:
+        raise APIError(409, "PASSWORD_CHANGE_NOT_REQUIRED", "El primer acceso ya fue completado.")
+    try:
+        same: bool = PasswordHasher().verify(user.password_hash, body.new_password)
+    except (VerificationError, InvalidHashError):
+        same = False
+    if same:
+        raise APIError(422, "PASSWORD_MUST_DIFFER", "La nueva contraseña debe ser diferente de la temporal.")
+    user.password_hash = PasswordHasher().hash(body.new_password)
+    user.must_change_password, user.temporary_password_expires_at = False, None
+    user.password_changed_at, user.updated_at, user.version = utcnow(), utcnow(), user.version + 1
+    revoke_sessions(db, user)
+    audit(db, "USER_PASSWORD_CHANGED", "user", user.id, "Primer acceso completado", Actor("USER", user.id, user.name), user.organization_id, {"sessions_revoked": True})
+    return establish_session(request, response, db, user, request.state.session.authentication_method)
+
+
+@router.get("/me", response_model=AuthenticationResponse)
 def me(request: Request):
     return identity(request.state.user, request.state.session.csrf_token)
 
@@ -924,7 +1032,8 @@ def monitor_run(monitor_id: str, body: MonitorRunBody, request: Request, db: Ses
 
 @router.get("/runs")
 def runs(module: Literal["intake", "recon", "sentinel", "DELIVERY"] | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([run_dto(db, r) for r in scoped(db, Run, user) if module is None or r.module == module])
+    allowed = readable_modules(db, user)
+    return listing([run_dto(db, r) for r in scoped(db, Run, user) if r.module in allowed and (module is None or r.module == module)])
 
 
 @router.get("/runs/{run_id}")
@@ -949,6 +1058,8 @@ def cancel_run(run_id: str, db: Session = Depends(get_db), user: User = Depends(
     )
     if run is None:
         raise APIError(404, "NOT_FOUND", "No se encontró el registro solicitado.")
+    if f"{run.module.lower()}:execute" not in effective_permissions(db, user):
+        raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite cancelar ejecuciones de este módulo.")
     if run.status in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}:
         raise APIError(409, "RUN_FINISHED", "La ejecución ya terminó.")
     run.cancel_requested = True
@@ -1026,6 +1137,14 @@ def evidence(run_id: str, db: Session = Depends(get_db), user: User = Depends(cu
 def artifact_download(artifact_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     from .exports import XLSX_MIME_TYPE, export_filename
     artifact = owned(db, Artifact, artifact_id, user)
+    links = db.scalars(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id)).all()
+    related = {link.source_id for link in links if link.source_type == "RUN" and link.target_type == "ARTIFACT" and link.target_id == artifact.id}
+    related |= {link.target_id for link in links if link.target_type == "RUN" and link.source_type == "ARTIFACT" and link.source_id == artifact.id}
+    for run_id in related:
+        owned(db, Run, run_id, user)
+    prerequisite = "exceptions:read" if artifact.kind == "EXCEPTION_ATTACHMENT" else "datasets:read"
+    if not related and prerequisite not in effective_permissions(db, user):
+        raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite consultar el recurso del artefacto.")
     path = authorize_artifact_file(artifact)
     audit(db, "ARTIFACT_DOWNLOADED", "artifact", artifact.id, "Artefacto descargado", user.name, user.organization_id, {"kind": artifact.kind, "sha256": artifact.sha256})
     db.commit()
@@ -1110,7 +1229,10 @@ def monitor_metrics(monitor_id: str, db: Session = Depends(get_db), user: User =
 
 @router.get("/findings")
 def findings(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([finding_dto(db, f) for f in scoped(db, Finding, user)])
+    allowed = readable_modules(db, user)
+    rows = db.scalars(select(Finding).join(Run, Finding.run_id == Run.id).where(
+        Finding.organization_id == user.organization_id, Run.module.in_(allowed))).all()
+    return listing([finding_dto(db, finding) for finding in rows])
 
 
 @router.post("/findings/{finding_id}/exceptions", status_code=201)
@@ -1189,7 +1311,7 @@ def dashboard(
         module=module,
         status=status,
         criticality=criticality,
-    ))
+    ), permissions=set(effective_permissions(db, user)))
 
 
 class ConfigurationVersionBody(InputModel):
@@ -1245,6 +1367,8 @@ class PlanPreviewBody(InputModel):
 def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     from .planner import ExecutionPlanner, WorkloadInput
     config = owned(db, Configuration, body.configuration_id, user)
+    if f"{config.module.lower()}:execute" not in effective_permissions(db, user):
+        raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite planificar ejecuciones de este módulo.")
     versions = [owned(db, DatasetVersion, body.dataset_version_id, user)]
     if body.target_version_id:
         versions.append(owned(db, DatasetVersion, body.target_version_id, user))
@@ -1259,6 +1383,7 @@ app.include_router(delivery_router)
 app.include_router(identity_router)
 app.include_router(exceptions_router)
 app.include_router(sentinel_router)
+app.include_router(sso_router)
 
 
 def openapi_contract():
@@ -1271,10 +1396,11 @@ def openapi_contract():
         "type": "apiKey", "in": "cookie", "name": COOKIE,
         "description": "Sesión local HttpOnly. Las mutaciones requieren además X-CSRF-Token.",
     }
-    public = {"/health", "/health/ready", "/api/v1/health", "/api/v1/health/ready", "/api/v1/auth/demo", "/api/v1/auth/login"}
     for path, operations in schema["paths"].items():
         for method, operation in operations.items():
-            if method not in {"get", "post", "patch", "put", "delete"} or path in public:
+            if (method not in {"get", "post", "patch", "put", "delete"}
+                or (method.upper(), path.removeprefix("/api/v1")) in PUBLIC_ENDPOINTS
+                or (method == "get" and path in {"/api/v1/auth/sso/{provider}/start", "/api/v1/auth/sso/{provider}/callback"})):
                 continue
             operation["security"] = [{"LocalSession": []}]
             permission = required_permission(path.removeprefix("/api/v1"), method.upper())

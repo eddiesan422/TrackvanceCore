@@ -35,4 +35,4 @@ USER trackvance
 EXPOSE 8000
 
 # Compose overrides this command with `python -m trackvance.worker` for the worker.
-CMD ["python", "-m", "uvicorn", "trackvance.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "trackvance.api:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

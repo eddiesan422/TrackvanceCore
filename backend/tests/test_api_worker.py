@@ -165,6 +165,8 @@ def test_cancel_locks_run_before_deciding_queued_state(monkeypatch):
     session = CapturingSession()
     monkeypatch.setattr(api, "audit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(api, "run_dto", lambda _db, value: {"status": value.status})
+    # This unit isolates Run/Job locking; HTTP/RBAC tests exercise persisted roles.
+    monkeypatch.setattr(api, "effective_permissions", lambda _db, _user: ["delivery:execute"])
 
     result = api.cancel_run(
         run.id,

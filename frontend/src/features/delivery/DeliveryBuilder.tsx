@@ -6,7 +6,7 @@ import { api, post } from '../../api/client'
 import type { Collection, RecordData } from '../../api/client'
 import { usePermission } from '../../app/session'
 import { Badge, date, ErrorState, Field, Loading, Notice, number, PageHeading } from '../../components/ui'
-import type { ColumnMapping, DatasetColumn, DatasetRecord, DeliveryColumnType, DeliveryConfiguration, DeliveryDestination, DeliveryDraft, DeliveryPreflight, DeliveryPreview, TableMetadata, TargetMode, WriteStrategy } from './types'
+import type { ColumnMapping, DatasetColumn, DatasetRecord, DeliveryColumnType, DeliveryConfiguration, DeliveryDestination, DeliveryDraft, DeliveryPreflight, DeliveryPreview, DeliveryTargetPolicy, TableMetadata, TargetMode, WriteStrategy } from './types'
 import { collectionItems, destinationVersionId } from './types'
 import './delivery.css'
 
@@ -87,7 +87,9 @@ function jsonValue(value: unknown) {
 export function DeliveryBuilder() {
   const [params] = useSearchParams(), navigate = useNavigate(), cache = useQueryClient()
   const initialId = params.get('configuration') || '', destinationParam = params.get('destination') || ''
-  const canConfigure = usePermission('configurations:write'), canExecute = usePermission('runs:execute')
+  const canConfigure = usePermission('delivery:configure'), canExecute = usePermission('delivery:execute')
+  const canAlter = usePermission('delivery:alter_target'), canOverwrite = usePermission('delivery:overwrite')
+  const [auditEnabled, setAuditEnabled] = useState(false)
   const [step, setStep] = useState(1), [name, setName] = useState(''), [owner, setOwner] = useState('Equipo de datos'), [description, setDescription] = useState('')
   const [datasetId, setDatasetId] = useState(''), [versionId, setVersionId] = useState(''), [destinationId, setDestinationId] = useState(destinationParam)
   const [targetMode, setTargetMode] = useState<TargetMode>('EXISTING_TABLE'), [schemaMode, setSchemaMode] = useState<'EXISTING' | 'NEW'>('EXISTING')
@@ -109,6 +111,9 @@ export function DeliveryBuilder() {
   const effectiveSchema = targetMode === 'CREATE_TABLE' && schemaMode === 'NEW' ? newSchemaName.trim() : schemaName
   const tables = useQuery({ queryKey: ['delivery-destination-tables', destinationId, destinationVersionId(destination.data), schemaName], queryFn: () => api<unknown>(`/delivery/destinations/${destinationId}/tables?${new URLSearchParams({ schema_name: schemaName })}`), enabled: !!destinationId && !!schemaName && targetMode === 'EXISTING_TABLE' })
   const metadata = useQuery({ queryKey: ['delivery-table-metadata', destinationId, destinationVersionId(destination.data), schemaName, tableName], queryFn: () => api<TableMetadata>(`/delivery/destinations/${destinationId}/table-metadata?${new URLSearchParams({ schema_name: schemaName, table_name: tableName })}`), enabled: !!destinationId && !!schemaName && !!tableName && targetMode === 'EXISTING_TABLE' })
+  const policy = useQuery({ queryKey: ['delivery-target-policy', destinationId, destinationVersionId(destination.data), effectiveSchema, tableName.trim()], queryFn: () => api<DeliveryTargetPolicy>(`/delivery/destinations/${destinationId}/target-policy?${new URLSearchParams({ schema_name: effectiveSchema, table_name: tableName.trim(), destination_version_id: destinationVersionId(destination.data) })}`), enabled: canConfigure && !!destination.data && !!effectiveSchema && !!tableName.trim() })
+  const auditLocked = Boolean(policy.data?.audit_columns_required)
+  const effectiveAudit = auditLocked || auditEnabled
   const initial = configurations.data?.items.find(item => item.id === initialId)
 
   useEffect(() => {
@@ -116,6 +121,7 @@ export function DeliveryBuilder() {
     initialApplied.current = true
     const config = initial.config || {}
     const target = (config.target || {}) as RecordData
+    setAuditEnabled(Boolean(config.audit_columns_enabled))
     setName(initial.name)
     setOwner(String(initial.owner || 'Equipo de datos'))
     setDescription(String(initial.description || ''))
@@ -209,6 +215,7 @@ export function DeliveryBuilder() {
   }), [selectedMappings])
   const draft = useMemo<DeliveryDraft>(() => ({
     schema_version: 1,
+    audit_columns_enabled: effectiveAudit,
     dataset_version_id: versionId,
     destination_id: destinationId,
     destination_version_id: destinationVersionId(destination.data),
@@ -216,7 +223,7 @@ export function DeliveryBuilder() {
     columns: deliveryColumns,
     write_strategy: targetMode === 'CREATE_TABLE' ? 'CREATE_AND_LOAD' : strategy,
     upsert_keys: targetMode === 'EXISTING_TABLE' && strategy === 'UPSERT' ? upsertKeys.map(key => key.trim()) : [],
-  }), [deliveryColumns, destination.data, destinationId, effectiveSchema, schemaMode, strategy, tableName, targetMode, upsertKeys, versionId])
+  }), [effectiveAudit, deliveryColumns, destination.data, destinationId, effectiveSchema, schemaMode, strategy, tableName, targetMode, upsertKeys, versionId])
   const draftFingerprint = JSON.stringify(draft), currentFingerprint = useRef(draftFingerprint)
   currentFingerprint.current = draftFingerprint
   const previousFingerprint = useRef('')
@@ -245,6 +252,7 @@ export function DeliveryBuilder() {
       if (variables.fingerprint !== currentFingerprint.current) return
       setPublished(data)
       cache.invalidateQueries({ queryKey: ['delivery-configurations'] })
+      cache.invalidateQueries({ queryKey: ['delivery-target-policy'] })
     },
   })
   const execute = useMutation({
@@ -258,11 +266,12 @@ export function DeliveryBuilder() {
   const schemaNames = namesFrom(schemas.data), tableNames = namesFrom(tables.data)
   const versionValid = !!name.trim() && !!owner.trim() && !!datasetId && !!versionId && !!selectedVersion?.canonical_artifact_id
   const destinationValid = !!destination.data?.enabled && !!destinationVersionId(destination.data)
-  const targetValid = !!effectiveSchema && !!tableName.trim() && (targetMode === 'CREATE_TABLE' || !!metadata.data)
+  const targetValid = !!effectiveSchema && !!tableName.trim() && policy.isSuccess && (targetMode === 'CREATE_TABLE' ? canAlter : !!metadata.data)
   const invalidParameters = selectedMappings.some(item => !validTypeParameters(item))
   const unsupportedTypes = selectedMappings.filter(item => !deliveryColumnType(item.source_type))
-  const mappingValid = !!selectedMappings.length && selectedMappings.length <= 100 && selectedMappings.every(item => item.target_name.trim() && deliveryColumnType(item.source_type) === item.target_type) && !invalidParameters && !duplicateTargets.size
-  const strategyValid = targetMode === 'CREATE_TABLE' || strategy !== 'UPSERT' || !!upsertKeys.length
+  const auditCollision = effectiveAudit && selectedMappings.some(item => ['fechaingesta', 'usuario'].includes(item.target_name.trim().toLowerCase()))
+  const mappingValid = !auditCollision && !!selectedMappings.length && selectedMappings.length <= 100 && selectedMappings.every(item => item.target_name.trim() && deliveryColumnType(item.source_type) === item.target_type) && !invalidParameters && !duplicateTargets.size
+  const strategyValid = (strategy !== 'OVERWRITE' || canOverwrite) && (targetMode === 'CREATE_TABLE' || strategy !== 'UPSERT' || !!upsertKeys.length)
   const validSteps = [versionValid, destinationValid, targetValid, mappingValid, strategyValid, preflightData?.status === 'PASS', !!published]
   const canContinue = validSteps[step - 1]
 
@@ -299,10 +308,11 @@ export function DeliveryBuilder() {
         {destination.isPending && <Loading text="Fijando la revisión del destino…"/>} {destination.error && <ErrorState error={destination.error} retry={() => destination.refetch()}/>} {destination.data && <div className="delivery-destination-card"><Send size={22}/><div><strong>{destination.data.name}</strong><span>{destination.data.sink_type === 'POSTGRESQL' ? 'PostgreSQL' : 'SQL Server'} · revisión {destination.data.version}</span><code>{destinationVersionId(destination.data) || 'Revisión no disponible'}</code></div><Badge value={destination.data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div>}
       </div>}
 
-      {step === 3 && <div className="delivery-step-content form-stack"><div className="delivery-choice-grid"><button type="button" className={targetMode === 'EXISTING_TABLE' ? 'selected' : ''} onClick={() => { setTargetMode('EXISTING_TABLE'); setSchemaMode('EXISTING'); setTableName(''); metadataKey.current = '' }}><Database size={21}/><strong>Usar tabla existente</strong><span>Inspecciona columnas, nulabilidad y claves reales.</span></button><button type="button" className={targetMode === 'CREATE_TABLE' ? 'selected' : ''} onClick={() => { setTargetMode('CREATE_TABLE'); setTableName(''); metadataKey.current = '' }}><Plus size={21}/><strong>Crear tabla nueva</strong><span>La creación ocurre únicamente al ejecutar el Run.</span></button></div>
+      {step === 3 && <div className="delivery-step-content form-stack"><div className="delivery-choice-grid"><button type="button" className={targetMode === 'EXISTING_TABLE' ? 'selected' : ''} onClick={() => { setTargetMode('EXISTING_TABLE'); setSchemaMode('EXISTING'); setTableName(''); metadataKey.current = '' }}><Database size={21}/><strong>Usar tabla existente</strong><span>Inspecciona columnas, nulabilidad y claves reales.</span></button><button type="button" disabled={!canAlter} className={targetMode === 'CREATE_TABLE' ? 'selected' : ''} onClick={() => { setTargetMode('CREATE_TABLE'); setTableName(''); metadataKey.current = '' }}><Plus size={21}/><strong>Crear tabla nueva</strong><span>La creación ocurre únicamente al ejecutar el Run.</span></button></div>
         {schemas.isPending && <Loading text="Consultando schemas disponibles…"/>} {schemas.error && <ErrorState error={schemas.error} retry={() => schemas.refetch()}/>} {targetMode === 'CREATE_TABLE' && <Field label="Ubicación del schema"><select value={schemaMode} onChange={event => { setSchemaMode(event.target.value as 'EXISTING' | 'NEW'); setSchemaName(''); setNewSchemaName('') }}><option value="EXISTING">Usar schema existente</option><option value="NEW">Crear schema nuevo al ejecutar</option></select></Field>}
         {targetMode === 'CREATE_TABLE' && schemaMode === 'NEW' ? <Field label="Nuevo schema" hint="El preflight valida el identificador y los permisos sin crearlo."><input required maxLength={128} value={newSchemaName} onChange={event => setNewSchemaName(event.target.value)} placeholder="publicacion"/></Field> : <Field label="Schema"><select required value={schemaName} onChange={event => { setSchemaName(event.target.value); setTableName(''); metadataKey.current = '' }}><option value="">Selecciona un schema</option>{schemaNames.map(item => <option key={item} value={item}>{item}</option>)}</select></Field>}
         {targetMode === 'EXISTING_TABLE' ? <><Field label="Tabla existente"><select required disabled={!schemaName || tables.isPending} value={tableName} onChange={event => { setTableName(event.target.value); metadataKey.current = '' }}><option value="">Selecciona una tabla</option>{tableNames.map(item => <option key={item} value={item}>{item}</option>)}</select></Field>{tables.isPending && <Loading text="Consultando tablas…"/>}{tables.error && <ErrorState error={tables.error} retry={() => tables.refetch()}/>} {metadata.isPending && <Loading text="Inspeccionando estructura y claves…"/>} {metadata.error && <ErrorState error={metadata.error} retry={() => metadata.refetch()}/>} {metadata.data && <div className="delivery-metadata"><strong>{metadata.data.schema_name}.{metadata.data.table_name}</strong><span>{number(metadata.data.columns.length)} columnas · PK: {metadata.data.constraints.find(item => item.type === 'PRIMARY_KEY')?.columns.join(', ') || 'sin clave primaria'}</span><div>{metadata.data.columns.map(column => <code key={column.name}>{column.name} <small>{column.native_type}{column.nullable ? ' · NULL' : ' · NOT NULL'}</small></code>)}</div></div>}</> : <Field label="Nueva tabla" hint="No se crea durante preview ni preflight."><input required maxLength={128} value={tableName} onChange={event => setTableName(event.target.value)} placeholder="ventas_publicadas"/></Field>}
+        {!!effectiveSchema && !!tableName.trim() && <section className="identity-access"><h3>Auditoría de ingesta de Trackvance</h3>{policy.isPending ? <Loading text="Consultando política del target…"/> : policy.error ? <ErrorState error={policy.error} retry={() => policy.refetch()}/> : <><label className="checkbox-label"><input type="checkbox" checked={effectiveAudit} disabled={auditLocked || (!canAlter && !effectiveAudit)} onChange={event => setAuditEnabled(event.target.checked)}/> Incluir campos de auditoría de Trackvance</label>{effectiveAudit && <p>✓ fechaIngesta · ✓ usuario</p>}{auditLocked ? <Notice>Esta tabla utiliza auditoría de ingesta de Trackvance. Todas las entregas posteriores deben registrar fechaIngesta y usuario.</Notice> : <p>Al publicar, la auditoría queda obligatoria para este target. Los campos se activan juntos. Las filas anteriores conservarán valores NULL; las nuevas registrarán la fecha del intento y el username interno de quien ejecuta.</p>}</>}</section>}
       </div>}
 
       {step === 4 && <div className="delivery-step-content"><div className="delivery-section-copy"><div><h3>Mapping de salida</h3><p>Selecciona, ordena y adapta técnicamente cada columna. No se aplican reglas de negocio ni transformaciones funcionales.</p></div><span>{number(selectedMappings.length)} de {number(mappings.length)} columnas</span></div>{profile.isPending ? <Loading text="Leyendo el esquema canónico…"/> : profile.error ? <ErrorState error={profile.error} retry={() => profile.refetch()}/> : <div className="table-scroll delivery-mapping"><table><thead><tr><th>Incluir</th><th>Orden</th><th>Origen</th><th>Nombre destino</th><th>Tipo destino</th><th>Parámetros</th><th>Nulos</th></tr></thead><tbody>{[...mappings].sort((left, right) => left.ordinal - right.ordinal).map((mapping, index) => {
@@ -310,14 +320,14 @@ export function DeliveryBuilder() {
           const decimal = fixedType === 'DECIMAL', sized = fixedType === 'STRING'
           const choices = [fixedType]
           return <tr key={mapping.source_name} className={mapping.selected ? '' : 'excluded'}><td><input aria-label={`Incluir ${mapping.source_name}`} type="checkbox" checked={mapping.selected} onChange={event => { updateMapping(mapping.source_name, { selected: event.target.checked }); if (!event.target.checked) setUpsertKeys(keys => keys.filter(key => key !== mapping.target_name)) }}/></td><td><div className="mapping-order"><button type="button" className="icon-button" aria-label={`Subir ${mapping.source_name}`} disabled={index === 0} onClick={() => moveMapping(mapping.source_name, -1)}><ArrowUp size={14}/></button><button type="button" className="icon-button" aria-label={`Bajar ${mapping.source_name}`} disabled={index === mappings.length - 1} onClick={() => moveMapping(mapping.source_name, 1)}><ArrowDown size={14}/></button></div></td><td><strong className="mono">{mapping.source_name}</strong><small className="table-subtitle">{mapping.source_type}</small></td><td><input aria-label={`Nombre destino de ${mapping.source_name}`} maxLength={128} disabled={!mapping.selected} value={mapping.target_name} onChange={event => { const previous = mapping.target_name; updateMapping(mapping.source_name, { target_name: event.target.value }); setUpsertKeys(keys => keys.map(key => key === previous ? event.target.value : key)) }}/>{duplicateTargets.has(mapping.target_name.trim().toLocaleLowerCase()) && <small className="mapping-error">Nombre duplicado</small>}</td><td><select aria-label={`Tipo destino de ${mapping.source_name}`} disabled value={fixedType}>{choices.map(type => <option key={type} value={type}>{type}</option>)}</select></td><td>{decimal ? <div className="mapping-params"><input aria-label={`Precisión de ${mapping.source_name}`} type="number" min={1} max={38} placeholder="Precisión" value={mapping.precision ?? ''} onChange={event => updateMapping(mapping.source_name, { precision: event.target.value ? Number(event.target.value) : undefined })}/><input aria-label={`Escala de ${mapping.source_name}`} type="number" min={0} max={38} placeholder="Escala" value={mapping.scale ?? ''} onChange={event => updateMapping(mapping.source_name, { scale: event.target.value ? Number(event.target.value) : undefined })}/></div> : sized ? <input aria-label={`Longitud de ${mapping.source_name}`} type="number" min={1} max={1000000} placeholder="Longitud" value={mapping.length ?? ''} onChange={event => updateMapping(mapping.source_name, { length: event.target.value ? Number(event.target.value) : undefined })}/> : <span className="muted">No aplica</span>}</td><td><label className="mapping-nullable"><input type="checkbox" aria-label={`Permitir nulos en ${mapping.source_name}`} disabled={!mapping.selected} checked={mapping.nullable} onChange={event => updateMapping(mapping.source_name, { nullable: event.target.checked })}/> Sí</label></td></tr>
-        })}</tbody></table></div>} {!selectedMappings.length && <Notice>Selecciona al menos una columna para continuar.</Notice>} {selectedMappings.length > 100 && <Notice>Una entrega admite como máximo 100 columnas. Excluye {number(selectedMappings.length - 100)} para continuar.</Notice>} {!!unsupportedTypes.length && <Notice>La DatasetVersion contiene tipos lógicos no admitidos por Delivery: {unsupportedTypes.map(item => `${item.source_name} (${item.source_type})`).join(', ')}.</Notice>} {invalidParameters && <Notice>Revisa longitud, precisión y escala. La escala no puede superar la precisión.</Notice>}
+        })}</tbody></table></div>} {auditCollision && <Notice>fechaIngesta y usuario son campos reservados para auditoría. Cambia los nombres destino del mapping de negocio.</Notice>} {!selectedMappings.length && <Notice>Selecciona al menos una columna para continuar.</Notice>} {selectedMappings.length > 100 && <Notice>Una entrega admite como máximo 100 columnas. Excluye {number(selectedMappings.length - 100)} para continuar.</Notice>} {!!unsupportedTypes.length && <Notice>La DatasetVersion contiene tipos lógicos no admitidos por Delivery: {unsupportedTypes.map(item => `${item.source_name} (${item.source_type})`).join(', ')}.</Notice>} {invalidParameters && <Notice>Revisa longitud, precisión y escala. La escala no puede superar la precisión.</Notice>}
       </div>}
 
       {step === 5 && <div className="delivery-step-content form-stack">{targetMode === 'CREATE_TABLE' ? <div className="delivery-strategy selected"><Plus size={22}/><div><strong>Crear y cargar</strong><p>Comprueba nuevamente que el target no exista, crea schema/tabla dentro de la ejecución y carga esta DatasetVersion.</p></div><Badge value="CREATE_AND_LOAD"/></div> : <div className="delivery-strategy-list">{([
           ['APPEND', 'Agregar registros', 'Inserta todas las filas. Una nueva ejecución intencional puede volver a agregarlas.'],
           ['OVERWRITE', 'Reemplazar datos existentes', 'Conserva la tabla, índices y constraints; sustituye sus datos de forma transaccional.'],
           ['UPSERT', 'Actualizar existentes y agregar nuevos', 'Actualiza coincidencias e inserta faltantes; no elimina filas ajenas al dataset.'],
-        ] as [WriteStrategy, string, string][]).map(([value, title, copy]) => <button type="button" key={value} className={`delivery-strategy ${strategy === value ? 'selected' : ''}`} onClick={() => { setStrategy(value); if (value !== 'UPSERT') setUpsertKeys([]) }}><span className="strategy-radio"/><div><strong>{title}</strong><p>{copy}</p></div><Badge value={value}/></button>)}</div>}
+        ] as [WriteStrategy, string, string][]).map(([value, title, copy]) => <button type="button" key={value} disabled={value === 'OVERWRITE' && !canOverwrite} className={`delivery-strategy ${strategy === value ? 'selected' : ''}`} onClick={() => { setStrategy(value); if (value !== 'UPSERT') setUpsertKeys([]) }}><span className="strategy-radio"/><div><strong>{title}</strong><p>{copy}</p></div><Badge value={value}/></button>)}</div>}
         {targetMode === 'EXISTING_TABLE' && strategy === 'APPEND' && <Notice>APPEND no ofrece exactly-once universal. Si la confirmación remota queda en UNKNOWN, Trackvance no reintentará automáticamente.</Notice>}
         {targetMode === 'EXISTING_TABLE' && strategy === 'OVERWRITE' && <div className="delivery-danger"><ShieldCheck size={19}/><div><strong>Operación destructiva sobre datos</strong><p>El Run reemplazará las filas actuales, sin eliminar ni recrear la tabla. Revisa target, mapping y constraints antes de publicar.</p></div></div>}
         {targetMode === 'EXISTING_TABLE' && strategy === 'UPSERT' && <fieldset className="delivery-key-picker"><legend>Clave de UPSERT</legend><p>Selecciona una o varias columnas destino cubiertas por una PK o restricción única compatible.</p>{selectedMappings.map(mapping => <label key={mapping.source_name}><input type="checkbox" checked={upsertKeys.includes(mapping.target_name)} onChange={event => setUpsertKeys(keys => event.target.checked ? [...keys, mapping.target_name] : keys.filter(key => key !== mapping.target_name))}/><span><strong>{mapping.target_name}</strong><small>Origen: {mapping.source_name}</small></span></label>)}{!upsertKeys.length && <small className="mapping-error">Selecciona al menos una clave.</small>}</fieldset>}

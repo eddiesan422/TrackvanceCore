@@ -493,6 +493,65 @@ def destroy_before_restore(source: str, database: str, evidence: Path) -> None:
            "La fuente PostgreSQL debe sobrevivir a la destrucción de Trackvance.")
 
 
+def prepare_identity_recovery(api: RecoveryApi, original: dict[str, Any], application: list[str],
+                              environment: dict[str, str], credentials: tuple[str, ...]) -> None:
+    role = api.json("POST", "/roles", {
+        "name": "Recovery custom role", "description": "Native restore fixture",
+        "permissions": ["datasets:read"], "active": True,
+    }, expected=201)
+    user = api.json("POST", "/users", {
+        "first_name": "Recovery", "last_name": "Fixture", "username": "recovery.fixture",
+        "email": "recovery.fixture@trackvance.test", "role_id": role["id"], "active": True,
+    }, expected=201)
+    ensure(user["credential_delivery"]["status"] == "FAILED",
+           "Sin SMTP la entrega de credenciales debe fallar explícitamente.")
+    # Durable synthetic metadata only. Actual signed OIDC/PKCE authentication is
+    # certified by identity_sso_cycle; recovery must also cover nonempty tables.
+    script = '''
+import hashlib
+import json
+from datetime import timedelta
+from trackvance.db import SessionLocal, utcnow
+from trackvance.models import ExternalIdentity, OIDCLoginAttempt, User
+identity = json.loads(INPUT)
+with SessionLocal() as db:
+    user = db.get(User, identity["user_id"])
+    now = utcnow()
+    db.add(ExternalIdentity(organization_id=user.organization_id, user_id=user.id,
+        provider="GOOGLE", issuer="https://accounts.google.com",
+        subject="recovery-synthetic-subject", email_at_link=user.email,
+        linked_at=now, last_login_at=now))
+    db.add(OIDCLoginAttempt(
+        state_hash=hashlib.sha256(b"recovery-consumed-state").hexdigest(),
+        browser_hash=hashlib.sha256(b"recovery-browser-binding").hexdigest(),
+        provider="GOOGLE", nonce="", code_verifier="",
+        expires_at=now + timedelta(minutes=10), consumed_at=now))
+    db.commit()
+'''.replace("INPUT", repr(json.dumps({"user_id": user["id"]})))
+    execute([*application, "exec", "-T", "api", "python", "-"], environment,
+            input_text=script, credentials=credentials)
+    original["identity"] = {
+        "user": api.json("GET", f"/users/{user['id']}"),
+        "role": api.json("GET", f"/roles/{role['id']}"),
+        "fixture": "SYNTHETIC_LINK_AND_CONSUMED_OIDC_METADATA_NO_PROVIDER_TOKENS",
+    }
+
+
+def validate_identity_restoration(api: RecoveryApi, original: dict[str, Any]) -> dict[str, Any]:
+    saved = original["identity"]
+    user = api.json("GET", f"/users/{saved['user']['id']}")
+    role = api.json("GET", f"/roles/{saved['role']['id']}")
+    ensure(user == saved["user"] and role == saved["role"],
+           "El restore modificó identidad, permisos, credenciales o vínculo externo.")
+    ensure(len(user["external_identities"]) == 1 and user["must_change_password"],
+           "Falta el vínculo externo o la restricción del primer acceso restaurado.")
+    return {"status": "PASS", "fixture": saved["fixture"],
+            "user_and_role_api_exactly_preserved": True,
+            "external_identity_exactly_preserved": True,
+            "notification_and_first_login_exactly_preserved": True,
+            "oidc_consumed_attempt_preserved_by_state_hash": True}
+
+
 def delivery_draft(original: dict[str, Any], table_name: str) -> dict[str, Any]:
     destination = original["destination"]
     return {
@@ -542,6 +601,7 @@ def prepare_delivery_operations(
     """
     configuration = api.json("POST", "/delivery/configurations", {
         **delivery_draft(original, "operational_records"),
+        "audit_columns_enabled": True,
         "name": "Entrega previa al respaldo y reparación local", "owner": "Recovery drill",
         "description": "Escritura real; pérdida controlada exclusivamente de evidencia local",
     }, expected=201)
@@ -752,6 +812,7 @@ def validate_delivery_restoration(
 
 def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[str],
                       environment: dict[str, str], credentials: tuple[str, ...]) -> dict[str, Any]:
+    identity_report = validate_identity_restoration(api, original)
     connection_id, dataset_id = original["connection_id"], original["dataset_id"]
     # No password after recovery: prove restored ciphertext AND master key work.
     test = api.json("POST", f"/connections/{connection_id}/test", {})
@@ -823,6 +884,7 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
         "restored_destination_credential_used": True,
         "exception": case_report, "sentinel": monitor_report, "delivery": delivery_report,
         "delivery_operations": operational_delivery_report,
+        "identity": identity_report,
     }
 
 
@@ -907,6 +969,8 @@ def main() -> int:
         original = capture_original(source_api, reader_password, delivery_password)
         stage = "delivery_operational_fixtures"
         prepare_delivery_operations(source_api, original, compose, fixture, environment, credentials)
+        stage = "identity_fixtures"
+        prepare_identity_recovery(source_api, original, compose, environment, credentials)
         stage = "backup"
         execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "backup",
                  "--project", source, "--destination", str(backup)], environment,
@@ -919,6 +983,8 @@ def main() -> int:
         counts = {name: len(state["tables"].get(name, {})) for name in (
             "exceptions", "exception_attachments", "monitor_schedules", "monitor_schedule_versions",
             "monitor_occurrences", "metric_history", "delivery_attempts", "delivery_reviews",
+            "roles", "role_permissions", "notification_deliveries", "delivery_target_policies",
+            "external_identities", "oidc_login_attempts",
         )}
         ensure(all(counts.values()) and counts["monitor_schedule_versions"] == 2,
                "El respaldo no contiene todos los registros operativos del ciclo.")

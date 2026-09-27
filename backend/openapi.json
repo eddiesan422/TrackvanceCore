@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.5.1"
+    "version": "0.6.0"
   },
   "paths": {
     "/health": {
@@ -79,7 +79,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
               }
             }
           }
@@ -105,7 +107,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
               }
             }
           },
@@ -122,6 +126,71 @@
         }
       }
     },
+    "/api/v1/auth/first-login/change-password": {
+      "post": {
+        "summary": "First Login Password",
+        "operationId": "first_login_password_api_v1_auth_first_login_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FirstLoginPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/me": {
       "get": {
         "summary": "Me",
@@ -131,7 +200,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
               }
             }
           },
@@ -643,7 +714,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
       },
       "post": {
         "summary": "Monitor",
@@ -695,7 +766,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write",
+        "x-required-permission": "sentinel:configure",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -739,7 +810,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "recon:read"
       },
       "post": {
         "summary": "Recon Control",
@@ -791,7 +862,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write",
+        "x-required-permission": "recon:configure",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -835,7 +906,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "intake:read"
       },
       "post": {
         "summary": "Intake Contract",
@@ -887,7 +958,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write",
+        "x-required-permission": "intake:configure",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -951,7 +1022,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute",
+        "x-required-permission": "intake:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -1015,7 +1086,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute",
+        "x-required-permission": "recon:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -1098,7 +1169,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute"
+        "x-required-permission": "sentinel:execute"
       }
     },
     "/api/v1/runs": {
@@ -1375,7 +1446,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "recon:read"
       }
     },
     "/api/v1/intake/runs/{run_id}/errors": {
@@ -1466,7 +1537,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "intake:read"
       }
     },
     "/api/v1/runs/{run_id}/results": {
@@ -1837,7 +1908,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
       }
     },
     "/api/v1/findings": {
@@ -2002,7 +2073,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "rules:read"
       }
     },
     "/api/v1/system/engines": {
@@ -2253,7 +2324,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "sentinel:configure"
       }
     },
     "/api/v1/recon/controls/{configuration_id}/versions": {
@@ -2326,7 +2397,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "recon:configure"
       }
     },
     "/api/v1/intake/contracts/{configuration_id}/versions": {
@@ -2399,7 +2470,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "intake:configure"
       }
     },
     "/api/v1/runs/{run_id}/execution-plan": {
@@ -3436,7 +3507,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:read"
+        "x-required-permission": "destinations:read"
       },
       "post": {
         "tags": [
@@ -3493,7 +3564,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:manage",
+        "x-required-permission": "destinations:manage",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -3562,7 +3633,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:manage",
+        "x-required-permission": "destinations:manage",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -3632,7 +3703,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:read"
+        "x-required-permission": "destinations:read"
       },
       "patch": {
         "tags": [
@@ -3708,7 +3779,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:manage"
+        "x-required-permission": "destinations:manage"
       },
       "delete": {
         "tags": [
@@ -3782,7 +3853,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:manage"
+        "x-required-permission": "destinations:manage"
       }
     },
     "/api/v1/delivery/destinations/{destination_id}/test": {
@@ -3850,7 +3921,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:manage"
+        "x-required-permission": "destinations:use"
       }
     },
     "/api/v1/delivery/destinations/{destination_id}/schemas": {
@@ -3908,7 +3979,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:use"
+        "x-required-permission": "destinations:use"
       }
     },
     "/api/v1/delivery/destinations/{destination_id}/tables": {
@@ -3977,7 +4048,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:use"
+        "x-required-permission": "destinations:use"
       }
     },
     "/api/v1/delivery/destinations/{destination_id}/table-metadata": {
@@ -4057,7 +4128,105 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "connections:use"
+        "x-required-permission": "destinations:use"
+      }
+    },
+    "/api/v1/delivery/destinations/{destination_id}/target-policy": {
+      "get": {
+        "tags": [
+          "Data Delivery"
+        ],
+        "summary": "Destination Target Policy",
+        "operationId": "destination_target_policy_api_v1_delivery_destinations__destination_id__target_policy_get",
+        "parameters": [
+          {
+            "name": "destination_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Destination Id"
+            }
+          },
+          {
+            "name": "schema_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Schema Name"
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Table Name"
+            }
+          },
+          {
+            "name": "destination_version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryTargetPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "delivery:read"
       }
     },
     "/api/v1/delivery/preview": {
@@ -4138,7 +4307,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "delivery:configure"
       }
     },
     "/api/v1/delivery/preflight": {
@@ -4197,7 +4366,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write",
+        "x-required-permission": "delivery:configure",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -4244,7 +4413,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "delivery:read"
       },
       "post": {
         "tags": [
@@ -4299,7 +4468,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write",
+        "x-required-permission": "delivery:configure",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -4385,7 +4554,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "delivery:configure"
       }
     },
     "/api/v1/delivery/runs": {
@@ -4422,7 +4591,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "delivery:read"
       },
       "post": {
         "tags": [
@@ -4477,7 +4646,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute",
+        "x-required-permission": "delivery:execute",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -4547,7 +4716,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "delivery:read"
       }
     },
     "/api/v1/delivery/runs/{run_id}/receipt": {
@@ -4674,7 +4843,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute"
+        "x-required-permission": "delivery:repair_evidence"
       }
     },
     "/api/v1/delivery/runs/{run_id}/reviews": {
@@ -4735,7 +4904,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "delivery:read"
       },
       "post": {
         "tags": [
@@ -4812,13 +4981,453 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:execute"
+        "x-required-permission": "delivery:review_unknown"
+      }
+    },
+    "/api/v1/roles/permissions": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Permission Catalog",
+        "operationId": "permission_catalog_api_v1_roles_permissions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:read"
+      }
+    },
+    "/api/v1/users/roles": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Roles",
+        "operationId": "roles_api_v1_users_roles_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:read"
+      }
+    },
+    "/api/v1/roles": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Roles",
+        "operationId": "roles_api_v1_roles_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:read"
+      },
+      "post": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Create Role",
+        "operationId": "create_role_api_v1_roles_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/roles/{role_id}": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Role Detail",
+        "operationId": "role_detail_api_v1_roles__role_id__get",
+        "parameters": [
+          {
+            "name": "role_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Role Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:read"
+      },
+      "patch": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Edit Role",
+        "operationId": "edit_role_api_v1_roles__role_id__patch",
+        "parameters": [
+          {
+            "name": "role_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Role Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:manage"
+      },
+      "delete": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Delete Role",
+        "operationId": "delete_role_api_v1_roles__role_id__delete",
+        "parameters": [
+          {
+            "name": "role_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Role Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "roles:manage"
       }
     },
     "/api/v1/users": {
       "get": {
         "tags": [
-          "Usuarios locales"
+          "Identidad y RBAC"
         ],
         "summary": "Users",
         "operationId": "users_api_v1_users_get",
@@ -4837,6 +5446,26 @@
                 }
               ],
               "title": "Active"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Deleted"
             }
           }
         ],
@@ -4883,7 +5512,7 @@
       },
       "post": {
         "tags": [
-          "Usuarios locales"
+          "Identidad y RBAC"
         ],
         "summary": "Create User",
         "operationId": "create_user_api_v1_users_post",
@@ -4936,7 +5565,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "users:write",
+        "x-required-permission": "users:manage",
         "parameters": [
           {
             "name": "X-CSRF-Token",
@@ -4949,47 +5578,10 @@
         ]
       }
     },
-    "/api/v1/users/roles": {
-      "get": {
-        "tags": [
-          "Usuarios locales"
-        ],
-        "summary": "Roles",
-        "operationId": "roles_api_v1_users_roles_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "401": {
-            "description": "Sesión ausente o vencida"
-          },
-          "403": {
-            "description": "Permiso u origen no autorizado / CSRF inválido"
-          },
-          "404": {
-            "description": "Recurso no disponible en la organización"
-          },
-          "409": {
-            "description": "Conflicto de versión, precondición o integridad"
-          }
-        },
-        "security": [
-          {
-            "LocalSession": []
-          }
-        ],
-        "x-required-permission": "users:read"
-      }
-    },
     "/api/v1/users/{user_id}": {
       "get": {
         "tags": [
-          "Usuarios locales"
+          "Identidad y RBAC"
         ],
         "summary": "User Detail",
         "operationId": "user_detail_api_v1_users__user_id__get",
@@ -5047,7 +5639,7 @@
       },
       "patch": {
         "tags": [
-          "Usuarios locales"
+          "Identidad y RBAC"
         ],
         "summary": "Edit User",
         "operationId": "edit_user_api_v1_users__user_id__patch",
@@ -5119,16 +5711,14 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "users:write"
-      }
-    },
-    "/api/v1/users/{user_id}/reset-password": {
-      "post": {
+        "x-required-permission": "users:manage"
+      },
+      "delete": {
         "tags": [
-          "Usuarios locales"
+          "Identidad y RBAC"
         ],
-        "summary": "Reset Password",
-        "operationId": "reset_password_api_v1_users__user_id__reset_password_post",
+        "summary": "Delete User",
+        "operationId": "delete_user_api_v1_users__user_id__delete",
         "parameters": [
           {
             "name": "user_id",
@@ -5153,7 +5743,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PasswordReset"
+                "$ref": "#/components/schemas/VersionInput"
               }
             }
           }
@@ -5197,7 +5787,319 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "users:write"
+        "x-required-permission": "users:manage"
+      }
+    },
+    "/api/v1/users/{user_id}/reset-password": {
+      "post": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Resend Credentials",
+        "operationId": "resend_credentials_api_v1_users__user_id__reset_password_post",
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:manage"
+      }
+    },
+    "/api/v1/users/{user_id}/resend-credentials": {
+      "post": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Resend Credentials",
+        "operationId": "resend_credentials_api_v1_users__user_id__resend_credentials_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:manage"
+      }
+    },
+    "/api/v1/users/{user_id}/external-identities/{identity_id}": {
+      "delete": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Unlink Identity",
+        "operationId": "unlink_identity_api_v1_users__user_id__external_identities__identity_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:manage"
+      }
+    },
+    "/api/v1/notifications/status": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Notification Status",
+        "operationId": "notification_status_api_v1_notifications_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "notifications:read"
+      }
+    },
+    "/api/v1/notifications/deliveries": {
+      "get": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Notification Deliveries",
+        "operationId": "notification_deliveries_api_v1_notifications_deliveries_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "notifications:read"
       }
     },
     "/api/v1/exceptions": {
@@ -5836,7 +6738,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "exceptions:read"
+        "x-required-permission": "artifacts:download"
       }
     },
     "/api/v1/monitors/{monitor_id}/schedule": {
@@ -5904,7 +6806,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
       },
       "post": {
         "tags": [
@@ -5980,7 +6882,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "configurations:write"
+        "x-required-permission": "sentinel:schedule"
       }
     },
     "/api/v1/monitors/{monitor_id}/occurrences": {
@@ -6052,7 +6954,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
       }
     },
     "/api/v1/monitors/{monitor_id}/series": {
@@ -6134,7 +7036,7 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
       }
     },
     "/api/v1/monitors/{monitor_id}/alerts": {
@@ -6204,12 +7106,139 @@
             "LocalSession": []
           }
         ],
-        "x-required-permission": "runs:read"
+        "x-required-permission": "sentinel:read"
+      }
+    },
+    "/api/v1/auth/providers": {
+      "get": {
+        "tags": [
+          "Autenticación OIDC"
+        ],
+        "summary": "Providers",
+        "operationId": "providers_api_v1_auth_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/{provider}/start": {
+      "get": {
+        "tags": [
+          "Autenticación OIDC"
+        ],
+        "summary": "Start",
+        "operationId": "start_api_v1_auth_sso__provider__start_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/{provider}/callback": {
+      "get": {
+        "tags": [
+          "Autenticación OIDC"
+        ],
+        "summary": "Callback",
+        "operationId": "callback_api_v1_auth_sso__provider__callback_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
   "components": {
     "schemas": {
+      "AuthenticationResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/OrganizationResponse"
+          },
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          },
+          "demo_mode": {
+            "type": "boolean",
+            "title": "Demo Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "organization",
+          "csrf_token",
+          "demo_mode"
+        ],
+        "title": "AuthenticationResponse"
+      },
       "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post": {
         "properties": {
           "file": {
@@ -7366,6 +8395,11 @@
             "maxItems": 100,
             "title": "Upsert Keys"
           },
+          "audit_columns_enabled": {
+            "type": "boolean",
+            "title": "Audit Columns Enabled",
+            "default": false
+          },
           "name": {
             "type": "string",
             "maxLength": 160,
@@ -7455,6 +8489,11 @@
             "maxItems": 100,
             "title": "Upsert Keys"
           },
+          "audit_columns_enabled": {
+            "type": "boolean",
+            "title": "Audit Columns Enabled",
+            "default": false
+          },
           "description": {
             "anyOf": [
               {
@@ -7535,6 +8574,11 @@
             "type": "array",
             "maxItems": 100,
             "title": "Upsert Keys"
+          },
+          "audit_columns_enabled": {
+            "type": "boolean",
+            "title": "Audit Columns Enabled",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -7578,6 +8622,11 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Target"
+          },
+          "system_audit": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "System Audit"
           }
         },
         "type": "object",
@@ -7813,6 +8862,48 @@
           "dataset_version_id"
         ],
         "title": "DeliveryRunBody"
+      },
+      "DeliveryTargetPolicyResponse": {
+        "properties": {
+          "audit_columns_required": {
+            "type": "boolean",
+            "title": "Audit Columns Required"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "materialized_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Materialized At"
+          },
+          "target_fingerprint": {
+            "type": "string",
+            "title": "Target Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audit_columns_required",
+          "policy_id",
+          "materialized_at",
+          "target_fingerprint"
+        ],
+        "title": "DeliveryTargetPolicyResponse"
       },
       "DestinationBody": {
         "properties": {
@@ -8232,6 +9323,74 @@
         ],
         "title": "DestinationTestResponse"
       },
+      "ExternalIdentityResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "email_at_link": {
+            "type": "string",
+            "title": "Email At Link"
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Linked At"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "issuer",
+          "subject",
+          "email_at_link",
+          "linked_at",
+          "last_login_at"
+        ],
+        "title": "ExternalIdentityResponse"
+      },
+      "FirstLoginPassword": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 12,
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "title": "FirstLoginPassword"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -8401,10 +9560,30 @@
       "LoginBody": {
         "properties": {
           "email": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 3,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Email"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
           },
           "password": {
             "type": "string",
@@ -8413,9 +9592,9 @@
             "title": "Password"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "email",
           "password"
         ],
         "title": "LoginBody"
@@ -8668,6 +9847,172 @@
         "type": "object",
         "title": "MonitorRunBody"
       },
+      "NotificationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "NotificationListResponse"
+      },
+      "NotificationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "template_key": {
+            "type": "string",
+            "title": "Template Key"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "recipient_type": {
+            "type": "string",
+            "title": "Recipient Type"
+          },
+          "recipient_user_id": {
+            "type": "string",
+            "title": "Recipient User Id"
+          },
+          "recipient_email_snapshot": {
+            "type": "string",
+            "title": "Recipient Email Snapshot"
+          },
+          "provider_key": {
+            "type": "string",
+            "title": "Provider Key"
+          },
+          "attempt_number": {
+            "type": "integer",
+            "title": "Attempt Number"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "organization_id",
+          "event_type",
+          "template_key",
+          "channel",
+          "recipient_type",
+          "recipient_user_id",
+          "recipient_email_snapshot",
+          "provider_key",
+          "attempt_number",
+          "status",
+          "error_code",
+          "created_at",
+          "sent_at",
+          "failed_at"
+        ],
+        "title": "NotificationResponse"
+      },
+      "NotificationStatusResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "security": {
+            "type": "string",
+            "title": "Security"
+          },
+          "from_address": {
+            "type": "string",
+            "title": "From Address"
+          },
+          "from_name": {
+            "type": "string",
+            "title": "From Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "configured",
+          "provider",
+          "security",
+          "from_address",
+          "from_name"
+        ],
+        "title": "NotificationStatusResponse"
+      },
       "OccurrenceCollection": {
         "properties": {
           "items": {
@@ -8815,29 +10160,80 @@
         ],
         "title": "OccurrenceResponse"
       },
-      "PasswordReset": {
+      "OrganizationResponse": {
         "properties": {
-          "version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Version"
-          },
-          "password": {
+          "id": {
             "type": "string",
-            "maxLength": 1024,
-            "minLength": 12,
-            "format": "password",
-            "title": "Password",
-            "writeOnly": true
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "required": [
-          "version",
-          "password"
+          "id",
+          "name"
         ],
-        "title": "PasswordReset"
+        "title": "OrganizationResponse"
+      },
+      "PermissionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "PermissionListResponse"
+      },
+      "PermissionResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependencies"
+          },
+          "delegable": {
+            "type": "boolean",
+            "title": "Delegable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "group",
+          "label",
+          "dependencies",
+          "delegable"
+        ],
+        "title": "PermissionResponse"
       },
       "PlanPreviewBody": {
         "properties": {
@@ -8868,6 +10264,63 @@
           "dataset_version_id"
         ],
         "title": "PlanPreviewBody"
+      },
+      "ProviderResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "start_url": {
+            "type": "string",
+            "title": "Start Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "start_url"
+        ],
+        "title": "ProviderResponse"
+      },
+      "ProvidersResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Statuses"
+          },
+          "local_enabled": {
+            "type": "boolean",
+            "title": "Local Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "statuses",
+          "local_enabled"
+        ],
+        "title": "ProvidersResponse"
       },
       "ReconBody": {
         "properties": {
@@ -9027,6 +10480,196 @@
           "target_version_id"
         ],
         "title": "ReconRunBody"
+      },
+      "RoleCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description",
+            "default": ""
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Permissions"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "RoleCreate"
+      },
+      "RoleListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "RoleListResponse"
+      },
+      "RolePatch": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "permissions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permissions"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "RolePatch"
+      },
+      "RoleResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
+          },
+          "system_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Key"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "active",
+          "deleted",
+          "system_key",
+          "protected",
+          "version",
+          "user_count",
+          "permissions"
+        ],
+        "title": "RoleResponse"
       },
       "RuleDefinition": {
         "properties": {
@@ -9479,11 +11122,23 @@
       },
       "UserCreate": {
         "properties": {
-          "name": {
+          "first_name": {
             "type": "string",
-            "maxLength": 200,
+            "maxLength": 100,
             "minLength": 1,
-            "title": "Name"
+            "title": "First Name"
+          },
+          "last_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Last Name"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 3,
+            "title": "Username"
           },
           "email": {
             "type": "string",
@@ -9491,26 +11146,11 @@
             "minLength": 3,
             "title": "Email"
           },
-          "role": {
+          "role_id": {
             "type": "string",
-            "enum": [
-              "Administrator",
-              "Data Owner",
-              "Data Owner / Lead",
-              "Data Analyst",
-              "Operations",
-              "Auditor"
-            ],
-            "title": "Role",
-            "default": "Data Analyst"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 12,
-            "format": "password",
-            "title": "Password",
-            "writeOnly": true
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role Id"
           },
           "active": {
             "type": "boolean",
@@ -9521,9 +11161,11 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "name",
+          "first_name",
+          "last_name",
+          "username",
           "email",
-          "password"
+          "role_id"
         ],
         "title": "UserCreate"
       },
@@ -9555,18 +11197,44 @@
             "minimum": 1.0,
             "title": "Version"
           },
-          "name": {
+          "first_name": {
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 200,
+                "maxLength": 100,
                 "minLength": 1
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Name"
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
           },
           "email": {
             "anyOf": [
@@ -9581,24 +11249,18 @@
             ],
             "title": "Email"
           },
-          "role": {
+          "role_id": {
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "Administrator",
-                  "Data Owner",
-                  "Data Owner / Lead",
-                  "Data Analyst",
-                  "Operations",
-                  "Auditor"
-                ]
+                "maxLength": 64,
+                "minLength": 1
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Role"
+            "title": "Role Id"
           },
           "active": {
             "anyOf": [
@@ -9629,6 +11291,32 @@
             "type": "string",
             "title": "Name"
           },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
           "email": {
             "type": "string",
             "title": "Email"
@@ -9637,9 +11325,21 @@
             "type": "string",
             "title": "Role"
           },
+          "role_id": {
+            "type": "string",
+            "title": "Role Id"
+          },
+          "role_version": {
+            "type": "integer",
+            "title": "Role Version"
+          },
           "active": {
             "type": "boolean",
             "title": "Active"
+          },
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
           },
           "permissions": {
             "items": {
@@ -9673,20 +11373,89 @@
               }
             ],
             "title": "Password Changed At"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "must_change_password": {
+            "type": "boolean",
+            "title": "Must Change Password"
+          },
+          "temporary_password_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporary Password Expires At"
+          },
+          "credential_delivery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "external_identities": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalIdentityResponse"
+            },
+            "type": "array",
+            "title": "External Identities"
           }
         },
         "type": "object",
         "required": [
           "id",
           "name",
+          "first_name",
+          "last_name",
+          "username",
           "email",
           "role",
+          "role_id",
+          "role_version",
           "active",
+          "deleted",
           "permissions",
           "version",
           "created_at",
           "updated_at",
-          "password_changed_at"
+          "password_changed_at",
+          "deleted_at",
+          "last_login_at",
+          "must_change_password",
+          "temporary_password_expires_at",
+          "credential_delivery",
+          "external_identities"
         ],
         "title": "UserResponse"
       },
@@ -9769,6 +11538,21 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VersionInput": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "VersionInput"
       }
     },
     "securitySchemes": {

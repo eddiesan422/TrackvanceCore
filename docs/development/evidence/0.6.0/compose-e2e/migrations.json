@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "historical_tables_preserved": 6,
+  "actor_backfill": "PASS",
+  "model_parity": "PASS",
+  "roundtrip": "PASS",
+  "0008_0012_roundtrip": "PASS",
+  "0008_tables_preserved": 24,
+  "0008_delivery_attempts_preserved": {
+    "COMMITTED": 1,
+    "UNKNOWN": 1
+  },
+  "0008_delivery_lineage_edges_preserved": 8
+}

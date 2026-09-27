@@ -18,7 +18,7 @@ type SeriesResponse = { items: MetricSeries[]; sample_count: number; limit: numb
 
 function ScheduleEditor({ monitorId, schedule }: { monitorId: string; schedule: Schedule | null }) {
   const cache = useQueryClient()
-  const canConfigure = usePermission('configurations:write'), canExecute = usePermission('runs:execute')
+  const canConfigure = usePermission('sentinel:schedule'), canExecute = usePermission('sentinel:execute')
   const [minutes, setMinutes] = useState(String((schedule?.interval_seconds || 3600) / 60))
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true), [start, setStart] = useState('')
   const save = useMutation({

@@ -51,6 +51,8 @@ _AUDIT_KEYS = frozenset({
     "interval_seconds", "assigned_user_id", "priority", "sla_hours", "due_at",
     "auto_resolve_enabled", "closure_type", "changed_fields", "active", "sessions_revoked", "policy",
     "origin_run_id", "validation_run_id", "criterion",
+    "role_id", "permissions", "provider", "notification_id",
+    "policy_id", "target_fingerprint", "username", "audit_columns_enabled",
 })
 
 

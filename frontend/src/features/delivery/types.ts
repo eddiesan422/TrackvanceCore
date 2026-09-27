@@ -156,6 +156,14 @@ export interface DeliveryDraft {
   columns: Omit<ColumnMapping, 'selected' | 'source_type'>[]
   write_strategy: WriteStrategy
   upsert_keys: string[]
+  audit_columns_enabled: boolean
+}
+
+export interface DeliveryTargetPolicy {
+  audit_columns_required: boolean
+  policy_id: string | null
+  materialized_at: string | null
+  target_fingerprint: string
 }
 
 export interface DeliveryPreview {

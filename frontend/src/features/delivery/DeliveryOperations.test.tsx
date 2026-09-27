@@ -10,7 +10,7 @@ import type { DeliveryReview, DeliveryReviewOutcome } from './types'
 
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn(), download: vi.fn() }))
 
-const permissions = ['runs:read', 'runs:execute', 'artifacts:download', 'audit:read']
+const permissions = ['runs:read', 'delivery:execute', 'delivery:repair_evidence', 'delivery:review_unknown', 'artifacts:download', 'audit:read']
 const committed = { id: 'run-1', module: 'DELIVERY', status: 'SUCCESS', decision: 'COMMITTED', metrics: { evidence_status: 'PENDING_REPAIR' }, name: 'Entrega confirmada', created_at: '2026-09-25T12:00:00Z' }
 const attempt = { id: 'attempt-1', run_id: 'run-1', attempt_number: 1, status: 'COMMITTED', rows_attempted: 2, rows_written: 2, rows_inserted: null, rows_updated: null }
 let currentRun: RecordData, currentAttempt: RecordData, reviews: DeliveryReview[]

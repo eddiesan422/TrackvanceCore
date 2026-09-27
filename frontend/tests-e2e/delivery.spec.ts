@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 // Opt in only on the disposable stack provisioned by delivery_cycle.py.
 // Delivery traffic may exercise credential-backed endpoints; never retain traces.
-test.use({ trace: 'off' })
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 test.setTimeout(180_000)
 test.skip(process.env.TV_DELIVERY_E2E !== 'true', 'Requires the isolated Data Delivery fixtures')
 
@@ -44,6 +44,7 @@ test('destino real → builder → preflight → publicación → receipt', asyn
   await page.getByRole('button', { name: /Crear tabla nueva/ }).click()
   await page.getByLabel('Schema', { exact: true }).selectOption('existing_delivery')
   await page.getByLabel('Nueva tabla', { exact: true }).fill(tableName)
+  await page.getByRole('checkbox', { name: 'Incluir campos de auditoría de Trackvance' }).check()
   await page.getByRole('button', { name: /Continuar/ }).click()
 
   await expect(page.getByRole('heading', { name: 'Mapping de salida', exact: true })).toBeVisible()
@@ -76,6 +77,7 @@ test('destino real → builder → preflight → publicación → receipt', asyn
     destination_version_id: expect.any(String),
     target: expect.objectContaining({ mode: 'CREATE_TABLE', schema_name: 'existing_delivery', table_name: tableName }),
     write_strategy: 'CREATE_AND_LOAD',
+    audit_columns_enabled: true,
   }))
   await expect(page.getByText(/Publicada como versión 1/)).toBeVisible()
 
@@ -96,6 +98,18 @@ test('destino real → builder → preflight → publicación → receipt', asyn
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
   await expect(page.getByText(`existing_delivery.${tableName}`, { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Auditoría de ingesta de Trackvance', exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('delivery-receipt.png'), fullPage: true })
+  // Another configuration for the same physical target inherits an irreversible policy.
+  await page.goto(`/delivery/new?configuration=${configuration.id}`)
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  const locked = page.getByRole('checkbox', { name: 'Incluir campos de auditoría de Trackvance' })
+  await expect(locked).toBeChecked()
+  await expect(locked).toBeDisabled()
+  await expect(page.getByText(/Todas las entregas posteriores deben registrar fechaIngesta y usuario/)).toBeVisible()
+  const identity = await (await page.request.get('/api/v1/me')).json()
+  const manipulated = await page.request.post('/api/v1/delivery/preflight', { headers: { 'X-CSRF-Token': identity.csrf_token }, data: { ...configuration.config, audit_columns_enabled: false } })
+  expect(manipulated.status()).toBe(412)
   expect(pageErrors).toEqual([])
 })

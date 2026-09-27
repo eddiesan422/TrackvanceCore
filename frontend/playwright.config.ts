@@ -10,8 +10,8 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.TV_E2E_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000',
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: process.env.TV_E2E_PRIVATE_ARTIFACTS ? 'off' : 'retain-on-failure',
+    screenshot: process.env.TV_E2E_PRIVATE_ARTIFACTS ? 'off' : 'only-on-failure',
     acceptDownloads: true,
   },
   projects: [{

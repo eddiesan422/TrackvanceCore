@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 — 2026-09-26 — identidad dinámica y auditoría de publicación
+
+- Sustituye autorización por nombres de roles estáticos por Role/RolePermission
+  persistidos y catálogo versionado con matriz explícita de rutas fail-closed.
+  Administrator protegido recibe el catálogo completo; users:manage/roles:manage
+  no son delegables. Dependencias y bajas se validan en backend; roles con
+  usuarios no eliminados no pueden desactivarse/eliminarse.
+- Añade username, nombres/apellidos, baja lógica, expiración temporal y último
+  acceso. Conserva cuentas y actores heredados. El alta genera password aleatorio
+  Argon2, envía por SMTP y fuerza cambio local incluso tras primer acceso SSO.
+  Regeneración invalida credencial y sesiones; cambio de Role revoca sesiones.
+- Implementa OIDC server-side para Microsoft common (personal y work/school) y
+  Google (Gmail/Workspace), Code Flow/PKCE/state/nonce y validación JOSE mantenida.
+  ExternalIdentity usa provider/issuer/subject; no auto-provisiona ni toma roles
+  externos. El primer vínculo exige autoridad sobre el identificador.
+- Implementa NotificationService → NotificationDelivery → SMTPNotificationDelivery,
+  con metadatos PENDING/SENT/FAILED y sin cuerpo/password persistido. La primera
+  notificación es USER_TEMPORARY_CREDENTIALS; alertas de ejecución siguen pendientes.
+- Añade DeliveryTargetPolicy por fingerprint físico y campos fechaIngesta/usuario
+  juntos. Publicar hace permanente la obligación; DDL/DML comparten transacción.
+  Tablas nuevas usan NOT NULL; columnas añadidas usan NULL sin DEFAULT. UPSERT
+  actualiza ambas columnas, drift falla cerrado y UNKNOWN conserva incertidumbre.
+- Agrega migraciones 0010, 0011 y 0012, state 5 para backup y proyecciones legacy
+  exactas. Conserva 0001..0009. Añade Mailpit/OIDC sólo en overlays desechables,
+  job identity-sso-e2e y drill auténtico 0.5.1→0.6.0; mantiene los ocho jobs previos.
+- Actualiza Configuración, usuarios/roles/autenticación/notificaciones, login,
+  actualización de `/me`, builder Delivery y evidencia. Amplía especificación,
+  guías operativas y revisión visual del PDF. Resultados y límites concretos en
+  `docs/development/validation.md`; no se heredan PASS de versiones anteriores.
+
 ## 0.5.1 — 2026-09-25 — hardening y operación de Data Delivery
 
 Código 8927ea0 certificado con ocho jobs SUCCESS en el workflow

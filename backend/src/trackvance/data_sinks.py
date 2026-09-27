@@ -116,6 +116,7 @@ class DeliveryResult:
     rows_updated: int | None
     bytes_sent: int
     remote_reference: str | None = None
+    audit_columns_created: bool = False
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,59 @@ class PreparedDelivery:
     strategy: str
     upsert_keys: list[str]
     bytes_sent: int
+
+
+AUDIT_NAMES = {"fecha_ingesta": "fechaIngesta", "usuario": "usuario"}
+
+
+def inspect_audit_columns(
+    sink_type: str, metadata: dict[str, Any] | None, *, materialized: bool = False,
+) -> dict[str, Any]:
+    """Validate/adopt writable audit columns without changing the remote schema."""
+    columns = (metadata or {}).get("columns", [])
+    names = dict(AUDIT_NAMES)
+    missing = []
+    for key, expected in AUDIT_NAMES.items():
+        matches = [c for c in columns if (
+            c["name"].casefold() == expected.casefold()
+            if sink_type == "SQLSERVER" else c["name"] == expected
+        )]
+        if len(matches) > 1:
+            raise DeliveryError("AUDIT_COLUMNS_INCOMPATIBLE", "Los nombres de auditoría son ambiguos.")
+        if not matches:
+            # PostgreSQL must never silently adopt an unquoted lowercase alias.
+            if any(c["name"].casefold() == expected.casefold() for c in columns):
+                raise DeliveryError("AUDIT_COLUMNS_INCOMPATIBLE", "El nombre de auditoría no coincide exactamente.")
+            missing.append(expected)
+            continue
+        column = matches[0]
+        names[key] = column["name"]
+        native = _base_native_type(str(column.get("native_type", "")))
+        writable = not column.get("identity") and not column.get("generated")
+        if key == "fecha_ingesta":
+            compatible = native in (
+                {"timestamp with time zone", "timestamptz"}
+                if sink_type == "POSTGRESQL" else {"datetimeoffset"}
+            ) and int(column.get("datetime_precision") or 0) >= 6
+        else:
+            compatible = native in (
+                {"character varying", "varchar", "text"}
+                if sink_type == "POSTGRESQL" else {"nvarchar"}
+            ) and (column.get("length") is None or int(column["length"]) >= 128)
+        if not writable or not compatible:
+            raise DeliveryError("AUDIT_COLUMNS_INCOMPATIBLE", "Los tipos de auditoría existentes no son compatibles.")
+    if materialized and missing:
+        raise DeliveryError("AUDIT_COLUMNS_DRIFT", "La tabla perdió campos de auditoría requeridos por Trackvance.")
+    return {"columns": names, "missing_columns": missing}
+
+
+def audit_column_mappings(names: dict[str, str], *, nullable: bool = False) -> list[dict[str, Any]]:
+    return [
+        {"source_name": "__trackvance_fecha_ingesta", "target_name": names["fecha_ingesta"],
+         "target_type": "TIMESTAMP", "nullable": nullable},
+        {"source_name": "__trackvance_usuario", "target_name": names["usuario"],
+         "target_type": "STRING", "length": 128, "nullable": nullable},
+    ]
 
 
 def validate_identifier(value: str) -> str:
@@ -617,6 +671,21 @@ class DatabaseDataSink:
             technical_type(self.sink_type, column)
         prepared_keys = [validator(name) for name in upsert_keys]
         rows = tuple(prepare_rows(records, prepared_columns))
+        system_audit = prepared_target.get("_system_audit")
+        if system_audit:
+            reserved = {name.casefold() for name in AUDIT_NAMES.values()}
+            if any(c["target_name"].casefold() in reserved for c in prepared_columns):
+                raise DeliveryError("AUDIT_MAPPING_COLLISION", "El mapping no puede escribir columnas de auditoría.")
+            audit_columns = audit_column_mappings(system_audit["columns"])
+            username = system_audit["username"]
+            if not isinstance(username, str) or not username or len(username) > 128:
+                raise DeliveryError("AUDIT_USERNAME_MISSING", "No hay snapshot válido de username para la entrega.")
+            audit_values = (
+                convert_value(system_audit["fecha_ingesta"], audit_columns[0]),
+                convert_value(username, audit_columns[1]),
+            )
+            rows = tuple(row + audit_values for row in rows)
+            prepared_columns.extend(audit_columns)
         return PreparedDelivery(
             schema_name=schema_name,
             table_name=table_name,
@@ -812,6 +881,17 @@ class PostgreSQLDataSink(DatabaseDataSink):
                 (privilege, schema_name, table_name),
             )
             allowed = cursor.fetchone()[0]
+            alter_allowed = False
+            if target.get("_audit_requires_alter"):
+                cursor.execute(
+                    """SELECT pg_has_role(c.relowner, 'USAGE') OR
+                              (SELECT rolsuper FROM pg_roles WHERE rolname=current_user)
+                       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                       WHERE n.nspname=%s AND c.relname=%s AND c.relkind IN ('r','p')""",
+                    (schema_name, table_name),
+                )
+                row = cursor.fetchone()
+                alter_allowed = bool(row and row[0])
             temporary_allowed = True
             if strategy == "UPSERT":
                 cursor.execute(
@@ -823,6 +903,7 @@ class PostgreSQLDataSink(DatabaseDataSink):
                 "schema_exists": True,
                 "target_exists": allowed is not None,
                 "allowed": bool(allowed) and temporary_allowed,
+                "alter_table": alter_allowed,
             }
 
     @staticmethod
@@ -1008,6 +1089,34 @@ class PostgreSQLDataSink(DatabaseDataSink):
                 break
         return inserted, updated
 
+    def _materialize_audit(self, cursor: Any, payload: PreparedDelivery) -> bool:
+        audit = payload.target.get("_system_audit")
+        if not audit:
+            return False
+        cursor.execute(
+            """SELECT c.column_name, c.data_type, c.character_maximum_length,
+                      c.datetime_precision, c.is_identity = 'YES', c.is_generated <> 'NEVER'
+               FROM information_schema.columns c
+               WHERE c.table_schema=%s AND c.table_name=%s ORDER BY c.ordinal_position""",
+            (payload.schema_name, payload.table_name),
+        )
+        metadata = {"columns": [
+            {"name": row[0], "native_type": row[1], "length": row[2],
+             "datetime_precision": row[3], "identity": row[4], "generated": row[5]}
+            for row in cursor.fetchall()
+        ]}
+        inspected = inspect_audit_columns(self.sink_type, metadata, materialized=audit["materialized"])
+        if inspected["columns"] != audit["columns"]:
+            raise DeliveryError("AUDIT_COLUMNS_DRIFT", "Los nombres de auditoría cambiaron después del preflight.")
+        for column in audit_column_mappings(inspected["columns"], nullable=True):
+            if column["target_name"] in inspected["missing_columns"]:
+                cursor.execute(sql.SQL("ALTER TABLE {} ADD COLUMN {} {} NULL").format(
+                    self._qualified(payload.schema_name, payload.table_name),
+                    sql.Identifier(column["target_name"]),
+                    sql.SQL(technical_type(self.sink_type, column)),
+                ))
+        return bool(inspected["missing_columns"])
+
     def deliver_prepared(self, payload: PreparedDelivery) -> DeliveryResult:
         schema_name = payload.schema_name
         table_name = payload.table_name
@@ -1019,6 +1128,7 @@ class PostgreSQLDataSink(DatabaseDataSink):
         inserted: int | None
         updated: int | None
         connection = None
+        audit_columns_created = False
         try:
             with self._connection() as connection, connection.cursor() as cursor:
                 if target["mode"] == "CREATE_TABLE":
@@ -1060,6 +1170,7 @@ class PostgreSQLDataSink(DatabaseDataSink):
                             self._qualified(schema_name, table_name), definitions
                         )
                     )
+                    audit_columns_created = bool(target.get("_system_audit"))
                     inserted = self._insert(cursor, schema_name, table_name, columns, rows)
                     updated = 0
                 else:
@@ -1070,12 +1181,13 @@ class PostgreSQLDataSink(DatabaseDataSink):
                         sql.SQL("LOCK TABLE {} IN {} MODE").format(
                             self._qualified(schema_name, table_name),
                             sql.SQL(
-                                "SHARE ROW EXCLUSIVE"
-                                if strategy == "OVERWRITE"
-                                else "ROW EXCLUSIVE"
+                                "ACCESS EXCLUSIVE" if target.get("_system_audit") else (
+                                    "SHARE ROW EXCLUSIVE" if strategy == "OVERWRITE" else "ROW EXCLUSIVE"
+                                )
                             ),
                         )
                     )
+                    audit_columns_created = self._materialize_audit(cursor, payload)
                     if strategy == "APPEND":
                         inserted = self._insert(cursor, schema_name, table_name, columns, rows)
                         updated = 0
@@ -1125,6 +1237,7 @@ class PostgreSQLDataSink(DatabaseDataSink):
             rows_inserted=inserted,
             rows_updated=updated,
             bytes_sent=payload.bytes_sent,
+            audit_columns_created=audit_columns_created,
         )
 
 
@@ -1355,12 +1468,17 @@ class SQLServerDataSink(DatabaseDataSink):
                 (schema_name, table_name),
             )
             exists = bool(cursor.fetchone()[0])
+            alter_allowed = False
+            if target.get("_audit_requires_alter"):
+                cursor.execute("SELECT HAS_PERMS_BY_NAME(%s, 'OBJECT', 'ALTER')", (locator,))
+                alter_allowed = bool(cursor.fetchone()[0])
             return {
                 "connect": True,
                 "schema_exists": True,
                 "target_exists": exists,
                 "security_metadata_visible": security_metadata_visible,
                 "allowed": allowed and exists and security_metadata_visible,
+                "alter_table": alter_allowed,
             }
 
     @staticmethod
@@ -1537,6 +1655,37 @@ class SQLServerDataSink(DatabaseDataSink):
                 inserted += int(cursor.fetchone()[0])
         return inserted, updated
 
+    def _materialize_audit(self, cursor: Any, payload: PreparedDelivery) -> bool:
+        audit = payload.target.get("_system_audit")
+        if not audit:
+            return False
+        cursor.execute(
+            """SELECT c.name, t.name, c.max_length, c.scale, c.is_identity,
+                      CASE WHEN c.is_computed=1 OR c.generated_always_type<>0 THEN 1 ELSE 0 END
+               FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id
+               JOIN sys.objects o ON o.object_id=c.object_id
+               JOIN sys.schemas s ON s.schema_id=o.schema_id
+               WHERE s.name=%s AND o.name=%s AND o.type='U' ORDER BY c.column_id""",
+            (payload.schema_name, payload.table_name),
+        )
+        metadata = {"columns": [
+            {"name": row[0], "native_type": row[1],
+             "length": None if row[2] == -1 else row[2] // 2,
+             "datetime_precision": row[3], "identity": row[4], "generated": row[5]}
+            for row in cursor.fetchall()
+        ]}
+        inspected = inspect_audit_columns(self.sink_type, metadata, materialized=audit["materialized"])
+        if inspected["columns"] != audit["columns"]:
+            raise DeliveryError("AUDIT_COLUMNS_DRIFT", "Los nombres de auditoría cambiaron después del preflight.")
+        for column in audit_column_mappings(inspected["columns"], nullable=True):
+            if column["target_name"] in inspected["missing_columns"]:
+                cursor.execute(
+                    f"ALTER TABLE {self._qualified(payload.schema_name, payload.table_name)} "
+                    f"ADD {quote_sqlserver_identifier(column['target_name'])} "
+                    f"{technical_type(self.sink_type, column)} NULL"
+                )
+        return bool(inspected["missing_columns"])
+
     def deliver_prepared(self, payload: PreparedDelivery) -> DeliveryResult:
         schema_name = payload.schema_name
         table_name = payload.table_name
@@ -1546,6 +1695,7 @@ class SQLServerDataSink(DatabaseDataSink):
         strategy = payload.strategy
         upsert_keys = payload.upsert_keys
         connection = None
+        audit_columns_created = False
         try:
             with self._connection() as connection, connection.cursor() as cursor:
                 if target["mode"] == "CREATE_TABLE":
@@ -1583,10 +1733,12 @@ class SQLServerDataSink(DatabaseDataSink):
                     cursor.execute(
                         f"CREATE TABLE {self._qualified(schema_name, table_name)} ({definitions})"
                     )
+                    audit_columns_created = bool(target.get("_system_audit"))
                     inserted = self._insert(cursor, schema_name, table_name, columns, rows)
                     updated = 0
                 else:
                     self._lock_existing_target(cursor, schema_name, table_name)
+                    audit_columns_created = self._materialize_audit(cursor, payload)
                     self._reject_ignore_duplicate_keys(
                         cursor, schema_name, table_name
                     )
@@ -1635,6 +1787,7 @@ class SQLServerDataSink(DatabaseDataSink):
             rows_inserted=inserted,
             rows_updated=updated,
             bytes_sent=payload.bytes_sent,
+            audit_columns_created=audit_columns_created,
         )
 
 

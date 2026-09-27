@@ -363,7 +363,8 @@ def test_delivery_schema_sorts_snapshot_and_rejects_ambiguous_plans(delivery_cas
     draft = DeliveryDraft.model_validate(payload)
 
     assert [item["ordinal"] for item in draft.snapshot()["columns"]] == [0, 1, 2, 3]
-    assert draft.snapshot() == draft.model_dump(mode="json")
+    assert draft.snapshot() == draft.model_dump(mode="json", exclude={"audit_columns_enabled"})
+    assert "audit_columns_enabled" not in draft.snapshot()  # Historical hash compatibility.
 
     invalid_payloads = []
     duplicate_source = deepcopy(payload)
@@ -549,7 +550,11 @@ def test_delivery_resources_are_organization_isolated(
         "organization-isolation",
     )
     with database() as db:
-        db.get(User, "test-user").organization_id = "another-organization"
+        from trackvance.identity_bootstrap import ensure_roles
+
+        user = db.get(User, "test-user")
+        user.organization_id = "another-organization"
+        user.role_id = ensure_roles(db, user.organization_id)["Administrator"]
         db.commit()
 
     destination_url = f"/api/v1/delivery/destinations/{delivery_case.destination['id']}"

@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 
-test.use({ trace: 'off' }) // Local authentication and connector forms contain disposable passwords.
+test.use({ trace: 'off', screenshot: 'off', video: 'off' }) // Credential-bearing requests stay out of browser artifacts.
 test.setTimeout(180_000)
 test.skip(process.env.TV_CONNECTIONS_E2E !== 'true', 'Requires isolated real source fixtures')
 

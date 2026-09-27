@@ -1,6 +1,37 @@
 # Trackvance Core
 
-## Evolución funcional local 0.5.1
+## Evolución funcional local 0.6.0
+
+0.6.0 incorpora **roles persistentes y permisos granulares**, usuarios con
+username y credenciales temporales por email, primer acceso obligatorio,
+**Microsoft/Google OIDC** sin auto-provisioning y **fechaIngesta/usuario en Data
+Delivery** mediante una política permanente por tabla. SSO autentica y Trackvance
+autoriza. DatasetVersion conserva su versionado interno inmutable; no se
+implementan SHIST/SCD ni históricos de vigencias.
+
+Administrator es un rol protegido que recibe siempre el catálogo completo.
+Cambiar permisos afecta la siguiente petición y `/me` actualiza la interfaz;
+cambiar el rol de un usuario revoca sesiones. Las bajas de usuarios/roles son
+lógicas, con protección del último administrador y de roles con usuarios
+asociados. SMTP envía credenciales sin persistir cuerpos ni passwords plaintext.
+SMTP/SSO deshabilitados no impiden iniciar el sistema.
+
+La cadena Alembic vigente termina en `0012_delivery_target_audit`, después de
+`0010_dynamic_rbac_identity` y `0011_notification_delivery`. Las migraciones
+0001..0009 permanecen intactas. El Compose principal conserva cinco servicios y
+`restart: "no"`; Mailpit y el proveedor OIDC falso pertenecen sólo a pruebas.
+
+- [Identidad/RBAC/primer acceso/notificaciones](docs/development/identity-060.md).
+- [Configurar Microsoft personal/corporativo y Google Gmail/Workspace](docs/development/sso-setup.md).
+- [Configurar SMTP y Mailpit](docs/development/smtp-setup.md).
+- [Auditoría de publicación y política por target](docs/development/delivery-audit.md).
+- [Resultados reales, fallos, omisiones y CI](docs/development/validation.md).
+
+Los resultados de 0.5.1 que se conservan debajo son antecedentes; no certifican
+automáticamente 0.6.0. Las pruebas externas sin client IDs/secrets se registran
+`NOT_RUN_EXTERNAL_CREDENTIALS`, separadas del mock OIDC automatizado.
+
+### Base funcional conservada de 0.5.1
 
 El prototipo conserva el monolito modular FastAPI/React, PostgreSQL, workers
 y almacenamiento local. Incluye perfiles observados sin trim implícito,
@@ -9,7 +40,7 @@ Intake en Parquet, evidencia v2 y reportes Excel estructurados con openpyxl.
 Las configuraciones publicadas, ejecuciones y archivos históricos permanecen
 inmutables. La capa de entrada admite CSV, Excel XLSX, JSON, Parquet y TXT
 delimitado, además de PostgreSQL y SQL Server mediante **Conexiones**;
-la migración más reciente es `0009_delivery_reviews`.
+su migración histórica era `0009_delivery_reviews`.
 
 Esta revisión amplía Intake con unicidad compuesta, longitud, comparaciones,
 condiciones e integridad contra otra DatasetVersion. ReconOps permite reglas
@@ -356,10 +387,10 @@ resultado remoto conocido prevalece sobre una cancelación tardía.
 
 La separación de montajes es deliberada: la API monta secretos de origen y
 destino; el worker `DEFAULT` sólo artifacts; el `delivery-worker`, artifacts y
-secretos de destino, nunca los de origen. 0.5.1 conserva los permisos existentes de
-conexiones, configuraciones, runs y artifacts; un RBAC granular propio de Delivery
-permanece pendiente. Tampoco se implementan otros sinks, scheduler de entregas,
-transformación arbitraria ni transacción distribuida.
+secretos de destino, nunca los de origen. 0.6.0 usa permisos propios de destinos y
+Delivery; sobrescribir, crear/alterar targets, revisar UNKNOWN y reparar evidencia
+requieren permisos separados. Otros sinks, scheduler de entregas,
+transformación arbitraria y transacción distribuida permanecen fuera del alcance.
 
 La certificación aislada usa motores y volúmenes desechables, sin tocar la
 instalación principal:
@@ -383,7 +414,7 @@ La compatibilidad de restore incluye backups schema 1/state 2 de la baseline
 0.4.1 en migración 0007 y el esquema 0.5.0/0008. La certificación histórica
 0.5.0 preservó exactamente la proyección legacy de 21 tablas y añadió las tres
 tablas Delivery vacías, con lane `DEFAULT` en jobs históricos. En 0.5.1 el head
-es `0009_delivery_reviews`: añade una cuarta tabla Delivery, inicialmente vacía
+era `0009_delivery_reviews`: añadió una cuarta tabla Delivery, inicialmente vacía
 al migrar backups anteriores. La recertificación de ambos orígenes y de las
 revisiones nuevas se informa en validación, sin reutilizar el PASS histórico.
 Docker copia cada componente a staging privado/read-only y vuelve a verificar
@@ -504,8 +535,9 @@ compose.yml    Entorno PostgreSQL local
 
 ## Límites de esta entrega
 
-- Administración local de usuarios y cinco roles base; OIDC/SSO, roles arbitrarios
-  y administración de múltiples organizaciones quedan fuera de esta entrega.
+- Roles administrables y catálogo controlado; Microsoft/Google autentican cuentas
+  preprovisionadas. Grupos externos y administración de múltiples organizaciones
+  quedan fuera de esta entrega. SMTP sólo notifica credenciales USER.
 - Archivos CSV/TXT UTF-8, XLSX, JSON y Parquet de máximo 10 MiB, 100.000
   filas y 100 columnas. La inspección usa una muestra de hasta 100 filas salvo
   el esquema embebido de Parquet; la carga completa sigue siendo síncrona.
@@ -515,13 +547,13 @@ compose.yml    Entorno PostgreSQL local
   1:N/N:1 SUM/COUNT. La ejecución completa de runs usa Polars/Python.
 - PySpark tiene una decisión de planificación y rechazo explícito cuando se
   requiere, pero no un adaptador de ejecución instalado. Redis/Celery, conectores
-  adicionales, object storage y OIDC/SSO son evoluciones preparadas o de producto.
+  adicionales y object storage son evoluciones preparadas o de producto.
 - El despliegue local usa cola persistente en PostgreSQL, leases y heartbeat.
   `DEFAULT` y `DELIVERY` son lanes y heartbeats separados; el scheduler depende
   sólo del worker DEFAULT y no corre con Docker detenido.
 - Data Delivery escribe realmente en PostgreSQL/SQL Server. No incluye otros
   sinks, DDL/SQL libre, scheduler, transforms de negocio, 2PC, reintento automático
-  tras `UNKNOWN` ni RBAC Delivery granular. Preflight es informativo; existencia,
+  tras `UNKNOWN`. El RBAC Delivery es granular desde 0.6.0. Preflight es informativo; existencia,
   arbitraje UPSERT y políticas que podrían ocultar/omitir filas se revalidan bajo
   bloqueo dentro de la transacción. Otros cambios externos siguen siendo
   responsabilidad operativa del destino.

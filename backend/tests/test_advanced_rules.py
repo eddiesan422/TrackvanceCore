@@ -357,6 +357,8 @@ def test_reference_artifact_lineage_finding_identity_and_xlsx(authenticated, dat
     assert "Excluidas" in [cell.value for row in workbook["Resumen"] for cell in row]
     with database() as db:
         db.get(User, "test-user").organization_id = "other-org"
+        from trackvance.identity_bootstrap import ensure_roles
+        db.get(User, "test-user").role_id = ensure_roles(db, "other-org")["Administrator"]
         db.commit()
     assert client.get(f"/api/v1/runs/{run['id']}/evidence").status_code == 404
 

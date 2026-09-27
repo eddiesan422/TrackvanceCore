@@ -435,6 +435,7 @@ def test_legacy_projections_reject_reviews_and_current_state_includes_them():
 
 @pytest.mark.parametrize(("migration", "schema"), [
     ("0007_monitor_scheduling", 2), ("0008_data_delivery", 3), ("0009_delivery_reviews", 4),
+    ("0012_delivery_target_audit", 5),
 ])
 def test_snapshot_labels_exact_running_revision_not_current_cli_version(monkeypatch, migration, schema):
     rows = {name: [] for name in verify_storage.FINGERPRINT_TABLES[migration]}
@@ -462,3 +463,38 @@ def test_snapshot_refuses_wrong_runtime_inventory_instead_of_mislabeling(monkeyp
     monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (migration, rows, [], 0, 0, 0))
     with pytest.raises(ValueError, match="revisión y el inventario"):
         verify_storage.snapshot()
+
+
+def test_identity_projection_preserves_051_history_and_refuses_new_activity():
+    rows = reviewed_rows()
+    original = deepcopy(rows)
+    rows.update({name: [] for name in verify_storage.IDENTITY_TABLES})
+    rows["roles"] = [{"id": "role", "organization_id": "org"}]
+    for user in rows["users"]:
+        user.update(username="historical.user", role_id="role", first_name=None,
+                    last_name=None, deleted=False, deleted_at=None,
+                    must_change_password=False, temporary_password_expires_at=None)
+    for attempt in rows["delivery_attempts"]:
+        attempt["system_audit"] = {}
+    report = verify_storage.legacy_v4_report(
+        rows, [("users", "role_id", "roles", "id")],
+        current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0,
+    )
+    assert report["tables"] == verify_storage._table_hashes(original)
+    assert report["schema_version"] == 4
+    assert report["migration"] == "0009_delivery_reviews"
+    rows["notification_deliveries"] = [{"id": "sent"}]
+    with pytest.raises(ValueError, match="actividad nueva"):
+        verify_storage.project_identity_upgrade(rows, [])
+
+
+def test_identity_projection_rejects_changed_user_or_audited_attempt():
+    rows = reviewed_rows()
+    rows["users"][0]["deleted"] = True
+    with pytest.raises(ValueError, match="cambios de identidad"):
+        verify_storage.project_identity_upgrade(rows, [])
+    rows["users"][0]["deleted"] = False
+    rows["delivery_attempts"][0]["system_audit"] = {"enabled": True}
+    with pytest.raises(ValueError, match="auditoría de entrega nueva"):
+        verify_storage.project_identity_upgrade(rows, [])

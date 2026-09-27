@@ -1,0 +1,14 @@
+{
+  "version": "0.6.0",
+  "scope": "Opt-in external identity providers; distinct from signed local mock OIDC",
+  "cases": [
+    {"provider": "MICROSOFT", "profile": "PERSONAL_OUTLOOK_HOTMAIL", "status": "NOT_RUN_EXTERNAL_CREDENTIALS", "reason": "No external client ID/secret or authorized interactive account supplied."},
+    {"provider": "MICROSOFT", "profile": "ORGANIZATIONAL_ENTRA", "status": "NOT_RUN_EXTERNAL_CREDENTIALS", "reason": "No external client ID/secret, tenant authorization or interactive account supplied."},
+    {"provider": "GOOGLE", "profile": "PERSONAL_GMAIL", "status": "NOT_RUN_EXTERNAL_CREDENTIALS", "reason": "No external OAuth Web Client credentials or authorized interactive account supplied."},
+    {"provider": "GOOGLE", "profile": "WORKSPACE", "status": "NOT_RUN_EXTERNAL_CREDENTIALS", "reason": "No external OAuth Web Client credentials, Workspace authorization or account supplied."}
+  ],
+  "execution_guide": "../../sso-setup.md",
+  "mock_evidence": "identity-sso-e2e/result.json",
+  "external_smtp": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "mailpit_smtp": "PASS; see identity-sso-e2e/result.json"
+}

@@ -10,7 +10,7 @@ import App from './App'
 vi.mock('../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../api/client')>(), api: vi.fn(), post: vi.fn(), setCsrfToken: vi.fn() }))
 
 const session: Session = {
-  user: { id: 'user-1', name: 'Equipo Trackvance', email: 'local@example.test', role: 'Administrator', permissions: [] },
+  user: { id: 'user-1', name: 'Equipo Trackvance', email: 'local@example.test', role: 'Administrator', permissions: ['runs:read', 'datasets:read', 'intake:read', 'recon:read', 'sentinel:read', 'delivery:read'] },
   organization: { id: 'organization', name: 'Trackvance' },
   csrf_token: 'csrf-token',
 }
@@ -41,7 +41,7 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.5\.1/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.6\.0/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
@@ -76,5 +76,41 @@ describe('App session', () => {
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/delivery/destinations/hidden']}><App/></MemoryRouter></QueryClientProvider>)
     expect(await screen.findByText('No tienes permisos para consultar este destino.')).toBeVisible()
     expect(api).not.toHaveBeenCalledWith('/delivery/destinations/hidden')
+  })
+
+  it('keeps first-access sessions outside every feature route', async () => {
+    const original = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path, options) => path === '/me' ? { ...session, user: { ...session.user, must_change_password: true } } : original(path, options))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/datasets']}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('heading', { name: 'Cambia tu contraseña' })).toBeVisible()
+    expect(api).not.toHaveBeenCalledWith('/datasets')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('offers only configured SSO providers and accepts a username for local login', async () => {
+    const original = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path, options) => path === '/me' ? null : path === '/auth/providers' ? { items: [{ id: 'microsoft', name: 'Microsoft', start_url: '/api/v1/auth/sso/microsoft/start' }] } : original(path, options))
+    vi.mocked(post).mockResolvedValue(session)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), user = userEvent.setup()
+    render(<QueryClientProvider client={client}><MemoryRouter><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('link', { name: 'Continuar con Microsoft' })).toHaveAttribute('href', '/api/v1/auth/sso/microsoft/start')
+    expect(screen.queryByRole('link', { name: 'Continuar con Google' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Tengo una cuenta local' }))
+    await user.type(screen.getByLabelText('Usuario o correo'), 'ana.ruiz')
+    await user.type(screen.getByLabelText('Contraseña'), 'Local phrase 2048!')
+    await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/login', { username: 'ana.ruiz', password: 'Local phrase 2048!' }))
+  })
+
+  it('refreshes effective permissions in the current browser session', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/datasets']}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('heading', { name: 'Datasets' })).toBeVisible()
+    vi.mocked(api).mockResolvedValue({ ...session, user: { ...session.user, role_version: 2, permissions: ['runs:read'] } })
+    window.dispatchEvent(new Event('trackvance:session-refresh'))
+    expect(await screen.findByText(/Tu rol no permite consultar esta sección/)).toBeVisible()
+    expect(screen.queryByRole('link', { name: 'Datasets' })).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalledWith('/auth/logout')
   })
 })

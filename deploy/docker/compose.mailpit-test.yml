@@ -1,0 +1,18 @@
+# Disposable certification only; never include in the user's installation.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27.4
+    ports:
+      - '127.0.0.1:${MAILPIT_PORT:-8025}:8025'
+    restart: "no"
+  api:
+    environment:
+      TRACKVANCE_SMTP_ENABLED: 'true'
+      TRACKVANCE_SMTP_HOST: mailpit
+      TRACKVANCE_SMTP_PORT: '1025'
+      TRACKVANCE_SMTP_SECURITY: NONE
+      TRACKVANCE_SMTP_ALLOW_INSECURE: 'true'
+      TRACKVANCE_SMTP_FROM_ADDRESS: credentials@trackvance.test
+    depends_on:
+      mailpit:
+        condition: service_started

@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+
 // Deterministic browser contract tests: API calls are intercepted, no SQL writes.
 // Real remote transactions are certified separately by delivery_cycle.py.
 async function stubApi(page: Page, state: 'UNKNOWN' | 'PENDING_REPAIR' | 'VALID', writable = true) {
@@ -15,7 +17,7 @@ async function stubApi(page: Page, state: 'UNKNOWN' | 'PENDING_REPAIR' | 'VALID'
     const run = { id: 'delivery-fixture', name: 'Entrega operacional de prueba', module: 'DELIVERY', status: unknown ? 'UNKNOWN' : 'SUCCESS', decision: unknown ? 'UNKNOWN' : 'COMMITTED', dataset_name: 'Fixture', dataset_version_id: 'version-fixture', created_at: '2026-09-25T12:00:00Z', metrics: { receipt_artifact_id: repaired ? 'receipt-fixture' : undefined, evidence_status: state === 'PENDING_REPAIR' && !repaired ? 'PENDING_REPAIR' : undefined }, findings: [] }
     let body: unknown = { items: [], total: 0 }
     let status = 200
-    if (path === '/me') body = { user: { id: 'operator-fixture', name: 'Operador de prueba', role: writable ? 'Data Analyst' : 'Auditor', permissions: ['runs:read', 'datasets:read', 'connections:read', 'artifacts:download', ...(writable ? ['runs:execute', 'configurations:write'] : [])] }, organization: { id: 'fixture', name: 'Fixture aislado' }, csrf_token: 'fixture-only' }
+    if (path === '/me') body = { user: { id: 'operator-fixture', name: 'Operador de prueba', role: writable ? 'Data Analyst' : 'Auditor', permissions: ['runs:read', 'datasets:read', 'intake:read', 'recon:read', 'sentinel:read', 'delivery:read', 'datasets:read', 'connections:read', 'destinations:read', 'artifacts:download', ...(writable ? ['runs:execute', 'delivery:execute', 'delivery:repair_evidence', 'delivery:review_unknown', 'delivery:configure'] : [])] }, organization: { id: 'fixture', name: 'Fixture aislado' }, csrf_token: 'fixture-only' }
     else if (path.startsWith('/dashboard?') || path === '/dashboard') body = { stats: {}, variations: {}, attention: [], datasets_attention: [], recent_runs: [], filter_options: {}, health_history: [], module_status: [] }
     else if (path === '/runs/delivery-fixture') body = run
     else if (path === '/delivery/runs/delivery-fixture/attempts') body = { items: [{ id: 'attempt-fixture', run_id: run.id, attempt_number: 1, status: unknown ? 'UNKNOWN' : 'COMMITTED', rows_attempted: 2, rows_written: unknown ? null : 2, rows_inserted: null, rows_updated: null, bytes_sent: unknown ? null : 18, target_locator: 'fixture.target' }], total: 1 }

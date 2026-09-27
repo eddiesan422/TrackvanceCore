@@ -79,6 +79,9 @@ jobs:
     needs: [backend, frontend]
     env:
       COMPOSE_PROJECT_NAME: trackvance-ci
+      COMPOSE_FILE: compose.yml:deploy/docker/compose.mailpit-test.yml
+      MAILPIT_PORT: '8025'
+      TV_MAILPIT_URL: http://127.0.0.1:8025
       POSTGRES_PASSWORD: disposable-compose-password
       WEB_PORT: '3100'
       TRACKVANCE_WEB_ORIGIN: http://localhost:3100
@@ -154,6 +157,36 @@ jobs:
       - name: Stop isolated stack without deleting volumes
         if: always()
         run: docker compose down
+  identity-sso-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend, frontend]
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@11.19.0
+      - name: Install browser certification dependencies
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Dynamic RBAC, Mailpit credentials and signed mock OIDC browser flows
+        run: python scripts/tests/identity_sso_cycle.py
+      - name: Upload sanitized identity certification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: identity-sso-evidence
+          path: .codex-local/identity-sso-e2e/**/result.json
+          include-hidden-files: true
+          if-no-files-found: ignore
   connections-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -216,15 +249,19 @@ jobs:
           if-no-files-found: ignore
   backup-restore-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
+      - name: Restore an authentic 0.5.1 backup into 0.6.0
+        run: python scripts/tests/identity_legacy_restore_cycle.py
       - name: Upload sanitized recovery results only
         if: always()
         uses: actions/upload-artifact@v7

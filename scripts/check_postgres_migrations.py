@@ -15,18 +15,28 @@ from sqlalchemy.exc import SQLAlchemyError
 
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     """Persist representative 0008 rows, not remote writes or credential files."""
-    from sqlalchemy.orm import Session
+    from sqlalchemy import MetaData
+    from sqlalchemy.orm import Session, registry
 
-    from trackvance.models import (
-        Artifact,
-        ArtifactLink,
-        Configuration,
-        DeliveryAttempt,
-        DeliveryDestination,
-        DeliveryDestinationVersion,
-        Job,
-        Run,
-    )
+    from trackvance import models
+
+    # A migration fixture must use the actual old schema, not INSERT new ORM
+    # columns into 0008. Retain only defaults for columns present at that revision.
+    metadata = MetaData()
+    metadata.reflect(bind=connection)
+    mapper = registry()
+    mapped = []
+    for name in ("Artifact", "ArtifactLink", "Configuration", "DeliveryAttempt",
+                 "DeliveryDestination", "DeliveryDestinationVersion", "Job", "Run"):
+        current = getattr(models, name)
+        table = metadata.tables[current.__tablename__]
+        for column in table.columns:
+            column.default = current.__table__.c[column.name].default
+        historical = type("Historical" + name, (), {})
+        mapper.map_imperatively(historical, table)
+        mapped.append(historical)
+    (Artifact, ArtifactLink, Configuration, DeliveryAttempt, DeliveryDestination,
+     DeliveryDestinationVersion, Job, Run) = mapped
 
     now = datetime(2026, 9, 11, 12, 34, 56, 123456, tzinfo=UTC)
     common = {"organization_id": "historical", "created_at": now}
@@ -183,7 +193,8 @@ def check() -> dict:
                         value = "historical"
                     values[column.name] = value
                 if name == "users":
-                    values.update(name="Equipo Trackvance", email="migration@trackvance.local")
+                    values.update(name="Equipo Trackvance", email="migration@trackvance.local",
+                                  role="Administrator")
                 if name == "configurations":
                     values.update(config={"key_columns": ["id"], "amount_column": "amount", "tolerance": "0.01"})
                 if name == "runs":
@@ -211,12 +222,22 @@ def check() -> dict:
             connection.commit()
             upgraded = sa.MetaData()
             upgraded.reflect(bind=connection)
-            assert set(upgraded.tables) - set(delivery_baseline.tables) == {"delivery_reviews"}
+            assert set(upgraded.tables) - set(delivery_baseline.tables) == {
+                "delivery_reviews", "roles", "role_permissions", "external_identities",
+                "oidc_login_attempts", "notification_deliveries", "delivery_target_policies",
+            }
             for name, historical in baseline_rows.items():
                 actual = [dict(row) for row in connection.execute(
-                    sa.select(upgraded.tables[name]).order_by(upgraded.tables[name].c.id)
+                    sa.select(*(upgraded.tables[name].c[column.name]
+                                for column in delivery_baseline.tables[name].columns))
+                    .order_by(upgraded.tables[name].c.id)
                 ).mappings()]
-                assert actual == historical, f"0008→0009 changed {name}"
+                assert actual == historical, f"0008→0012 changed {name}"
+            migrated_user = connection.execute(sa.select(upgraded.tables["users"]).where(
+                upgraded.tables["users"].c.id == ids["users"])).mappings().one()
+            assert migrated_user["username"] and migrated_user["role_id"]
+            assert migrated_user["first_name"] is None and migrated_user["last_name"] is None
+            assert not migrated_user["deleted"] and not migrated_user["must_change_password"]
             assert connection.execute(sa.select(sa.func.count()).select_from(
                 upgraded.tables["delivery_reviews"]
             )).scalar_one() == 0
@@ -241,7 +262,7 @@ def check() -> dict:
                 actual = [dict(row) for row in connection.execute(
                     sa.select(delivery_baseline.tables[name]).order_by(delivery_baseline.tables[name].c.id)
                 ).mappings()]
-                assert actual == historical, f"0009→0008 changed {name}"
+                assert actual == historical, f"0012→0008 changed {name}"
             connection.rollback()
             command.upgrade(config, "head")
             connection.commit()
@@ -254,7 +275,7 @@ def check() -> dict:
             connection.commit()
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
-                "0008_0009_roundtrip": "PASS", "0008_tables_preserved": len(baseline_rows),
+                "0008_0012_roundtrip": "PASS", "0008_tables_preserved": len(baseline_rows),
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
                 "0008_delivery_lineage_edges_preserved": 8}
     finally:

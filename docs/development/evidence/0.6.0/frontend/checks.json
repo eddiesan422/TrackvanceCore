@@ -1,0 +1,19 @@
+{
+  "version": "0.6.0",
+  "status": "PASS",
+  "date_utc": "2026-09-27",
+  "pnpm_frozen_lockfile": "PASS",
+  "lint": "PASS",
+  "typecheck": "PASS",
+  "production_build": "PASS",
+  "vitest": {
+    "files": 19,
+    "passed": 164,
+    "failed": 0,
+    "duration_seconds": 10.46
+  },
+  "visual_review": ["role-catalogue.png", "user-editor.png", "first-login.png", "authentication.png", "notifications.png"],
+  "visual_review_status": "PASS",
+  "browser": "Chrome",
+  "credential_fields_in_reviewed_screenshots": "EMPTY"
+}

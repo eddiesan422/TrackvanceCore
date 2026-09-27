@@ -1,0 +1,793 @@
+{
+  "status": "PASS",
+  "project": "trackvance-delivery-e2e-18020-7a4286",
+  "dataset_version_id": "960def2d-068f-4705-ac07-0a34b8476819",
+  "destinations": [
+    {
+      "audit_columns": {
+        "status": "PASS",
+        "runs": [
+          {
+            "configuration_id": "2270812f-170d-4423-9a30-398f9ae0ee75",
+            "run_id": "ababaec5-17dd-482f-9132-9192614dadf0",
+            "attempt_id": "fed076c5-4452-4e54-93a3-1ae747c2caec",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          },
+          {
+            "configuration_id": "fc90f2eb-3cae-44ab-9c96-b3d58156a54f",
+            "run_id": "ed91b03e-5a53-46df-b5fe-cd330acd3c93",
+            "attempt_id": "39b1c2d2-e720-41aa-9381-eb9db20444dd",
+            "status": "COMMITTED",
+            "strategy": "APPEND"
+          },
+          {
+            "configuration_id": "c4c49667-17b6-4f05-9aa9-22bdc1188c26",
+            "run_id": "8194c2da-a9b1-40e3-b4d1-aef4d20c8bc5",
+            "attempt_id": "1d6a38a1-c1a8-4fde-b7f4-20356c512bd6",
+            "status": "COMMITTED",
+            "strategy": "UPSERT"
+          },
+          {
+            "configuration_id": "238532e3-22d7-4cea-be50-0f34bcbd2829",
+            "run_id": "e46507d9-0f61-4ed2-847e-d42c878d0316",
+            "attempt_id": "7f2b21b7-107f-49b4-b68d-5c20746e4c19",
+            "status": "COMMITTED",
+            "strategy": "OVERWRITE"
+          }
+        ],
+        "policy_id": "73fd291d-6ffa-4cc7-b8f1-35129dd40d49",
+        "unknown_simulated_ack_loss": "7c4ef659-4a87-45fb-9a49-3a5c75556499",
+        "resumed": {
+          "configuration_id": "8265d7b6-4325-4f6e-b76d-1e7e75f0fb8b",
+          "run_id": "9f986ba9-7406-46ff-a7d4-284b07989a7c",
+          "attempt_id": "c9c2948a-c3b2-45ae-8c74-53fae4d80ec9",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        "sso_runs": [
+          {
+            "configuration_id": "0caba67f-c67f-4116-b562-17658d7eeba3",
+            "run_id": "c3dd5ccf-7bb3-4d46-9dc3-084e2e3a291f",
+            "attempt_id": "d899da5c-7441-4efb-b8dc-59f78d055a8f",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          },
+          {
+            "configuration_id": "58d5b7b2-cfaa-4f3e-b531-2b8628578954",
+            "run_id": "2f678e98-e5aa-47ac-9810-9b34f426b22f",
+            "attempt_id": "c9333ddf-5778-4819-b4f8-b8577c49a659",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          }
+        ]
+      },
+      "sink_type": "POSTGRESQL",
+      "destination_id": "8eaeb6d9-fc6a-4a3a-8d03-d8b7e75392f9",
+      "destination_version_id": "0a56c392-04ab-4dba-b34f-d15df5d948e0",
+      "runs": [
+        {
+          "configuration_id": "26d95c29-c02e-46cf-906b-095d366bc6bf",
+          "run_id": "5a55a29c-9b19-4cbf-9654-45604636b5fe",
+          "attempt_id": "3abc01d8-f508-4126-9784-599bf06bae88",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "52e24cc0-6d79-42c6-af8c-04297afa9412",
+          "run_id": "f67adc4e-ae4f-4cf1-aa92-8c24db94a236",
+          "attempt_id": "034871c5-2b7b-45f8-8fcb-6a5de6b0fbb7",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "ebe75d1a-94ba-4e33-9976-bb0ac9befd2e",
+          "run_id": "90550349-e7ea-483f-84a2-7eb32592f525",
+          "attempt_id": "c8da3b49-7089-4e1f-b02b-1595556fa4db",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "3a896110-e6f5-413a-8da4-a60a0414e9c7",
+          "run_id": "2de1ed6b-35dc-44b5-ad1e-e21a2b4c662a",
+          "attempt_id": "5c815adc-d563-4354-9f09-1fc23aa875a2",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "27e900df-f2c3-4bda-97b2-329fc4c4b35b",
+        "attempt_id": "1f4920a2-72aa-47a6-861d-e86e97cddf34",
+        "status": "FAILED"
+      },
+      "collation_guard": null,
+      "status": "PASS"
+    },
+    {
+      "audit_columns": {
+        "status": "PASS",
+        "runs": [
+          {
+            "configuration_id": "c7fe2112-fa6b-4d5d-a99e-b8df91c9b76f",
+            "run_id": "92f1b5dd-5dc3-4495-8ce0-a3fa522159e4",
+            "attempt_id": "748cfa01-5fc5-40bb-8b9f-b23747326d65",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          },
+          {
+            "configuration_id": "ea093763-0b4e-4b53-8c70-f4c582e6e8d8",
+            "run_id": "fd71e3c3-0ef6-410b-9846-e578185c24ad",
+            "attempt_id": "dd1d41ff-daae-4b00-a871-34687613e113",
+            "status": "COMMITTED",
+            "strategy": "APPEND"
+          },
+          {
+            "configuration_id": "7e92842f-6cef-40e1-bbc5-0fc776708b7a",
+            "run_id": "eed934ba-8847-41dd-9861-ff758724e585",
+            "attempt_id": "25714ecf-091f-4c55-80e4-020006ed9170",
+            "status": "COMMITTED",
+            "strategy": "UPSERT"
+          },
+          {
+            "configuration_id": "9a1b4ee9-eeeb-4553-b225-f82f08b71d94",
+            "run_id": "9f314570-8642-4787-a702-68f65073f08b",
+            "attempt_id": "cd6e356b-b6b4-43be-bc2a-1ac0c7a22064",
+            "status": "COMMITTED",
+            "strategy": "OVERWRITE"
+          }
+        ],
+        "policy_id": "244de294-66b6-4186-b6c2-e2538ed77025",
+        "unknown_simulated_ack_loss": "f0709451-5569-4abb-b2e9-c77647297809",
+        "resumed": {
+          "configuration_id": "035fa469-fb3c-4782-8e76-eec3dcba1b88",
+          "run_id": "e82d9993-3df5-4c73-913a-400b3feb0fde",
+          "attempt_id": "f9a305c2-683f-4adc-b074-30aaf3706464",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        "sso_runs": [
+          {
+            "configuration_id": "de7c6792-6257-46fa-ac31-fe3609dbcaf9",
+            "run_id": "72d42f79-8fd6-4105-8b8d-b3679b768c82",
+            "attempt_id": "abc05e8e-de0b-4524-91de-e3e30569dfc3",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          },
+          {
+            "configuration_id": "2d03d474-7717-4a66-b079-49e70eee28dd",
+            "run_id": "93a03d3d-4ad6-4061-a071-f3b94f0909e6",
+            "attempt_id": "985a67d1-eb8f-419e-9680-f1e5cc6db6eb",
+            "status": "COMMITTED",
+            "strategy": "CREATE_AND_LOAD"
+          }
+        ]
+      },
+      "sink_type": "SQLSERVER",
+      "destination_id": "dd955840-d025-416c-98f8-4d3e08899979",
+      "destination_version_id": "680e43c1-5175-424f-8d13-2057ab3681e3",
+      "runs": [
+        {
+          "configuration_id": "6eb2e22e-190e-43b3-a0c6-a031d39e21d9",
+          "run_id": "91ece422-7530-443d-89ab-0ad6450d2604",
+          "attempt_id": "71ca5b5b-0293-41ce-848c-a5296f6e3fed",
+          "status": "COMMITTED",
+          "strategy": "CREATE_AND_LOAD"
+        },
+        {
+          "configuration_id": "7211eb4a-ed02-4651-9ffd-6da0299b6f91",
+          "run_id": "f958a0bb-767e-4c1f-90f6-0f5004fa41f3",
+          "attempt_id": "ef040cef-4e33-4be0-8163-4c3a9f054a4f",
+          "status": "COMMITTED",
+          "strategy": "APPEND"
+        },
+        {
+          "configuration_id": "28b198db-0527-46c0-be7e-401c1b5e93f0",
+          "run_id": "d9fd72e7-ac00-4493-ad02-fff1a5f29e12",
+          "attempt_id": "630dc4fb-023f-4cc6-a95c-23971d5a162e",
+          "status": "COMMITTED",
+          "strategy": "OVERWRITE"
+        },
+        {
+          "configuration_id": "df3751bf-7040-4ad8-afd7-5526edf40e75",
+          "run_id": "52bc0825-b72e-4284-b400-d49cdfac9a0c",
+          "attempt_id": "a1cb6681-ad59-43b2-acc2-9a047d12f19b",
+          "status": "COMMITTED",
+          "strategy": "UPSERT"
+        }
+      ],
+      "failed_attempt": {
+        "run_id": "1b22f617-94b1-4a6c-b705-abd379afeafe",
+        "attempt_id": "67abf854-40e4-4aeb-94c9-bff3a00a12d7",
+        "status": "FAILED"
+      },
+      "collation_guard": {
+        "run_id": "74c19d37-85ac-4c79-861d-32334d349e62",
+        "attempt_id": "e3ff6c24-526e-4911-baab-687816e755fb",
+        "status": "FAILED"
+      },
+      "status": "PASS"
+    }
+  ],
+  "checks": [
+    "DatasetVersion inmutable de entrada contiene las filas certificadas",
+    "POSTGRESQL: prueba credencial real de escritura",
+    "POSTGRESQL: destino versionado recupera su secreto segregado",
+    "POSTGRESQL: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "POSTGRESQL CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: crea schema/tabla y carga exactamente la DatasetVersion",
+    "POSTGRESQL APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: APPEND deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture stale preparado antes de OVERWRITE",
+    "POSTGRESQL OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: OVERWRITE deja el conjunto remoto esperado",
+    "POSTGRESQL: fixture update/insert preparado antes de UPSERT",
+    "POSTGRESQL UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL: UPSERT deja el conjunto remoto esperado",
+    "POSTGRESQL: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "POSTGRESQL: preflight rechaza target inexistente sin modificarlo",
+    "POSTGRESQL: preflight detecta permisos insuficientes sin escribir",
+    "POSTGRESQL: preflight previo es v\u00e1lido",
+    "POSTGRESQL: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "POSTGRESQL AUDIT CREATE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT CREATE: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT CREATE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT CREATE: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT CREATE: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT CREATE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT CREATE: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT CREATE: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: CREATE audit llena ambos campos en todas las filas",
+    "POSTGRESQL: CREATE audit declara ambos NOT NULL",
+    "POSTGRESQL AUDIT APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT APPEND: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: ALTER sin DEFAULT conserva filas hist\u00f3ricas NULL y audita nuevas",
+    "POSTGRESQL: policy durable required/materialized tras commit confirmado",
+    "POSTGRESQL AUDIT UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT UPSERT: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: UPSERT INSERT y UPDATE reciben mismo timestamp nuevo",
+    "POSTGRESQL AUDIT OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT OVERWRITE: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: OVERWRITE audita todas las filas resultantes",
+    "POSTGRESQL: API rechaza deshabilitar pol\u00edtica",
+    "POSTGRESQL: destino duplicado conserva pol\u00edtica f\u00edsica",
+    "POSTGRESQL AUDIT both: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT both: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT both: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT both: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT both: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT both: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT both: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT both: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: adopci\u00f3n audit compatible crea s\u00f3lo faltante",
+    "POSTGRESQL AUDIT timestamp: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT timestamp: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT timestamp: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT timestamp: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT timestamp: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT timestamp: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT timestamp: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT timestamp: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: adopci\u00f3n audit compatible crea s\u00f3lo faltante",
+    "POSTGRESQL: tipo audit externo incompatible falla cerrado",
+    "POSTGRESQL: mapping no puede escribir auditor\u00eda",
+    "POSTGRESQL: commit real + p\u00e9rdida simulada de confirmaci\u00f3n conserva UNKNOWN y required sin materialized",
+    "POSTGRESQL AUDIT after UNKNOWN: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT after UNKNOWN: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT after UNKNOWN: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT after UNKNOWN: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT after UNKNOWN: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT after UNKNOWN: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT after UNKNOWN: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT after UNKNOWN: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: nueva operaci\u00f3n deliberada adopta columnas sin reescribir UNKNOWN",
+    "microsoft: usuario preprovisionado recibe credenciales en Mailpit",
+    "microsoft: SSO conserva username interno y primer acceso restringido",
+    "microsoft: password local definido tras primer SSO",
+    "POSTGRESQL AUDIT microsoft: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT microsoft: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT microsoft: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT microsoft: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT microsoft: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT microsoft: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT microsoft: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT microsoft: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: microsoft publica username interno, no email/display name",
+    "google: usuario preprovisionado recibe credenciales en Mailpit",
+    "google: SSO conserva username interno y primer acceso restringido",
+    "google: password local definido tras primer SSO",
+    "POSTGRESQL AUDIT google: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "POSTGRESQL AUDIT google: preflight real de solo lectura supera todas las comprobaciones",
+    "POSTGRESQL AUDIT google: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "POSTGRESQL AUDIT google: delivery-worker confirma la transacci\u00f3n remota",
+    "POSTGRESQL AUDIT google: DeliveryAttempt registra filas y estado COMMITTED",
+    "POSTGRESQL AUDIT google: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "POSTGRESQL AUDIT google: manifest schema 2 enlaza destino, intento y evidencia",
+    "POSTGRESQL AUDIT google: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "POSTGRESQL: google publica username interno, no email/display name",
+    "POSTGRESQL: permiso ALTER remoto insuficiente bloquea preflight",
+    "POSTGRESQL: external DROP detecta drift sin recrear columna",
+    "SQLSERVER: prueba credencial real de escritura",
+    "SQLSERVER: destino versionado recupera su secreto segregado",
+    "SQLSERVER: descubre schemas, tablas, columnas, nullability y constraints reales",
+    "SQLSERVER CREATE_AND_LOAD: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER CREATE_AND_LOAD: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER CREATE_AND_LOAD: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER CREATE_AND_LOAD: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER CREATE_AND_LOAD: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER CREATE_AND_LOAD: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER CREATE_AND_LOAD: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: crea schema/tabla y carga exactamente la DatasetVersion",
+    "SQLSERVER APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: APPEND deja el conjunto remoto esperado",
+    "SQLSERVER: fixture stale preparado antes de OVERWRITE",
+    "SQLSERVER OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: OVERWRITE deja el conjunto remoto esperado",
+    "SQLSERVER: fixture update/insert preparado antes de UPSERT",
+    "SQLSERVER UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER: UPSERT deja el conjunto remoto esperado",
+    "SQLSERVER: UPSERT actualiza coincidencias y recupera valores Unicode",
+    "SQLSERVER: preflight rechaza target inexistente sin modificarlo",
+    "SQLSERVER: preflight detecta permisos insuficientes sin escribir",
+    "SQLSERVER: preflight previo es v\u00e1lido",
+    "SQLSERVER: constraint remota genera intento FAILED sin \u00e9xito simulado",
+    "SQLSERVER: preflight conserva deduplicaci\u00f3n exacta de la fuente",
+    "SQLSERVER: collation nativa rechaza claves UPSERT equivalentes",
+    "SQLSERVER: colisi\u00f3n UPSERT hace rollback antes de mutar el target",
+    "SQLSERVER AUDIT CREATE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT CREATE: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT CREATE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT CREATE: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT CREATE: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT CREATE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT CREATE: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT CREATE: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: CREATE audit llena ambos campos en todas las filas",
+    "SQLSERVER: CREATE audit declara ambos NOT NULL",
+    "SQLSERVER AUDIT APPEND: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT APPEND: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT APPEND: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT APPEND: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT APPEND: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT APPEND: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT APPEND: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT APPEND: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: ALTER sin DEFAULT conserva filas hist\u00f3ricas NULL y audita nuevas",
+    "SQLSERVER: policy durable required/materialized tras commit confirmado",
+    "SQLSERVER AUDIT UPSERT: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT UPSERT: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT UPSERT: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT UPSERT: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT UPSERT: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT UPSERT: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT UPSERT: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT UPSERT: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: UPSERT INSERT y UPDATE reciben mismo timestamp nuevo",
+    "SQLSERVER AUDIT OVERWRITE: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT OVERWRITE: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT OVERWRITE: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT OVERWRITE: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT OVERWRITE: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT OVERWRITE: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT OVERWRITE: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT OVERWRITE: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: OVERWRITE audita todas las filas resultantes",
+    "SQLSERVER: API rechaza deshabilitar pol\u00edtica",
+    "SQLSERVER: destino duplicado conserva pol\u00edtica f\u00edsica",
+    "SQLSERVER AUDIT both: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT both: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT both: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT both: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT both: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT both: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT both: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT both: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: adopci\u00f3n audit compatible crea s\u00f3lo faltante",
+    "SQLSERVER AUDIT timestamp: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT timestamp: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT timestamp: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT timestamp: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT timestamp: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT timestamp: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT timestamp: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT timestamp: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: adopci\u00f3n audit compatible crea s\u00f3lo faltante",
+    "SQLSERVER: tipo audit externo incompatible falla cerrado",
+    "SQLSERVER: mapping no puede escribir auditor\u00eda",
+    "SQLSERVER: commit real + p\u00e9rdida simulada de confirmaci\u00f3n conserva UNKNOWN y required sin materialized",
+    "SQLSERVER AUDIT after UNKNOWN: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT after UNKNOWN: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT after UNKNOWN: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT after UNKNOWN: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT after UNKNOWN: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT after UNKNOWN: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT after UNKNOWN: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT after UNKNOWN: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: nueva operaci\u00f3n deliberada adopta columnas sin reescribir UNKNOWN",
+    "microsoft: usuario preprovisionado recibe credenciales en Mailpit",
+    "microsoft: SSO conserva username interno y primer acceso restringido",
+    "microsoft: password local definido tras primer SSO",
+    "SQLSERVER AUDIT microsoft: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT microsoft: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT microsoft: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT microsoft: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT microsoft: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT microsoft: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT microsoft: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT microsoft: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: microsoft publica username interno, no email/display name",
+    "google: usuario preprovisionado recibe credenciales en Mailpit",
+    "google: SSO conserva username interno y primer acceso restringido",
+    "google: password local definido tras primer SSO",
+    "SQLSERVER AUDIT google: preview acotada respeta selecci\u00f3n, orden y nombres",
+    "SQLSERVER AUDIT google: preflight real de solo lectura supera todas las comprobaciones",
+    "SQLSERVER AUDIT google: Idempotency-Key devuelve la misma Run sin duplicarla",
+    "SQLSERVER AUDIT google: delivery-worker confirma la transacci\u00f3n remota",
+    "SQLSERVER AUDIT google: DeliveryAttempt registra filas y estado COMMITTED",
+    "SQLSERVER AUDIT google: receipt inmutable identifica fuente, destino, estrategia e intento",
+    "SQLSERVER AUDIT google: manifest schema 2 enlaza destino, intento y evidencia",
+    "SQLSERVER AUDIT google: receipt/manifest/intento preservan snapshot audit id\u00e9ntico",
+    "SQLSERVER: google publica username interno, no email/display name",
+    "SQLSERVER: permiso ALTER remoto insuficiente bloquea preflight",
+    "SQLSERVER: external DROP detecta drift sin recrear columna",
+    "PostgreSQL 16: m\u00e9tricas all_insert_composite",
+    "PostgreSQL 16: m\u00e9tricas all_update_composite",
+    "PostgreSQL 16: m\u00e9tricas mixed_composite",
+    "PostgreSQL 16: m\u00e9tricas empty",
+    "PostgreSQL 16: m\u00e9tricas key_only_do_nothing",
+    "PostgreSQL 16: m\u00e9tricas rollback",
+    "PostgreSQL 16: m\u00e9tricas constraint_drift",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_insert",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_update",
+    "PostgreSQL 16: m\u00e9tricas trigger_suppressed_append",
+    "PostgreSQL 16: m\u00e9tricas old_all_null_row_not_insert",
+    "PostgreSQL 18: m\u00e9tricas all_insert_composite",
+    "PostgreSQL 18: m\u00e9tricas all_update_composite",
+    "PostgreSQL 18: m\u00e9tricas mixed_composite",
+    "PostgreSQL 18: m\u00e9tricas empty",
+    "PostgreSQL 18: m\u00e9tricas key_only_do_nothing",
+    "PostgreSQL 18: m\u00e9tricas rollback",
+    "PostgreSQL 18: m\u00e9tricas constraint_drift",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_insert",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_update",
+    "PostgreSQL 18: m\u00e9tricas trigger_suppressed_append",
+    "PostgreSQL 18: m\u00e9tricas old_all_null_row_not_insert",
+    "POSTGRESQL: credencial destino persiste cifrada tras reinicio",
+    "SQLSERVER: credencial destino persiste cifrada tras reinicio",
+    "POSTGRESQL: policy irreversible sobrevive restart",
+    "SQLSERVER: policy irreversible sobrevive restart",
+    "Auditor\u00eda cubre destino, cola, inicio, commit y fallo de Delivery",
+    "Secretos ausentes de logs, metadata, auditor\u00eda y evidencia"
+  ],
+  "playwright": "PASS",
+  "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
+  "postgres_metrics_matrix": [
+    {
+      "engine": "POSTGRESQL",
+      "major_version": 16,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "all_insert_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 15,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "all_update_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 18,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "mixed_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 12,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "empty",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 0,
+            "rows_written": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 0,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "key_only_do_nothing",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 0,
+            "bytes_sent": 4,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "rollback",
+          "status": "PASS",
+          "error_code": "DESTINATION_CONSTRAINT_VIOLATION"
+        },
+        {
+          "case": "constraint_drift",
+          "status": "PASS",
+          "error_code": "UPSERT_CONSTRAINT_DRIFT"
+        },
+        {
+          "case": "trigger_suppressed_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 6,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "trigger_suppressed_update",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 13,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "trigger_suppressed_append",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "old_all_null_row_not_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": null,
+            "rows_updated": null,
+            "bytes_sent": 9,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        }
+      ]
+    },
+    {
+      "engine": "POSTGRESQL",
+      "major_version": 18,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "all_insert_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 2,
+            "rows_updated": 0,
+            "bytes_sent": 15,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "all_update_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 0,
+            "rows_updated": 2,
+            "bytes_sent": 18,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "mixed_composite",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 1,
+            "bytes_sent": 12,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "empty",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 0,
+            "rows_written": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 0,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "key_only_do_nothing",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 2,
+            "rows_written": 2,
+            "rows_inserted": 1,
+            "rows_updated": 0,
+            "bytes_sent": 4,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "rollback",
+          "status": "PASS",
+          "error_code": "DESTINATION_CONSTRAINT_VIOLATION"
+        },
+        {
+          "case": "constraint_drift",
+          "status": "PASS",
+          "error_code": "UPSERT_CONSTRAINT_DRIFT"
+        },
+        {
+          "case": "trigger_suppressed_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "trigger_suppressed_update",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 13,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "trigger_suppressed_append",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "bytes_sent": 6,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        },
+        {
+          "case": "old_all_null_row_not_insert",
+          "status": "PASS",
+          "metrics": {
+            "rows_attempted": 1,
+            "rows_written": 1,
+            "rows_inserted": 0,
+            "rows_updated": 1,
+            "bytes_sent": 9,
+            "remote_reference": null,
+            "audit_columns_created": false
+          }
+        }
+      ]
+    }
+  ]
+}

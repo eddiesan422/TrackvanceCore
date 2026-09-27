@@ -19,6 +19,8 @@ import sys
 import uuid
 from pathlib import Path
 
+from browser_evidence import run_browser
+
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_PREFIX = "trackvance-e2e-"
 
@@ -72,6 +74,7 @@ def main() -> int:
     except ValueError as error:
         parser.error(str(error))
     port = options.port or available_port()
+    mailpit_port = available_port()
     if not 1 <= port <= 65535:
         parser.error("--port debe estar entre 1 y 65535")
 
@@ -86,9 +89,13 @@ def main() -> int:
             "DEMO_ACCESS_ENABLED": "true",
             "DEMO_SEED_ENABLED": "true",
             "TV_E2E_URL": base_url,
+            "PLAYWRIGHT_BASE_URL": base_url,
+            "MAILPIT_PORT": str(mailpit_port),
+            "TV_MAILPIT_URL": f"http://127.0.0.1:{mailpit_port}",
         }
     )
-    compose = ["docker", "compose", "-p", project]
+    compose = ["docker", "compose", "-p", project, "-f", "compose.yml",
+               "-f", "deploy/docker/compose.mailpit-test.yml"]
     evidence = options.evidence_dir or ROOT / ".codex-local" / "architecture-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
     started = False
@@ -133,11 +140,7 @@ def main() -> int:
             pnpm = shutil.which("pnpm")
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
-            execute(
-                [pnpm, "test:e2e"],
-                environment=environment,
-                cwd=ROOT / "frontend",
-            )
+            run_browser(pnpm, [], root=ROOT, project=project, environment=environment, evidence=evidence)
 
         before = evidence / "before.json"
         after = evidence / "after.json"

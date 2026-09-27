@@ -1,3 +1,4 @@
+import { activateLocal, createAccount, temporaryCredentials } from './identity-helpers'
 import { expect, test, type Page } from '@playwright/test'
 import type { RecordData } from '../src/api/client'
 
@@ -11,55 +12,61 @@ async function administrator(page: Page) {
   return { identity, headers: { 'X-CSRF-Token': identity.csrf_token as string } }
 }
 
-test('administrador crea, edita, restablece y desactiva un usuario local desde la interfaz', async ({ page }) => {
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+
+test('administrador crea, edita, regenera y desactiva un usuario desde la interfaz', async ({ page, browser }) => {
   const { headers } = await administrator(page)
-  const stamp = Date.now(), name = `E2E identidad ${stamp}`, email = `local-${stamp}@example.test`
-  const password = 'Local E2E passphrase 2048!', replacement = 'Changed E2E passphrase 4096!'
+  const stamp = Date.now(), name = `E2E Identidad ${stamp}`, email = `local-${stamp}@example.test`, username = `local.${stamp}`
+  const roles = await (await page.request.get('/api/v1/roles')).json()
+  const roleId = (name: string) => roles.items.find((role: RecordData) => role.name === name).id as string
   await page.goto('/settings/system')
   await page.getByRole('button', { name: 'Usuarios locales' }).click()
   await page.getByRole('button', { name: 'Nuevo usuario' }).click()
   let dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Nombre del usuario').fill(name)
+  await dialog.getByLabel('Nombres', { exact: true }).fill('E2E')
+  await dialog.getByLabel('Apellidos').fill(`Identidad ${stamp}`)
+  await dialog.getByLabel('Username', { exact: true }).fill(username)
   await dialog.getByLabel('Correo electrónico').fill(email)
-  await dialog.getByLabel('Rol del usuario').selectOption('Data Analyst')
-  await dialog.getByLabel('Contraseña inicial').fill(password)
+  await dialog.getByLabel('Rol del usuario').selectOption(roleId('Data Analyst'))
+  await expect(dialog.locator('input[type=password]')).toHaveCount(0)
   const createdResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/users' && response.request().method() === 'POST')
   await dialog.getByRole('button', { name: 'Crear usuario' }).click()
   const created = await createdResponse
   expect(created.status()).toBe(201)
-  const account = await created.json()
-  expect(JSON.stringify(account)).not.toContain(password)
+  const account = await created.json(), first = await temporaryCredentials(email)
+  expect(JSON.stringify(account).includes(first.password), 'User response excludes the generated secret').toBe(false)
   await page.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
   dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Rol del usuario').selectOption('Auditor')
+  await dialog.getByLabel('Rol del usuario').selectOption(roleId('Auditor'))
   const edited = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
   await dialog.getByRole('button', { name: 'Guardar usuario' }).click()
   expect((await edited).status()).toBe(200)
-  await page.getByRole('button', { name: `Restablecer contraseña de ${name}`, exact: true }).click()
-  dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Nueva contraseña').fill(replacement)
-  await dialog.getByLabel('Confirmar contraseña').fill(replacement)
-  const reset = page.waitForResponse(response => response.url().endsWith(`/users/${account.id}/reset-password`))
-  await dialog.getByRole('button', { name: 'Restablecer contraseña', exact: true }).click()
+  await page.getByRole('button', { name: `Regenerar credenciales de ${name}`, exact: true }).click()
+  const reset = page.waitForResponse(response => response.url().endsWith(`/users/${account.id}/resend-credentials`))
+  await page.getByRole('dialog').getByRole('button', { name: 'Regenerar y reenviar', exact: true }).click()
   expect((await reset).status()).toBe(200)
-  await page.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
-  dialog = page.getByRole('dialog')
-  await dialog.getByLabel('Usuario activo').uncheck()
-  const disabled = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
-  await dialog.getByRole('button', { name: 'Guardar usuario' }).click()
-  expect((await disabled).status()).toBe(200)
+  const replacement = await temporaryCredentials(email, first.messageId)
+  const context = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  try {
+    expect((await context.request.post('/api/v1/auth/login', { data: { username, password: first.password } })).status()).toBe(401)
+    expect((await context.request.post('/api/v1/auth/login', { data: { username, password: replacement.password } })).status()).toBe(200)
+    await page.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Usuario activo').uncheck()
+    const disabled = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
+    await dialog.getByRole('button', { name: 'Guardar usuario' }).click()
+    expect((await disabled).status()).toBe(200)
+    expect((await context.request.get('/api/v1/me')).status()).toBe(401)
+    expect((await context.request.post('/api/v1/auth/login', { data: { email, password: replacement.password } })).status()).toBe(401)
+  } finally { await context.close() }
   const current = await (await page.request.get(`/api/v1/users/${account.id}`)).json()
-  expect(current).toMatchObject({ role: 'Auditor', active: false, version: 4 })
-  expect((await page.request.post('/api/v1/auth/login', { data: { email, password: replacement } })).status()).toBe(401)
+  expect(current).toMatchObject({ role: 'Auditor', active: false })
   const audit = await (await page.request.get('/api/v1/audit-events')).json()
-  const events = audit.items.filter((event: RecordData) => event.subject_id === account.id)
-  expect(events.map((event: RecordData) => event.event_type)).toContain('USER_PASSWORD_RESET')
-  expect(JSON.stringify(events)).not.toContain(replacement)
-  // A real CSRF negative check goes through the running API.
-  expect((await page.request.patch(`/api/v1/users/${account.id}`, { headers: { ...headers, 'X-CSRF-Token': 'invalid' }, data: { version: 4, active: true } })).status()).toBe(403)
+  expect(JSON.stringify(audit).includes(replacement.password), 'Audit excludes regenerated credential').toBe(false)
+  expect((await page.request.patch(`/api/v1/users/${account.id}`, { headers: { ...headers, 'X-CSRF-Token': 'invalid' }, data: { version: current.version, active: true } })).status()).toBe(403)
 })
 
-test('cada rol local recibe accesos permitidos y denegados por el servidor', async ({ page, browser }) => {
+test('cada rol migrado conserva sus accesos con credenciales generadas y primer login obligatorio', async ({ page, browser }) => {
   const { headers } = await administrator(page)
   const baseURL = new URL(page.url()).origin
   const roles = [
@@ -70,28 +77,23 @@ test('cada rol local recibe accesos permitidos y denegados por el servidor', asy
     { name: 'Auditor', users: true, write: false, cases: false },
   ]
   for (const [index, role] of roles.entries()) {
-    const email = `rbac-${Date.now()}-${index}@example.test`, password = 'Role E2E passphrase 8192!'
-    const creation = await page.request.post('/api/v1/users', { headers, data: { name: `E2E ${role.name}`, email, password, role: role.name } })
-    expect(creation.status(), await creation.text()).toBe(201)
+    const email = `rbac-${Date.now()}-${index}@example.test`
+    await createAccount(page.request, headers, { email, username: `rbac.${Date.now()}.${index}`, role: role.name })
     const context = await browser.newContext({ baseURL })
     try {
-      const login = await context.request.post('/api/v1/auth/login', { data: { email, password } })
-      expect(login.status()).toBe(200)
-      const identity = await login.json(), roleHeaders = { 'X-CSRF-Token': identity.csrf_token }
+      const identity = await activateLocal(context.request, email), roleHeaders = { 'X-CSRF-Token': identity.csrf_token }
       expect((await context.request.get('/api/v1/users')).status()).toBe(role.users ? 200 : 403)
       expect((await context.request.get('/api/v1/datasets')).status()).toBe(200)
       expect((await context.request.post('/api/v1/datasets', { headers: roleHeaders, data: { name: `E2E RBAC ${Date.now()} ${index}` } })).status()).toBe(role.write ? 201 : 403)
       expect((await context.request.post('/api/v1/exceptions/missing/comments', { headers: roleHeaders, data: { version: 1, comment: 'Permission check' } })).status()).toBe(role.cases ? 404 : 403)
-      expect((await context.request.post('/api/v1/users', { headers: roleHeaders, data: { name: 'Denied', email: 'denied@invalid.test', password: 'short' } })).status()).toBe(role.name === 'Administrator' ? 422 : 403)
+      expect((await context.request.post('/api/v1/users', { headers: roleHeaders, data: {} })).status()).toBe(role.name === 'Administrator' ? 422 : 403)
       const rolePage = await context.newPage()
       await rolePage.goto('/settings/system')
       if (role.users) {
         await rolePage.getByRole('button', { name: 'Usuarios locales' }).click()
         await expect(rolePage.getByRole('heading', { name: 'Cuentas de esta organización' })).toBeVisible()
         if (role.name === 'Auditor') await expect(rolePage.getByRole('button', { name: 'Nuevo usuario' })).toHaveCount(0)
-      } else {
-        await expect(rolePage.getByText('Tu rol no permite administrar este entorno.')).toBeVisible()
-      }
+      } else await expect(rolePage.getByText('Tu rol no permite administrar este entorno.')).toBeVisible()
     } finally { await context.close() }
   }
 })

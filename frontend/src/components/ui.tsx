@@ -12,6 +12,7 @@ Object.assign(labels, { ORIGINAL_UPLOAD: 'Archivo original subido', CANONICAL_PA
 Object.assign(labels, { ASSIGNED: 'Asignada', REOPENED: 'Reabierta', PENDING_VALIDATION: 'Pendiente de validación', DISCARDED: 'Descartada', NOT_APPLICABLE: 'No aplica', NOT_REQUESTED: 'Sin validar', NO_LATER_RUN: 'Sin ejecución posterior', VALIDATED: 'Validada', BLOCKED: 'Bloqueada', LEGACY_UNVERIFIED: 'Cierre histórico sin validar', ADMINISTRATIVE_CLOSURE: 'Cierre administrativo' })
 Object.assign(labels, { FAILED_PRECONDITION: 'Precondición no cumplida', POSTGRESQL: 'PostgreSQL', SQLSERVER: 'SQL Server', SOURCE_SNAPSHOT: 'Snapshot de fuente externa' })
 Object.assign(labels, { DELIVERY: 'Data Delivery', delivery: 'Data Delivery', STARTED: 'Iniciado', COMMITTED: 'Confirmado', UNKNOWN: 'Confirmación desconocida', CREATE_AND_LOAD: 'Crear y cargar', APPEND: 'Agregar registros', OVERWRITE: 'Reemplazar datos', UPSERT: 'Actualizar y agregar', EXISTING_TABLE: 'Tabla existente', CREATE_TABLE: 'Tabla nueva', DELIVERY_RECEIPT: 'Receipt de entrega' })
+Object.assign(labels, { DELETED: 'Eliminado', SENT: 'Enviado', PENDING: 'Pendiente' })
 export function label(value: unknown) { return labels[String(value)] || String(value ?? '—').replaceAll('_', ' ') }
 export function Badge({ value, children }: { value?: unknown; children?: ReactNode }) {
   const v = String(value || '').toUpperCase()

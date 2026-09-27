@@ -146,6 +146,7 @@ class DeliveryDraft(StrictModel):
     columns: list[ColumnMapping] = Field(min_length=1, max_length=100)
     write_strategy: Literal["CREATE_AND_LOAD", "APPEND", "OVERWRITE", "UPSERT"]
     upsert_keys: list[str] = Field(default_factory=list, max_length=100)
+    audit_columns_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_plan(self):
@@ -173,7 +174,12 @@ class DeliveryDraft(StrictModel):
         return self
 
     def snapshot(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        snapshot = self.model_dump(mode="json")
+        # Preserve canonical hashes/evidence of configurations published before
+        # 0.6.0, which did not carry this optional field.
+        if "audit_columns_enabled" not in self.model_fields_set:
+            snapshot.pop("audit_columns_enabled", None)
+        return snapshot
 
 
 class DeliveryPreviewResponse(BaseModel):
@@ -190,6 +196,14 @@ class DeliveryPreflightResponse(BaseModel):
     source: dict[str, Any]
     destination: dict[str, Any]
     target: dict[str, Any]
+    system_audit: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeliveryTargetPolicyResponse(BaseModel):
+    audit_columns_required: bool
+    policy_id: str | None
+    materialized_at: str | None
+    target_fingerprint: str
 
 
 class DeliveryConfigurationBody(DeliveryDraft):

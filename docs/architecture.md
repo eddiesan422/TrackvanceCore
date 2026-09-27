@@ -1,7 +1,7 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.5.1, hardening operacional de Data Delivery,
-25 de septiembre de 2026. La certificación integrada se registra por separado;
+Revisión de implementación: 0.6.0, RBAC dinámico, identidad/SSO, SMTP y auditoría
+de publicación, 26 de septiembre de 2026. La certificación integrada se registra por separado;
 los resultados históricos no certifican automáticamente esta revisión.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y
@@ -77,7 +77,7 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 | `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine`, Polars/Python | Adaptador de ejecución distribuida |
 | `ProcessingEngine` | Compilar/evaluar expresiones portables de reglas | Compiladores Polars y DuckDB | Otros compiladores con pruebas de paridad |
 | `JobQueue` | Registrar la entrega de un run para ejecución asíncrona | `DatabaseJobQueue`, consumida mediante leases | Publicación y consumo Redis/Celery |
-| `NotificationDelivery` | Contrato de entrega de alertas externas | Sin adaptador; Findings internos operativos | Email, Teams, Slack o Webhook |
+| `NotificationDelivery` | Entregar mensajes efímeros y conservar sólo resultado | SMTP para credenciales USER | Resolutores ROLE/DOMAIN/GROUP y futuros eventos; Teams/Slack/Webhook |
 
 `ExecutionPlanner` estima memoria y disco antes de aceptar una ejecución. Elige
 POLARS dentro del presupuesto local; si la carga necesita PYSPARK, devuelve
@@ -114,7 +114,7 @@ completamente independientes.
 | Ejecución asíncrona | `execution.py`, `jobqueue.py`, `worker.py`, `planner.py` | Entrega de jobs, leases, heartbeat, presupuesto y procesamiento |
 | Sentinel programado | `scheduler.py`, `sentinel_api.py` | Programaciones, revisiones, ocurrencias, despacho transaccional e histórico de series |
 | Gestión de casos | `exceptions_api.py` | Responsable, prioridad, SLA, comentarios, adjuntos y filtros; validación compartida en servicios |
-| Administración local | `identity_api.py` | Usuarios, roles base, permisos, contraseñas, revocación de sesiones y auditoría |
+| Administración e identidad | `identity_api.py`, `permissions.py`, `sso_api.py`, `notifications.py` | RBAC persistido, catálogo, username, primer acceso, OIDC, SMTP, revocación y auditoría |
 | Presentación | `frontend/src/` | Pantallas React, formularios, estados, navegación y cliente HTTP |
 | Operación | `compose.yml`, `deploy/`, `scripts/`, `.github/workflows/` | Imágenes, proxy, arranque, diagnósticos y comprobaciones |
 
@@ -291,12 +291,33 @@ reescribe historia para corregir la documentación:
 | `RUN` | `DELIVERY_RECEIPT` | `ARTIFACT` (receipt) |
 | `ARTIFACT` (receipt) | `EVIDENCE_OF` | `DELIVERY_ATTEMPT` |
 
-La política 0.5.1 reutiliza permisos de conexiones, configuraciones, runs y
-artifacts. Reparar o registrar revisión exige `runs:execute`; consultar revisiones
-exige `runs:read`, además del ámbito de organización y CSRF para mutaciones.
-Esto no constituye RBAC granular de Delivery. Permisos por destino, estrategia o
-aprobación de un nuevo run después de `UNKNOWN` permanecen pendientes. Ver
-[ADR 0015](adr/0015-data-delivery.md).
+0.6.0 sustituye los permisos reutilizados de 0.5.1 por Delivery/Destinos
+granulares. Reparar y revisar exigen delivery:repair_evidence y
+delivery:review_unknown; sobrescribir/alterar tienen permisos separados.
+Organización y CSRF continúan siendo obligatorios. Una DeliveryTargetPolicy
+persistida vuelve irreversible la auditoría fechaIngesta/usuario por fingerprint
+físico. La publicación fija policy y Configuration juntas; ALTER y DML ocurren
+en la misma transacción remota. No se modifica DatasetVersion ni se implementa
+SHIST. Ver [ADR 0019](adr/0019-delivery-target-audit.md) y
+[detalle funcional/técnico](development/delivery-audit.md).
+
+### Identidad y notificaciones 0.6.0
+
+User.role_id referencia Role; RolePermission asigna códigos del catálogo del
+producto. Cada petición resuelve permisos vigentes; las rutas desconocidas
+fallan cerrado. Administrator usa system_key protegido y catálogo completo;
+users:manage/roles:manage no son delegables. Las bajas son lógicas y serializadas
+por organización; el último administrador y roles con usuarios quedan protegidos.
+La UI refresca /me y role_version sin logout al cambiar sólo permisos.
+
+Username/email autentican localmente. Alta genera temporal Argon2 de 24 horas
+y NotificationService la entrega mediante NotificationDelivery/SMTP. El registro
+de notificación contiene sólo metadatos. Primer acceso restringe la sesión y
+exige nueva contraseña, también tras login Microsoft/Google. SSO usa Authlib y
+joserfc para Code Flow, PKCE y validación de tokens; ExternalIdentity referencia
+User mediante provider/issuer/subject, sin auto-provisioning ni grupos externos.
+Variables SMTP/OAuth pertenecen a API y quedan fuera de backups. Ver
+[identidad 0.6.0](development/identity-060.md).
 
 ### Carga diferida de la interfaz
 
@@ -322,14 +343,14 @@ de warning artificialmente aumentado. El entry JS medido baja de 611.407 a
 | Destinos | PostgreSQL y SQL Server mediante `DataSink`; escritura transaccional controlada | S3/Blob/REST, warehouses y otros sinks con gobierno productivo |
 | Procesamiento | Polars/Python; DuckDB para reglas portables | Polars y PySpark según presupuesto y capacidad instalada |
 | Cola | Jobs PostgreSQL, leases, reintentos y heartbeat | Redis/Celery con entrega fiable y workers escalables |
-| Identidad | Usuarios locales, roles base, contraseñas, revocación de sesiones, CSRF y RBAC | Federación OIDC/SSO y gobierno de identidad productivo |
+| Identidad | RBAC dinámico, usuarios locales, primer acceso y OIDC Microsoft/Google | Gobierno ampliado, grupos/dominios y directorio multi-organización |
 | Secretos | Stores y claves separados para fuentes y destinos | Key Vault, Secrets Manager o Vault y rotación |
 | Observabilidad | Logs, readiness, heartbeat y auditoría | OpenTelemetry, Prometheus y Grafana |
 | Infraestructura | Compose y scripts operativos | Terraform, Helm y despliegues controlados |
 | Entrega | Workflow de checks backend/frontend/migraciones/E2E | Controles de seguridad, dependencias e imágenes y promoción de entornos |
 
 No se han añadido dependencias cloud al prototipo. Kubernetes, Redis/Celery,
-PySpark runtime, OIDC, gestores de secretos, telemetría distribuida y Terraform/Helm
+PySpark runtime, gestores de secretos, telemetría distribuida y Terraform/Helm
 son objetivos de producto; su presencia en este mapa no significa que existan
 adaptadores o despliegues certificados.
 
@@ -361,11 +382,13 @@ depende de la política de `tempdb` para su tabla temporal.
 `UNKNOWN` requiere
 verificación operativa; repetir a ciegas puede duplicar o reemplazar datos.
 
-La revisión del schema actual es `0009_delivery_reviews`, con 25 tablas de
+La revisión histórica 0.5.1 terminaba en `0009_delivery_reviews`, con 25 tablas de
 aplicación. `0007` añade programaciones; `0008` crea destinos, revisiones e intentos
 de entrega y agrega `jobs.lane`; `0009` sólo añade revisiones operativas
 `delivery_reviews`. Las migraciones 0001–0008 no se reescriben. Los cambios futuros
-requieren migraciones Alembic nuevas. Los
+requieren migraciones Alembic nuevas. 0.6.0 agrega 0010/0011/0012 y seis tablas:
+roles, role_permissions, external_identities, oidc_login_attempts,
+notification_deliveries y delivery_target_policies. Los
 runbooks de arranque, reinicio, diagnóstico, reset, backup y restore están en
 [operación](development/operations.md); su certificación se registra en
 [validación](development/validation.md). Los ensayos destructivos sólo usan

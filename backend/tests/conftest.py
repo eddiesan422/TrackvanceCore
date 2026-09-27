@@ -20,6 +20,7 @@ os.environ["DEMO_SEED_ENABLED"] = "false"
 
 @pytest.fixture
 def database():
+    from trackvance import identity_bootstrap  # noqa: F401
     from trackvance.db import Base, SessionLocal, engine
     from trackvance.models import User
 

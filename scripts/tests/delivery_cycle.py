@@ -23,7 +23,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
+
+from browser_evidence import run_browser
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-delivery-e2e-"
@@ -318,6 +320,13 @@ def publish_and_run(
         and evidence["delivery"]["attempt"]["id"] == attempts["items"][0]["id"],
         f"{label}: manifest schema 2 enlaza destino, intento y evidencia",
     )
+    if draft.get("audit_columns_enabled"):
+        snapshot = receipt.get("system_audit", {})
+        checks.verify(snapshot.get("enabled") and bool(snapshot.get("username"))
+                      and bool(snapshot.get("fecha_ingesta")) and bool(snapshot.get("policy_id"))
+                      and snapshot == attempts["items"][0].get("system_audit")
+                      and snapshot == evidence["delivery"].get("system_audit"),
+                      f"{label}: receipt/manifest/intento preservan snapshot audit idéntico")
     assert_no_credentials(
         [preview, preflight, configuration, completed, attempts, receipt, evidence],
         credentials,
@@ -580,6 +589,200 @@ def destination_body(engine: str, password: str) -> dict[str, Any]:
     }
 
 
+def mock_sso_delivery_client(admin, checks, provider, credentials):
+    """Run actual state/nonce/PKCE code flow against the disposable signed mock."""
+    suffix = uuid.uuid4().hex[:10]
+    username = f"delivery.{provider}.{suffix}"
+    email = username + ("@outlook.com" if provider == "microsoft" else "@gmail.com")
+    roles = admin.get("/api/v1/roles")["items"]
+    role = next(item for item in roles if item["name"] == "Data Analyst")
+    created = admin.post("/api/v1/users", {
+        "first_name": "Delivery", "last_name": provider, "username": username,
+        "email": email, "role_id": role["id"], "active": True,
+    })
+    checks.verify(created["must_change_password"] and created["credential_delivery"]["status"] == "SENT",
+                  provider + ": usuario preprovisionado recibe credenciales en Mailpit")
+    client = smoke.Api(admin.base_url, timeout=60)
+    try:
+        with client.opener.open(admin.base_url + f"/api/v1/auth/sso/{provider}/start", timeout=60) as response:
+            authorization = response.geturl()
+            response.read()
+        parsed = urlsplit(authorization)
+        if parsed.hostname != "127.0.0.1" or parsed.path != f"/{provider}/authorize":
+            raise smoke.SmokeFailure("El proveedor OIDC de prueba no recibió la autorización.")
+        form = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+        form.update(email=email, subject="delivery-" + suffix,
+                    profile="Microsoft personal" if provider == "microsoft" else "Google Gmail", scenario="valid")
+        request = urllib.request.Request(authorization.split("?", 1)[0],
+            data=urlencode(form).encode(), headers={"Content-Type": "application/x-www-form-urlencoded"})
+        with client.opener.open(request, timeout=60) as response:
+            response.read()
+    except (urllib.error.URLError, OSError, ValueError):
+        raise smoke.SmokeFailure("Falló el flujo OIDC mock de Delivery; secretos excluidos del diagnóstico.") from None
+    identity = client.get("/api/v1/me")
+    client.csrf = identity["csrf_token"]
+    checks.verify(identity["user"]["username"] == username and identity["user"]["must_change_password"],
+                  provider + ": SSO conserva username interno y primer acceso restringido")
+    client.request("GET", "/api/v1/delivery/configurations", expected=(403,))
+    password = secrets.token_urlsafe(32)
+    credentials.append(password)
+    changed = client.post("/api/v1/auth/first-login/change-password", {"new_password": password}, expected=(200,))
+    client.csrf = changed["csrf_token"]
+    checks.verify(not changed["user"]["must_change_password"], provider + ": password local definido tras primer SSO")
+    return client, username
+
+
+def certify_audit_columns(api, checks, engine, version_id, destination, password, credentials, run):
+    """Real transactional DDL/DML, permanent policy, compatible adoption and drift."""
+    pg = engine == "POSTGRESQL"
+    schema = "existing_delivery"
+    quote = (lambda value: '"' + value + '"') if pg else (lambda value: "[" + value + "]")
+    locator = lambda name: quote(schema) + "." + quote(name)
+    stamp, username = quote("fechaIngesta"), quote("usuario")
+    records = locator("records")
+    audit_records = locator("audit_records")
+    def clone(name, *, rows=False):
+        target = locator(name)
+        sql = (f"CREATE TABLE {target} AS SELECT * FROM {records}" + (";" if rows else " WHERE false;")
+               if pg else f"SELECT * INTO {target} FROM {records}" + (";" if rows else " WHERE 1=0;"))
+        if pg:
+            sql += f" ALTER TABLE {target} OWNER TO tv_delivery_writer;"
+        target_sql(run, engine, sql)
+    def draft(name, strategy="APPEND", mode="EXISTING_TABLE"):
+        return {**delivery_draft(version_id, destination, mode=mode,
+                                schema_name=schema, table_name=name, strategy=strategy),
+                "audit_columns_enabled": True}
+    def policy(name):
+        return api.get(f"/api/v1/delivery/destinations/{destination['id']}/target-policy?" + urlencode(
+            {"schema_name": schema, "table_name": name}))
+    def count(name, where="1=1"):
+        return int(target_scalar(run, engine, f"SELECT COUNT(*) FROM {locator(name)} WHERE {where};"))
+    created = publish_and_run(api, checks, draft("audit_created", "CREATE_AND_LOAD", "CREATE_TABLE"),
+                              engine + " AUDIT CREATE", credentials)
+    checks.verify(count("audit_created", f"{stamp} IS NOT NULL AND {username} IS NOT NULL") == 3,
+                  engine + ": CREATE audit llena ambos campos en todas las filas")
+    metadata = api.get(f"/api/v1/delivery/destinations/{destination['id']}/table-metadata?" + urlencode(
+        {"schema_name": schema, "table_name": "audit_created"}))
+    audit_types = {item["name"]: item for item in metadata["columns"]}
+    checks.verify(not audit_types["fechaIngesta"]["nullable"] and not audit_types["usuario"]["nullable"],
+                  engine + ": CREATE audit declara ambos NOT NULL")
+    clone("audit_records", rows=True)
+    target_sql(run, engine, f"UPDATE {audit_records} SET record_id=" +
+               ("'OLD-' || record_id;" if pg else "N'OLD-' + record_id;"))
+    target_sql(run, engine, f"ALTER TABLE {audit_records} ADD CONSTRAINT audit_records_pk PRIMARY KEY(record_id);")
+    appended = publish_and_run(api, checks, draft("audit_records"), engine + " AUDIT APPEND", credentials)
+    checks.verify(count("audit_records", f"{stamp} IS NULL AND {username} IS NULL") == 3
+                  and count("audit_records", f"{stamp} IS NOT NULL AND {username} IS NOT NULL") == 3,
+                  engine + ": ALTER sin DEFAULT conserva filas históricas NULL y audita nuevas")
+    first_policy = policy("audit_records")
+    checks.verify(first_policy["audit_columns_required"] and first_policy["materialized_at"],
+                  engine + ": policy durable required/materialized tras commit confirmado")
+    target_sql(run, engine, f"DELETE FROM {audit_records} WHERE record_id='C-003';")
+    upserted = publish_and_run(api, checks, draft("audit_records", "UPSERT"), engine + " AUDIT UPSERT", credentials)
+    upsert_receipt = api.get(f"/api/v1/delivery/runs/{upserted['run_id']}/receipt")
+    latest_stamp = upsert_receipt["system_audit"]["fecha_ingesta"]
+    instant = (f"'{latest_stamp}'::timestamptz" if pg else f"CONVERT(datetimeoffset(6), '{latest_stamp}', 127)")
+    checks.verify(count("audit_records", f"{stamp} = {instant}") == 3,
+                  engine + ": UPSERT INSERT y UPDATE reciben mismo timestamp nuevo")
+    overwritten = publish_and_run(api, checks, draft("audit_records", "OVERWRITE"), engine + " AUDIT OVERWRITE", credentials)
+    checks.verify(count("audit_records") == 3 and count("audit_records", f"{stamp} IS NULL") == 0,
+                  engine + ": OVERWRITE audita todas las filas resultantes")
+    disabled = {**draft("audit_records"), "audit_columns_enabled": False}
+    rejection = api.request("POST", "/api/v1/delivery/configurations", {"name": "disable forbidden", **disabled}, expected=(412,)).json()
+    checks.verify(rejection["error"]["code"] == "AUDIT_COLUMNS_REQUIRED", engine + ": API rechaza deshabilitar política")
+    duplicate_destination = api.post("/api/v1/delivery/destinations", {
+        **destination_body(engine, password), "name": "Physical target alias " + engine,
+    })
+    alias_policy = api.get(f"/api/v1/delivery/destinations/{duplicate_destination['id']}/target-policy?" + urlencode(
+        {"schema_name": schema, "table_name": "audit_records"}))
+    checks.verify(alias_policy["policy_id"] == first_policy["policy_id"],
+                  engine + ": destino duplicado conserva política física")
+    for name, existing in (("audit_adopted", "both"), ("audit_partial", "timestamp"), ("audit_bad", "bad")):
+        clone(name)
+        temporal = "TIMESTAMPTZ(6)" if pg else "DATETIMEOFFSET(6)"
+        string = "VARCHAR(128)" if pg else "NVARCHAR(128)"
+        target_sql(run, engine, f"ALTER TABLE {locator(name)} ADD {stamp} " +
+                   ("INTEGER" if existing == "bad" else temporal) + " NULL;")
+        if existing == "both":
+            target_sql(run, engine, f"ALTER TABLE {locator(name)} ADD {username} {string} NULL;")
+        if existing == "bad":
+            invalid = api.request("POST", "/api/v1/delivery/preflight", draft(name), expected=(412,)).json()
+            checks.verify(invalid["error"]["code"] == "AUDIT_COLUMNS_INCOMPATIBLE", engine + ": tipo audit externo incompatible falla cerrado")
+        else:
+            result = publish_and_run(api, checks, draft(name), engine + " AUDIT " + existing, credentials)
+            receipt = api.get(f"/api/v1/delivery/runs/{result['run_id']}/receipt")
+            checks.verify(receipt["system_audit"]["columns_created"] == (existing == "timestamp"),
+                          engine + ": adopción audit compatible crea sólo faltante")
+    collision = draft("audit_records")
+    collision["columns"] = [dict(c) for c in COLUMN_MAPPING]
+    collision["columns"][0]["target_name"] = "usuario"
+    invalid = api.request("POST", "/api/v1/delivery/preflight", collision, expected=(412,)).json()
+    checks.verify(invalid["error"]["code"] == "AUDIT_MAPPING_COLLISION", engine + ": mapping no puede escribir auditoría")
+    # Execute against the real target, then deliberately lose only the adapter's
+    # acknowledgement. This certifies OUR durable UNKNOWN semantics, not a real
+    # network outage, and the fixture records that distinction in its evidence.
+    clone("audit_unknown")
+    unknown_draft = draft("audit_unknown")
+    unknown_config = api.post("/api/v1/delivery/configurations", {"name": engine + " audit UNKNOWN", **unknown_draft})
+    run(["stop", "delivery-worker"])
+    try:
+        queued = post_idempotent(api, "/api/v1/delivery/runs", {
+            "configuration_id": unknown_config["id"], "dataset_version_id": version_id,
+        }, "audit-unknown-" + uuid.uuid4().hex)
+        probe = "\n".join([
+            "from trackvance.db import SessionLocal",
+            "from trackvance.models import Run",
+            "from trackvance import delivery_service",
+            "from trackvance.data_sinks import DeliveryError",
+            "original = delivery_service.sink_registry.create",
+            "def create(settings):",
+            "    sink = original(settings)",
+            "    deliver = sink.deliver_prepared",
+            "    def lose_ack(payload):",
+            "        deliver(payload)",
+            "        raise DeliveryError('CERTIFICATION_ACK_LOSS', 'Controlled commit acknowledgement loss', ambiguous=True)",
+            "    sink.deliver_prepared = lose_ack",
+            "    return sink",
+            "delivery_service.sink_registry.create = create",
+            "with SessionLocal() as db:",
+            "    delivery_service.execute_delivery_run(db, db.get(Run, " + repr(queued["id"]) + "))",
+        ])
+        run(["exec", "-T", "api", "python", "-"], input_text=probe)
+    finally:
+        run(["up", "-d", "--wait", "delivery-worker"])
+    unknown = wait_for_run(api, queued["id"])
+    unknown_policy = policy("audit_unknown")
+    checks.verify(unknown["status"] == "UNKNOWN" and count("audit_unknown") == 3
+                  and unknown_policy["audit_columns_required"] and unknown_policy["materialized_at"] is None,
+                  engine + ": commit real + pérdida simulada de confirmación conserva UNKNOWN y required sin materialized")
+    resumed = publish_and_run(api, checks, draft("audit_unknown", "OVERWRITE"), engine + " AUDIT after UNKNOWN", credentials)
+    checks.verify(api.get("/api/v1/runs/" + unknown["id"])["status"] == "UNKNOWN"
+                  and policy("audit_unknown")["materialized_at"] is not None,
+                  engine + ": nueva operación deliberada adopta columnas sin reescribir UNKNOWN")
+    sso_runs = []
+    for provider in ("microsoft", "google"):
+        sso, internal_username = mock_sso_delivery_client(api, checks, provider, credentials)
+        sso_result = publish_and_run(sso, checks, draft("audit_" + provider, "CREATE_AND_LOAD", "CREATE_TABLE"),
+                                     engine + " AUDIT " + provider, credentials)
+        remote_username = target_scalar(run, engine, f"SELECT MIN({username}) FROM {locator('audit_' + provider)};")
+        receipt = sso.get(f"/api/v1/delivery/runs/{sso_result['run_id']}/receipt")
+        checks.verify(remote_username == internal_username and receipt["system_audit"]["username"] == internal_username,
+                      engine + ": " + provider + " publica username interno, no email/display name")
+        sso_runs.append(sso_result)
+    clone("audit_no_alter")
+    if pg:
+        target_sql(run, engine, f"ALTER TABLE {locator('audit_no_alter')} OWNER TO delivery_admin; GRANT SELECT, INSERT ON {locator('audit_no_alter')} TO tv_delivery_writer;")
+    else:
+        target_sql(run, engine, f"DENY ALTER ON OBJECT::{locator('audit_no_alter')} TO tv_delivery_writer;")
+    denied = api.request("POST", "/api/v1/delivery/preflight", draft("audit_no_alter"), expected=(412,)).json()
+    checks.verify(any(c["code"] == "AUDIT_ALTER_PERMISSION" and c["status"] == "FAIL"
+                      for c in denied["error"]["details"]["checks"]), engine + ": permiso ALTER remoto insuficiente bloquea preflight")
+    target_sql(run, engine, f"ALTER TABLE {audit_records} DROP COLUMN {username};")
+    drift = api.request("POST", "/api/v1/delivery/preflight", draft("audit_records"), expected=(412,)).json()
+    checks.verify(drift["error"]["code"] == "AUDIT_COLUMNS_DRIFT", engine + ": external DROP detecta drift sin recrear columna")
+    return {"status": "PASS", "runs": [created, appended, upserted, overwritten], "policy_id": first_policy["policy_id"], "unknown_simulated_ack_loss": unknown["id"], "resumed": resumed, "sso_runs": sso_runs}
+
+
 def certify_engine(
     api,
     checks,
@@ -735,7 +938,9 @@ def certify_engine(
         if engine == "SQLSERVER"
         else None
     )
+    audit_columns = certify_audit_columns(api, checks, engine, dataset_version_id, destination, password, credentials, run)
     return {
+        "audit_columns": audit_columns,
         "sink_type": engine,
         "destination_id": destination["id"],
         "destination_version_id": destination["destination_version_id"],
@@ -769,7 +974,8 @@ def main() -> int:
     writer_password = "TvDelivery-" + secrets.token_hex(18)
     admin_password = "TvAdmin-" + secrets.token_hex(18) + "!Aa1"
     internal_password = "TvInternal-" + secrets.token_hex(18)
-    credentials = [writer_password, admin_password, internal_password]
+    mock_secret = secrets.token_urlsafe(32)
+    credentials = [writer_password, admin_password, internal_password, mock_secret]
     base_url = f"http://127.0.0.1:{port}"
     environment = {
         **os.environ,
@@ -777,6 +983,10 @@ def main() -> int:
         "COMPOSE_PROJECT_NAME": project,
         "WEB_PORT": str(port),
         "TRACKVANCE_WEB_ORIGIN": base_url,
+        "TRACKVANCE_PUBLIC_URL": base_url,
+        "MAILPIT_PORT": str(available_port()),
+        "MOCK_OIDC_PORT": str(available_port()),
+        "MOCK_OIDC_CLIENT_SECRET": mock_secret,
         "TV_E2E_URL": base_url,
         "POSTGRES_USER": "trackvance",
         "POSTGRES_DB": "trackvance",
@@ -788,6 +998,7 @@ def main() -> int:
         "TV_DELIVERY_E2E": "true",
         "TV_DELIVERY_PASSWORD": writer_password,
     }
+    environment["TV_MAILPIT_URL"] = f"http://127.0.0.1:{environment['MAILPIT_PORT']}"
     compose = [
         "docker",
         "compose",
@@ -797,6 +1008,8 @@ def main() -> int:
         "compose.yml",
         "-f",
         "deploy/docker/compose.delivery-test.yml",
+        "-f", "deploy/docker/compose.mailpit-test.yml",
+        "-f", "deploy/docker/compose.identity-test.yml",
     ]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "delivery-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
@@ -839,6 +1052,7 @@ def main() -> int:
              "--docker", "--project", project]
         )
         api = smoke.Api(base_url, timeout=60)
+        application_version = api.get("/api/v1/health")["version"]
         api.request("GET", "/api/v1/delivery/destinations", expected=(401,))
         auth = api.post("/api/v1/auth/demo", {}, expected=(200,))
         api.csrf = auth["csrf_token"]
@@ -887,11 +1101,19 @@ def main() -> int:
                 f"{result['sink_type']}: credencial destino persiste cifrada tras reinicio",
             )
 
+        for result in results:
+            policy_after_restart = api.get(f"/api/v1/delivery/destinations/{result['destination_id']}/target-policy?" + urlencode(
+                {"schema_name": "existing_delivery", "table_name": "audit_records"}))
+            checks.verify(policy_after_restart["policy_id"] == result["audit_columns"]["policy_id"]
+                          and policy_after_restart["audit_columns_required"],
+                          result["sink_type"] + ": policy irreversible sobrevive restart")
+
         audits = api.get("/api/v1/audit-events")
         event_types = {item["event_type"] for item in audits["items"]}
         checks.verify(
             {"DESTINATION_CREATED", "DESTINATION_TESTED", "DELIVERY_RUN_QUEUED",
-             "DELIVERY_STARTED", "DELIVERY_COMMITTED", "DELIVERY_FAILED"}.issubset(event_types),
+             "DELIVERY_STARTED", "DELIVERY_COMMITTED", "DELIVERY_FAILED", "DELIVERY_TARGET_AUDIT_ENABLED",
+             "DELIVERY_TARGET_AUDIT_COLUMNS_CREATED", "DELIVERY_TARGET_AUDIT_DRIFT"}.issubset(event_types),
             "Auditoría cubre destino, cola, inicio, commit y fallo de Delivery",
         )
         logs = run(["logs", "--no-color", "api", "worker", "delivery-worker"], capture=True)
@@ -911,21 +1133,27 @@ def main() -> int:
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
             browser_args = [] if args.full_playwright else ["tests-e2e/delivery.spec.ts"]
-            command([pnpm, "exec", "playwright", "test", *browser_args], cwd=ROOT / "frontend")
+            run_browser(pnpm, browser_args, root=ROOT, project=project,
+                        environment=environment, evidence=evidence)
             playwright = "PASS"
-            for directory in ("test-results", "playwright-report"):
-                source = ROOT / "frontend" / directory
-                if source.exists():
-                    shutil.copytree(source, evidence / directory, dirs_exist_ok=True)
 
         result = {
             "status": "PASS",
+            "version": application_version,
             "project": project,
             "dataset_version_id": version["id"],
             "destinations": results,
             "checks": checks.completed,
             "playwright": playwright,
             "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
+            "unknown_reproduction_scope": "PHYSICAL_NONDETERMINISTIC_NETWORK_FAILURE",
+            "controlled_ack_loss": {
+                "status": "PASS",
+                "mechanism": "ADAPTER_ACK_LOSS_AFTER_REAL_SQL_COMMIT",
+                "engines": [item["sink_type"] for item in results
+                            if item["audit_columns"]["unknown_simulated_ack_loss"]],
+                "automatic_replay": False,
+            },
             "postgres_metrics_matrix": metrics_matrix,
         }
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -950,10 +1178,6 @@ def main() -> int:
                 (evidence / "application.log").write_text(
                     redact(logs, credentials), encoding="utf-8"
                 )
-                for directory in ("test-results", "playwright-report"):
-                    source = ROOT / "frontend" / directory
-                    if source.exists():
-                        shutil.copytree(source, evidence / directory, dirs_exist_ok=True)
             except (OSError, RuntimeError):
                 pass
         return 1

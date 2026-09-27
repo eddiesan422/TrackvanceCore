@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 
 // Opt in only on the disposable stack provisioned by connections_cycle.py.
 // Traces contain network request bodies, including the test password: never retain them.
-test.use({ trace: 'off' })
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 test.setTimeout(150_000)
 test.skip(process.env.TV_CONNECTIONS_E2E !== 'true', 'Requires the isolated external source fixtures')
 

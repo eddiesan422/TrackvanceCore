@@ -15,12 +15,25 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+REVIEW_SCHEMA_VERSION = 4
 DELIVERY_BASELINE_SCHEMA_VERSION = 3
 LEGACY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
-CURRENT_MIGRATION = "0009_delivery_reviews"
+REVIEW_MIGRATION = "0009_delivery_reviews"
+CURRENT_MIGRATION = "0012_delivery_target_audit"
+IDENTITY_TABLES = frozenset({
+    "roles", "role_permissions", "external_identities", "oidc_login_attempts",
+    "notification_deliveries", "delivery_target_policies",
+})
+ADDITIVE_COLUMNS = {
+    "users": frozenset({"first_name", "last_name", "username", "role_id", "deleted",
+                        "deleted_at", "must_change_password", "temporary_password_expires_at",
+                        "last_login_at"}),
+    "sessions": frozenset({"authentication_method"}),
+    "delivery_attempts": frozenset({"system_audit"}),
+}
 REVIEW_TABLE = "delivery_reviews"
 REVIEW_OUTCOMES = frozenset({
     "REMOTE_COMMIT_OBSERVED", "REMOTE_NOT_COMMITTED_OBSERVED", "INCONCLUSIVE",
@@ -47,7 +60,8 @@ LEGACY_TABLES = frozenset({
 FINGERPRINT_TABLES = {
     LEGACY_MIGRATION: LEGACY_TABLES,
     DELIVERY_BASELINE_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES,
-    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE},
+    REVIEW_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE},
+    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES,
 }
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
@@ -58,6 +72,7 @@ POLYMORPHIC_TABLES = {
     "DELIVERY_DESTINATION": "delivery_destinations",
     "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions",
     "DELIVERY_ATTEMPT": "delivery_attempts",
+    "DELIVERY_TARGET_POLICY": "delivery_target_policies",
 }
 LEGACY_POLYMORPHIC_TABLES = {
     key: value
@@ -73,11 +88,19 @@ def _canonical_hash(row: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _row_identity(table: str, row: Mapping[str, Any]) -> str:
+    if table == "role_permissions":
+        return json.dumps([row["role_id"], row["permission_code"]], separators=(",", ":"))
+    if table == "oidc_login_attempts":
+        return str(row["state_hash"])
+    return str(row["id"])
+
+
 def _row_index(
     rows: Mapping[str, list[Mapping[str, Any]]],
 ) -> dict[str, dict[str, Mapping[str, Any]]]:
     return {
-        table: {str(row["id"]): row for row in values}
+        table: {_row_identity(table, row): row for row in values}
         for table, values in rows.items()
     }
 
@@ -223,7 +246,7 @@ def _table_hashes(
     rows: Mapping[str, list[Mapping[str, Any]]],
 ) -> dict[str, dict[str, str]]:
     return {
-        name: dict(sorted((str(row["id"]), _canonical_hash(row)) for row in table_rows))
+        name: dict(sorted((_row_identity(name, row), _canonical_hash(row)) for row in table_rows))
         for name, table_rows in sorted(rows.items())
     }
 
@@ -239,11 +262,13 @@ def legacy_v2_report(
     """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
 
     foreign_keys = list(foreign_keys)
-    if current_migration not in {DELIVERY_BASELINE_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration not in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La compatibilidad 0.4.1 requiere la migración 0008 o 0009 aplicada.")
     excluded = DELIVERY_TABLES | {REVIEW_TABLE}
     if any(rows.get(table) for table in excluded):
         raise ValueError("Un backup 0.4.1 no puede contener registros de Data Delivery.")
+    if current_migration == CURRENT_MIGRATION:
+        rows, foreign_keys = project_identity_upgrade(rows, foreign_keys)
     if any(str(run.get("module", "")).upper() == "DELIVERY" for run in rows.get("runs", [])):
         raise ValueError("Un backup 0.4.1 no puede contener Runs DELIVERY.")
     if any(str(job.get("lane", "")) != "DEFAULT" for job in rows.get("jobs", [])):
@@ -290,9 +315,11 @@ def legacy_v3_report(
     verified_source_secrets: int, verified_delivery_secrets: int,
 ) -> dict[str, Any]:
     """Project a fresh 0009 upgrade onto the exact, unchanged 0.5.0 state."""
-    if current_migration != CURRENT_MIGRATION or rows.get(REVIEW_TABLE):
+    if current_migration not in {REVIEW_MIGRATION, CURRENT_MIGRATION} or rows.get(REVIEW_TABLE):
         raise ValueError("La proyección 0.5.0 requiere 0009 y revisiones vacías.")
     foreign_keys = list(foreign_keys)
+    if current_migration == CURRENT_MIGRATION:
+        rows, foreign_keys = project_identity_upgrade(rows, foreign_keys)
     validate_relationships(rows, foreign_keys)
     previous = {name: values for name, values in rows.items() if name != REVIEW_TABLE}
     previous_fks = [fk for fk in foreign_keys if REVIEW_TABLE not in (fk[0], fk[2])]
@@ -305,6 +332,56 @@ def legacy_v3_report(
         "verified_delivery_secrets": verified_delivery_secrets,
         "validated_relationships": validate_relationships(previous, previous_fks),
         "migration": DELIVERY_BASELINE_MIGRATION,
+    }
+
+
+def project_identity_upgrade(rows, foreign_keys):
+    """Remove only release-defined additions after validating the upgraded state.
+
+    Original names, role labels, password hashes, timestamps and actors remain
+    byte-for-byte authoritative in the historical projection. Functional 0.6
+    activity cannot be silently discarded as a migration addition.
+    """
+    foreign_keys = list(foreign_keys)
+    validate_relationships(rows, foreign_keys)
+    for table in IDENTITY_TABLES - {"roles", "role_permissions"}:
+        if rows.get(table):
+            raise ValueError("La proyección histórica contiene actividad nueva de 0.6.0.")
+    for user in rows.get("users", []):
+        if any(user.get(field) for field in (
+            "first_name", "last_name", "deleted", "deleted_at", "must_change_password",
+            "temporary_password_expires_at",
+        )):
+            raise ValueError("La proyección histórica contiene cambios de identidad nuevos.")
+    for attempt in rows.get("delivery_attempts", []):
+        if attempt.get("system_audit"):
+            raise ValueError("La proyección histórica contiene auditoría de entrega nueva.")
+    previous = {
+        name: [{key: value for key, value in dict(row).items()
+                if key not in ADDITIVE_COLUMNS.get(name, frozenset())} for row in values]
+        for name, values in rows.items() if name not in IDENTITY_TABLES
+    }
+    previous_fks = [fk for fk in foreign_keys
+                    if fk[0] not in IDENTITY_TABLES and fk[2] not in IDENTITY_TABLES
+                    and fk[1] not in ADDITIVE_COLUMNS.get(fk[0], frozenset())]
+    return previous, previous_fks
+
+
+def legacy_v4_report(rows, foreign_keys, *, current_migration, verified_artifacts,
+                     verified_source_secrets, verified_delivery_secrets):
+    """Recreate the exact 0.5.1 fingerprint after the additive 0.6.0 migration."""
+    if current_migration != CURRENT_MIGRATION:
+        raise ValueError("La proyección 0.5.1 requiere la migración 0012.")
+    previous, previous_fks = project_identity_upgrade(rows, foreign_keys)
+    return {
+        "schema_version": REVIEW_SCHEMA_VERSION,
+        "tables": _table_hashes(previous),
+        "verified_artifacts": verified_artifacts,
+        "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets,
+        "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(previous, previous_fks),
+        "migration": REVIEW_MIGRATION,
     }
 
 
@@ -396,6 +473,7 @@ def snapshot() -> dict[str, Any]:
         "schema_version": (
             LEGACY_SCHEMA_VERSION if legacy else
             DELIVERY_BASELINE_SCHEMA_VERSION if migration == DELIVERY_BASELINE_MIGRATION else
+            REVIEW_SCHEMA_VERSION if migration == REVIEW_MIGRATION else
             SCHEMA_VERSION
         ),
         "tables": _table_hashes(rows),
@@ -439,7 +517,9 @@ def snapshot_legacy_v3() -> dict[str, Any]:
 
 
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
-    if before.get("schema_version") not in {DELIVERY_BASELINE_SCHEMA_VERSION, SCHEMA_VERSION}:
+    if before.get("schema_version") not in {
+        DELIVERY_BASELINE_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION, SCHEMA_VERSION,
+    }:
         raise ValueError("Versión del informe previo no reconocida.")
     if after.get("schema_version") != before.get("schema_version"):
         raise ValueError("Versión del informe posterior no reconocida.")
@@ -461,6 +541,7 @@ def main() -> int:
     commands.add_parser("snapshot")
     commands.add_parser("snapshot-legacy-v2")
     commands.add_parser("snapshot-legacy-v3")
+    commands.add_parser("snapshot-legacy-v4")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -472,6 +553,12 @@ def main() -> int:
             print(json.dumps(snapshot_legacy_v2(), indent=2, sort_keys=True))
         elif args.command == "snapshot-legacy-v3":
             print(json.dumps(snapshot_legacy_v3(), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v4":
+            migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
+            print(json.dumps(legacy_v4_report(
+                rows, fks, current_migration=migration, verified_artifacts=artifacts,
+                verified_source_secrets=source, verified_delivery_secrets=delivery,
+            ), indent=2, sort_keys=True))
         else:
             compare(
                 json.loads(args.before.read_text(encoding="utf-8-sig")),

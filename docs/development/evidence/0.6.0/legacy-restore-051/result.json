@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "baseline_commit": "4519ed354202ea8f220682758da234e07b6df3ed",
+  "source_version": "0.5.1",
+  "target_version": "0.6.0",
+  "source_state_sha256": "cbfb5c0472b0ba67130fdd6bbb02c660ba94d4d756981bdecea6a273663f07d6",
+  "restored_legacy_sha256": "cbfb5c0472b0ba67130fdd6bbb02c660ba94d4d756981bdecea6a273663f07d6",
+  "exact_historical_state": "PASS",
+  "migration": "0012_delivery_target_audit",
+  "artifacts": 78,
+  "source_secrets": 0,
+  "delivery_secrets": 0,
+  "restore": "RUNNING_VERIFIED",
+  "roles": 5,
+  "users": 1,
+  "duration_seconds": 140.886
+}

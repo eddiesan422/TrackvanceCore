@@ -8,7 +8,7 @@ import { RunDetail } from '../runs/Runs'
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn(), download: vi.fn() }))
 
 let currentRun: RecordData, runReads: number
-const permissions = ['runs:read', 'runs:execute', 'artifacts:download']
+const permissions = ['runs:read', 'delivery:execute', 'delivery:repair_evidence', 'delivery:review_unknown', 'artifacts:download']
 const advance = async (milliseconds: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 const renderRun = (grants = permissions) => renderApp(<RunDetail/>, { path: '/runs/run-settling', route: '/runs/:id', permissions: grants })
 

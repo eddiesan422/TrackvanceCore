@@ -1,7 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Evidence records retain heterogeneous API fields until a generated DTO client is adopted.
 export type RecordData = Record<string, any> // API-defined, heterogeneous evidence and configuration records.
 export interface Collection { items: RecordData[]; total: number }
-export interface Session { user: { id: string; name: string; email: string; role: string; permissions: string[] }; organization: { id: string; name: string }; csrf_token: string }
+export interface Session { user: { id: string; name: string; username?: string; email: string; role: string; role_id?: string; role_version?: number; must_change_password?: boolean; permissions: string[] }; organization: { id: string; name: string }; csrf_token: string }
 
 let csrfToken = ''
 export function setCsrfToken(token: string) { csrfToken = token }
@@ -20,6 +20,7 @@ export async function api<T = RecordData>(path: string, options: RequestInit = {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     const detail = body.error || body.detail || {}
+    if ((response.status === 401 || response.status === 403) && path !== '/me' && !path.startsWith('/auth/')) window.dispatchEvent(new Event('trackvance:session-refresh'))
     throw new ApiError(typeof detail === 'string' ? detail : detail.message || 'No fue posible completar la operación.', response.status, detail.request_id)
   }
   return response.status === 204 ? undefined as T : response.json()

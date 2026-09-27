@@ -129,7 +129,7 @@ def _variation(current: float | None, previous: float | None, available: bool) -
     return {"previous": round(float(previous), 1), "delta": round(float(current) - float(previous), 1)}
 
 
-def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters) -> dict[str, Any]:
+def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters, *, permissions: set[str] | None = None) -> dict[str, Any]:
     now = utcnow()
     days = PERIOD_DAYS[filters.period]
     current_start = now - timedelta(days=days) if days is not None else None
@@ -141,6 +141,17 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
     findings = list(db.scalars(select(Finding).where(Finding.organization_id == organization_id)).all())
     cases = list(db.scalars(select(ExceptionCase).where(ExceptionCase.organization_id == organization_id)).all())
     audit_events = list(db.scalars(select(AuditEvent).where(AuditEvent.organization_id == organization_id).order_by(AuditEvent.created_at.desc()).limit(8)).all())
+    if permissions is not None:
+        runs = [run for run in runs if f"{run.module.lower()}:read" in permissions]
+        visible_runs = {run.id for run in runs}
+        findings = [finding for finding in findings if finding.run_id in visible_runs]
+        cases = [case for case in cases if case.run_id in visible_runs] if "exceptions:read" in permissions else []
+        audit_events = audit_events if "audit:read" in permissions else []
+        if "datasets:read" not in permissions:
+            version_ids = {version_id for run in runs for version_id in (run.dataset_version_id, run.target_version_id) if version_id}
+            versions = [version for version in versions if version.id in version_ids]
+            dataset_ids = {version.dataset_id for version in versions}
+            datasets = [dataset for dataset in datasets if dataset.id in dataset_ids]
 
     dataset_by_id = {dataset.id: dataset for dataset in datasets}
     version_by_id = {version.id: version for version in versions}

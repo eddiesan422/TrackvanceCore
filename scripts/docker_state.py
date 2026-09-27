@@ -32,12 +32,14 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 4
+VERIFY_SCHEMA_VERSION = 5
+REVIEW_VERIFY_SCHEMA_VERSION = 4
+REVIEW_MIGRATION = "0009_delivery_reviews"
 DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION = 3
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0009_delivery_reviews"
+CURRENT_MIGRATION = "0012_delivery_target_audit"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
@@ -110,7 +112,12 @@ LEGACY_STATE_FIELDS = frozenset(
     }
 )
 DELIVERY_BASELINE_STATE_TABLES = LEGACY_STATE_TABLES | DELIVERY_TABLES
-CURRENT_STATE_TABLES = DELIVERY_BASELINE_STATE_TABLES | {"delivery_reviews"}
+REVIEW_STATE_TABLES = DELIVERY_BASELINE_STATE_TABLES | {"delivery_reviews"}
+IDENTITY_STATE_TABLES = frozenset({
+    "roles", "role_permissions", "external_identities", "oidc_login_attempts",
+    "notification_deliveries", "delivery_target_policies",
+})
+CURRENT_STATE_TABLES = REVIEW_STATE_TABLES | IDENTITY_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -459,7 +466,7 @@ def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     execute(["docker", "cp", str(VERIFY_SCRIPT), f"{api_id}:/tmp/verify_storage.py"])
     output = execute(
@@ -622,6 +629,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
     expected_tables = (
         DELIVERY_BASELINE_STATE_TABLES
         if state.get("schema_version") == DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
+        else REVIEW_STATE_TABLES
+        if state.get("schema_version") == REVIEW_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -714,6 +723,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = LEGACY_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == DELIVERY_BASELINE_MIGRATION:
         expected_state_schema = DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == REVIEW_MIGRATION:
+        expected_state_schema = REVIEW_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -775,16 +786,18 @@ def validate_restored_state(
 ) -> None:
     schema_version = manifest.get("schema_version")
     if schema_version == BACKUP_SCHEMA_VERSION:
-        if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION:
+        if manifest.get("migration") in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION}:
             tables = restored_state.get("tables")
             if (
                 restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                 or restored_state.get("migration") != CURRENT_MIGRATION
                 or not isinstance(tables, Mapping)
-                or tables.get("delivery_reviews") != {}
+                or (manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
+                    and tables.get("delivery_reviews") != {})
                 or normalized_legacy_state != expected_state
             ):
-                raise OperationError("La huella 0.5.0 normalizada no coincide con el respaldo.")
+                release = "0.5.0" if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION else "0.5.1"
+                raise OperationError(f"La huella {release} normalizada no coincide con el respaldo.")
             return
         if restored_state != expected_state:
             raise OperationError("La huella restaurada no coincide con el respaldo.")
@@ -973,6 +986,8 @@ def _restore_verified(
             if backup_schema_version == LEGACY_BACKUP_SCHEMA_VERSION
             else "snapshot-legacy-v3"
             if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
+            else "snapshot-legacy-v4"
+            if manifest.get("migration") == REVIEW_MIGRATION
             else None
         )
         if legacy_command:

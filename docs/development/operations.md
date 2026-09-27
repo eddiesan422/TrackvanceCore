@@ -22,7 +22,7 @@ servicios. La interfaz queda en `http://localhost:3000`.
 Un entorno adicional puede coexistir con el prototipo nativo:
 
 ```powershell
-$env:COMPOSE_PROJECT_NAME = 'trackvance-certification'
+$env:COMPOSE_PROJECT_NAME = 'trackvance-local-demo'
 $env:WEB_PORT = '3100'
 $env:TRACKVANCE_WEB_ORIGIN = 'http://localhost:3100'
 .\scripts\bootstrap.ps1
@@ -61,7 +61,9 @@ de fórmulas en las celdas de negocio. No reinicia ni elimina datos.
 
 Las imágenes y paquetes se descargan durante la preparación. Una vez construidos,
 la aplicación, los archivos, PostgreSQL y los workers funcionan localmente. No hay
-storage, autenticación, fuentes, analítica ni procesamiento cloud requerido.
+storage, fuentes, analítica ni procesamiento cloud obligatorio. El login local
+funciona sin SMTP ni SSO. El correo SMTP y Microsoft/Google SSO son integraciones
+opcionales que requieren acceso a sus proveedores cuando están habilitadas.
 
 El override siguiente coloca PostgreSQL, API y worker en una red Docker interna.
 Si el proyecto ya existe, se recrea únicamente su red conservando los volúmenes:
@@ -82,15 +84,33 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual llega a `0009_delivery_reviews`, precedida por
+La revisión actual 0.6.0 llega a `0012_delivery_target_audit`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
-`0006_local_identity_exceptions`, `0007_monitor_scheduling` y `0008_data_delivery`. Las
+`0006_local_identity_exceptions`, `0007_monitor_scheduling`, `0008_data_delivery`,
+`0009_delivery_reviews`, `0010_dynamic_rbac_identity` y
+`0011_notification_delivery`. Las
 correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
 puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
 En bases SQLite previas sin tabla Alembic, el adaptador
 solo adopta un schema original reconocido o uno que coincida con el modelo actual;
 un schema desconocido exige revisión y no se modifica a ciegas.
+
+0010 crea roles/permisos persistidos, usernames estables, estado de primer acceso,
+vínculos externos y estados OIDC. Asigna roles por organización a cuentas históricas;
+`Data Owner` pasa a `Data Owner / Lead`. Los usernames se derivan de la parte local
+del correo, normalizados y desambiguados determinísticamente. La migración conserva
+hashes de contraseña, actividad, IDs, actores históricos y sesiones; no obliga a
+los usuarios existentes a cambiar contraseña. Los nombres de roles desconocidos
+se conservan como roles inactivos sin privilegios para revisión administrativa.
+0011 añade sólo metadatos de entrega de notificaciones. 0012 añade políticas
+irreversibles de auditoría por tabla y el snapshot `system_audit` de cada intento
+Delivery; los intentos históricos reciben un objeto vacío y no se rehace evidencia.
+
+SQLite usa una transacción DDL explícita y comprobación `foreign_key_check` durante
+las reconstrucciones de tablas de Alembic. La suspensión de FK se limita a esa
+conexión de migración y su estado previo se restaura; las conexiones de aplicación
+mantienen las FK activas. PostgreSQL realiza sus migraciones transaccionales normales.
 
 `scripts/check_postgres_migrations.py` usa `DATABASE_URL` del backend, crea una base
 temporal de nombre aleatorio y comprueba upgrade desde v1 hasta head con datos
@@ -120,6 +140,151 @@ python scripts/verify_storage.py compare before.json after.json
 Si se recrea el contenedor, debe copiarse de nuevo el script temporal antes de la
 segunda captura. No ejecutar login, exports, smoke ni pruebas durante el intervalo:
 son operaciones auditadas y agregan registros legítimos que cambiarían la huella.
+
+## Actualización y recuperación 0.6.0
+
+La actualización de una instalación existente requiere conservar su nombre Compose,
+puerto, configuración externa y los seis volúmenes. Antes de reconstruir, esperar
+los runs/jobs, pausar los schedules que podrían encolar trabajo y registrar su
+estado para reactivarlos después. El backup coordinado rechaza trabajo pendiente;
+no cancela ni vuelve a ejecutar una entrega remota para desbloquear el respaldo.
+
+1. Inspeccionar el proyecto explícito y hacer backup con las herramientas compatibles
+   con su versión. Validar el backup y conservarlo en ubicación privada fuera de Git.
+2. Guardar por separado la configuración del despliegue, `.env` o `external.env`,
+   secretos SMTP/OAuth, registros de aplicaciones y callbacks. Estos archivos no son
+   componentes del backup. No imprimirlos ni anexarlos a evidencia de validación.
+3. Reconstruir API, ambos workers y web desde la misma versión 0.6.0; conservar
+   PostgreSQL y los volúmenes. API migra a 0012 antes de declararse saludable.
+4. Ejecutar readiness/doctor y verificar la migración. Para comparar la historia
+   anterior a 0.6.0, usar su proyección legacy correspondiente antes de generar
+   datos nuevos. No comparar directamente state 4 contra state 5 como si sus
+   columnas y tablas fueran idénticas.
+5. Comprobar login de una cuenta local histórica y el rol asignado. Probar SMTP/SSO
+   sólo si se configuraron; reactivar los schedules previstos. El smoke completo
+   crea datasets/runs y se reserva para una copia aislada si se requiere preservar
+   sin adiciones la instalación operativa.
+
+Ejemplo con un nombre elegido expresamente para la instalación:
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = 'trackvance-core'
+python scripts/docker_state.py inventory --project trackvance-core
+python scripts/docker_state.py backup --project trackvance-core --destination backups/pre-060
+python scripts/docker_state.py verify --source backups/pre-060
+docker compose -p trackvance-core up -d --build --wait
+python scripts/doctor.py --base-url http://localhost:3000 --docker --project trackvance-core --recovery-ready
+```
+
+Si el despliegue usa un archivo separado, Compose debe recibirlo explícitamente
+mediante su `--env-file` o el mecanismo de despliegue establecido. `external.env`
+no se carga automáticamente por su nombre; `bootstrap.ps1` prepara `.env`. Los
+comandos Python de operación deben heredar las mismas variables necesarias para
+construir el destino. Restaurar PostgreSQL no recupera valores ausentes del entorno.
+Mantener SMTP/SSO deshabilitados permite comprobar recuperación local sin esos secretos.
+
+El rollback operativo es restaurar el backup anterior en un proyecto fresco con
+la versión adecuada y cambiar la entrada de acceso después de verificarlo. No se
+certifica el downgrade de la base activa como recuperación. En particular, quitar
+0012 no retira `fechaIngesta`/`usuario` de una base remota ni revierte entregas ya
+COMMITTED; los cambios remotos no pertenecen al backup de Trackvance.
+
+### Formatos de backup y proyección histórica
+
+El backup Docker actual conserva **manifest 2** y avanza la huella a **state 5**,
+revisión `0012_delivery_target_audit`. Los números de manifest y state son contratos
+distintos. State 5 cubre 31 tablas: las 25 de 0.5.1 y `roles`, `role_permissions`,
+`external_identities`, `oidc_login_attempts`, `notification_deliveries`,
+`delivery_target_policies`. Incluye por hash los nuevos campos de User, AuthSession
+y DeliveryAttempt. Verifica además artifacts, FK, linaje y ambas familias de secretos.
+
+| Fuente | Manifest / state / migración | Validación al restaurar con 0.6.0 |
+| --- | --- | --- |
+| 0.6.0 | 2 / 5 / 0012 | Igualdad exacta de la huella completa antes de smoke |
+| 0.5.1 | 2 / 4 / 0009 | Migración a 0012 y proyección `snapshot-legacy-v4` exactamente igual |
+| 0.5.0 | 2 / 3 / 0008 | Migración a 0012, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
+| 0.4.1 | 1 / 2 / 0007 | Migración a 0012, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
+
+Las proyecciones excluyen únicamente adiciones de versiones posteriores para
+comparar los registros históricos; no sobrescriben backups ni normalizan sus datos
+en el origen. No se inventan hashes del catálogo para state 2, que no los almacenaba.
+Las herramientas actuales pueden respaldar runtimes 0.5.0/0.5.1 conservando su
+huella nativa. Para crear un backup de 0.4.1 se usa su tooling histórico, pues su
+topología no contiene `delivery-worker` ni los dos volúmenes de secretos destino.
+
+### Datos incluidos y exclusiones
+
+Se restauran roles personalizados y sus permisos, usuarios/asignaciones, estado y
+expiración de primer acceso, hashes de contraseña, sesiones, vínculos externos por
+provider/issuer/subject, metadatos OIDC persistidos, estados de notificación y
+políticas Delivery con el usuario que las habilitó. La huella contiene IDs/hashes;
+el dump PostgreSQL sí contiene los registros y debe tratarse como información
+privada. Un intento OIDC consumido conserva su marcador y no se vuelve reutilizable.
+Un intento pendiente sigue sujeto a su expiración, cookie del navegador y validación
+del proveedor; recuperarlo no garantiza que la autorización externa continúe.
+
+El backup no incluye cuerpos de correo, contraseñas temporales en claro, access
+tokens, refresh tokens ni ID tokens, porque la aplicación no los almacena. Tampoco
+incluye `.env`, `external.env`, secretos de clientes Microsoft/Google, contraseña
+SMTP, DNS/TLS, configuración de los proveedores ni contenido de las bases externas.
+Las credenciales cifradas y claves maestras de **fuentes y destinos SQL sí** se
+incluyen como los pares de volúmenes existentes; son un dominio diferente de los
+secretos OAuth/SMTP. No publicar el dump, archivos de volúmenes o carpetas de backup.
+
+Después de restaurar, una notificación SENT describe una entrega pasada y no se
+reenvía. FAILED permanece FAILED y PENDING no presume envío. Reenviar credenciales
+desde Usuarios genera una nueva temporal y revoca las anteriores/sesiones. Si SMTP
+no está configurado, el usuario existe pero la entrega falla explícitamente; revisar
+[SMTP](smtp-setup.md). Los vínculos SSO recuperados necesitan el proveedor y callback
+correctos; ver [SSO](sso-setup.md). No crear cuentas duplicadas para reparar un vínculo.
+
+Una política Delivery requerida continúa requerida aunque cambien contraseña,
+Destination, nombre del usuario o su rol. Si la tabla materializada pierde una de
+las columnas de auditoría, preflight falla con drift y se requiere revisión explícita;
+restaurar Trackvance no corrige silenciosamente la tabla externa. UNKNOWN continúa
+UNKNOWN, sin replay. La reparación de evidencia usa el snapshot del intento y
+requiere `delivery:repair_evidence`; la revisión externa requiere
+`delivery:review_unknown`. Ver [Delivery y auditoría](delivery-audit.md).
+
+### Simulacros aislados reproducibles
+
+```powershell
+python scripts/tests/docker_backup_cycle.py
+python scripts/tests/identity_legacy_restore_cycle.py
+python scripts/tests/legacy_restore_cycle.py --legacy041-backup RUTA_BACKUP_041 --baseline-image-project trackvance-certification --evidence-dir .codex-local/legacy-restore/060-nuevo
+```
+
+El primero destruye sólo su aplicación fuente recién creada y exige recuperación
+exacta de la huella y funcionamiento de credenciales SQL. Incluye roles/permisos,
+notificaciones y primer acceso, un vínculo externo sintético y un intento OIDC
+consumido sin tokens, auditoría Delivery, COMMITTED reparado y UNKNOWN revisado.
+Las fixtures OIDC prueban persistencia; el flujo OAuth firmado/PKCE se certifica
+por separado con `identity_sso_cycle.py` y `delivery_cycle.py`.
+
+El segundo construye el commit real 0.5.1 en su directorio privado, crea su backup,
+destruye ese origen y restaura en 0.6.0. El tercero usa un backup auténtico 0.4.1 y
+las imágenes inmutables 0.5.0 de un proyecto existente **sólo para inspección**:
+levanta esas imágenes en otro proyecto, prueba la Delivery histórica y verifica
+que la instalación existente y el backup original no cambien. El proyecto indicado
+debe seguir conteniendo imágenes reales 0.5.0; no reconstruirlo para preparar esta prueba.
+
+Todos rechazan nombres propios que ya tengan recursos antes de crear nada y limpian
+exclusivamente sus proyectos temporales. Sus carpetas privadas pueden contener
+backups y claves; publicar sólo `result.json` revisado y saneado. La comprobación web
+del drill nativo es HTTP/HTML; no atribuirle una prueba Playwright que no ejecuta.
+
+La ejecución 0.6.0 conserva estos resultados saneados:
+
+| Simulacro | Resultado y alcance comprobado |
+| --- | --- |
+| [Nativo 0.6.0](evidence/0.6.0/native-recovery-identity/result.json) | PASS; 9 artifacts, 2 secretos SQL, 269 relaciones, 6 roles y 95 grants, vínculo externo y estado OIDC no vacíos; origen destruido, huella exacta, reconexión SQL, UNKNOWN sin replay y limpieza completa |
+| [0.5.1 a 0.6.0](evidence/0.6.0/legacy-restore-051/result.json) | PASS; commit histórico `4519ed3`, 78 artifacts y proyección state 4 exactamente igual tras migrar a 0012; 5 roles y un usuario histórico |
+| [0.4.1 y 0.5.0 a 0.6.0](evidence/0.6.0/legacy-restore-041-050/result.json) | PASS; ambas proyecciones históricas exactas, 7 y 9 artifacts respectivamente; credenciales fuente/destino 0.5.0 utilizables, contratos API y bytes Delivery históricos intactos; backup 0.4.1 e inventario de `trackvance-certification` sin cambios |
+
+El vínculo/estado OIDC del drill nativo es una fixture sintética de persistencia,
+identificada expresamente en su resultado. La comparación histórica 0.5.1 no incluye
+secretos SQL porque esa instalación sintética no tenía conexiones; el drill nativo
+y la certificación 0.5.0 cubren el uso de credenciales recuperadas.
 
 ## Copia y restauración del prototipo SQLite
 
@@ -339,14 +504,14 @@ antes de abrirla; no uses un backup cuyo inventario cambie durante la operación
 
 ## Endurecimiento 0.5.1: reparación, revisión y recuperación
 
-La migración vigente es `0009_delivery_reviews`; no se modifican 0001..0008.
+En 0.5.1 la migración vigente era `0009_delivery_reviews`; no se modificaron 0001..0008.
 Los comandos habituales aplican la migración al arrancar API. Nunca se ejecuta
 un downgrade sobre la instalación operativa para probar compatibilidad.
 
 ### Entrega COMMITTED con evidencia pendiente
 
 1. Abrir la Run: verificar SUCCESS/COMMITTED y aviso PENDING_REPAIR.
-2. Con permiso `runs:execute`, pulsar **Reparar evidencia**. La acción llama
+2. Con permiso `delivery:repair_evidence` en 0.6.0, pulsar **Reparar evidencia**. La acción llama
    `POST /api/v1/delivery/runs/{id}/repair-evidence` con sesión y CSRF.
 3. REPAIRED completa receipt/manifest; ALREADY_VALID confirma que están íntegros.
    Repetir la acción no vuelve a entregar filas ni crea artifacts duplicados.
@@ -373,7 +538,7 @@ una acción deliberada distinta y considerar la estrategia/población del destin
 
 ### Backup 0.5.1 y upgrades compatibles
 
-El backup nativo usa manifest 2/state 4/0009 y conserva 25 tablas, artifacts, ambas
+El backup nativo de 0.5.1 usa manifest 2/state 4/0009 y conserva 25 tablas, artifacts, ambas
 familias de secretos y claves. Restore de 0.5.0 / manifest 2 / state 3 / 0008 verifica
 una proyección legacy-v3 exacta y que delivery_reviews está vacía. Restore de 0.4.x
 / manifest 1 / state 2 / 0007 conserva proyección legacy-v2, cuatro tablas Delivery vacías

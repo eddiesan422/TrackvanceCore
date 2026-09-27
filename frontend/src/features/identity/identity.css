@@ -1,0 +1,15 @@
+.permission-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.permission-groups fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+.permission-groups legend { font-weight: 650; padding: 0 6px; }
+.permission-choice { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; cursor: pointer; }
+.permission-choice input { margin-top: 4px; }
+.permission-choice span { display: grid; gap: 3px; min-width: 0; }
+.permission-choice code, .permission-choice small { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.identity-permission-heading p, .identity-access p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.identity-access { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.identity-method { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.identity-method:last-child { border-bottom: 0; }
+.identity-method small { display: block; margin-top: 4px; color: var(--muted); }
+.login-providers { display: grid; gap: 10px; margin-top: 18px; }
+.first-login-page { min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; background: #f4f7fa; }
+.first-login-page .login-card { width: min(100%, 470px); }
