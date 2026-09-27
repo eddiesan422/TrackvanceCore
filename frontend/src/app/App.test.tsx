@@ -41,7 +41,7 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.6\.0/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.6\.1/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))

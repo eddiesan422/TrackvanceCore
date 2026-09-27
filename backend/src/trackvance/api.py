@@ -411,7 +411,11 @@ class FirstLoginPassword(BaseModel):
 @router.post("/auth/first-login/change-password", response_model=AuthenticationResponse)
 def first_login_password(body: FirstLoginPassword, request: Request, response: Response,
                          db: Session = Depends(get_db), actor: User = Depends(current_user)):
-    from .identity_api import lock_organization_identities, revoke_sessions
+    from .identity_api import (
+        credential_write_boundary,
+        lock_organization_identities,
+        revoke_sessions,
+    )
     lock_organization_identities(db, actor.organization_id)
     user = db.get(User, actor.id)
     persisted = db.get(AuthSession, request.state.session.id)
@@ -428,12 +432,14 @@ def first_login_password(body: FirstLoginPassword, request: Request, response: R
         same = False
     if same:
         raise APIError(422, "PASSWORD_MUST_DIFFER", "La nueva contraseña debe ser diferente de la temporal.")
-    user.password_hash = PasswordHasher().hash(body.new_password)
-    user.must_change_password, user.temporary_password_expires_at = False, None
-    user.password_changed_at, user.updated_at, user.version = utcnow(), utcnow(), user.version + 1
-    revoke_sessions(db, user)
-    audit(db, "USER_PASSWORD_CHANGED", "user", user.id, "Primer acceso completado", Actor("USER", user.id, user.name), user.organization_id, {"sessions_revoked": True})
-    return establish_session(request, response, db, user, request.state.session.authentication_method)
+    with credential_write_boundary(db, code="PASSWORD_CHANGE_FAILED",
+                                   message="No se pudo cambiar la contraseña. Inicia sesión y vuelve a intentar."):
+        user.password_hash = PasswordHasher().hash(body.new_password)
+        user.must_change_password, user.temporary_password_expires_at = False, None
+        user.password_changed_at, user.updated_at, user.version = utcnow(), utcnow(), user.version + 1
+        revoke_sessions(db, user)
+        audit(db, "USER_PASSWORD_CHANGED", "user", user.id, "Primer acceso completado", Actor("USER", user.id, user.name), user.organization_id, {"sessions_revoked": True})
+        return establish_session(request, response, db, user, request.state.session.authentication_method)
 
 
 @router.get("/me", response_model=AuthenticationResponse)

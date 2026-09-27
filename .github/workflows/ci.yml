@@ -79,9 +79,8 @@ jobs:
     needs: [backend, frontend]
     env:
       COMPOSE_PROJECT_NAME: trackvance-ci
-      COMPOSE_FILE: compose.yml:deploy/docker/compose.mailpit-test.yml
-      MAILPIT_PORT: '8025'
-      TV_MAILPIT_URL: http://127.0.0.1:8025
+      COMPOSE_FILE: compose.yml
+      TV_E2E_PRIVATE_ARTIFACTS: '1'
       POSTGRES_PASSWORD: disposable-compose-password
       WEB_PORT: '3100'
       TRACKVANCE_WEB_ORIGIN: http://localhost:3100
@@ -128,17 +127,15 @@ jobs:
         run: python scripts/doctor.py --base-url http://localhost:3100 --docker
       - name: API smoke
         run: python scripts/smoke_test.py --base-url http://localhost:3100
-      - name: Browser flows and Excel downloads
-        working-directory: frontend
-        run: pnpm test:e2e
+      - name: Browser flows with sanitized credential evidence
+        run: python scripts/tests/browser_evidence.py --project trackvance-ci --evidence-dir .codex-local/compose-e2e
       - name: Restart with retained volumes
         run: |
-          docker compose cp scripts/verify_storage.py api:/tmp/verify_storage.py
-          docker compose exec -T api python /tmp/verify_storage.py snapshot > persistence-before.json
+          docker compose exec -T api python - snapshot < scripts/verify_storage.py > persistence-before.json
           docker compose restart
           docker compose up --detach --wait --wait-timeout 120
           python scripts/doctor.py --base-url http://localhost:3100 --docker
-          docker compose exec -T api python /tmp/verify_storage.py snapshot > persistence-after.json
+          docker compose exec -T api python - snapshot < scripts/verify_storage.py > persistence-after.json
           python scripts/verify_storage.py compare persistence-before.json persistence-after.json
       - name: Upload browser evidence
         if: always()
@@ -146,8 +143,7 @@ jobs:
         with:
           name: browser-evidence
           path: |
-            frontend/playwright-report/
-            frontend/test-results/
+            .codex-local/compose-e2e/browser-summary.json
             persistence-before.json
             persistence-after.json
           if-no-files-found: ignore
@@ -177,7 +173,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
-      - name: Dynamic RBAC, Mailpit credentials and signed mock OIDC browser flows
+      - name: One-time credentials, dynamic RBAC and signed mock OIDC browser flows
         run: python scripts/tests/identity_sso_cycle.py
       - name: Upload sanitized identity certification
         if: always()
@@ -260,8 +256,10 @@ jobs:
           python-version: '3.12'
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
-      - name: Restore an authentic 0.5.1 backup into 0.6.0
+      - name: Restore an authentic 0.5.1 backup into 0.6.1
         run: python scripts/tests/identity_legacy_restore_cycle.py
+      - name: Preserve notification history from an authentic 0.6.0 backup
+        run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
       - name: Upload sanitized recovery results only
         if: always()
         uses: actions/upload-artifact@v7

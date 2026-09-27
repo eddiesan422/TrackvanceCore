@@ -13,3 +13,10 @@
 .login-providers { display: grid; gap: 10px; margin-top: 18px; }
 .first-login-page { min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; background: #f4f7fa; }
 .first-login-page .login-card { width: min(100%, 470px); }
+.credential-summary { display: grid; gap: 12px; margin: 0; }
+.credential-summary div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; }
+.credential-summary dt { color: var(--muted); font-size: 13px; }
+.credential-summary dd { margin: 0; overflow-wrap: anywhere; }
+.credential-issue input { font-family: ui-monospace, monospace; }
+.credential-copy-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.credential-visibility { align-self: flex-start; }

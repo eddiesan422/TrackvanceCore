@@ -1,4 +1,4 @@
-# Requires compose.mailpit-test.yml, a fresh project and loopback browser ports.
+# Signed OIDC mock only; requires a fresh project and loopback browser ports.
 services:
   mock-oidc:
     build:

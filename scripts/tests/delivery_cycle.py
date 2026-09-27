@@ -600,8 +600,15 @@ def mock_sso_delivery_client(admin, checks, provider, credentials):
         "first_name": "Delivery", "last_name": provider, "username": username,
         "email": email, "role_id": role["id"], "active": True,
     })
-    checks.verify(created["must_change_password"] and created["credential_delivery"]["status"] == "SENT",
-                  provider + ": usuario preprovisionado recibe credenciales en Mailpit")
+    temporary = created["temporary_credentials"]["temporary_password"]
+    credentials.append(temporary)
+    checks.verify(created["user"]["must_change_password"]
+                  and created["temporary_credentials"]["username"] == username
+                  and len(temporary) >= 20,
+                  provider + ": usuario preprovisionado obtiene credencial efímera sin email")
+    assert_no_credentials(admin.get(f"/api/v1/users/{created['user']['id']}"), [temporary],
+                          "La credencial temporal apareció en GET User.")
+    del temporary, created
     client = smoke.Api(admin.base_url, timeout=60)
     try:
         with client.opener.open(admin.base_url + f"/api/v1/auth/sso/{provider}/start", timeout=60) as response:
@@ -984,7 +991,6 @@ def main() -> int:
         "WEB_PORT": str(port),
         "TRACKVANCE_WEB_ORIGIN": base_url,
         "TRACKVANCE_PUBLIC_URL": base_url,
-        "MAILPIT_PORT": str(available_port()),
         "MOCK_OIDC_PORT": str(available_port()),
         "MOCK_OIDC_CLIENT_SECRET": mock_secret,
         "TV_E2E_URL": base_url,
@@ -998,7 +1004,6 @@ def main() -> int:
         "TV_DELIVERY_E2E": "true",
         "TV_DELIVERY_PASSWORD": writer_password,
     }
-    environment["TV_MAILPIT_URL"] = f"http://127.0.0.1:{environment['MAILPIT_PORT']}"
     compose = [
         "docker",
         "compose",
@@ -1008,7 +1013,6 @@ def main() -> int:
         "compose.yml",
         "-f",
         "deploy/docker/compose.delivery-test.yml",
-        "-f", "deploy/docker/compose.mailpit-test.yml",
         "-f", "deploy/docker/compose.identity-test.yml",
     ]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "delivery-e2e" / project

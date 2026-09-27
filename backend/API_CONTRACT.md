@@ -1,8 +1,8 @@
-# Contrato Trackvance Core local 0.6.0
+# Contrato Trackvance Core local 0.6.1
 
 El esquema ejecutable se genera desde la aplicación y mantiene base `/api/v1`
 para compatibilidad. El archivo [openapi.json](openapi.json) se regenera y revisa
-como paso documental separado. El snapshot 0.6.0 contiene 95 paths, incluidos
+como paso documental separado. El snapshot 0.6.1 contiene 96 paths, incluidos
 17 paths bajo Data Delivery, y corresponde a las rutas efectivamente instaladas.
 El runtime documenta sesión cookie, CSRF, MIME, DTOs y errores desde ese contrato.
 
@@ -10,7 +10,7 @@ Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.6.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.6.1',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `AuthenticationResponse={user:UserResponse,organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
 - `POST /auth/login` `{username,password}` o `{email,password}` → AuthenticationResponse. El campo username acepta usuario o correo; se envía exactamente un identificador. `demo_mode` es true sólo para la cuenta demo.
@@ -232,7 +232,7 @@ indica que Trackvance no puede confirmar el commit remoto; no equivale a fallo n
 decidir una ejecución explícita. Receipt y manifest no contienen secretos ni filas
 completas y enlazan Run, DatasetVersion, DestinationVersion y DeliveryAttempt.
 
-RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence. Receipt añade artifacts:download. La matriz exhaustiva y los controles adicionales por módulo/recurso están en [permission-matrix-0.6.0.md](../docs/development/permission-matrix-0.6.0.md).
+RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence. Receipt añade artifacts:download. La matriz exhaustiva y los controles adicionales por módulo/recurso están en [permission-matrix.md](../docs/development/permission-matrix.md).
 
 ## Configuraciones y ejecuciones
 
@@ -485,13 +485,14 @@ El scheduler usa `LATEST_REGISTERED_SNAPSHOT`, `COALESCE_LATEST` y `SKIP_WHILE_A
 
 Flujo `OPEN → ASSIGNED → INVESTIGATING → PENDING_VALIDATION → RESOLVED`; también se permite pasar de OPEN a INVESTIGATING. Resolver exige causa/corrección y validación posterior vigente del mismo control. Reabrir exige comentario y una nueva ejecución creada después de la reapertura. Cierres DISCARDED/ACCEPTED/NOT_APPLICABLE exigen un motivo explícito nuevo en cada petición y nunca equivalen a resolución técnica. Cambiar la política automática o cerrar requiere `exceptions:close`. La política automática está deshabilitada por defecto y conserva SYSTEM, evidencia, run confirmatorio y timeline. Ver ADR 0011.
 
-### Usuarios, roles y autenticación 0.6.0
+### Usuarios, roles y autenticación 0.6.1
 
 Los DTO exactos `UserResponse`, `RoleResponse`, `ExternalIdentityResponse` y
 `NotificationResponse` están en OpenAPI. Nunca contienen hash, contraseña,
 token OAuth ni secreto SMTP/client. `UserResponse` añade first_name/last_name,
 username, role_id/role_version, active/deleted, must_change_password,
-temporary_password_expires_at, last_login_at, credential_delivery y external_identities.
+temporary_password_expires_at, password_changed_at, last_login_at y external_identities.
+No incluye credential_delivery ni permite recuperar una contraseña temporal.
 Los nombres personales legacy pueden ser null; name histórico se conserva.
 
 | Método/ruta | Entrada y resultado |
@@ -504,19 +505,19 @@ Los nombres personales legacy pueden ser null; name histórico se conserva.
 | DELETE /roles/{id} | Cuerpo {version}; baja lógica; rechaza asociados no eliminados y Administrator. |
 | GET /users?active=&include_deleted=&search= | Colección User; filtros opcionales, include_deleted=false predeterminado. |
 | GET /users/{id} | User del scope con estados de credenciales/identidades. |
-| POST /users | first_name,last_name,username,email,role_id,active?; 201 User. Sin password de entrada. |
+| POST /users | first_name,last_name,username,email,role_id,active? (true por defecto); 201 UserCredentialIssueResponse. Sin password de entrada. |
 | PATCH /users/{id} | version, first_name?,last_name?,username?,email?,role_id?,active?. |
 | DELETE /users/{id} | Cuerpo {version}; baja lógica; reserva identificadores y revoca sesiones. |
-| POST /users/{id}/resend-credentials | {version}; nueva temporal, expiración24h, revocación y entrega SMTP. |
-| POST /users/{id}/reset-password | Alias deprecated de resend, mismo {version}; no acepta password elegida por admin. |
+| POST /users/{id}/regenerate-credentials | {version}; 200 UserCredentialIssueResponse; nueva temporal de 24 horas y revocación de todas las sesiones. |
+| POST /users/{id}/resend-credentials y /reset-password | Aliases deprecated de regenerate-credentials, mismo {version} y envelope; no envían correo ni aceptan password elegida por admin. |
 | DELETE /users/{id}/external-identities/{identity_id} | Sin cuerpo; desvincula identidad del usuario del mismo scope, audita y revoca sesiones. |
 | POST /auth/login | {username,password} o {email,password}; exactamente un identificador, username acepta usuario o correo normalizado. |
 | POST /auth/first-login/change-password | {new_password}; confirmación se valida en UI; devuelve envelope /me con cookie/CSRF nuevos. |
 | GET /auth/providers | {items:[{id,name,start_url}],total,statuses:{microsoft,google},local_enabled:true}; items contiene sólo habilitados/configurados; estados ENABLED/NOT_CONFIGURED/DISABLED, sin client IDs/secrets. |
 | GET /auth/sso/{provider}/start | Redirect a autorización, state/nonce/PKCE y cookie binder. Sólo microsoft/google. |
 | GET /auth/sso/{provider}/callback | code/state o error; consume intento único, valida token y redirige a UI o /login?sso_error. |
-| GET /notifications/status | Estado enabled/configured/provider/security/from_address/from_name, sin configuración sensible. |
-| GET /notifications/deliveries | Lista de metadata de entregas de organización, sin cuerpos. |
+| GET /notifications/status | Deprecated, histórico: enabled=false, configured=false, provider=NONE, security=NONE, from_address y from_name vacíos, availability=HISTORICAL_ONLY. Ninguna variable activa SMTP. |
+| GET /notifications/deliveries | Deprecated: hasta 200 metadatos históricos de la organización, sin cuerpos. Alta/regeneración no añaden intentos. |
 
 Las modificaciones de User/Role administran version/CAS; desvincular identidad externa es una eliminación idempotente por identidad bajo lock, y un vínculo inexistente devuelve404. Dependencias incompletas, códigos
 desconocidos o permisos no delegables se rechazan. Administrator protegido
@@ -524,17 +525,47 @@ resuelve todo el catálogo y no puede perder identidad/actividad/permisos.
 Un rol con usuarios no eliminados no puede desactivarse ni borrarse; se preserva
 el último administrador activo y se protege la eliminación propia.
 
-Un alta genera temporal de 32 caracteres y sólo persiste Argon2. SMTP FAILED
-conserva el usuario; regenerar invalida la anterior. Primer login local y SSO
-con must_change_password restringe acceso hasta definir contraseña. Role/email/
-username/actividad, regeneración y desvinculación revocan sesiones. Editar grants
-no requiere logout: el backend relee Role y la UI refresca /me.
+`UserCredentialIssueResponse` es exclusivo de las respuestas de alta y
+regeneración (incluidos los aliases deprecated):
+
+```json
+{
+  "user": "UserResponse sin secretos",
+  "temporary_credentials": {
+    "username": "username del usuario",
+    "temporary_password": "valor efímero generado, nunca persistido",
+    "expires_at": "fecha ISO UTC de expiración",
+    "must_change_password": true
+  }
+}
+```
+
+Los valores anteriores describen el contrato y no son credenciales válidas.
+El alta genera 32 caracteres URL-safe con CSPRNG y sólo persiste Argon2.
+La temporal vence a las 24 horas; la respuesta lleva `Cache-Control: no-store`
+y `Pragma: no-cache`. No hay recuperación por GET, reconsulta, auditoría o historial.
+Los errores inesperados durante la emisión devuelven `CREDENTIAL_ISSUE_FAILED`
+con mensaje fijo, sin registrar el texto de excepciones de hashing o persistencia.
+El cambio de primer acceso aplica la misma protección y devuelve
+`PASSWORD_CHANGE_FAILED` ante fallos inesperados al escribir la nueva credencial.
+El frontend la conserva únicamente mientras muestra el modal, ofrece copia
+explícita y descarta el secreto al cerrar o desmontar. No usa caché de consultas,
+Storage del navegador, cookies, URL ni notificaciones para conservarlo.
+
+Regenerar invalida la contraseña anterior, obliga al cambio y revoca todas las
+sesiones. Exige users:manage, CSRF, organización y versión vigente; un CAS obsoleto
+responde 409 sin emitir una credencial nueva. No envía email ni crea registros de
+notificación, aunque queden variables SMTP de una instalación antigua. Primer
+login local y SSO con must_change_password restringe acceso hasta definir una
+contraseña de 12–1024 caracteres diferente a la temporal. Role/email/username/
+actividad y desvinculación también revocan sesiones. Editar grants no requiere
+logout: el backend relee Role y la UI refresca /me.
 
 SSO no auto-provisiona ni confía en roles externos. El primer vínculo exige email
 con autoridad verificada y usuario activo preprovisionado; accesos posteriores
 usan provider/issuer/subject. No se guardan access/id/refresh tokens. Ver
 [identidad](../docs/development/identity-060.md), [SSO](../docs/development/sso-setup.md)
-y [SMTP](../docs/development/smtp-setup.md).
+y el [antecedente SMTP deshabilitado](../docs/development/smtp-setup.md).
 
 ### Columnas de auditoría y target policy 0.6.0
 

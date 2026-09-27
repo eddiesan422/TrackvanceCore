@@ -985,6 +985,7 @@ def main() -> int:
         storage_sampler = StorageSampler(api_container["id"])
         storage_sampler.start()
         api = smoke.Api(f"http://127.0.0.1:{port}", timeout=1200)
+        result["version"] = api.get("/api/v1/health")["version"]
         authentication = api.post("/api/v1/auth/demo", {}, expected=(200,))
         api.csrf = authentication["csrf_token"]
         timings: list[dict[str, Any]] = []

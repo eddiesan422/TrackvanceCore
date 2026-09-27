@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.6.0"
+    "version": "0.6.1"
   },
   "paths": {
     "/health": {
@@ -5532,7 +5532,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/UserCredentialIssueResponse"
                 }
               }
             }
@@ -5795,8 +5795,8 @@
         "tags": [
           "Identidad y RBAC"
         ],
-        "summary": "Resend Credentials",
-        "operationId": "resend_credentials_api_v1_users__user_id__reset_password_post",
+        "summary": "Regenerate Credentials",
+        "operationId": "regenerate_credentials_api_v1_users__user_id__reset_password_post",
         "deprecated": true,
         "parameters": [
           {
@@ -5833,7 +5833,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/UserCredentialIssueResponse"
                 }
               }
             }
@@ -5874,8 +5874,9 @@
         "tags": [
           "Identidad y RBAC"
         ],
-        "summary": "Resend Credentials",
-        "operationId": "resend_credentials_api_v1_users__user_id__resend_credentials_post",
+        "summary": "Regenerate Credentials",
+        "operationId": "regenerate_credentials_api_v1_users__user_id__resend_credentials_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "user_id",
@@ -5911,7 +5912,85 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
+                  "$ref": "#/components/schemas/UserCredentialIssueResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "users:manage"
+      }
+    },
+    "/api/v1/users/{user_id}/regenerate-credentials": {
+      "post": {
+        "tags": [
+          "Identidad y RBAC"
+        ],
+        "summary": "Regenerate Credentials",
+        "operationId": "regenerate_credentials_api_v1_users__user_id__regenerate_credentials_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCredentialIssueResponse"
                 }
               }
             }
@@ -6055,6 +6134,7 @@
             "description": "Conflicto de versión, precondición o integridad"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "LocalSession": []
@@ -6094,6 +6174,7 @@
             "description": "Conflicto de versión, precondición o integridad"
           }
         },
+        "deprecated": true,
         "security": [
           {
             "LocalSession": []
@@ -10000,6 +10081,11 @@
           "from_name": {
             "type": "string",
             "title": "From Name"
+          },
+          "availability": {
+            "type": "string",
+            "const": "HISTORICAL_ONLY",
+            "title": "Availability"
           }
         },
         "type": "object",
@@ -10009,7 +10095,8 @@
           "provider",
           "security",
           "from_address",
-          "from_name"
+          "from_name",
+          "availability"
         ],
         "title": "NotificationStatusResponse"
       },
@@ -11120,6 +11207,37 @@
         ],
         "title": "TargetSpec"
       },
+      "TemporaryCredentialsResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "temporary_password": {
+            "type": "string",
+            "title": "Temporary Password"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "must_change_password": {
+            "type": "boolean",
+            "const": true,
+            "title": "Must Change Password",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "temporary_password",
+          "expires_at"
+        ],
+        "title": "TemporaryCredentialsResponse",
+        "description": "Ephemeral disclosure; never attach this model to persisted user metadata."
+      },
       "UserCreate": {
         "properties": {
           "first_name": {
@@ -11168,6 +11286,22 @@
           "role_id"
         ],
         "title": "UserCreate"
+      },
+      "UserCredentialIssueResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          },
+          "temporary_credentials": {
+            "$ref": "#/components/schemas/TemporaryCredentialsResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "temporary_credentials"
+        ],
+        "title": "UserCredentialIssueResponse"
       },
       "UserListResponse": {
         "properties": {
@@ -11414,16 +11548,6 @@
             ],
             "title": "Temporary Password Expires At"
           },
-          "credential_delivery": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NotificationResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "external_identities": {
             "items": {
               "$ref": "#/components/schemas/ExternalIdentityResponse"
@@ -11454,7 +11578,6 @@
           "last_login_at",
           "must_change_password",
           "temporary_password_expires_at",
-          "credential_delivery",
           "external_identities"
         ],
         "title": "UserResponse"

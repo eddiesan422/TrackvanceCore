@@ -1,13 +1,17 @@
-"""Organization-scoped dynamic roles, local accounts and notification metadata."""
+"""Organization-scoped roles, one-time credential issuance and historical metadata."""
 import hashlib
 import re
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
+from typing import Literal
 
 from argon2 import PasswordHasher
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .audit_context import Actor
@@ -20,7 +24,7 @@ from .models import (
     RolePermission,
     User,
 )
-from .notifications import NotificationService, delivery_dto, smtp_status
+from .notifications import delivery_dto, historical_notification_status
 from .operations_common import OperationError
 from .permissions import (
     CATALOG,
@@ -48,11 +52,6 @@ def user_dto(user: User, db: Session | None = None) -> dict:
         with SessionLocal() as local:
             return user_dto(user, local)
     role = db.get(Role, user.role_id)
-    notification = db.scalar(select(NotificationDeliveryRecord).where(
-        NotificationDeliveryRecord.recipient_user_id == user.id,
-        NotificationDeliveryRecord.organization_id == user.organization_id,
-        NotificationDeliveryRecord.template_key == "USER_TEMPORARY_CREDENTIALS"
-    ).order_by(NotificationDeliveryRecord.created_at.desc(), NotificationDeliveryRecord.id.desc()))
     identities = db.scalars(select(ExternalIdentity).where(ExternalIdentity.user_id == user.id,
         ExternalIdentity.organization_id == user.organization_id).order_by(ExternalIdentity.provider)).all()
     return {"id": user.id, "name": user.name, "first_name": user.first_name, "last_name": user.last_name,
@@ -64,7 +63,6 @@ def user_dto(user: User, db: Session | None = None) -> dict:
         "last_login_at": iso(user.last_login_at),
         "must_change_password": user.must_change_password,
         "temporary_password_expires_at": iso(user.temporary_password_expires_at),
-        "credential_delivery": delivery_dto(notification) if notification else None,
         "external_identities": [{"id": row.id, "provider": row.provider, "issuer": row.issuer,
             "subject": row.subject, "email_at_link": row.email_at_link,
             "linked_at": iso(row.linked_at), "last_login_at": iso(row.last_login_at)} for row in identities]}
@@ -119,8 +117,44 @@ class UserResponse(BaseModel):
     last_login_at: datetime | None
     must_change_password: bool
     temporary_password_expires_at: datetime | None
-    credential_delivery: NotificationResponse | None
     external_identities: list[ExternalIdentityResponse]
+
+
+class TemporaryCredentialsResponse(BaseModel):
+    """Ephemeral disclosure; never attach this model to persisted user metadata."""
+
+    username: str
+    temporary_password: str = Field(repr=False)
+    expires_at: datetime
+    must_change_password: Literal[True] = True
+
+
+class UserCredentialIssueResponse(BaseModel):
+    user: UserResponse
+    temporary_credentials: TemporaryCredentialsResponse
+
+
+@contextmanager
+def credential_write_boundary(db: Session, *, code: str = "CREDENTIAL_ISSUE_FAILED",
+                              message: str = "No se pudieron emitir las credenciales. Actualiza el usuario y vuelve a intentar.") -> Iterator[None]:
+    """Do not pass secret-bearing hash/DB exceptions to the general error logger."""
+    try:
+        yield
+    except (OperationError, IntegrityError):
+        raise  # Both have sanitized HTTP handlers without exception logging.
+    except Exception:  # noqa: BLE001 - secret issuance is a deliberately opaque boundary.
+        with suppress(Exception):
+            db.rollback()
+        raise OperationError(500, code, message) from None
+
+
+def credential_issue_response(db: Session, user: User, password: str, response: Response) -> UserCredentialIssueResponse:
+    assert user.temporary_password_expires_at is not None
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return UserCredentialIssueResponse(user=UserResponse.model_validate(user_dto(user, db)),
+        temporary_credentials=TemporaryCredentialsResponse(username=user.username,
+            temporary_password=password, expires_at=user.temporary_password_expires_at))
 
 
 class UserListResponse(BaseModel):
@@ -166,6 +200,7 @@ class NotificationStatusResponse(BaseModel):
     security: str
     from_address: str
     from_name: str
+    availability: Literal["HISTORICAL_ONLY"]
 
 
 class NotificationListResponse(BaseModel):
@@ -376,26 +411,23 @@ def assert_unique(db: Session, username: str, email: str, user_id: str = "") -> 
         raise OperationError(409, "USER_USERNAME_UNAVAILABLE", "El username no está disponible.")
 
 
-@router.post("/users", status_code=201, response_model=UserResponse)
-def create_user(body: UserCreate, db: Session = Depends(get_db), actor: User = Depends(current_user)):
+@router.post("/users", status_code=201, response_model=UserCredentialIssueResponse)
+def create_user(body: UserCreate, response: Response, db: Session = Depends(get_db), actor: User = Depends(current_user)):
     lock_organization_identities(db, actor.organization_id)
     role = owned_role(db, body.role_id, actor, assign=True)
     assert_unique(db, body.username, body.email)
-    password = secrets.token_urlsafe(24)
-    user = User(organization_id=actor.organization_id, name=f"{body.first_name} {body.last_name}",
-        first_name=body.first_name, last_name=body.last_name, username=body.username, email=body.email,
-        role_id=role.id, role=role.name[:40], active=body.active, password_hash=PasswordHasher().hash(password),
-        must_change_password=True, temporary_password_expires_at=utcnow() + timedelta(hours=24))
-    db.add(user)
-    db.flush()
-    audit(db, "USER_CREATED", "user", user.id, "Usuario pre-provisionado", actor_of(actor), actor.organization_id,
-          {"role_id": role.id, "active": user.active})
-    db.commit()
-    try:
-        NotificationService().temporary_credentials(db, user, password)
-    finally:
-        password = ""
-    return user_dto(user, db)
+    with credential_write_boundary(db):
+        password = secrets.token_urlsafe(24)
+        user = User(organization_id=actor.organization_id, name=f"{body.first_name} {body.last_name}",
+            first_name=body.first_name, last_name=body.last_name, username=body.username, email=body.email,
+            role_id=role.id, role=role.name[:40], active=body.active, password_hash=PasswordHasher().hash(password),
+            must_change_password=True, temporary_password_expires_at=utcnow() + timedelta(hours=24))
+        db.add(user)
+        db.flush()
+        audit(db, "USER_CREATED", "user", user.id, "Usuario pre-provisionado", actor_of(actor), actor.organization_id,
+              {"role_id": role.id, "active": user.active})
+        db.commit()
+        return credential_issue_response(db, user, password, response)
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
@@ -468,24 +500,23 @@ def delete_user(user_id: str, body: VersionInput, db: Session = Depends(get_db),
     return user_dto(user, db)
 
 
-@router.post("/users/{user_id}/resend-credentials", response_model=UserResponse)
-@router.post("/users/{user_id}/reset-password", response_model=UserResponse, deprecated=True)
-def resend_credentials(user_id: str, body: VersionInput, db: Session = Depends(get_db), actor: User = Depends(current_user)):
+@router.post("/users/{user_id}/regenerate-credentials", response_model=UserCredentialIssueResponse)
+@router.post("/users/{user_id}/resend-credentials", response_model=UserCredentialIssueResponse, deprecated=True)
+@router.post("/users/{user_id}/reset-password", response_model=UserCredentialIssueResponse, deprecated=True)
+def regenerate_credentials(user_id: str, body: VersionInput, response: Response,
+                           db: Session = Depends(get_db), actor: User = Depends(current_user)):
     lock_organization_identities(db, actor.organization_id)
     user = owned_user(db, user_id, actor)
     assert_version(user, body.version)
-    password = secrets.token_urlsafe(24)
-    user.password_hash = PasswordHasher().hash(password)
-    user.must_change_password, user.temporary_password_expires_at = True, utcnow() + timedelta(hours=24)
-    user.version, user.updated_at = user.version + 1, utcnow()
-    revoke_sessions(db, user)
-    audit(db, "USER_CREDENTIALS_REGENERATED", "user", user.id, "Credenciales regeneradas", actor_of(actor), actor.organization_id, {"sessions_revoked": True})
-    db.commit()
-    try:
-        NotificationService().temporary_credentials(db, user, password)
-    finally:
-        password = ""
-    return user_dto(user, db)
+    with credential_write_boundary(db):
+        password = secrets.token_urlsafe(24)
+        user.password_hash = PasswordHasher().hash(password)
+        user.must_change_password, user.temporary_password_expires_at = True, utcnow() + timedelta(hours=24)
+        user.version, user.updated_at = user.version + 1, utcnow()
+        revoke_sessions(db, user)
+        audit(db, "USER_CREDENTIALS_REGENERATED", "user", user.id, "Credenciales regeneradas", actor_of(actor), actor.organization_id, {"sessions_revoked": True})
+        db.commit()
+        return credential_issue_response(db, user, password, response)
 
 
 @router.delete("/users/{user_id}/external-identities/{identity_id}", response_model=UserResponse)
@@ -504,12 +535,12 @@ def unlink_identity(user_id: str, identity_id: str, db: Session = Depends(get_db
     return user_dto(user, db)
 
 
-@router.get("/notifications/status", response_model=NotificationStatusResponse)
+@router.get("/notifications/status", response_model=NotificationStatusResponse, deprecated=True)
 def notification_status():
-    return smtp_status()
+    return historical_notification_status()
 
 
-@router.get("/notifications/deliveries", response_model=NotificationListResponse)
+@router.get("/notifications/deliveries", response_model=NotificationListResponse, deprecated=True)
 def notification_deliveries(db: Session = Depends(get_db), actor: User = Depends(current_user)):
     rows = db.scalars(select(NotificationDeliveryRecord).where(NotificationDeliveryRecord.organization_id == actor.organization_id)
                       .order_by(NotificationDeliveryRecord.created_at.desc()).limit(200))

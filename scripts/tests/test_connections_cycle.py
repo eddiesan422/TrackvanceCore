@@ -48,7 +48,7 @@ def test_connections_runner_failure_cleans_only_new_project_and_redacts_secrets(
     monkeypatch.setattr(runner.secrets, "token_hex", lambda _length: "never-persist-this-credential")
     monkeypatch.setattr(runner.sys, "argv", ["connections_cycle.py", "--project", project, "--port", "3200", "--evidence-dir", str(tmp_path)])
     assert runner.main() == 1
-    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml", "-f", "deploy/docker/compose.connections-test.yml", "-f", "deploy/docker/compose.mailpit-test.yml", "down", "-v", "--remove-orphans"]
+    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml", "-f", "deploy/docker/compose.connections-test.yml", "down", "-v", "--remove-orphans"]
     evidence = (tmp_path / "result.json").read_text(encoding="utf-8")
     assert "never-persist-this-credential" not in evidence
     assert "[REDACTED]" in evidence

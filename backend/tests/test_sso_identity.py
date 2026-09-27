@@ -228,3 +228,61 @@ def test_official_google_issuer_alias_normalizes_stable_identity(oidc, issuer, m
     config = Provider("google", "client", "secret", "https://accounts.google.com/discovery", "https://app.test/callback", False)
     result = verified_claims(config, {"issuer": "https://accounts.google.com", "jwks_uri": "https://google.test/jwks"}, {"id_token": token}, "nonce")
     assert result["iss"] == "https://accounts.google.com" and result["sub"] == "stable"
+
+
+@pytest.mark.parametrize("provider,profile,email", [("google", "gmail", "tester@gmail.com"),
+    ("google", "workspace", "tester@workspace.test"), ("microsoft", "personal", "tester@outlook.com"),
+    ("microsoft", "organizational", "tester@company.test")])
+def test_preprovisioned_one_time_credentials_support_sso_without_smtp(authenticated, database, oidc, monkeypatch, provider, profile, email):
+    import smtplib
+
+    from trackvance.models import NotificationDeliveryRecord
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("SSO and local credentials must not depend on SMTP")
+
+    monkeypatch.setattr(smtplib, "SMTP", forbidden)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", forbidden)
+    monkeypatch.setenv("TRACKVANCE_SMTP_ENABLED", "true")
+    role = next(row for row in authenticated.get("/api/v1/roles").json()["items"] if row["name"] == "Data Analyst")
+    issued = authenticated.post("/api/v1/users", json={"first_name": "Federated", "last_name": "User",
+        "username": "federated.user", "email": email, "role_id": role["id"]})
+    assert issued.status_code == 201
+    user = issued.json()["user"]
+    temporary = issued.json()["temporary_credentials"]["temporary_password"]
+    oidc["profile"] = profile
+    with TestClient(app) as client:
+        assert finish(client, start(client, oidc, provider), provider).headers["location"] == "/"
+        me = client.get("/api/v1/me").json()
+        assert me["user"]["id"] == user["id"] and me["user"]["must_change_password"]
+        assert client.get("/api/v1/datasets").status_code == 403
+        client.headers["X-CSRF-Token"] = me["csrf_token"]
+        changed = client.post("/api/v1/auth/first-login/change-password", json={"new_password": "Federated local password 2026!"})
+        assert changed.status_code == 200 and not changed.json()["user"]["must_change_password"]
+        assert client.get("/api/v1/datasets").status_code == 200
+        regenerated = authenticated.post(f"/api/v1/users/{user['id']}/regenerate-credentials",
+            json={"version": changed.json()["user"]["version"]})
+        assert regenerated.status_code == 200
+        assert client.get("/api/v1/me").status_code == 401
+        assert finish(client, start(client, oidc, provider), provider).headers["location"] == "/"
+        assert client.get("/api/v1/me").json()["user"]["must_change_password"]
+        assert client.get("/api/v1/datasets").status_code == 403
+    with database() as db:
+        assert db.scalar(select(NotificationDeliveryRecord)) is None
+        assert db.scalar(select(ExternalIdentity).where(ExternalIdentity.user_id == user["id"])) is not None
+        serialized = json.dumps([row.metadata_json for row in db.scalars(select(AuditEvent))])
+        leaked = temporary in serialized or regenerated.json()["temporary_credentials"]["temporary_password"] in serialized
+        assert not leaked
+
+
+def test_sso_disabled_by_default_cannot_be_enabled_by_smtp(client, monkeypatch):
+    monkeypatch.setenv("TRACKVANCE_SMTP_ENABLED", "true")
+    for provider in ("GOOGLE", "MICROSOFT"):
+        for field in ("ENABLED", "CLIENT_ID", "CLIENT_SECRET", "DISCOVERY_URL"):
+            monkeypatch.delenv(f"TRACKVANCE_SSO_{provider}_{field}", raising=False)
+    providers = client.get("/api/v1/auth/providers").json()
+    assert providers["local_enabled"] is True
+    assert providers["items"] == [] and providers["statuses"] == {"google": "DISABLED", "microsoft": "DISABLED"}
+    for provider in ("google", "microsoft"):
+        response = client.get(f"/api/v1/auth/sso/{provider}/start", follow_redirects=False)
+        assert response.status_code == 404

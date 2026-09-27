@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// Private identity tests must not generate automatic DOM snapshots on failure.
+if (process.env.TV_E2E_PRIVATE_ARTIFACTS) process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1'
+
 export default defineConfig({
   testDir: './tests-e2e',
   fullyParallel: false,

@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { RecordData } from '../src/api/client'
-import { createAccount, temporaryCredentials } from './identity-helpers'
+import { createAccount, fillSecret, installCredentialPrivacyHooks, issuedCredentials, rememberSecret } from './identity-helpers'
+
+installCredentialPrivacyHooks()
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 20000, navigationTimeout: 30000 })
-test.skip(process.env.TV_IDENTITY_SSO_E2E !== 'true', 'Runs only with the disposable Mailpit/OIDC overlay')
+test.skip(process.env.TV_IDENTITY_SSO_E2E !== 'true', 'Runs only with the disposable OIDC overlay')
 test.setTimeout(180_000)
 
 async function administrator(page: Page) {
@@ -34,22 +36,22 @@ async function sso(page: Page, options: { provider: string; email: string; subje
 
 test('local first access is restricted, rotates the session and revokes the temporary credential', async ({ page, browser }) => {
   const headers = await administrator(page), stamp = Date.now(), email = `first-${stamp}@example.test`
-  const account = await createAccount(page.request, headers, { email, username: `first.${stamp}` })
-  const temporary = await temporaryCredentials(email), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  const issue = await createAccount(page.request, headers, { email, username: `first.${stamp}` })
+  const account = issue.user, temporary = issuedCredentials(issue), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
   try {
     const person = await context.newPage()
     await person.goto('/')
     await person.getByRole('button', { name: 'Tengo una cuenta local' }).click()
     await person.getByLabel('Usuario o correo').fill(temporary.username.toUpperCase())
-    await person.getByLabel('Contraseña', { exact: true }).fill(temporary.password)
+    await fillSecret(person.getByLabel('Contraseña', { exact: true }), temporary.password)
     await person.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
     await expect(person.getByRole('heading', { name: 'Cambia tu contraseña' })).toBeVisible()
     const before = await (await context.request.get('/api/v1/me')).json()
     expect((await context.request.get('/api/v1/datasets')).status()).toBe(403)
     expect((await context.request.get('/api/v1/delivery/configurations')).status()).toBe(403)
     const replacement = `Complete local ${crypto.randomUUID()}!`
-    await person.getByLabel('Nueva contraseña', { exact: true }).fill(replacement)
-    await person.getByLabel('Confirmar contraseña').fill(replacement)
+    await fillSecret(person.getByLabel('Nueva contraseña', { exact: true }), replacement)
+    await fillSecret(person.getByLabel('Confirmar contraseña'), replacement)
     await person.getByRole('button', { name: 'Guardar y continuar' }).click()
     await expect(person.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
     const after = await (await context.request.get('/api/v1/me')).json()
@@ -78,12 +80,12 @@ test('role changes reach existing sessions, associated roles remain protected an
   const creation = page.waitForResponse(response => response.url().endsWith('/api/v1/roles') && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Crear rol', exact: true }).click()
   const role = await (await creation).json(), email = `dynamic-${stamp}@example.test`
-  const account = await createAccount(page.request, headers, { email, username: `dynamic.${stamp}`, role_id: role.id })
-  const temporary = await temporaryCredentials(email), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  const issue = await createAccount(page.request, headers, { email, username: `dynamic.${stamp}`, role_id: role.id })
+  const account = issue.user, temporary = issuedCredentials(issue), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
   try {
     const login = await context.request.post('/api/v1/auth/login', { data: { username: temporary.username, password: temporary.password } })
     const identity = await login.json()
-    const changed = await context.request.post('/api/v1/auth/first-login/change-password', { headers: { 'X-CSRF-Token': identity.csrf_token }, data: { new_password: `Dynamic ${crypto.randomUUID()}!` } })
+    const changed = await context.request.post('/api/v1/auth/first-login/change-password', { headers: { 'X-CSRF-Token': identity.csrf_token }, data: { new_password: rememberSecret(`Dynamic ${crypto.randomUUID()}!`) } })
     expect(changed.status()).toBe(200)
     const person = await context.newPage()
     await person.goto('/datasets')
@@ -114,16 +116,16 @@ for (const profile of [
 ]) test(`OIDC ${profile.profile}: first access, stable subject, replay and deactivation`, async ({ page, browser }) => {
   const headers = await administrator(page), stamp = `${Date.now()}-${crypto.randomUUID().slice(0, 6)}`
   const email = `sso-${stamp}@${profile.domain}`, subject = `subject-${stamp}`
-  const account = await createAccount(page.request, headers, { email, username: `sso.${stamp}`, role: 'Auditor' })
-  const temporary = await temporaryCredentials(email), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  const issue = await createAccount(page.request, headers, { email, username: `sso.${stamp}`, role: 'Auditor' })
+  const account = issue.user, temporary = issuedCredentials(issue), context = await browser.newContext({ baseURL: new URL(page.url()).origin })
   try {
     const person = await context.newPage()
     const callback = await sso(person, { ...profile, email, subject })
     await expect(person.getByRole('heading', { name: 'Cambia tu contraseña' })).toBeVisible()
     expect((await context.request.get('/api/v1/datasets')).status()).toBe(403)
     const replacement = `SSO local ${crypto.randomUUID()}!`
-    await person.getByLabel('Nueva contraseña', { exact: true }).fill(replacement)
-    await person.getByLabel('Confirmar contraseña').fill(replacement)
+    await fillSecret(person.getByLabel('Nueva contraseña', { exact: true }), replacement)
+    await fillSecret(person.getByLabel('Confirmar contraseña'), replacement)
     await person.getByRole('button', { name: 'Guardar y continuar' }).click()
     await expect(person.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
     let me = await (await context.request.get('/api/v1/me')).json()

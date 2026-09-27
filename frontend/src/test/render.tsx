@@ -11,5 +11,6 @@ export function renderApp(ui: ReactElement, options: { permissions?: string[]; p
     user: { id: 'stable-user-id', name: 'Equipo Trackvance', email: 'local@example.test', role: 'ADMIN', permissions: options.permissions ?? ['exports:download', 'artifacts:download', 'runs:execute', 'intake:configure', 'recon:configure', 'sentinel:configure', 'sentinel:schedule', 'intake:execute', 'recon:execute', 'sentinel:execute', 'datasets:write', 'exceptions:write', 'exceptions:close'] },
     organization: { id: 'organization', name: 'Trackvance' }, csrf_token: 'test-csrf',
   }
-  return render(<QueryClientProvider client={client}><AuthContext.Provider value={session}><MemoryRouter initialEntries={[options.path || '/']}><Routes><Route path={options.route || '*'} element={ui}/></Routes></MemoryRouter></AuthContext.Provider></QueryClientProvider>)
+  const rendered = render(<QueryClientProvider client={client}><AuthContext.Provider value={session}><MemoryRouter initialEntries={[options.path || '/']}><Routes><Route path={options.route || '*'} element={ui}/></Routes></MemoryRouter></AuthContext.Provider></QueryClientProvider>)
+  return { ...rendered, client }
 }

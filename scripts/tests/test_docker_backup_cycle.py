@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import subprocess
+import tarfile
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
@@ -526,10 +527,11 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner, "cleanup", lambda project, path: calls.append(("cleanup", project)))
     monkeypatch.setattr(runner, "initialize_source", lambda *args: None)
     monkeypatch.setattr(runner, "attach_external_network", lambda *args: None)
-    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: object())
+    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.6.1"}))
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
     monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
-    monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: None)
+    monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: args[-1])
+    monkeypatch.setattr(runner, "scan_backup_plaintext", lambda *args: {"status": "PASS"})
     monkeypatch.setattr(runner, "destroy_before_restore", lambda *args: calls.append(("destroy", source)))
     monkeypatch.setattr(runner, "validate_restored", lambda *args: {"restored_credential_used": True})
     monkeypatch.setattr(runner.docker_state, "digest", lambda path: "a" * 64)
@@ -541,6 +543,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
         if "backup" in args:
             (evidence / "backup").mkdir()
             (evidence / "backup" / "state.json").write_text(json.dumps({
+                "schema_version": 5,
                 "verified_secrets": 2, "verified_source_secrets": 1,
                 "verified_delivery_secrets": 1,
                 "verified_artifacts": 4, "validated_relationships": 8,
@@ -583,3 +586,70 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     else:
         assert result["retained_projects"] == []
         assert [project for event, project in calls if event == "cleanup"] == [target, source, database]
+
+
+@pytest.mark.parametrize("leak", ["dump", "artifact", "metadata", None])
+def test_backup_privacy_scans_decompressed_dump_and_artifacts_without_publishing(monkeypatch, tmp_path, capsys, leak):
+    secret = "temporary-credential-only-in-memory"
+    (tmp_path / "postgres.dump").write_bytes(b"PGDMP compressed fixture")
+    (tmp_path / "state.json").write_text(secret if leak == "metadata" else "{}")
+    content = secret.encode() if leak == "artifact" else b"clean manifest and artifact"
+    with tarfile.open(tmp_path / "artifacts.tar.gz", "w:gz") as archive:
+        info = tarfile.TarInfo("manifest.json")
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+    observed = {}
+
+    def restore(arguments, **kwargs):
+        observed.update(arguments=arguments, **kwargs)
+        return subprocess.CompletedProcess(arguments, 0,
+            stdout=secret.encode() if leak == "dump" else b"decoded SQL without plaintext", stderr=b"")
+
+    monkeypatch.setattr(runner.subprocess, "run", restore)
+    if leak:
+        with pytest.raises(RuntimeError) as caught:
+            runner.scan_backup_plaintext(tmp_path, ["docker", "compose"], {}, (secret,))
+        assert secret not in str(caught.value)
+    else:
+        result = runner.scan_backup_plaintext(tmp_path, ["docker", "compose"], {}, (secret,))
+        assert result["postgres_dump_decompressed"] == "PASS"
+        assert result["archive_files_scanned"] == 1 and not result["raw_contents_published"]
+    assert observed["input"] == b"PGDMP compressed fixture"
+    assert secret not in " ".join(observed["arguments"])
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("notifications_after", [0, 1])
+def test_native_identity_issues_secrets_ephemerally_and_rejects_new_notifications(monkeypatch, notifications_after):
+    secret, renewed = "A" * 32, "B" * 32
+    user = {"id": "user", "version": 1, "must_change_password": True}
+    role = {"id": "role"}
+    calls = []
+    counts = iter([0, notifications_after])
+    monkeypatch.setattr(runner, "notification_count", lambda *args: next(counts))
+    scripts = []
+    monkeypatch.setattr(runner, "execute", lambda *args, **kwargs: scripts.append(kwargs["input_text"]))
+
+    def response(method, path, *args, **kwargs):
+        calls.append((method, path))
+        if path == "/roles":
+            return role
+        if method == "POST":
+            return {"user": user, "temporary_credentials": {
+                "temporary_password": renewed if "regenerate" in path else secret}}
+        return role if path.startswith("/roles/") else user
+
+    api = SimpleNamespace(json=response, credentials=())
+    original = {}
+    if notifications_after:
+        with pytest.raises(RuntimeError, match="notificación"):
+            runner.prepare_identity_recovery(api, original, [], {}, ())
+        assert not scripts
+    else:
+        assert runner.prepare_identity_recovery(api, original, [], {}, ()) == (secret, renewed)
+        assert original["identity"]["create_and_regenerate_notifications_unchanged"]
+        assert "SYNTHETIC_HISTORICAL_NOTIFICATION" in original["identity"]["fixture"]
+        assert "NotificationDeliveryRecord" in scripts[0]
+        assert secret not in json.dumps(original) and renewed not in json.dumps(original)
+        assert secret not in scripts[0] and renewed not in scripts[0]
+        assert ("GET", "/users") in calls and ("GET", "/audit-events") in calls

@@ -1,6 +1,7 @@
 """Guard the isolated runner against deleting application or pre-existing resources."""
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ def test_rejects_application_project_names(name):
         runner.validated_project_name(name)
 
 
-@pytest.mark.parametrize("existing_kind", ["container", "volume"])
+@pytest.mark.parametrize("existing_kind", ["container", "volume", "network"])
 def test_existing_project_is_never_started_or_deleted(monkeypatch, tmp_path, existing_kind):
     calls = []
 
@@ -28,6 +29,8 @@ def test_existing_project_is_never_started_or_deleted(monkeypatch, tmp_path, exi
             return "existing-container"
         if arguments[1:3] == ["volume", "ls"] and existing_kind == "volume":
             return "existing-volume"
+        if arguments[1:3] == ["network", "ls"] and existing_kind == "network":
+            return "existing-network"
         return ""
 
     monkeypatch.setattr(runner, "execute", execute)
@@ -59,8 +62,55 @@ def test_failed_start_cleans_only_its_new_isolated_project(monkeypatch, tmp_path
     assert runner.main() == 1
     assert start_environment["DEMO_ACCESS_ENABLED"] == "true"
     assert start_environment["DEMO_SEED_ENABLED"] == "true"
-    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml", "-f",
-                         "deploy/docker/compose.mailpit-test.yml", "down", "-v", "--remove-orphans"]
+    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml",
+                         "down", "-v", "--remove-orphans"]
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["status"] == "FAIL" and result["cleanup"] == "PASS"
+
+
+def test_storage_snapshot_does_not_depend_on_an_old_container_file(monkeypatch):
+    submissions = []
+
+    def execute(arguments, **kwargs):
+        assert arguments[-2:] == ["-", "snapshot"]
+        assert kwargs["capture"]
+        assert "def snapshot(" in kwargs["input_text"]
+        compile(kwargs["input_text"], "<storage-verifier>", "exec")
+        submissions.append(kwargs["input_text"])
+        return '{"tables": {}}'
+
+    monkeypatch.setattr(runner, "execute", execute)
+    for _ in range(2):
+        assert runner.storage_snapshot(["docker", "compose"], {}) == '{"tables": {}}'
+    assert len(submissions) == 2
+
+
+def test_clean_demo_starts_without_seeding_and_uses_only_the_clean_browser_scenario(monkeypatch, tmp_path):
+    calls, browser_arguments = [], []
+
+    def execute(arguments, **kwargs):
+        calls.append(arguments)
+        if "up" in arguments:
+            assert kwargs["environment"]["DEMO_SEED_ENABLED"] == "false"
+            assert kwargs["environment"]["TV_EXPECT_CLEAN_DEMO"] == "true"
+        if "inspect" in arguments:
+            return "no"
+        if arguments[-2:] == ["ps", "-q"]:
+            return "isolated-api"
+        return "{}" if kwargs.get("capture") and "snapshot" in arguments else ""
+
+    monkeypatch.setattr(runner, "execute", execute)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "pnpm")
+    monkeypatch.setattr(runner, "run_browser", lambda _pnpm, arguments, **_kwargs:
+                        browser_arguments.extend(arguments) or {"status": "PASS", "expected": 1})
+    monkeypatch.setattr(runner.sys, "argv", ["docker_e2e_cycle.py", "--clean-demo",
+                        "--project", "trackvance-e2e-clean-test", "--port", "3200",
+                        "--evidence-dir", str(tmp_path)])
+    assert runner.main() == 0
+    assert browser_arguments == ["tests-e2e/demo-access-clean.spec.ts"]
+    assert not any("scripts/smoke_test.py" in command for command in calls)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["status"] == "PASS" and result["cleanup"] == "PASS"
 
 
 def test_compose_isolates_source_and_delivery_secrets_by_worker_lane():

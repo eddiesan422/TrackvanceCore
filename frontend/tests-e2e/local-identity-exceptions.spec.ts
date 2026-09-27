@@ -1,8 +1,10 @@
-import { activateLocal, createAccount, temporaryCredentials } from './identity-helpers'
+import { activateLocal, createAccount, expectNoCredentialResidue, fillSecret, installCredentialPrivacyHooks, issuedCredentials, readCredentialModal } from './identity-helpers'
 import { expect, test, type Page } from '@playwright/test'
 import type { RecordData } from '../src/api/client'
 
-test.setTimeout(150_000)
+installCredentialPrivacyHooks()
+
+test.setTimeout(180_000)
 
 async function administrator(page: Page) {
   await page.goto('/')
@@ -14,12 +16,13 @@ async function administrator(page: Page) {
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 
-test('administrador crea, edita, regenera y desactiva un usuario desde la interfaz', async ({ page, browser }) => {
-  const { headers } = await administrator(page)
+test('alta visible una vez, primer login y regeneración revocan credenciales y sesiones sin persistir secretos', async ({ page, browser }) => {
+  await administrator(page)
   const stamp = Date.now(), name = `E2E Identidad ${stamp}`, email = `local-${stamp}@example.test`, username = `local.${stamp}`
   const roles = await (await page.request.get('/api/v1/roles')).json()
   const roleId = (name: string) => roles.items.find((role: RecordData) => role.name === name).id as string
   await page.goto('/settings/system')
+  await expect(page.getByRole('button', { name: 'Notificaciones', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Usuarios locales' }).click()
   await page.getByRole('button', { name: 'Nuevo usuario' }).click()
   let dialog = page.getByRole('dialog')
@@ -33,37 +36,83 @@ test('administrador crea, edita, regenera y desactiva un usuario desde la interf
   await dialog.getByRole('button', { name: 'Crear usuario' }).click()
   const created = await createdResponse
   expect(created.status()).toBe(201)
-  const account = await created.json(), first = await temporaryCredentials(email)
-  expect(JSON.stringify(account).includes(first.password), 'User response excludes the generated secret').toBe(false)
+  expect(created.headers()['cache-control']).toContain('no-store')
+  const first = await readCredentialModal(page)
+  const users = await (await page.request.get('/api/v1/users')).json()
+  const account = users.items.find((item: RecordData) => item.username === username)
+  expect(Boolean(account), 'Created user appears in normal list').toBe(true)
+  expect(JSON.stringify(users).includes(first.password), 'Normal reads never recover the issued secret').toBe(false)
+  await page.reload()
+  await page.getByRole('button', { name: 'Usuarios locales' }).click()
+  await expectNoCredentialResidue(page, [first.password])
   await page.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
   dialog = page.getByRole('dialog')
   await dialog.getByLabel('Rol del usuario').selectOption(roleId('Auditor'))
-  const edited = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
   await dialog.getByRole('button', { name: 'Guardar usuario' }).click()
-  expect((await edited).status()).toBe(200)
-  await page.getByRole('button', { name: `Regenerar credenciales de ${name}`, exact: true }).click()
-  const reset = page.waitForResponse(response => response.url().endsWith(`/users/${account.id}/resend-credentials`))
-  await page.getByRole('dialog').getByRole('button', { name: 'Regenerar y reenviar', exact: true }).click()
-  expect((await reset).status()).toBe(200)
-  const replacement = await temporaryCredentials(email, first.messageId)
-  const context = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click()
+  async function login(password: string) {
+    await page.getByRole('button', { name: 'Tengo una cuenta local' }).click()
+    await page.getByLabel('Usuario o correo').fill(username)
+    await fillSecret(page.getByLabel('Contraseña', { exact: true }), password)
+    await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  }
+  async function complete(password: string) {
+    await expect(page.getByRole('heading', { name: 'Cambia tu contraseña' })).toBeVisible()
+    expect((await page.request.get('/api/v1/datasets')).status()).toBe(403)
+    await fillSecret(page.getByLabel('Nueva contraseña', { exact: true }), password)
+    await fillSecret(page.getByLabel('Confirmar contraseña'), password)
+    await page.getByRole('button', { name: 'Guardar y continuar' }).click()
+    await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  }
+  await login(first.password)
+  const defined = `First completion ${crypto.randomUUID()}!`
+  await complete(defined)
+  await expectNoCredentialResidue(page, [first.password, defined])
+  const identity = await (await page.request.get('/api/v1/me')).json()
+  expect(identity.user.role).toBe('Auditor')
+  expect((await page.request.post('/api/v1/users', { headers: { 'X-CSRF-Token': identity.csrf_token }, data: {} })).status()).toBe(403)
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click()
+  expect((await page.request.post('/api/v1/auth/login', { data: { username, password: first.password } })).status()).toBe(401)
+  await login(defined)
+  await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
   try {
-    expect((await context.request.post('/api/v1/auth/login', { data: { username, password: first.password } })).status()).toBe(401)
-    expect((await context.request.post('/api/v1/auth/login', { data: { username, password: replacement.password } })).status()).toBe(200)
-    await page.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
-    dialog = page.getByRole('dialog')
+    const adminPage = await adminContext.newPage()
+    const { headers } = await administrator(adminPage)
+    await adminPage.goto('/settings/system')
+    await adminPage.getByRole('button', { name: 'Usuarios locales' }).click()
+    await adminPage.getByRole('button', { name: `Regenerar credenciales de ${name}`, exact: true }).click()
+    const reset = adminPage.waitForResponse(response => response.url().endsWith(`/users/${account.id}/regenerate-credentials`))
+    await adminPage.getByRole('dialog').getByRole('button', { name: 'Regenerar credenciales', exact: true }).click()
+    expect((await reset).status()).toBe(200)
+    const replacement = await readCredentialModal(adminPage, 'Credenciales regeneradas')
+    expect(replacement.password !== first.password, 'Regeneration issues a different secret').toBe(true)
+    expect((await page.request.get('/api/v1/me')).status(), 'Regeneration revokes an active normal session').toBe(401)
+    for (const password of [first.password, defined]) expect((await page.request.post('/api/v1/auth/login', { data: { username, password } })).status()).toBe(401)
+    await page.reload()
+    await login(replacement.password)
+    const secondDefined = `Regenerated completion ${crypto.randomUUID()}!`
+    await complete(secondDefined)
+    await expectNoCredentialResidue(page, [first.password, replacement.password, defined, secondDefined])
+    // Password changes update the account revision in the other browser session.
+    await adminPage.getByRole('button', { name: 'Actualizar usuarios', exact: true }).click()
+    await expect(adminPage.getByRole('row').filter({ hasText: username }).getByText('Contraseña definida', { exact: true })).toBeVisible()
+    await adminPage.getByRole('button', { name: `Editar ${name}`, exact: true }).click()
+    dialog = adminPage.getByRole('dialog')
     await dialog.getByLabel('Usuario activo').uncheck()
-    const disabled = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
+    const disabled = adminPage.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/users/${account.id}` && response.request().method() === 'PATCH')
     await dialog.getByRole('button', { name: 'Guardar usuario' }).click()
-    expect((await disabled).status()).toBe(200)
-    expect((await context.request.get('/api/v1/me')).status()).toBe(401)
-    expect((await context.request.post('/api/v1/auth/login', { data: { email, password: replacement.password } })).status()).toBe(401)
-  } finally { await context.close() }
-  const current = await (await page.request.get(`/api/v1/users/${account.id}`)).json()
-  expect(current).toMatchObject({ role: 'Auditor', active: false })
-  const audit = await (await page.request.get('/api/v1/audit-events')).json()
-  expect(JSON.stringify(audit).includes(replacement.password), 'Audit excludes regenerated credential').toBe(false)
-  expect((await page.request.patch(`/api/v1/users/${account.id}`, { headers: { ...headers, 'X-CSRF-Token': 'invalid' }, data: { version: current.version, active: true } })).status()).toBe(403)
+    expect((await disabled).status(), 'Edit uses the refreshed current account revision').toBe(200)
+    await expect(dialog).toHaveCount(0)
+    expect((await page.request.get('/api/v1/me')).status()).toBe(401)
+    expect((await page.request.post('/api/v1/auth/login', { data: { email, password: secondDefined } })).status()).toBe(401)
+    const current = await (await adminPage.request.get(`/api/v1/users/${account.id}`)).json()
+    expect(current).toMatchObject({ role: 'Auditor', active: false, must_change_password: false })
+    const audit = await (await adminPage.request.get('/api/v1/audit-events')).json()
+    expect([first.password, replacement.password, defined, secondDefined].some(value => JSON.stringify({ audit, current }).includes(value)), 'Normal user reads and audit exclude all credentials').toBe(false)
+    expect((await adminPage.request.patch(`/api/v1/users/${account.id}`, { headers: { ...headers, 'X-CSRF-Token': 'invalid' }, data: { version: current.version, active: true } })).status()).toBe(403)
+  } finally { await adminContext.close() }
 })
 
 test('cada rol migrado conserva sus accesos con credenciales generadas y primer login obligatorio', async ({ page, browser }) => {
@@ -78,10 +127,10 @@ test('cada rol migrado conserva sus accesos con credenciales generadas y primer 
   ]
   for (const [index, role] of roles.entries()) {
     const email = `rbac-${Date.now()}-${index}@example.test`
-    await createAccount(page.request, headers, { email, username: `rbac.${Date.now()}.${index}`, role: role.name })
+    const issue = await createAccount(page.request, headers, { email, username: `rbac.${Date.now()}.${index}`, role: role.name })
     const context = await browser.newContext({ baseURL })
     try {
-      const identity = await activateLocal(context.request, email), roleHeaders = { 'X-CSRF-Token': identity.csrf_token }
+      const identity = await activateLocal(context.request, issuedCredentials(issue)), roleHeaders = { 'X-CSRF-Token': identity.csrf_token }
       expect((await context.request.get('/api/v1/users')).status()).toBe(role.users ? 200 : 403)
       expect((await context.request.get('/api/v1/datasets')).status()).toBe(200)
       expect((await context.request.post('/api/v1/datasets', { headers: roleHeaders, data: { name: `E2E RBAC ${Date.now()} ${index}` } })).status()).toBe(role.write ? 201 : 403)

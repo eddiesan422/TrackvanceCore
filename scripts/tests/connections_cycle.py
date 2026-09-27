@@ -458,7 +458,6 @@ def main() -> int:
     except ValueError as error:
         parser.error(str(error))
     port = args.port or available_port()
-    mailpit_port = available_port()
     if not 1 <= port <= 65535:
         parser.error("--port debe estar entre 1 y 65535")
     password = "TvReader-" + secrets.token_hex(18)
@@ -470,8 +469,7 @@ def main() -> int:
                    "PYTHONIOENCODING": "utf-8",
                    "COMPOSE_PROJECT_NAME": project, "WEB_PORT": str(port),
                    "TRACKVANCE_WEB_ORIGIN": base_url, "TV_E2E_URL": base_url,
-                   "PLAYWRIGHT_BASE_URL": base_url, "MAILPIT_PORT": str(mailpit_port),
-                   "TV_MAILPIT_URL": f"http://127.0.0.1:{mailpit_port}",
+                   "PLAYWRIGHT_BASE_URL": base_url,
                    "POSTGRES_USER": "trackvance", "POSTGRES_DB": "trackvance",
                    "POSTGRES_PASSWORD": internal_password,
                    "SOURCE_POSTGRES_PASSWORD": admin_password,
@@ -479,8 +477,7 @@ def main() -> int:
                    "DEMO_ACCESS_ENABLED": "true", "DEMO_SEED_ENABLED": "false",
                    "TV_CONNECTIONS_E2E": "true", "TV_CONNECTIONS_PASSWORD": password}
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml",
-               "-f", "deploy/docker/compose.connections-test.yml",
-               "-f", "deploy/docker/compose.mailpit-test.yml"]
+               "-f", "deploy/docker/compose.connections-test.yml"]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "connections-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
 
@@ -523,6 +520,7 @@ def main() -> int:
         checks.verify(json.loads(migration_result)["roundtrip"] == "PASS",
                       "Migraciones PostgreSQL: ida/vuelta, historial y paridad de modelos")
         api = smoke.Api(base_url, timeout=60)
+        application_version = api.get("/api/v1/health")["version"]
         api.request("GET", "/api/v1/connections", expected=(401,))
         auth = api.post("/api/v1/auth/demo", {}, expected=(200,))
         api.csrf = auth["csrf_token"]
@@ -553,7 +551,7 @@ def main() -> int:
         audits = api.get("/api/v1/audit-events")
         assert_no_credentials(audits, credentials, "Secreto filtrado en auditoría")
         checks.verify(True, "Contraseñas ausentes de logs, auditoría y metadata interna")
-        result = {"status": "PASS", "project": project, "sources": results,
+        result = {"status": "PASS", "version": application_version, "project": project, "sources": results,
                   "temporal_regressions": temporal_results,
                   "checks": checks.completed, "playwright": "SKIPPED" if args.skip_playwright else "PASS",
                   "regression_smoke": "SKIPPED" if args.skip_regression else "PASS"}

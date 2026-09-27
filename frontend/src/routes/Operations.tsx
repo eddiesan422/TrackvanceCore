@@ -1,5 +1,4 @@
 import { RolesPanel } from '../features/identity/RolesPanel'
-import { NotificationsPanel } from '../features/identity/NotificationsPanel'
 import { AuthenticationPanel } from '../features/identity/AuthenticationPanel'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -179,17 +178,17 @@ export function RulesPage() {
 }
 
 export function SettingsPage() {
-  const canSystem = usePermission('system:read'), canUsers = usePermission('users:read'), canRoles = usePermission('roles:read'), canNotifications = usePermission('notifications:read')
-  const [selectedTab, setTab] = useState(canSystem ? 'system' : canUsers ? 'users' : canRoles ? 'roles' : 'notifications')
-  const availableTabs = [canSystem && 'system', canSystem && 'authentication', canUsers && 'users', canRoles && 'roles', canNotifications && 'notifications'].filter(Boolean)
+  const canSystem = usePermission('system:read'), canUsers = usePermission('users:read'), canRoles = usePermission('roles:read')
+  const [selectedTab, setTab] = useState(canSystem ? 'system' : canUsers ? 'users' : 'roles')
+  const availableTabs = [canSystem && 'system', canSystem && 'authentication', canUsers && 'users', canRoles && 'roles'].filter(Boolean)
   const tab = availableTabs.includes(selectedTab) ? selectedTab : availableTabs[0]
   const engines = useQuery({ queryKey: ['engines'], queryFn: () => api('/system/engines'), refetchInterval: 10000, enabled: canSystem && tab === 'system' })
   return <><PageHeading eyebrow="TU ENTORNO DE TRABAJO" title="Configuración" description="Consulta el estado del procesamiento local y las cuentas disponibles."/>
-    <div className="tabs">{canSystem && <button className={tab === 'system' ? 'active' : ''} onClick={() => setTab('system')}><Cpu size={16}/> Procesamiento y entorno</button>}{canUsers && <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}><Users size={16}/> Usuarios locales</button>}{canRoles && <button className={tab === 'roles' ? 'active' : ''} onClick={() => setTab('roles')}><ShieldCheck size={16}/> Roles y permisos</button>}{canSystem && <button className={tab === 'authentication' ? 'active' : ''} onClick={() => setTab('authentication')}>Autenticación</button>}{canNotifications && <button className={tab === 'notifications' ? 'active' : ''} onClick={() => setTab('notifications')}>Notificaciones</button>}</div>
-    {!canSystem && !canUsers && !canRoles && !canNotifications ? <Notice>Tu rol no permite administrar este entorno.</Notice> : tab === 'system' && canSystem ? engines.isPending ? <Loading/> : engines.error ? <ErrorState error={engines.error} retry={() => engines.refetch()}/> : <>
+    <div className="tabs">{canSystem && <button className={tab === 'system' ? 'active' : ''} onClick={() => setTab('system')}><Cpu size={16}/> Procesamiento y entorno</button>}{canUsers && <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}><Users size={16}/> Usuarios locales</button>}{canRoles && <button className={tab === 'roles' ? 'active' : ''} onClick={() => setTab('roles')}><ShieldCheck size={16}/> Roles y permisos</button>}{canSystem && <button className={tab === 'authentication' ? 'active' : ''} onClick={() => setTab('authentication')}>Autenticación</button>}</div>
+    {!canSystem && !canUsers && !canRoles ? <Notice>Tu rol no permite administrar este entorno.</Notice> : tab === 'system' && canSystem ? engines.isPending ? <Loading/> : engines.error ? <ErrorState error={engines.error} retry={() => engines.refetch()}/> : <>
       <section className="panel"><div className="panel-heading"><div><h2>Estado del procesador</h2><p>Los controles se ejecutan en un proceso local independiente.</p></div><Badge value={engines.data.worker?.status}/></div><div className="profile-stats"><div><span>Última señal</span><strong style={{ fontSize: '1rem' }}>{date(engines.data.worker?.last_seen)}</strong></div><div><span>Máximo por carga</span><strong>{number(engines.data.limits?.max_upload_mb)} <small>MiB</small></strong></div><div><span>Filas por archivo</span><strong>{number(engines.data.limits?.max_rows)}</strong></div></div></section>
       <section className="panel" style={{ marginTop: 24 }}><div className="panel-heading"><div><h2>Motores de procesamiento</h2><p>Disponibilidad efectiva de esta instalación.</p></div></div><div className="table-scroll"><table><thead><tr><th>Motor</th><th>Disponibilidad</th><th>Versión</th><th>Capacidad</th></tr></thead><tbody>{engines.data.items?.map((item: RecordData) => <tr key={item.id}><td><strong>{item.name}</strong></td><td><Badge value={item.available ? 'ACTIVE' : 'PLANNED'}>{item.available ? 'Disponible' : 'Próxima etapa'}</Badge></td><td className="mono">{item.version || '—'}</td><td>{item.description}</td></tr>)}</tbody></table></div></section>
       <Notice>Las cargas admiten CSV, Excel XLSX, JSON, Parquet y TXT delimitado; los informes se descargan en Excel XLSX. Las reglas avanzadas se configuran desde cada módulo. Los permisos se aplican por rol y se administran desde Roles y permisos.</Notice>
-    </> : tab === 'authentication' && canSystem ? <AuthenticationPanel/> : tab === 'roles' && canRoles ? <RolesPanel/> : tab === 'notifications' && canNotifications ? <NotificationsPanel/> : canUsers ? <UsersPanel/> : <Notice>Tu rol no permite consultar usuarios.</Notice>}
+    </> : tab === 'authentication' && canSystem ? <AuthenticationPanel/> : tab === 'roles' && canRoles ? <RolesPanel/> : canUsers ? <UsersPanel/> : <Notice>Tu rol no permite consultar usuarios.</Notice>}
   </>
 }

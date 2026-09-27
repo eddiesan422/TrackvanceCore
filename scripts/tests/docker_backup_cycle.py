@@ -20,6 +20,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.request
@@ -61,6 +62,35 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
     text = contents.decode("utf-8", errors="replace") if isinstance(contents, bytes) else contents
     ensure(not any(value and value in text for value in credentials),
            "Se detectó una credencial en la salida; el contenido fue suprimido.")
+
+
+def scan_backup_plaintext(backup: Path, application: list[str], environment: dict[str, str],
+                          credentials: tuple[str, ...]) -> dict[str, Any]:
+    """Inspect decompressed backup bytes in memory without publishing database contents."""
+    result = subprocess.run(
+        [*application, "exec", "-T", "postgres", "pg_restore", "--file=-"],
+        cwd=ROOT, env=environment, input=(backup / "postgres.dump").read_bytes(),
+        capture_output=True, timeout=300, check=False,
+    )
+    assert_no_secrets(result.stdout + result.stderr, credentials)
+    ensure(result.returncode == 0, "No se pudo inspeccionar el dump privado del backup.")
+    files = 0
+    for path in backup.rglob("*"):
+        if not path.is_file():
+            continue
+        assert_no_secrets(path.read_bytes(), credentials)
+        if path.name.endswith(".tar.gz"):
+            with tarfile.open(path, "r:gz") as archive:
+                for entry in archive:
+                    if entry.isfile():
+                        member = archive.extractfile(entry)
+                        ensure(member is not None, "Entrada de backup no legible.")
+                        with member:
+                            assert_no_secrets(member.read(), credentials)
+                        files += 1
+    return {"status": "PASS", "postgres_dump_decompressed": "PASS",
+            "archive_files_scanned": files, "known_credentials_scanned": len(credentials),
+            "raw_contents_published": False}
 
 
 def execute(arguments: list[str], environment: dict[str, str], *, timeout: int = 1800,
@@ -493,18 +523,46 @@ def destroy_before_restore(source: str, database: str, evidence: Path) -> None:
            "La fuente PostgreSQL debe sobrevivir a la destrucción de Trackvance.")
 
 
+def notification_count(application: list[str], environment: dict[str, str],
+                       credentials: tuple[str, ...]) -> int:
+    script = """
+from sqlalchemy import func, select
+from trackvance.db import SessionLocal
+from trackvance.models import NotificationDeliveryRecord
+with SessionLocal() as db:
+    print(db.scalar(select(func.count()).select_from(NotificationDeliveryRecord)))
+"""
+    return int(execute([*application, "exec", "-T", "api", "python", "-"], environment,
+                       input_text=script, credentials=credentials).strip())
+
+
 def prepare_identity_recovery(api: RecoveryApi, original: dict[str, Any], application: list[str],
-                              environment: dict[str, str], credentials: tuple[str, ...]) -> None:
+                              environment: dict[str, str], credentials: tuple[str, ...]) -> tuple[str, ...]:
+    notifications_before = notification_count(application, environment, credentials)
     role = api.json("POST", "/roles", {
         "name": "Recovery custom role", "description": "Native restore fixture",
         "permissions": ["datasets:read"], "active": True,
     }, expected=201)
-    user = api.json("POST", "/users", {
+    issued = api.json("POST", "/users", {
         "first_name": "Recovery", "last_name": "Fixture", "username": "recovery.fixture",
         "email": "recovery.fixture@trackvance.test", "role_id": role["id"], "active": True,
     }, expected=201)
-    ensure(user["credential_delivery"]["status"] == "FAILED",
-           "Sin SMTP la entrega de credenciales debe fallar explícitamente.")
+    user = issued["user"]
+    temporary = issued["temporary_credentials"]["temporary_password"]
+    ensure(len(temporary) >= 20 and user["must_change_password"], "Credencial temporal no válida.")
+    credentials += (temporary,)
+    api.credentials = credentials
+    regenerated = api.json("POST", f"/users/{user['id']}/regenerate-credentials",
+                           {"version": user["version"]})
+    replacement = regenerated["temporary_credentials"]["temporary_password"]
+    ensure(replacement != temporary and len(replacement) >= 20, "La regeneración no rota credenciales.")
+    credentials += (replacement,)
+    api.credentials = credentials
+    del issued, regenerated, temporary, replacement
+    ensure(notification_count(application, environment, credentials) == notifications_before,
+           "Alta o regeneración 0.6.1 creó una notificación.")
+    api.json("GET", "/users")
+    api.json("GET", "/audit-events")
     # Durable synthetic metadata only. Actual signed OIDC/PKCE authentication is
     # certified by identity_sso_cycle; recovery must also cover nonempty tables.
     script = '''
@@ -512,7 +570,7 @@ import hashlib
 import json
 from datetime import timedelta
 from trackvance.db import SessionLocal, utcnow
-from trackvance.models import ExternalIdentity, OIDCLoginAttempt, User
+from trackvance.models import ExternalIdentity, NotificationDeliveryRecord, OIDCLoginAttempt, User
 identity = json.loads(INPUT)
 with SessionLocal() as db:
     user = db.get(User, identity["user_id"])
@@ -526,6 +584,12 @@ with SessionLocal() as db:
         browser_hash=hashlib.sha256(b"recovery-browser-binding").hexdigest(),
         provider="GOOGLE", nonce="", code_verifier="",
         expires_at=now + timedelta(minutes=10), consumed_at=now))
+    # Declared historical persistence fixture: no active SMTP delivery in 0.6.1.
+    db.add(NotificationDeliveryRecord(organization_id=user.organization_id,
+        event_type="USER_TEMPORARY_CREDENTIALS", template_key="USER_TEMPORARY_CREDENTIALS",
+        channel="EMAIL", recipient_type="USER", recipient_user_id=user.id,
+        recipient_email_snapshot=user.email, provider_key="SMTP", attempt_number=1,
+        status="FAILED", error_code="NO_PROVIDER", failed_at=now))
     db.commit()
 '''.replace("INPUT", repr(json.dumps({"user_id": user["id"]})))
     execute([*application, "exec", "-T", "api", "python", "-"], environment,
@@ -533,8 +597,10 @@ with SessionLocal() as db:
     original["identity"] = {
         "user": api.json("GET", f"/users/{user['id']}"),
         "role": api.json("GET", f"/roles/{role['id']}"),
-        "fixture": "SYNTHETIC_LINK_AND_CONSUMED_OIDC_METADATA_NO_PROVIDER_TOKENS",
+        "fixture": "SYNTHETIC_HISTORICAL_NOTIFICATION_LINK_AND_CONSUMED_OIDC_NO_TOKENS_OR_BODY",
+        "create_and_regenerate_notifications_unchanged": True,
     }
+    return credentials
 
 
 def validate_identity_restoration(api: RecoveryApi, original: dict[str, Any]) -> dict[str, Any]:
@@ -546,6 +612,7 @@ def validate_identity_restoration(api: RecoveryApi, original: dict[str, Any]) ->
     ensure(len(user["external_identities"]) == 1 and user["must_change_password"],
            "Falta el vínculo externo o la restricción del primer acceso restaurado.")
     return {"status": "PASS", "fixture": saved["fixture"],
+            "create_and_regenerate_notifications_unchanged": saved["create_and_regenerate_notifications_unchanged"],
             "user_and_role_api_exactly_preserved": True,
             "external_identity_exactly_preserved": True,
             "notification_and_first_login_exactly_preserved": True,
@@ -966,16 +1033,19 @@ def main() -> int:
         stage = "source_trackvance_fixtures"
         attach_external_network(source, database, environment)
         source_api = RecoveryApi(source_port, credentials)
+        result["version"] = source_api.json("GET", "/health")["version"]
         original = capture_original(source_api, reader_password, delivery_password)
         stage = "delivery_operational_fixtures"
         prepare_delivery_operations(source_api, original, compose, fixture, environment, credentials)
         stage = "identity_fixtures"
-        prepare_identity_recovery(source_api, original, compose, environment, credentials)
+        credentials = prepare_identity_recovery(source_api, original, compose, environment, credentials)
         stage = "backup"
         execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "backup",
                  "--project", source, "--destination", str(backup)], environment,
                 credentials=credentials)
         state = json.loads((backup / "state.json").read_text(encoding="utf-8"))
+        result["plaintext_backup_scan"] = scan_backup_plaintext(backup, compose, environment, credentials)
+        result["state_schema_version"] = state["schema_version"]
         ensure(state.get("verified_secrets") == 2
                and state.get("verified_source_secrets") == 1
                and state.get("verified_delivery_secrets") == 1,

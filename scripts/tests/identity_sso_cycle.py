@@ -1,7 +1,7 @@
-"""Certify identity in a new disposable Docker project with Mailpit and real OIDC.
+"""Certify identity in a new disposable Docker project with one-time credentials and signed mock OIDC.
 
 The signed mock tests our client, not Microsoft's or Google's live services.
-Only sanitized aggregate results are retained; mail bodies, passwords and OAuth
+Only sanitized aggregate results are retained; passwords and OAuth
 tokens are neither printed nor published as artifacts.
 """
 from __future__ import annotations
@@ -20,6 +20,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from uuid import uuid4
+
+from browser_evidence import run_browser
+from credential_leak_probe import scan as scan_credentials
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,27 +50,26 @@ def storage_snapshot(run, compose: list[str]) -> dict:
 
 def main() -> int:
     project = validated_project(f"trackvance-identity-e2e-{uuid4().hex[:12]}")
-    port, mail_port, oidc_port = (available_port() for _ in range(3))
+    port, oidc_port = (available_port() for _ in range(2))
     base_url = f"http://127.0.0.1:{port}"
-    mail_url = f"http://127.0.0.1:{mail_port}"
     client_secret, database_password = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     environment = {
         **os.environ, "PYTHONIOENCODING": "utf-8", "COMPOSE_PROJECT_NAME": project,
-        "COMPOSE_FILE": "compose.yml", "WEB_PORT": str(port), "MAILPIT_PORT": str(mail_port),
+        "COMPOSE_FILE": "compose.yml", "WEB_PORT": str(port),
         "MOCK_OIDC_PORT": str(oidc_port), "MOCK_OIDC_CLIENT_SECRET": client_secret,
         "POSTGRES_USER": "trackvance", "POSTGRES_DB": "trackvance",
         "POSTGRES_PASSWORD": database_password, "TRACKVANCE_PUBLIC_URL": base_url,
         "TRACKVANCE_WEB_ORIGIN": base_url, "DEMO_ACCESS_ENABLED": "true", "DEMO_SEED_ENABLED": "false",
         "TV_E2E_URL": base_url, "PLAYWRIGHT_BASE_URL": base_url,
-        "TV_MAILPIT_URL": mail_url, "TV_IDENTITY_SSO_E2E": "true",
+        "TV_IDENTITY_SSO_E2E": "true",
     }
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml", "-f",
-               "deploy/docker/compose.mailpit-test.yml", "-f", "deploy/docker/compose.identity-test.yml"]
+               "deploy/docker/compose.identity-test.yml"]
     evidence = ROOT / ".codex-local" / "identity-sso-e2e" / project
     evidence.mkdir(parents=True, exist_ok=False)
     started = False
     began = time.monotonic()
-    result: dict = {"version": "0.6.0", "project": project, "status": "FAIL",
+    result: dict = {"version": "0.6.1", "project": project, "status": "FAIL",
                     "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS", "mock_provider": True}
 
     def run(arguments, *, cwd=ROOT, capture=False, input_text=None, stage=None):
@@ -122,20 +124,17 @@ def main() -> int:
         run([*compose, "up", "--build", "-d", "--wait", "--wait-timeout", "300"])
         with urllib.request.urlopen(base_url + "/api/v1/health", timeout=10) as response:
             health = json.load(response)
-        if health.get("version") != "0.6.0":
+        if health.get("version") != "0.6.1":
             raise RuntimeError("La API no ejecuta la versión objetivo.")
         run([sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project])
         pnpm = shutil.which("pnpm")
         if not pnpm:
             raise RuntimeError("pnpm no está disponible.")
-        browser_output = run([pnpm, "exec", "playwright", "test", "tests-e2e/identity-sso.spec.ts",
-                              "--reporter=json", "--output", str(evidence / "browser-results")],
-                             cwd=ROOT / "frontend", capture=True)
-        browser = json.loads(browser_output[browser_output.index("{"):])
-        stats = browser.get("stats", {})
-        if stats.get("unexpected", 0) or not stats.get("expected", 0) or stats.get("skipped", 0):
+        browser = run_browser(pnpm, ["tests-e2e/identity-sso.spec.ts"], root=ROOT,
+                              project=project, environment=environment, evidence=evidence)
+        if browser.get("unexpected", 0) or not browser.get("expected", 0) or browser.get("skipped", 0):
             raise RuntimeError("La suite Identity/SSO no quedó completamente ejecutada y aprobada.")
-        result["playwright"] = stats
+        result["playwright"] = browser
         admin_http = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
         def api_request(method, path, body=None, *, csrf=None, authenticated=True):
@@ -161,25 +160,19 @@ def main() -> int:
         status, probe = api_request("POST", "/users", {"first_name": "Expiry", "last_name": "Probe",
                                   "username": probe_name, "email": probe_email,
                                   "role_id": analyst, "active": True}, csrf=csrf)
-        if status != 201 or probe["credential_delivery"]["status"] != "SENT":
-            raise RuntimeError("No se pudo preparar la prueba de expiración por email.")
-        with urllib.request.urlopen(mail_url + "/api/v1/messages", timeout=10) as response:
-            messages = json.load(response).get("messages", [])
-        if not messages:
-            raise RuntimeError("Mailpit no recibió las credenciales de prueba.")
-        sensitive = [client_secret]
-        expired_password = None
-        for message in messages:
-            with urllib.request.urlopen(mail_url + "/api/v1/message/" + message["ID"], timeout=10) as response:
-                body = json.load(response).get("Text", "")
-            sensitive.extend(re.findall(r"(?:Contraseña temporal|Temporary password):\s*(\S+)", body))
-            if any(recipient.get("Address") == probe_email for recipient in message.get("To", [])):
-                expired_password = re.search(r"Contraseña temporal:\s*(\S+)", body).group(1)
-        if len(sensitive) < 2:
-            raise RuntimeError("No se pudo validar el contenido de credenciales recibido.")
-        if not expired_password:
-            raise RuntimeError("No llegó el email de la prueba de expiración.")
-        # This fixture mutation runs only in the newly created isolated test project.
+        if status != 201 or not probe.get("temporary_credentials"):
+            raise RuntimeError("El alta no devolvió la credencial efímera.")
+        issued = probe["temporary_credentials"]
+        probe = probe["user"]
+        expired_password = issued["temporary_password"]
+        sensitive = [client_secret, expired_password]
+        if len(expired_password) < 20 or not issued["must_change_password"]:
+            raise RuntimeError("La credencial temporal no cumple el contrato.")
+        for path in ("/users", f"/users/{probe['id']}", "/audit-events"):
+            status, public = api_request("GET", path)
+            if status != 200 or expired_password in json.dumps(public):
+                raise RuntimeError("La lectura pública recuperó la credencial o falló.")
+        # Fixture only in this newly created disposable project; never the user's data.
         fixture = ("from datetime import timedelta; from trackvance.db import SessionLocal, utcnow; "
                    "from trackvance.models import User; "
                    f"db=SessionLocal(); user=db.get(User,{probe['id']!r}); "
@@ -189,47 +182,27 @@ def main() -> int:
         if status != 401:
             raise RuntimeError("La contraseña temporal expirada no fue rechazada.")
         result["temporary_password_expiration"] = "PASS"
-
-        run([*compose, "stop", "mailpit"])
-        failed_name = "smtp.failure." + uuid4().hex[:16]
-        failed_email = failed_name + "@example.test"
-        status, failed_user = api_request("POST", "/users", {"first_name": "SMTP", "last_name": "Failure",
-                                        "username": failed_name, "email": failed_email,
-                                        "role_id": analyst, "active": True}, csrf=csrf)
-        if status != 201 or failed_user["credential_delivery"]["status"] != "FAILED":
-            raise RuntimeError("El fallo SMTP no conservó usuario creado y metadata FAILED.")
-        run([*compose, "up", "-d", "--wait", "mailpit"])
-        for user in (probe, failed_user):
-            status, _ = api_request("POST", f"/users/{user['id']}/resend-credentials",
-                                    {"version": user["version"]}, csrf=csrf)
-            if status != 200:
-                raise RuntimeError("No se pudo regenerar tras fallo SMTP/expiración.")
-            _, current_user = api_request("GET", f"/users/{user['id']}")
-            if current_user["credential_delivery"]["status"] != "SENT":
-                raise RuntimeError("Las credenciales regeneradas no se enviaron tras recuperar SMTP.")
+        status, regenerated = api_request("POST", f"/users/{probe['id']}/regenerate-credentials",
+                                          {"version": probe["version"]}, csrf=csrf)
+        if status != 200:
+            raise RuntimeError("No se pudo regenerar la credencial expirada.")
+        new_password = regenerated["temporary_credentials"]["temporary_password"]
+        sensitive.append(new_password)
+        if new_password == expired_password:
+            raise RuntimeError("La regeneración no produjo una credencial nueva.")
         status, _ = api_request("POST", "/auth/login", {"username": probe_name, "password": expired_password}, authenticated=False)
         if status != 401:
             raise RuntimeError("La regeneración no invalidó la credencial previa.")
-        with urllib.request.urlopen(mail_url + "/api/v1/messages", timeout=10) as response:
-            messages = json.load(response).get("messages", [])
-        for message in messages:
-            with urllib.request.urlopen(mail_url + "/api/v1/message/" + message["ID"], timeout=10) as response:
-                body = json.load(response).get("Text", "")
-            sensitive.extend(re.findall(r"Contraseña temporal:\s*(\S+)", body))
-            if any(recipient.get("Address") == failed_email for recipient in message.get("To", [])):
-                regenerated = re.search(r"Contraseña temporal:\s*(\S+)", body).group(1)
-                status, restricted = api_request("POST", "/auth/login", {"username": failed_name, "password": regenerated}, authenticated=False)
-                if status != 200 or not restricted["user"]["must_change_password"]:
-                    raise RuntimeError("El envío recuperado no permite únicamente el primer acceso restringido.")
-        result["smtp_failure_and_regeneration"] = "PASS"
-        dump = run([*compose, "exec", "-T", "postgres", "sh", "-c",
-                    'pg_dump --data-only --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"'], capture=True)
-        logs = run([*compose, "logs", "--no-color", "api", "web", "worker", "delivery-worker"], capture=True)
-        if any(secret in dump or secret in logs for secret in sensitive):
-            raise RuntimeError("Se detectó persistencia o log de material sensible.")
+        status, restricted = api_request("POST", "/auth/login", {"username": probe_name, "password": new_password}, authenticated=False)
+        if status != 200 or not restricted["user"]["must_change_password"]:
+            raise RuntimeError("La nueva temporal no produce una sesión de primer acceso.")
+        result["one_time_issue_and_regeneration"] = "PASS"
+        result["credential_privacy"] = scan_credentials(project, sensitive)
         result["plaintext_database_and_log_scan"] = "PASS"
-        result["mailpit_messages"] = len(messages)
         before = storage_snapshot(run, compose)
+        if before["tables"].get("notification_deliveries"):
+            raise RuntimeError("El alta o regeneración creó registros de entrega de email.")
+        result["no_notification_records_created"] = "PASS"
         run([*compose, "restart"])
         run([*compose, "up", "-d", "--wait", "--wait-timeout", "120"], stage="restart_readiness")
         after = storage_snapshot(run, compose)

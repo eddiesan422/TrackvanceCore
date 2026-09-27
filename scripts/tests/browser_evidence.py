@@ -1,11 +1,45 @@
 """Retain only sanitized browser counters in publishable certification evidence."""
 from __future__ import annotations
 
+import argparse
 import json
-import re
+import os
+import shutil
 import subprocess
-import urllib.request
 from pathlib import Path
+
+
+def credential_privacy_reports(report: dict) -> list[dict]:
+    """Accept only a fixed aggregate schema; never retain arbitrary child text."""
+    prefix = "CREDENTIAL_PRIVACY_PROBE "
+    statuses = {"status", "database", "container_logs", "artifacts"}
+    counts = {"secrets_scanned", "artifact_files_scanned", "browser_files_scanned"}
+    records = []
+
+    def inspect(suite):
+        for spec in suite.get("specs", []):
+            for test in spec.get("tests", []):
+                for attempt in test.get("results", []):
+                    for entry in attempt.get("stdout", []):
+                        for line in entry.get("text", "").splitlines():
+                            if not line.startswith(prefix):
+                                continue
+                            try:
+                                value = json.loads(line[len(prefix):])
+                            except (ValueError, TypeError) as error:
+                                raise RuntimeError("Agregado de privacidad inválido; contenido omitido.") from error
+                            if (not isinstance(value, dict) or set(value) != statuses | counts
+                                    or any(type(value[key]) is not str or value[key] not in {"PASS", "FAIL"}
+                                           for key in statuses)
+                                    or any(type(value[key]) is not int or value[key] < 0 for key in counts)):
+                                raise RuntimeError("Agregado de privacidad inválido; contenido omitido.")
+                            records.append({key: value[key] for key in sorted(statuses | counts)})
+        for nested in suite.get("suites", []):
+            inspect(nested)
+
+    for suite in report.get("suites", []):
+        inspect(suite)
+    return records
 
 
 def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
@@ -22,6 +56,13 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
     except (ValueError, TypeError) as error:
         raise RuntimeError("Playwright no devolvió un informe JSON válido; salida omitida por privacidad.") from error
     summary = {"status": "PASS" if not completed.returncode else "FAIL", **report.get("stats", {})}
+    probes = credential_privacy_reports(report)
+    privacy_failed = any(value != "PASS" for probe in probes for key, value in probe.items()
+                         if key in {"status", "database", "container_logs", "artifacts"})
+    if privacy_failed:
+        summary["status"] = "FAIL"
+    if probes:
+        summary["credential_privacy_probes"] = probes
     failures = []
     def inspect(suite):
         for spec in suite.get("specs", []):
@@ -36,16 +77,9 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
         inspect(suite)
     if failures:
         summary["failures"] = failures
-    # Mail bodies remain in memory. Neither raw reports nor credentials are published.
+    # Issued user credentials are scanned inside Playwright using a stdin-only
+    # probe while still in memory; they are never exported to this reporter.
     sensitive = []
-    mailbox_url = environment.get("TV_MAILPIT_URL")
-    if mailbox_url:
-        with urllib.request.urlopen(mailbox_url + "/api/v1/messages", timeout=10) as response:
-            messages = json.load(response).get("messages", [])
-        for message in messages:
-            with urllib.request.urlopen(mailbox_url + "/api/v1/message/" + message["ID"], timeout=10) as response:
-                body = json.load(response).get("Text", "")
-            sensitive.extend(re.findall(r"Contraseña temporal:\s*(\S+)", body))
     sensitive.extend(environment[key] for key in (
         "TV_CONNECTIONS_PASSWORD", "POSTGRES_PASSWORD", "SOURCE_POSTGRES_PASSWORD",
         "SOURCE_MSSQL_SA_PASSWORD", "TV_DELIVERY_PASSWORD", "DELIVERY_POSTGRES_ADMIN_PASSWORD",
@@ -63,4 +97,25 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
     print("Playwright: " + json.dumps(summary, ensure_ascii=False), flush=True)
     if completed.returncode:
         raise RuntimeError("Playwright falló; consultar únicamente las ubicaciones saneadas del resumen.")
+    if privacy_failed:
+        raise RuntimeError("La comprobación de privacidad de credenciales falló.")
     return summary
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--evidence-dir", type=Path, required=True)
+    options = parser.parse_args()
+    root = Path(__file__).resolve().parents[2]
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        raise RuntimeError("pnpm no está disponible.")
+    options.evidence_dir.mkdir(parents=True, exist_ok=True)
+    run_browser(pnpm, [], root=root, project=options.project,
+                environment=dict(os.environ), evidence=options.evidence_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
