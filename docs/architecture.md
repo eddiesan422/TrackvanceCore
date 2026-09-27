@@ -1,7 +1,7 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.6.0, RBAC dinámico, identidad/SSO, SMTP y auditoría
-de publicación, 26 de septiembre de 2026. La certificación integrada se registra por separado;
+Revisión de implementación: 0.6.1, credenciales temporales visibles una vez,
+RBAC/SSO y auditoría de publicación conservados, 27 de septiembre de 2026. La certificación integrada se registra por separado;
 los resultados históricos no certifican automáticamente esta revisión.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y
@@ -77,7 +77,7 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 | `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine`, Polars/Python | Adaptador de ejecución distribuida |
 | `ProcessingEngine` | Compilar/evaluar expresiones portables de reglas | Compiladores Polars y DuckDB | Otros compiladores con pruebas de paridad |
 | `JobQueue` | Registrar la entrega de un run para ejecución asíncrona | `DatabaseJobQueue`, consumida mediante leases | Publicación y consumo Redis/Celery |
-| `NotificationDelivery` | Entregar mensajes efímeros y conservar sólo resultado | SMTP para credenciales USER | Resolutores ROLE/DOMAIN/GROUP y futuros eventos; Teams/Slack/Webhook |
+| Notificaciones históricas | Conservar metadata de entregas 0.6.0 | Lectura histórica, sin envíos ni adaptador SMTP | Futuro módulo de eventos y destinatarios; canal por decidir según el cliente |
 
 `ExecutionPlanner` estima memoria y disco antes de aceptar una ejecución. Elige
 POLARS dentro del presupuesto local; si la carga necesita PYSPARK, devuelve
@@ -114,7 +114,7 @@ completamente independientes.
 | Ejecución asíncrona | `execution.py`, `jobqueue.py`, `worker.py`, `planner.py` | Entrega de jobs, leases, heartbeat, presupuesto y procesamiento |
 | Sentinel programado | `scheduler.py`, `sentinel_api.py` | Programaciones, revisiones, ocurrencias, despacho transaccional e histórico de series |
 | Gestión de casos | `exceptions_api.py` | Responsable, prioridad, SLA, comentarios, adjuntos y filtros; validación compartida en servicios |
-| Administración e identidad | `identity_api.py`, `permissions.py`, `sso_api.py`, `notifications.py` | RBAC persistido, catálogo, username, primer acceso, OIDC, SMTP, revocación y auditoría |
+| Administración e identidad | `identity_api.py`, `permissions.py`, `sso_api.py`, `notifications.py` | RBAC persistido, catálogo, username, credencial efímera, primer acceso, OIDC, revocación y auditoría |
 | Presentación | `frontend/src/` | Pantallas React, formularios, estados, navegación y cliente HTTP |
 | Operación | `compose.yml`, `deploy/`, `scripts/`, `.github/workflows/` | Imágenes, proxy, arranque, diagnósticos y comprobaciones |
 
@@ -301,7 +301,7 @@ en la misma transacción remota. No se modifica DatasetVersion ni se implementa
 SHIST. Ver [ADR 0019](adr/0019-delivery-target-audit.md) y
 [detalle funcional/técnico](development/delivery-audit.md).
 
-### Identidad y notificaciones 0.6.0
+### Identidad 0.6.1 y compatibilidad de notificaciones
 
 User.role_id referencia Role; RolePermission asigna códigos del catálogo del
 producto. Cada petición resuelve permisos vigentes; las rutas desconocidas
@@ -310,14 +310,23 @@ users:manage/roles:manage no son delegables. Las bajas son lógicas y serializad
 por organización; el último administrador y roles con usuarios quedan protegidos.
 La UI refresca /me y role_version sin logout al cambiar sólo permisos.
 
-Username/email autentican localmente. Alta genera temporal Argon2 de 24 horas
-y NotificationService la entrega mediante NotificationDelivery/SMTP. El registro
-de notificación contiene sólo metadatos. Primer acceso restringe la sesión y
-exige nueva contraseña, también tras login Microsoft/Google. SSO usa Authlib y
-joserfc para Code Flow, PKCE y validación de tokens; ExternalIdentity referencia
-User mediante provider/issuer/subject, sin auto-provisioning ni grupos externos.
-Variables SMTP/OAuth pertenecen a API y quedan fuera de backups. Ver
-[identidad 0.6.0](development/identity-060.md).
+Username/email autentican localmente. Alta y regeneración generan una temporal
+de 24 horas y sólo persisten Argon2. El envelope UserCredentialIssueResponse
+devuelve la credencial una vez al administrador con Cache-Control: no-store;
+UserResponse y GET nunca la contienen. La UI usa estado transitorio del modal,
+sin MutationCache ni persistencia, y lo libera al cerrar o desmontar.
+
+Primer acceso exige nueva contraseña, también tras login Microsoft/Google. SSO
+usa Authlib/joserfc, Code Flow, PKCE y validación de tokens; ExternalIdentity
+resuelve provider/issuer/subject. Microsoft y Google están deshabilitados por
+defecto y no son requisitos de la operación local. Sus variables y secretos se
+mantienen separados de los backups.
+
+En 0.6.0 NotificationService intentaba enviar la temporal por SMTP; 0.6.1 retira
+ese flujo y el adaptador. notification_deliveries, sus filas y 0011 se conservan
+para lectura histórica y recuperación. No se crea una entrega ni un evento de
+envío al administrar usuarios. El futuro módulo de notificaciones y su canal se
+decidirán según necesidad del cliente. Ver [identidad](development/identity-060.md).
 
 ### Carga diferida de la interfaz
 
@@ -402,10 +411,12 @@ vacío y asignó lane DEFAULT a los jobs históricos. En 0.5.1 el restore llega 
 25 tablas/0009; los backups anteriores empiezan sin revisiones UNKNOWN y los
 backups nuevos deben recuperarlas íntegramente. La recertificación de ambos
 orígenes se informa en validación y no se deduce del ensayo histórico.
-En 0.6.0 el destino es 0012/state 5 con 31 tablas; se compara el estado nativo
+En 0.6.0 y 0.6.1 el destino es 0012/state 5 con 31 tablas; se compara el estado nativo
 completo o las proyecciones legacy-v4/v3/v2 según la versión real del origen.
-Las pruebas nuevas desde 0.4.1, 0.5.0 y 0.5.1 y el drill nativo están enlazadas
-desde [operaciones](development/operations.md).
+En el ciclo 0.6.1 se ejecutaron nuevamente el drill nativo y las restauraciones
+auténticas desde 0.6.0 y 0.5.1. Las restauraciones desde 0.4.1 y 0.5.0 son
+antecedentes del ciclo 0.6.0. [Operaciones](development/operations.md) enlaza
+ambos grupos con su procedencia explícita.
 El staging de backup verifica
 tamaño/hash antes de consumir cada copia para impedir sustituciones TOCTOU.
 State 2 no incluía hash estructural del catálogo; esa limitación histórica se

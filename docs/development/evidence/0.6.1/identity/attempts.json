@@ -1,0 +1,25 @@
+{
+  "version": "0.6.1",
+  "final_status": "PASS",
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "PASS",
+      "project": "trackvance-identity-e2e-84bfa1979b62",
+      "duration_seconds": 104.928,
+      "browser_passed": 9,
+      "cleanup": "PASS"
+    },
+    {
+      "attempt": 2,
+      "status": "PASS",
+      "project": "trackvance-identity-e2e-7b3c34447434",
+      "duration_seconds": 104.251,
+      "browser_passed": 9,
+      "cleanup": "PASS"
+    }
+  ],
+  "repeat_reason": "Added explicit aggregate reporting of the in-memory credential privacy probe.",
+  "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "raw_artifacts_published": false
+}

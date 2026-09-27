@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "version": "0.6.1",
+  "base_url": "http://localhost:3100",
+  "browser_login": "PASS",
+  "login_method": "existing_demo_access",
+  "password_login": "PASS_IN_DISPOSABLE_TESTS_NOT_REPEATED_ON_PRIMARY",
+  "started_at": "2026-09-27T15:02:05.606Z",
+  "checks": {
+    "login_without_sso_buttons": "PASS",
+    "footer_version": "PASS",
+    "settings_without_notifications": "PASS",
+    "existing_users_without_smtp_or_plaintext": "PASS",
+    "existing_roles": "PASS",
+    "local_enabled_and_providers_disabled": "PASS",
+    "existing_datasets": "PASS",
+    "logout": "PASS"
+  },
+  "business_mutations": 0,
+  "screenshots": false,
+  "raw_responses_published": false,
+  "existing_users_visible": 2,
+  "existing_roles_visible": 5,
+  "existing_dataset_count": 3,
+  "finished_at": "2026-09-27T15:02:08.666Z"
+}

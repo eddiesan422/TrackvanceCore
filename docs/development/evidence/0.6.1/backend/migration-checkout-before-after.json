@@ -1,0 +1,79 @@
+{
+  "status": "PASS",
+  "comparison": "Exact on-disk bytes before and after 0.6.1 work",
+  "files": [
+    {
+      "name": "0001_initial.py",
+      "before_sha256": "cf4387ca796ad22e4b0b6e396d45b0fcbb351e7b45d371048dfd191375a32ece",
+      "after_sha256": "cf4387ca796ad22e4b0b6e396d45b0fcbb351e7b45d371048dfd191375a32ece",
+      "identical": true
+    },
+    {
+      "name": "0002_evidence_v2.py",
+      "before_sha256": "2b770b2958bf0beffede835af2489876cc8c6cc34913c2515adf1ad4398a29b0",
+      "after_sha256": "2b770b2958bf0beffede835af2489876cc8c6cc34913c2515adf1ad4398a29b0",
+      "identical": true
+    },
+    {
+      "name": "0003_dataset_ingestion_metadata.py",
+      "before_sha256": "44407bdfe61ce3af580f090466417a2415cf55c3f1fc312367348b4b539fb894",
+      "after_sha256": "44407bdfe61ce3af580f090466417a2415cf55c3f1fc312367348b4b539fb894",
+      "identical": true
+    },
+    {
+      "name": "0004_exception_validation.py",
+      "before_sha256": "478a0d39a0c128a18d974a8bb31fd394d912670993dffd7e0f6d26c44f1a3d21",
+      "after_sha256": "478a0d39a0c128a18d974a8bb31fd394d912670993dffd7e0f6d26c44f1a3d21",
+      "identical": true
+    },
+    {
+      "name": "0005_external_connections.py",
+      "before_sha256": "d46d79eabf36bcb3cd05c696a06de60d6278237b2f0ebf6dd92b3a490023a427",
+      "after_sha256": "d46d79eabf36bcb3cd05c696a06de60d6278237b2f0ebf6dd92b3a490023a427",
+      "identical": true
+    },
+    {
+      "name": "0006_local_identity_exceptions.py",
+      "before_sha256": "bfcee4fe030218c2e3e54247321a31d8ec01ab50e9e0b4b97bd96bf410f2de69",
+      "after_sha256": "bfcee4fe030218c2e3e54247321a31d8ec01ab50e9e0b4b97bd96bf410f2de69",
+      "identical": true
+    },
+    {
+      "name": "0007_monitor_scheduling.py",
+      "before_sha256": "08b8b245a4ab2736c8590fdb0748aef45be2dff2008472152c1d39764e4bd162",
+      "after_sha256": "08b8b245a4ab2736c8590fdb0748aef45be2dff2008472152c1d39764e4bd162",
+      "identical": true
+    },
+    {
+      "name": "0008_data_delivery.py",
+      "before_sha256": "5a329d7c20f6ed8d44c4893d7f59484d888692012563c863a9eef3eaed54fc58",
+      "after_sha256": "5a329d7c20f6ed8d44c4893d7f59484d888692012563c863a9eef3eaed54fc58",
+      "identical": true
+    },
+    {
+      "name": "0009_delivery_reviews.py",
+      "before_sha256": "b5f115ea04f39515e4d2e57947f0f8920a0b65b2676703033e5151ca1defdeb7",
+      "after_sha256": "b5f115ea04f39515e4d2e57947f0f8920a0b65b2676703033e5151ca1defdeb7",
+      "identical": true
+    },
+    {
+      "name": "0010_dynamic_rbac_identity.py",
+      "before_sha256": "3e9680d122595ad04957d2616448ce2b028d15be14012f0d02230cdd61942bb2",
+      "after_sha256": "3e9680d122595ad04957d2616448ce2b028d15be14012f0d02230cdd61942bb2",
+      "identical": true
+    },
+    {
+      "name": "0011_notification_delivery.py",
+      "before_sha256": "4473f4b966393438019e524ece878812138217b2479d9e0a664268d51fd1157d",
+      "after_sha256": "4473f4b966393438019e524ece878812138217b2479d9e0a664268d51fd1157d",
+      "identical": true
+    },
+    {
+      "name": "0012_delivery_target_audit.py",
+      "before_sha256": "8965d3d15a401a116f8b3590d518b5018966e543fd898a15a887be88b6863cfd",
+      "after_sha256": "8965d3d15a401a116f8b3590d518b5018966e543fd898a15a887be88b6863cfd",
+      "identical": true
+    }
+  ],
+  "migration_count": 12
+}

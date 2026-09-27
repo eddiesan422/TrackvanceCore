@@ -1,0 +1,25 @@
+{
+  "final_status": "PASS",
+  "attempts": [
+    {
+      "status": "FAIL",
+      "stage": "authentic_source_build",
+      "error_type": "RuntimeError",
+      "duration_seconds": 3.69,
+      "cleanup_reported": "FAIL",
+      "cause": "Relative evidence path resolved against archived source cwd; no source container was created.",
+      "resolution": "Resolve evidence directory to an absolute path before executing source commands; regression test added."
+    },
+    {
+      "status": "FAIL",
+      "stage": "current_credentials",
+      "error_type": "RuntimeError",
+      "duration_seconds": 135.717,
+      "cleanup_reported": "PASS",
+      "exact_historical_state": "PASS",
+      "cause": "Credential probe attempted demo login after restore intentionally disabled demo access.",
+      "resolution": "After exact historical comparison, enable demo access only on the disposable target with demo seeding disabled; regression test added."
+    }
+  ],
+  "raw_output_published": false
+}

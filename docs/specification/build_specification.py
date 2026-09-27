@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.6.0"
-EDITION_DATE = "26 septiembre 2026"
+VERSION = "0.6.1"
+EDITION_DATE = "27 septiembre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -129,6 +129,8 @@ class Diagram(Flowable):
         self.kind = kind
         self.width = CONTENT
         self.height = 188 if kind != "exceptions" else 195
+        if kind == "create-credentials":
+            self.height = 464
 
     def box(self, x, y, w, h, title, detail=""):
         c = self.canv
@@ -240,14 +242,47 @@ class Diagram(Flowable):
             self.box(370, 39, 156, 59, "Drift detectado", "Falla cerrado; no repara ni desactiva auditoría")
             self.arrow(261, 125, 261, 100)
             self.arrow(449, 125, 449, 100)
+        elif self.kind == "create-credentials":
+            steps = [
+                ("Administrator", "Sesion normal y users:manage"),
+                ("Crear usuario", "Identidad, email, rol y estado"),
+                ("Generar password temporal", "CSPRNG, 32 caracteres y 24 horas"),
+                ("Argon2 en DB", "Solo hash persistido"),
+                ("Mostrar UNA VEZ", "Modal con acciones de copia"),
+                ("Administrador entrega credenciales externamente", "Canal elegido por el administrador"),
+                ("Usuario inicia sesion", "Username o email y temporal vigente"),
+                ("Cambio obligatorio", "Contraseña propia, sesion y CSRF nuevos"),
+                ("Sesion normal", "La temporal queda invalidada"),
+            ]
+            for index, (title, detail) in enumerate(steps):
+                y = 414 - index * 51
+                self.box(30, y, w - 60, 40, title, detail)
+                if index < len(steps) - 1:
+                    self.arrow(w / 2, y - 1, w / 2, y - 10)
+        elif self.kind == "regenerate-credentials":
+            steps = [("Administrator", "Regenerar + version"), ("Nueva temporal", "Password anterior invalida"),
+                     ("Revocar sesiones", "Commit antes de responder"), ("Modal UNA VEZ", "Entregar nueva temporal"),
+                     ("Primer login", "Obligatorio nuevamente"), ("Sesion normal", "Password propia y CSRF nuevo")]
+            bw = (w - 30) / 3
+            for index, (title, detail) in enumerate(steps):
+                row, col = divmod(index, 3)
+                x = col * (bw + 15) if row == 0 else (2 - col) * (bw + 15)
+                y = 113 if row == 0 else 20
+                self.box(x, y, bw, 62, title, detail)
+                if col < 2:
+                    if row == 0:
+                        self.arrow(x + bw + 1, y + 31, x + bw + 13, y + 31)
+                    else:
+                        self.arrow(x - 1, y + 31, x - 13, y + 31)
+            self.arrow(w - bw / 2, 111, w - bw / 2, 85)
         elif self.kind in {"rbac", "role-lifecycle", "permission-request", "first-login", "sso", "notification"}:
             flows = {
                 "rbac": [("User", "role_id, active, deleted"), ("Role", "estado y version"), ("RolePermission", "codigos del producto"), ("Administrator protegido", "Catalogo completo vigente; usuarios no copian permisos")],
                 "role-lifecycle": [("Activo", "Crear / editar"), ("Inactivo", "Sin usuarios asociados"), ("Baja logica", "Nombre reservado"), ("Bloqueos backend", "Administrator permanente; usuario inactivo tambien bloquea baja")],
                 "permission-request": [("Cookie / User", "Sesion y organizacion"), ("Role vigente", "Permisos actuales"), ("Ruta y recurso", "Matriz + modulo + scope"), ("Autoridad request-by-request", "Denegar ruta desconocida; UI refresca /me y role_version")],
-                "first-login": [("Alta + Argon2", "Temporal 24 horas"), ("SMTP", "SENT / FAILED"), ("Sesion restringida", "Local o SSO"), ("Nueva password + sesion rotada", "Limpiar temporal; revocar sesiones; habilitar permisos actuales")],
+                "first-login": [("Alta + Argon2", "Temporal 24 horas"), ("Modal una vez", "Entrega externa"), ("Sesion restringida", "Local o SSO"), ("Nueva password + sesion rotada", "Limpiar temporal; revocar sesiones; habilitar permisos actuales")],
                 "sso": [("Proveedor", "Code + PKCE"), ("Validar ID token", "Firma, iss, aud, nonce"), ("ExternalIdentity", "provider / issuer / sub"), ("Trackvance User y Role", "Sin auto-provisioning; sesion HttpOnly local y primer acceso")],
-                "notification": [("NotificationService", "Evento y template"), ("Delivery port", "Mensaje en memoria"), ("SMTP adapter", "TLS + resultado"), ("NotificationDeliveryRecord", "Solo metadata; nunca body, password, tokens ni secretos")],
+                "notification": [("0.6.0", "Intento SMTP"), ("0.6.1", "Envio retirado"), ("Backlog", "Canal por decidir"), ("NotificationDeliveryRecord historico", "0011 y filas conservadas; sin productor de notificaciones") ],
             }
             boxes = flows[self.kind]
             for index, (title, detail) in enumerate(boxes[:3]):
@@ -256,7 +291,8 @@ class Diagram(Flowable):
                 if index < 2:
                     self.arrow(x + (w - 24) / 3 + 1, 144, x + (w + 12) / 3 - 2, 144)
             self.box(0, 16, w, 63, *boxes[3])
-            self.arrow(w / 2, 114, w / 2, 82)
+            exit_x = (5 * w + 24) / 6 if self.kind == "first-login" else w / 2
+            self.arrow(exit_x, 114, exit_x, 82)
         elif self.kind == "product":
             self.box(0, 128, w, 48, "Kubernetes / AKS / EKS / OpenShift", "Web + réplicas API y workers del monolito modular")
             titles = [("Metadata", "PostgreSQL administrado"), ("Storage", "S3 / Azure Blob"), ("Jobs / compute", "Redis-Celery / Polars-PySpark")]
@@ -346,7 +382,7 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Paragraph("Contenido", ParagraphStyle("toc-title", parent=STYLES["h1"])))
     toc = TableOfContents()
     toc.levelStyles = [
-        ParagraphStyle("toc", fontName="ArialBold", fontSize=9, leading=12, textColor=INK, spaceBefore=5),
+        ParagraphStyle("toc", fontName="ArialBold", fontSize=9, leading=12, textColor=INK, spaceBefore=4),
         ParagraphStyle("toc-detail", fontName="Arial", fontSize=8, leading=10.2, leftIndent=13, textColor=MUTED, spaceBefore=0),
     ]
     story.extend([toc, PageBreak()])

@@ -1,6 +1,8 @@
 # Prueba manual de Microsoft y Google SSO
 
-Estas instrucciones permiten ejecutar pruebas externas opt-in. El mock de CI
+Guía opcional conservada para una futura prueba manual. En 0.6.1 Microsoft y
+Google permanecen deshabilitados por defecto; no se configura ni certifica SSO
+real como parte de esta entrega. Estas instrucciones permiten pruebas externas opt-in. El mock de CI
 certifica el cliente OIDC de Trackvance; no certifica cuentas ni servicios reales.
 Mientras no se hayan configurado credenciales y ejecutado cada caso, el resultado
 es `NOT_RUN_EXTERNAL_CREDENTIALS`. Nunca escribas secretos en una captura, ticket,
@@ -15,8 +17,9 @@ commit, comando compartido o archivo de evidencia.
    query strings ni fragmentos como URL pública.
 2. En Configuración → Usuarios crea primero la cuenta con el correo exacto de la
    identidad que vas a probar y un rol de Trackvance. No existe auto-provisioning.
-   No es necesario que SMTP esté configurado para autenticar por SSO, pero el
-   primer acceso seguirá exigiendo definir una contraseña local.
+   El alta muestra la temporal una sola vez al administrador; no envía email ni
+   necesita SMTP. El primer acceso SSO también exige definir una contraseña local.
+   Cerrar el modal descarta el secreto; si se pierde, usa Regenerar credenciales.
 3. Registra una aplicación Web con callback exacto para cada proveedor. El secreto
    permanece sólo en la API, no en React ni en los workers. No habilites implicit
    grant ni scopes de correo/calendario/Graph.

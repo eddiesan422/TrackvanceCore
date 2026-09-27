@@ -1,31 +1,33 @@
-# ADR 0018 — Puerto de notificaciones y entrega SMTP
+# ADR 0018 — Retiro del envío de credenciales y conservación del historial
 
-Fecha: 2026-09-27. Estado: implementado en 0.6.0 para credenciales temporales por email.
+Fecha: 2026-09-27. Estado: decisión de SMTP de 0.6.0 sustituida en 0.6.1. Se conserva la persistencia histórica, no el transporte operativo.
 
-## Arquitectura
+## Antecedente de 0.6.0
 
-0.5.1 declaraba una frontera futura sin adaptador operativo. 0.6.0 implementa `NotificationService → NotificationDelivery → SMTPNotificationDelivery`. El puerto recibe un `NotificationMessage` inmutable con destinatario, asunto y body sólo en memoria; su representación excluye el body. El servicio persiste intentos y decide estado; el adaptador conoce SMTP. La lógica de usuarios invoca el template `USER_TEMPORARY_CREDENTIALS`, sin crear otro motor de correo.
+0.5.1 declaraba una frontera futura sin adaptador. 0.6.0 implementó `NotificationService → NotificationDelivery → SMTPNotificationDelivery`: un mensaje inmutable con destinatario, asunto y cuerpo sólo en memoria. El template USER_TEMPORARY_CREDENTIALS entregaba por email una temporal de 24 horas. Únicamente USER tuvo resolución operativa; ROLE, USERS, DOMAIN, GROUP y alertas de ejecución quedaron pendientes.
 
-El contrato admite futuras clases de eventos y templates sin cambiar transporte. Recipient USER es la única resolución operativa. ROLE, USERS, DOMAIN y GROUP permanecen diseño futuro; no se implementan alertas, runs, excepciones ni entregas automáticas de otro tipo. SSO y SMTP son integraciones independientes.
+El usuario y su hash se confirmaban antes del envío. El intento pasaba de PENDING a SENT o FAILED, con códigos sanitizados y auditoría NOTIFICATION_SENT/FAILED. SENT significaba aceptación SMTP, no lectura ni llegada final al buzón. Un crash podía dejar PENDING. No existía outbox con secretos ni recuperación de la contraseña previa. Las pruebas históricas usaron Mailpit desechable.
 
-## Persistencia y fallos
+## Decisión vigente en 0.6.1
 
-La migración aditiva `0011_notification_delivery` crea `notification_deliveries`: organización, evento, template, canal, tipo de destinatario, User, snapshot de email, provider, número de intento, estado, error_code y fechas. No existe columna para body, contraseña, token, cabecera Authorization, client secret o SMTP password.
+La creación y regeneración ya no envían correo. El backend genera 32 caracteres URL-safe con CSPRNG, conserva únicamente Argon2 y devuelve una respuesta efímera `UserCredentialIssueResponse` con UserResponse y temporary_credentials. Ese objeto incluye username, temporary_password, expires_at y must_change_password=true. Alta responde 201; regeneración 200 exige `{version}`, permiso users:manage, CSRF y organización. Las respuestas llevan `Cache-Control: no-store` y `Pragma: no-cache`.
 
-El User y su hash temporal se confirman antes del envío. Un intento se confirma PENDING; tras la llamada al adaptador pasa a SENT o FAILED y se audita con códigos sanitizados. Un crash entre envío y confirmación puede dejar PENDING: no se afirma entrega ni se reintenta una contraseña cuyo plaintext no se conservó. El operador debe regenerar y reenviar. La infraestructura no promete exactly-once SMTP.
+El administrador ve la temporal una sola vez en un modal y puede copiar username, contraseña o ambos para entregarlos por el canal que elija. Cerrar o desmontar el modal descarta su estado. No se permite recuperar el secreto por GET ni mantenerlo en caché de React Query, Storage, cookies, URL, logs, auditoría, artifacts, backups o evidencia. Si se pierde, se genera uno nuevo; regenerar invalida la contraseña anterior, renueva 24 horas y revoca todas las sesiones. El primer acceso sigue exigiendo cambio local incluso cuando autentica mediante SSO.
 
-Regenerar produce siempre un secreto nuevo, revoca sesiones y renueva 24 horas; la contraseña anterior queda invalidada. Fallar la entrega conserva la cuenta, hace visible el estado y permite otro intento. No se muestra el secreto al administrador. No se persiste un outbox con contenido sensible ni se recupera la contraseña anterior.
+Se elimina el servicio de entrega, el puerto operativo, el adaptador SMTP y el template de envío. Ninguna variable `TRACKVANCE_SMTP_*` habilita una capacidad. SMTP no figura como integración operativa ni como pantalla de configuración y las pruebas nuevas no necesitan Mailpit. Microsoft/Google SSO conserva su implementación, permanece opcional y deshabilitado por defecto; sus secretos no se reutilizan para correo.
 
-## SMTP y template
+Los aliases `/users/{id}/resend-credentials` y `/reset-password` se conservan deprecated y ejecutan exactamente la emisión de `/regenerate-credentials`, sin envío ni intento de notificación. El nombre histórico resend no implica entrega.
 
-Variables: `TRACKVANCE_SMTP_ENABLED`, HOST, PORT, USERNAME, PASSWORD, FROM_ADDRESS, FROM_NAME y SECURITY. Se admiten STARTTLS, SSL/TLS y NONE sólo con `TRACKVANCE_SMTP_ALLOW_INSECURE=true` explícito para local/pruebas. TLS usa validación de certificados por defecto; timeouts limitan las operaciones. Secretos se inyectan sólo al API.
+## Persistencia y compatibilidad
 
-Si no se habilita/configura SMTP, la instalación sigue operativa y el intento queda FAILED/NO_PROVIDER. Errores de autenticación/transporte se convierten a códigos limitados sin publicar respuestas del servidor que pudieran contener datos sensibles. El template contiene nombre, username, contraseña temporal, expiración UTC, URL pública, obligación de cambio y advertencia de seguridad. Los tests Mailpit pueden extraer las líneas `Username:` y `Contraseña temporal:` exclusivamente del buzón desechable; la aplicación no ofrece esta extracción.
+La migración `0011_notification_delivery`, el modelo NotificationDeliveryRecord y la tabla notification_deliveries se conservan intactos. Registran organización, evento/template, canal, tipo de destinatario, User, snapshot de email, proveedor, número de intento, estado, error_code y fechas. Nunca incluyeron columnas para body, contraseña, token, Authorization, client secret o password SMTP.
 
-`GET /notifications/status` exige notifications:read y devuelve habilitación/configuración/remitente/seguridad sin credenciales. `/notifications/deliveries` devuelve hasta 200 metadatos de la organización; detalles de User incluyen el último intento de credenciales. La configuración del proveedor permanece en entorno, no editable como secreto desde UI.
+0.6.1 no crea nuevos registros por alta/regeneración ni modifica los PENDING/SENT/FAILED existentes. Todas las migraciones 0001..0012 permanecen byte a byte iguales y el head continúa en 0012; no se añade 0013. La compatibilidad de backup/restore incluye las filas históricas, aunque ningún transporte nuevo las utilice.
 
-## Validación y límites
+`GET /notifications/deliveries` permanece deprecated, exige notifications:read y devuelve hasta 200 metadatos de la organización. `GET /notifications/status` también está deprecated y responde siempre enabled=false, configured=false, provider=NONE, security=NONE, remitente vacío y availability=HISTORICAL_ONLY. No lee variables SMTP. Los permisos históricos se mantienen para compatibilidad del catálogo, sin habilitar envíos. UserResponse deja de incluir credential_delivery.
 
-Pruebas comprueban fallo sin proveedor, adapter con error sensible, metadata sin contraseña/body, Argon2, secreto nuevo en regeneración, revocación y Mailpit. El puerto acepta un adaptador inyectado para pruebas sin usar cuentas reales. Las credenciales de proveedores externos no forman parte del respaldo funcional y deben restituirse aparte de los datos, según la guía de operaciones.
+## Validación y futuro
 
-Limitación deliberada: el envío es síncrono y local, sin broker, jobs email ni reintento automático con contenido. Futuras notificaciones no sensibles podrán introducir entrega desacoplada mediante este mismo puerto, con garantías y payload definidas en otra decisión.
+Las pruebas comprueban emisión exclusiva en respuestas autorizadas, Argon2, caducidad, CAS, regeneración y revocación, primer acceso, no invocación SMTP incluso con variables legacy, cero nuevas notificaciones, preservación del historial y ausencia de secretos en respuestas ordinarias, DB, auditoría, logs y almacenamiento. El mock OIDC sigue probando code, PKCE, firmas, claims y usuarios preprovisionados sin correo. La evidencia se publica por ejecución, sin secretos.
+
+No se ha elegido una tecnología para futuras notificaciones. Añadir cualquier canal, resolutor de destinatarios, procesamiento asíncrono o garantías de entrega requerirá otra decisión y una interfaz nueva acorde a sus requisitos. Esta tabla histórica por sí sola no constituye un motor habilitable.

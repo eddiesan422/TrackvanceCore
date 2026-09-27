@@ -1,7 +1,8 @@
-# Identidad, autorización y notificaciones 0.6.0
+# Identidad y autorización 0.6.1; compatibilidad con 0.6.0
 
-Este documento describe la implementación; los resultados ejecutados se registran
-en `validation.md` y `evidence/0.6.0`. Una capacidad implementada no equivale a una
+Este documento conserva la arquitectura de identidad introducida en 0.6.0 y
+describe el flujo de credenciales vigente en 0.6.1. Los resultados ejecutados se
+registran por release en `validation.md` y `evidence/`. Una capacidad implementada no equivale a una
 prueba real de Microsoft/Google. Los ensayos externos sin credenciales conservan
 `NOT_RUN_EXTERNAL_CREDENTIALS`.
 
@@ -103,7 +104,8 @@ mantiene junto al contrato y se contrasta con las rutas instaladas por FastAPI.
 
 ## Usuarios y acceso local
 
-El formulario de alta requiere nombres, apellidos, username, email, rol y estado.
+El alta requiere nombres, apellidos, username, email y rol; active es opcional
+en API y vale true por defecto. La interfaz permite elegirlo.
 Los nombres/apellidos heredados siguen nulos hasta una edición explícita; no se
 deducen a partir de un display name. Para usuarios nuevos, `name` es la unión de
 nombres y apellidos. Username acepta 3 a 80 caracteres ASCII entre letras,
@@ -118,29 +120,43 @@ posterior de username no cambia el snapshot de una Run ya encolada.
 
 La pantalla acepta usuario o correo con contraseña. El error de login es
 genérico para no confirmar si existe una cuenta. La autenticación local sigue
-disponible cuando SSO y SMTP están deshabilitados. La API de alta no acepta una
-contraseña elegida por el administrador: genera una credencial criptográfica de
-al menos 20 caracteres, guarda únicamente Argon2 y establece cambio obligatorio
-con expiración a 24 horas. El plaintext vive en memoria durante el envío SMTP;
-no aparece en DTOs, frontend administrativo, auditoría, logs ni tabla de entregas.
+disponible cuando SSO está deshabilitado. Desde 0.6.1 SMTP está retirado del flujo.
+La API de alta no acepta una contraseña elegida por el administrador: genera
+32 caracteres URL-safe mediante CSPRNG, guarda únicamente Argon2 y establece
+cambio obligatorio con expiración a 24 horas.
+
+`POST /users` devuelve 201 y `POST /users/{id}/regenerate-credentials` devuelve 200
+con `{user, temporary_credentials:{username,temporary_password,expires_at,
+must_change_password:true}}`. Sólo estas operaciones y sus aliases deprecated
+contienen el plaintext. `UserResponse` normal, `/me` y todos los GET carecen del
+secreto y del antiguo campo credential_delivery. Las respuestas de emisión llevan
+`Cache-Control: no-store` y `Pragma: no-cache`.
 
 ```mermaid
 flowchart TD
-    A[Administrador crea User] --> H[Generar temporal y guardar hash Argon2]
-    H --> M[Intentar entrega SMTP]
-    M --> S[Metadatos SENT o FAILED]
-    S --> L[Usuario entra por username/email y temporal]
+    A[Administrador crea o regenera User] --> H[Generar temporal y guardar sólo Argon2]
+    H --> M[Respuesta efímera y modal de una sola visualización]
+    M --> C[Administrador copia y entrega por su canal elegido]
+    M --> D[Cerrar modal descarta el secreto]
+    C --> L[Usuario entra por username/email y temporal]
     L --> R[Sesión restringida de primer acceso]
     R --> P[Definir y confirmar contraseña nueva]
-    P --> V[Invalidar temporal, revocar sesión y rotar cookie/CSRF]
+    P --> V[Invalidar temporal, revocar sesiones y rotar cookie/CSRF]
     V --> N[Acceso normal según Role vigente]
 ```
 
-Si SMTP falla, el usuario permanece creado y se muestra el estado de entrega.
-Regenerar y reenviar crea otra contraseña, sustituye el hash, renueva la
-expiración, reactiva la obligación y revoca sesiones. No recupera la credencial
-anterior ni permite verla al administrador. La operación necesita versión
-esperada; su evento no contiene el password ni su hash.
+El modal muestra nombre, rol, username, temporal y expiración; permite copiar
+usuario, contraseña o ambos. Su estado se descarta al cerrar/desmontar: no se
+conserva en caché React Query, localStorage, sessionStorage, cookies o URL.
+El clipboard sólo cambia por una acción explícita de copia. Reabrir el detalle
+no recupera la contraseña. Si se pierde, un administrador debe regenerarla.
+
+Regenerar crea otra contraseña, sustituye el hash, renueva 24 horas, reactiva la
+obligación y revoca todas las sesiones. Requiere users:manage, CSRF, scope y
+versión esperada. Los aliases `/resend-credentials` y `/reset-password` están
+deprecated y ejecutan exactamente la misma emisión sin envío de correo.
+Ni el secreto ni su hash entran en auditoría, logs o metadatos de notificación.
+No se crea ningún NotificationDeliveryRecord por alta o regeneración.
 
 Una sesión con `must_change_password=true` únicamente puede usar `/me`, logout y
 el cambio de primer acceso. No puede consultar Datasets, publicar Delivery ni
@@ -209,33 +225,23 @@ JWKS y token exchange se hacen durante autenticación, no como requisito de
 salud de workers. El modo de proveedor falso exige un indicador explícito de
 test y vive en un overlay desechable; no está habilitado en Compose base.
 
-## Notificaciones reutilizables
+## Historial de notificaciones de 0.6.0
 
-En 0.5.1 había una frontera preparada sin transporte operativo. En 0.6.0
-NotificationService recibe el evento/template y delega un mensaje efímero en el
-puerto NotificationDelivery. SMTPNotificationDelivery implementa EMAIL. El
-primer template funcional es USER_TEMPORARY_CREDENTIALS: nombre, username,
-contraseña temporal, expiración, URL de Trackvance y avisos de cambio y seguridad.
+0.6.0 incorporó un servicio y adaptador SMTP para entregar temporales. Esa
+decisión se retiró en 0.6.1: ya no existen NotificationService,
+SMTPNotificationDelivery ni un puerto operativo. No hay configuración, pantalla,
+capacidad SMTP habilitable por entorno ni dependencia de Mailpit para usar o
+probar credenciales. No se ha elegido un transporte futuro.
 
-NotificationDeliveryRecord guarda organización, tipo de evento, template,
-canal, recipient_type, user_id, email snapshot, provider_key, número de intento,
-estado PENDING/SENT/FAILED, error_code y fechas. No guarda subject/body que
-contengan contraseña, hashes Argon2, cabeceras Authorization ni credenciales
-SMTP. El estado PENDING se confirma antes de enviar; una interrupción del
-proceso puede dejarlo pendiente. Recuperarse exige una regeneración explícita:
-no existe una cola que pueda reenviar un cuerpo secreto persistido.
-
-SMTP acepta STARTTLS y SSL/TLS con validación de certificados; NONE requiere
-habilitación explícita de entorno local/test. Errores de autenticación, conexión
-o configuración se convierten en códigos controlados. La ausencia de proveedor
-produce FAILED/NO_PROVIDER y no interrumpe el arranque. Configuración muestra
-remitente y estado, nunca usuario/password SMTP o secretos OAuth.
-
-El destinatario operativo es USER. El puerto y los metadatos están preparados
-para futuros resolutores USER/USERS/ROLE/DOMAIN/GROUP, pero no se implementan
-envíos masivos ni resolución de grupos en este release. Tampoco se envían aún
-RUN_COMPLETED, DELIVERY_FAILED, DELIVERY_UNKNOWN o SENTINEL_ALERT. Añadir esos
-eventos reutilizará este servicio en lugar de crear otro motor de email.
+NotificationDeliveryRecord y la migración 0011 permanecen intactos para preservar
+historia y backups. Sus campos conservan organización, evento/template, canal,
+recipient_type, user_id, snapshot de email, provider, intento, estado, códigos
+y fechas. No se reescriben estados PENDING/SENT/FAILED anteriores ni se generan
+intentos nuevos. Los GET deprecated `/notifications/deliveries` y
+`/notifications/status` permiten compatibilidad de lectura; el status es siempre
+`enabled=false`, `configured=false`, `availability=HISTORICAL_ONLY`.
+Los permisos históricos se conservan, sin conceder una capacidad de envío.
+Ver [ADR 0018](../adr/0018-notification-delivery.md).
 
 ## Migración, compatibilidad, seguridad y pruebas
 
@@ -243,27 +249,30 @@ eventos reutilizará este servicio en lugar de crear otro motor de email.
 oidc_login_attempts, los nuevos campos de usuarios y el método de sesión.
 `0011_notification_delivery` añade los metadatos de entrega.
 `0012_delivery_target_audit` añade políticas físicas y metadata por intento.
-Las migraciones 0001..0009 permanecen sin modificaciones. Upgrade, downgrade y
+0.6.1 no añade migraciones: 0001..0012 permanecen byte a byte intactas y el head
+continúa en 0012. Upgrade, downgrade y
 upgrade se prueban únicamente sobre bases desechables. Un downgrade descarta las
 capacidades nuevas; no es un procedimiento de operación para datos 0.6.0 activos.
 
 La verificación de almacenamiento incorpora claves compuestas y una huella nueva
 state 5. Restore de 0.5.1 produce una proyección state 4 que excluye únicamente las
 adiciones definidas; exige identidad exacta de las filas/campos históricos.
-Los formatos anteriores soportados mantienen su proyección propia. `.env` y los
-secretos SMTP/OAuth externos no forman parte del backup: deben restaurarse desde
-la configuración privada del operador.
+Los formatos anteriores soportados mantienen su proyección propia. Un restore
+de 0.6.0 a 0.6.1 conserva esquema, historial y huella funcional. `.env` y los
+secretos OAuth externos no forman parte del backup: se restauran desde la
+configuración privada del operador. Las antiguas variables SMTP no tienen efecto.
 
 La certificación debe demostrar autorización con petición manipulada, aislamiento
 de organización, dependencias, protección del último administrador, cambios de
-rol/permisos y revocación. Mailpit permite obtener la temporal exclusivamente
-desde el entorno de test y comprobar expiración, regeneración, primer acceso y
-ausencia de plaintext en DB/logs. El mock OIDC usa code+PKCE y tokens RS256 reales
+rol/permisos y revocación. Las pruebas mantienen las credenciales emitidas sólo
+en memoria; comprueban expiración, regeneración, primer acceso, revocación,
+no envío SMTP, historial sin nuevos registros y ausencia de plaintext en GET,
+DB, auditoría, logs, artefactos y backup. No necesitan Mailpit. El mock OIDC usa code+PKCE y tokens RS256 reales
 para probar navegador, replay, state/nonce, issuer/audience/expiración, usuarios
 inexistentes/desactivados/eliminados y sujeto estable. Estos resultados se
 publican con sus conteos reales; no certifican el servicio externo.
 
-Fuera de 0.6.0: auto-provisioning, group-to-role/domain, dominios administrables,
+Fuera de 0.6.1: auto-provisioning, group-to-role/domain, dominios administrables,
 gobierno ampliado, notificaciones de ejecución, SMTP OAuth2, secretos cloud,
 SHIST/SCD, masking, retención avanzada y plataformas distribuidas. DatasetVersion
 sigue siendo el versionado inmutable interno.

@@ -1,72 +1,25 @@
-# Configurar email de credenciales
+# SMTP: antecedente histórico de 0.6.0, deshabilitado en 0.6.1
 
-SMTP y SSO son integraciones independientes. Un client secret Google/Microsoft
-para login no sirve como contraseña SMTP y el adaptador no reutiliza tokens SSO.
+Esta página se conserva para explicar datos y documentación de instalaciones anteriores. **Trackvance Core 0.6.1 no configura, habilita ni envía correo SMTP.** El adaptador, servicio, template operativo y pantalla de Notificaciones se retiraron. No se ha elegido un transporte futuro.
 
-## SMTP genérico
+## Flujo vigente de credenciales
 
-En el `.env` privado establece `TRACKVANCE_SMTP_ENABLED=true`, host, puerto,
-remitente y modo de seguridad. Los nombres completos están en `.env.example`.
-Para submission con STARTTLS utiliza normalmente puerto 587 y
-`TRACKVANCE_SMTP_SECURITY=STARTTLS`; para TLS implícito utiliza el puerto que
-indique el proveedor (habitualmente 465) y `SSL` o `TLS`. El adaptador valida el
-certificado con el almacén de confianza del sistema. Configura username/password
-sólo cuando el servidor los requiera y autorice esa modalidad.
+En Configuración → Usuarios, el administrador crea una cuenta o usa **Regenerar credenciales**. La respuesta de esa operación contiene una temporal de 24 horas que se muestra una sola vez, junto con username, nombre, rol y expiración. El modal permite copiar usuario, contraseña o ambos. El administrador puede entregarlos por el canal que elija.
 
-Recrea la API conservando volúmenes. Configuración → Notificaciones muestra
-configurado/no configurado, remitente y estado de entrega. Crear un usuario
-envía una contraseña temporal de 24 horas. Si falla, el usuario se conserva y
-la entrega muestra un código controlado. Una vez corregida la integración, usa
-**Regenerar y reenviar credenciales**; esto crea otra contraseña e invalida la
-anterior. No existe recuperación ni vista administrativa del plaintext.
+Cerrar o desmontar el modal descarta el secreto; no se puede recuperar mediante el detalle, GET o historial. Si se pierde, se regenera. La regeneración sustituye el hash, invalida la contraseña anterior y revoca todas las sesiones. El primer acceso obliga a definir una contraseña local nueva. No se crea ningún intento de notificación ni se necesita una cuenta de correo, App Password, SMTP AUTH o Mailpit.
 
-`NONE` se limita a un entorno local/test explícito con
-`TRACKVANCE_SMTP_ALLOW_INSECURE=true`. No se activa por omitir TLS. Cuando SMTP
-está incompleto o deshabilitado, Trackvance inicia y crea usuarios con entrega
-FAILED/NO_PROVIDER. No se incluyen body/password en notificaciones persistidas.
+La API devuelve `UserCredentialIssueResponse` únicamente desde alta/regeneración y sus aliases deprecated; aplica no-store/no-cache. UserResponse normal no contiene secreto ni credential_delivery. El frontend no conserva la temporal en caché, Storage, cookies o URL. Evita capturas, tickets, logs y archivos de evidencia con credenciales.
 
-## Mailpit de pruebas
+## Compatibilidad con instalaciones 0.6.0
 
-Los runners añaden `deploy/docker/compose.mailpit-test.yml` a un proyecto nuevo,
-con SMTP interno 1025 y API/UI ligada a loopback. No añadas ese overlay al
-Compose de la instalación habitual. El test obtiene la contraseña desde
-`/api/v1/messages` y `/api/v1/message/{id}` únicamente en memoria para completar
-primer acceso; no la publica en reports, logs o artifacts.
-La [documentación de Mailpit](https://mailpit.axllent.org/docs/api-v1/) describe
-su API y el [uso en Docker](https://mailpit.axllent.org/docs/install/docker/)
-permite reproducir ese entorno desechable.
+0.6.0 tenía un adaptador SMTP con STARTTLS/SSL/TLS y NONE limitado explícitamente a pruebas locales. Los nombres históricos `TRACKVANCE_SMTP_ENABLED`, HOST, PORT, USERNAME, PASSWORD, FROM_ADDRESS, FROM_NAME, SECURITY y ALLOW_INSECURE pertenecen a ese release. **No tienen efecto en 0.6.1 y no existe una combinación que reactive el envío.** No añadas variables, un overlay Mailpit ni secretos SMTP a una instalación nueva.
 
-## Gmail y App Password
+La tabla notification_deliveries se mantiene para preservar backups e historial. SENT documentaba aceptación por un servidor; FAILED podía registrar NO_PROVIDER u otros códigos; PENDING podía quedar tras una interrupción. Esos estados históricos no cambian ni provocan reenvíos. Alta/regeneración 0.6.1 no añade filas ni eventos NOTIFICATION_SENT/FAILED.
 
-Cuando la cuenta y sus políticas lo permiten, activa 2-Step Verification y
-genera una contraseña de aplicación específica para este SMTP. Guarda ese valor
-en TRACKVANCE_SMTP_PASSWORD, con el correo completo como username. No uses la
-contraseña normal de Google ni un secreto OAuth de SSO. La disponibilidad de App
-Passwords depende del tipo de cuenta y sus restricciones; consulta la
-[guía oficial](https://support.google.com/accounts/answer/185833?hl=en). Usa el
-host/puerto/TLS de SMTP que Google documente para tu modalidad de cuenta.
+Las lecturas API deprecated `/notifications/deliveries` y `/notifications/status` conservan compatibilidad con permisos y organización. El estado actual es siempre disabled/unconfigured, availability=HISTORICAL_ONLY. No existe pantalla para habilitarlo. Las migraciones 0001..0012 y NotificationDeliveryRecord se conservan intactos; no hay migración 0013.
 
-## Microsoft SMTP
+## SSO y recuperación
 
-Este adaptador implementa SMTP con credenciales y TLS; no implementa SASL OAuth2.
-Sólo puede usar un servidor/relay Microsoft cuya configuración autorice esa
-modalidad. No se afirma compatibilidad general con SMTP AUTH de Microsoft 365:
-las políticas del tenant, Security defaults y evolución de Basic Authentication
-pueden impedirlo. No reduzcas la seguridad del tenant para cumplir la prueba.
-Si exige OAuth, el caso queda NOT_RUN_UNSUPPORTED_SMTP_AUTH hasta incorporar un
-adaptador apropiado. Consulta [SMTP AUTH en Exchange Online](https://learn.microsoft.com/en-us/Exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission)
-y [SMTP con OAuth](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth).
+El correo sigue siendo metadata de identidad y puede servir para el primer enlace SSO verificado. Microsoft y Google continúan siendo integraciones de autenticación independientes, opcionales y deshabilitadas por defecto. La [guía SSO](sso-setup.md) describe su activación manual futura; no necesita SMTP ni reutiliza sus secretos.
 
-## Operación y recuperación
-
-La tabla conserva sólo destinatario, template, proveedor, intentos, resultado y
-fechas; NOTIFICATION_SENT/FAILED aportan auditoría. SENT significa aceptación por
-el servidor SMTP, no confirmación de lectura o entrega final en la bandeja.
-Una interrupción entre envío y actualización local puede dejar PENDING: no
-reenvíes el mismo secreto; genera credenciales nuevas explícitamente.
-
-`.env` y passwords SMTP/client secrets SSO están fuera del backup. Conserva su
-configuración en el mecanismo privado del operador y reintégrala tras restore.
-Nunca incluyas esos valores ni correos con contraseñas en evidencia de CI.
-En 0.6.0 sólo se envían credenciales USER; alertas de Runs, roles, dominios y
-grupos permanecen pendientes aunque el puerto pueda reutilizarse.
+Un restore conserva las filas históricas de notificaciones sin reactivar transportes. `.env` y secretos externos no forman parte del backup funcional. Los secretos OAuth de una integración SSO habilitada se restituyen mediante la configuración privada del operador; las antiguas variables SMTP no habilitan nada. Ver [ADR 0018](../adr/0018-notification-delivery.md) y el [contrato de identidad](identity-060.md).

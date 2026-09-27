@@ -1,0 +1,27 @@
+{
+  "version": "0.6.1",
+  "status": "PASS",
+  "project": "trackvance-e2e-1860-10bfaa",
+  "port": 58154,
+  "demo_seed_enabled": false,
+  "browser": {
+    "status": "PASS",
+    "startTime": "2026-09-27T14:41:58.802Z",
+    "duration": 1878.402,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0,
+    "artifact_credentials_scan": "PASS",
+    "raw_artifacts_published": false
+  },
+  "smoke": "NOT_RUN_CLEAN_DEMO",
+  "playwright": "PASS",
+  "migrations": "PASS",
+  "persistence_after_restart": "PASS",
+  "restart_policies": [
+    "no"
+  ],
+  "cleanup": "PASS",
+  "duration_seconds": 61.566
+}

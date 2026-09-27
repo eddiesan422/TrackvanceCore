@@ -1,8 +1,8 @@
-# Alcance funcional local 0.6.0
+# Alcance funcional local 0.6.1
 
 Se conserva el monolito FastAPI/React, PostgreSQL interno, artifacts locales,
 workers DEFAULT/DELIVERY, Conexiones PostgreSQL/SQL Server y DatasetVersions
-inmutables. Esta versión evoluciona el producto existente sobre 0.5.1.
+inmutables. Esta versión evoluciona el producto existente sobre 0.6.0.
 
 | Área | Implementado | Límites / preparado |
 | --- | --- | --- |
@@ -10,11 +10,11 @@ inmutables. Esta versión evoluciona el producto existente sobre 0.5.1.
 | Intake/ReconOps/Sentinel | Reglas, transforms, referencias, conciliación, programación Sentinel e historia compatible | Sin notificaciones externas de ejecuciones |
 | Excepciones | Asignación, SLA, adjuntos, validación, reapertura y política automática opcional | Sin escalamiento corporativo |
 | RBAC | Roles persistentes, catálogo, dependencias, Administrator protegido, propagación inmediata backend | Sin permisos arbitrarios; gestión de usuarios/roles no delegable |
-| Usuarios | Username/email, alta con temporal, primer acceso, regeneración, baja lógica y sesiones revocables | Nombres/apellidos heredados no inventados; identidad reservada tras baja |
-| SSO | Microsoft common personal/corporativo y Google Gmail/Workspace; identidad estable | Sin auto-provisioning ni group-role/domain; tests reales externos opt-in |
-| Notificaciones | Puerto reutilizable y SMTP para credenciales USER; metadatos de entrega | Sin cuerpos persistidos, notificaciones de Runs ni SMTP OAuth2 |
+| Usuarios | Username/email, temporal visible una vez, primer acceso, regeneración, baja lógica y sesiones revocables | Nombres/apellidos heredados no inventados; identidad reservada tras baja |
+| SSO | Microsoft common personal/corporativo y Google Gmail/Workspace; identidad estable | Deshabilitado por defecto; sin auto-provisioning ni group-role/domain; proveedores externos no probados en este ciclo |
+| Notificaciones | Lectura y persistencia histórica 0.6.0 | Sin SMTP operativo, sin pestaña ni env estándar; notificaciones funcionales y canal futuros |
 | Delivery | CREATE/APPEND/OVERWRITE/UPSERT, UNKNOWN, evidencia/revisión, audit policy física, fechaIngesta/usuario | Sin SHIST/SCD, scheduler, replay automático ni nuevos Sink |
-| Operación | Migraciones 0010/0011/0012, backup state5 y proyecciones legacy, Docker manual | .env fuera de backup; sin cloud, Kubernetes, Helm o Terraform |
+| Operación | Sin migración nueva; 0001..0012 intactas, backup state5 y proyecciones legacy, Docker manual | .env fuera de backup; sin cloud, Kubernetes, Helm o Terraform |
 
 Los límites por defecto siguen en 10 MiB, 100.000 filas y 100 columnas. Los
 benchmarks smoke no certifican volúmenes mayores. PySpark, Redis/Celery,

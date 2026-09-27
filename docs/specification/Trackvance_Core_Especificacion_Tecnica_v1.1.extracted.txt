@@ -1,8 +1,8 @@
 --- PAGE 1 ---
 Trackvance Core
 Especificación técnica v1.1
-IMPLEMENTACIÓN 0.6.0 · EVOLUCIÓN FUNCIONAL LOCAL
-26 septiembre 2026 · Estado funcional y evidencia de validación
+IMPLEMENTACIÓN 0.6.1 · EVOLUCIÓN FUNCIONAL LOCAL
+27 septiembre 2026 · Estado funcional y evidencia de validación
 Arquitectura local y evolución a producto
 Monolito modular · Persistencia local · Reglas portables · Evidencia verificable
 Documento oficial de referencia. Describe el estado real de Trackvance Core y distingue las capacidades implementadas de los
@@ -12,8 +12,8 @@ Trackvance Colombia SAS
 
 --- PAGE 2 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 2
 Contenido
 7
@@ -84,15 +84,15 @@ N. Preview, configuración y publicación
 O. Workers, lanes y frontera de commit
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 19
 P. Estados del intento y del Run
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 19
+Q. UNKNOWN: revisión operacional append-only
 
 
 --- PAGE 3 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 3
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 19
-Q. UNKNOWN: revisión operacional append-only
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 20
 R. COMMITTED + PENDING_REPAIR: sólo evidencia local
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 20
@@ -161,15 +161,15 @@ Caso operativo: cierre respaldado por nueva ejecución
 Rutas SPA
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 32
 Carga diferida y continuidad de la navegación
+33
+13. StorageProvider, artefactos y linaje
 
 
 --- PAGE 4 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 4
-33
-13. StorageProvider, artefactos y linaje
 34
 14. Manifest schema 2 y auditoría
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 34
@@ -190,7 +190,7 @@ Cadena de trazabilidad
 18. API y errores
 41
 19. Contratos HTTP y permisos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 41
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 42
 Administración de identidad implementada
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 42
 Errores operativos
@@ -198,14 +198,14 @@ Errores operativos
 20. Configuración, operación y respaldo
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 43
 Respaldo Docker consistente
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 43
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 44
 Restauración en proyecto nuevo
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 44
 Reset deliberado
 45
 20A. Benchmark reproducible y límites comprobados
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 45
-Antecedente de volumen 0.4.0; no certifica 0.6.0
+Antecedente de volumen 0.4.0; no certifica 0.6.1
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 45
 Representatividad y progresión detenida
 46
@@ -215,9 +215,9 @@ Pasos de evolución sin cambiar reglas
 47
 22. Calidad, pruebas y aceptación
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 48
-Certificación incremental 0.6.0
+Certificación incremental 0.6.1
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 48
-Antecedente certificado 0.5.0 (no certifica 0.6.0)
+Antecedente certificado 0.5.0 (no certifica 0.6.1)
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 49
 Base certificada de 0.4.1
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 49
@@ -234,17 +234,17 @@ Pendientes explícitos
 Precedencia y cambios de esta revisión
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 52
 Registro
-
-
---- PAGE 5 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-5
 53
 24. Antecedente: cambios funcionales y técnicos 0.5.1
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 53
 1. Reparación local de evidencia COMMITTED
+
+
+--- PAGE 5 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+5
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 53
 2. Revisión operacional de UNKNOWN
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 53
@@ -262,108 +262,165 @@ Trackvance Colombia SAS · 26 septiembre 2026
 55
 25. RBAC dinámico y administración real de roles
 57
-26. Usuarios, login local y primer acceso
-58
+26. Usuarios, credenciales y primer acceso
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 57
+Alta e identidad estable
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 57
+Emisión efímera y entrega externa
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 58
+Modal obligatorio y ciclo de vida del plaintext
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 59
+Regeneración y concurrencia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 59
+Login, expiración y primer acceso
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 60
+Estado, permisos y auditoría
+60
 27. SSO Microsoft y Google
-59
-28. Infraestructura reutilizable de notificaciones
-60
-29. Migración de identidad, recuperación y pruebas
-60
-30. Auditoría técnica de Data Delivery
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 60
-Cambio funcional respecto a 0.5.1
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 60
-Uso del builder
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 61
-Qué significan las columnas
+61
+28. Notificaciones: historia preservada y backlog
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 61
+Decisión funcional posterior a 0.6.0
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 61
+Compatibilidad histórica sin servicio operativo
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 61
+Eventos futuros, canal por decidir
+62
+29. Persistencia, recuperación y pruebas de identidad
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 62
+Sin nueva migración en 0.6.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 62
+Backups nativos y heredados
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 62
+Recorridos de navegador y SSO conservado
+63
+30. Auditoría técnica de Data Delivery
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 63
+Cambio funcional respecto a 0.5.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 63
+Uso del builder
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 63
+Qué significan las columnas
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 64
 Esquemas y compatibilidad de tipos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 61
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 64
 Modelo persistente y migración
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 62
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 65
 Fronteras transaccionales y permisos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 63
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 66
 Drift, fallos y estado UNKNOWN
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 63
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 66
 Contratos y evidencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 64
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 67
 Backup/restore, pruebas y límites
-64
-31. Cambios funcionales y técnicos 0.6.0
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 65
+67
+31. Antecedente: cambios funcionales y técnicos 0.6.0
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 68
 A. Roles y catálogo de permisos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 65
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 68
 B. Usuarios, credenciales y SSO
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 66
-C. Notificaciones
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 66
-D. Auditoría de publicación
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 67
-Resultados ejecutados de la edición
-68
-32. Configuración y prueba real SSO
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 68
-Preparación común
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 68
-A. Cuenta personal Microsoft: Outlook, Hotmail, Live
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 69
-B. Microsoft Entra work/school
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 69
-C. Gmail personal
 
 
 --- PAGE 6 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 6
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 70
-D. Google Workspace
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 69
+C. Notificaciones
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 69
+D. Auditoría de publicación
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 70
-Verificación y desvinculación
+Resultados del antecedente
+70
+32. Configuración y prueba real SSO
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 70
-Errores frecuentes
-71
-33. Configuración SMTP y operación de credenciales
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
-SMTP genérico
+Preparación común
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 70
+A. Cuenta personal Microsoft: Outlook, Hotmail, Live
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
+B. Microsoft Entra work/school
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
-Mailpit de pruebas
+C. Gmail personal
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
-Gmail y App Password
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
-Microsoft SMTP
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
-Operación y recuperación
+D. Google Workspace
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 71
+Verificación y desvinculación
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 72
+Errores frecuentes
 72
-34. Matriz completa de autorización
+33. Operación de credenciales y retiro de SMTP
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 72
+Antecedente 0.6.0
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 72
+Operación estándar 0.6.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 72
+Configuración e instalación del cliente
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 73
+Notificaciones futuras
+73
+34. Matriz completa de autorización
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 73
 Catálogo y dependencias
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 73
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 75
 Endpoints públicos y de sesión
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 74
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 76
 Endpoints protegidos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 76
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 78
 Controles adicionales por recurso y operación
+79
+35. Cambios funcionales y técnicos 0.6.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+1. Situación 0.6.0
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+2. Problema funcional
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+3. Decisión de producto
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+4. Solución funcional
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+5. Solución técnica
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 79
+6. Cambios API
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+7. Cambios UI
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+8. Persistencia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+9. Seguridad y límites de memoria
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+10. Compatibilidad
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+11. E2E y privacidad de evidencia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+12. Upgrade Docker real
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+13. CI y trazabilidad documental
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+14. Limitaciones
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 80
+15. Pendientes posteriores
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 81
+Resultados ejecutados 0.6.1
 
 
 --- PAGE 7 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 7
 1. Alcance, estados e invariantes
 Trackvance Core es una plataforma local de confiabilidad de datos. Integra Data Intake, ReconOps, Sentinel y Data Delivery con
 Datasets, Excepciones, Centro de Control, Auditoría e Identidad/RBAC. El usuario carga o versiona datos, publica una
 configuración inmutable, ejecuta controles o entregas y conserva evidencia verificable del resultado.
-Esta especificación describe 0.6.0 sobre la baseline de repositorio 0.5.1. Añade RBAC dinámico, username/primer acceso,
-Microsoft/Google SSO, SMTP reutilizable y fechaIngesta/usuario en Data Delivery. Los capítulos 25 a 34 desarrollan funcional y
-técnicamente esta evolución. La instalación Docker detectada aún ejecutaba 0.5.0/0008 antes de actualizarse; esa diferencia se
-conserva en la evidencia de upgrade. Conserva de 0.5.1 Data Delivery PostgreSQL/SQL Server, reparación de evidencia, revisión
-operacional UNKNOWN, métricas honestas, conteos UPSERT fiables cuando el motor los proporciona, regresión temporal, linaje
-preciso, benchmark dedicado y carga diferida del frontend. El documento conserva su nombre v1.1. La tabla de validación informa
-cada ejecución real y distingue antecedentes, pendientes y limitaciones; no se heredan éxitos de otra versión.
+Esta especificación describe 0.6.1 sobre la baseline exacta 0.6.0 (587909bc4462683e87e403dd2ea29a1d6d4afe08). Revierte
+deliberadamente el envío SMTP de credenciales: alta y regeneración devuelven una temporal efímera que el administrador ve una
+sola vez y entrega externamente. Conserva RBAC dinámico, login local, primer acceso obligatorio, Microsoft/Google OIDC y Data
+Delivery con fechaIngesta/usuario. SSO permanece implementado, opcional y deshabilitado por defecto; su activación se decide
+durante la implantación según el cliente. El modelo continúa con 31 tablas y Alembic 0012_delivery_target_audit, sin alterar
+0001..0012. Los capítulos 25..34 describen las capacidades vigentes y el antecedente 0.6.0; el capítulo 35 detalla la corrección
+0.6.1. Se conserva el nombre documental v1.1. La validación distingue ejecuciones actuales, antecedentes y limitaciones, sin
+heredar éxitos de otra versión.
 Estado
 Significado normativo
 IMPLEMENTADO
@@ -404,8 +461,8 @@ productización del punto 11 requiere una evolución posterior.
 
 --- PAGE 8 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 8
 2. Arquitectura lógica estable
 La separación principal es entre adquisición de datos, almacenamiento interno y ejecución. Estos conceptos tienen
@@ -465,11 +522,12 @@ Presupuesto de memoria/disco local
 JobQueue
 Publicar el trabajo asociado a un Run.
 DatabaseJobQueue
-NotificationDelivery
-Puerto real de entrega de mensajes
-efímeros.
-SMTP para credenciales USER; otros
-eventos/destinatarios preparados
+Notificaciones históricas
+Modelo y lectura de registros 0.6.0
+conservados.
+Sin envío, adaptador SMTP ni productor
+operativo en 0.6.1; eventos futuros en
+backlog
 Las reglas no reciben cadenas de conexión ni conocen CSV, Excel o buckets. Trabajan sobre el modelo común producido por los
 lectores y el Parquet canónico. La orquestación usa identidades de versiones y configuraciones, genera hallazgos y publica
 evidencia mediante los puertos.
@@ -477,8 +535,8 @@ evidencia mediante los puertos.
 
 --- PAGE 9 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 9
 Separación incremental
 La implementación mantiene un paquete Python compacto. API, servicios, modelos ORM, reglas, adapters y worker están en
@@ -544,8 +602,8 @@ los de fuente. La copia de recuperación debe conservar metadata, artifacts y am
 
 --- PAGE 10 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 10
 Todos los servicios declaran restart: "no". Trackvance permanece detenido al iniciar Docker Desktop hasta que el usuario ejecute el
 arranque. La instancia del equipo usa trackvance-certification y http://localhost:3100; el valor por defecto del repositorio es 3000.
@@ -576,8 +634,8 @@ backend/uv.lock, frontend/pnpm-lock.yaml, Dockerfiles y compose.yml.
 
 --- PAGE 11 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 11
 Responsabilidades del backend
 Archivo
@@ -636,8 +694,8 @@ documentación inicial que los proponía se interpreta como antecedente de dise�
 
 --- PAGE 12 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 12
 5. Fuentes y lectores de datasets
 IMPLEMENTADO. DatasetSource.read(options, inspect) devuelve DatasetReadResult. LocalFileDatasetSource resuelve el lector
@@ -677,8 +735,8 @@ Oracle, MySQL, Snowflake y Databricks son futuros adaptadores. La adquisición p
 
 --- PAGE 13 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 13
 5A. Módulo Conexiones
 IMPLEMENTADO. Permite crear, probar, editar, deshabilitar y eliminar lógicamente conexiones PostgreSQL y SQL Server. La
@@ -730,8 +788,8 @@ versión vigente. Cambiar cualquiera exige una contraseña explícita; su ausenc
 
 --- PAGE 14 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 14
 PASSWORD_REQUIRED_FOR_ENDPOINT_CHANGE antes de contactar el destino. Nombre y timeouts pueden cambiar
 conservando el secreto. Esto impide redirigir una credencial guardada a otro servidor desde un formulario de edición.
@@ -781,8 +839,8 @@ cambiar la contraseña, host o nombre del destino no reescribe runs históricos.
 
 --- PAGE 15 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 15
 La API recibe password pero no la devuelve ni expone secret_reference. La contraseña cifrada vive en delivery_credentials y la
 clave en delivery_keys, volúmenes diferentes de los secretos fuente. La referencia opaca participa en el hash interno, no aparece
@@ -858,8 +916,8 @@ caracteres suplementarios exigen collation _SC/_UTF8 en SQL Server. Tablas nueva
 
 --- PAGE 16 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 16
 Fuente nativa
 Lógico conservado
@@ -926,8 +984,8 @@ timeout o target ausente producen error saneado y rollback conocido cuando el mo
 
 --- PAGE 17 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 17
 Resultado y métricas: no hay actualizaciones explícitas (rows_updated=0); inserciones sólo se reportan si el driver conoce su
 conteo. La población previa no se suma. La pérdida de confirmación conserva UNKNOWN y exige verificar el destino antes de otra
@@ -981,8 +1039,8 @@ silenciosamente la instalación del usuario.
 
 --- PAGE 18 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 18
 L. SQL Server: concurrencia y conteos
 El adaptador evita MERGE. Usa transacción, staging #temp con tipos/collation del target, locks y comprobación por clave; SELECT
@@ -1035,8 +1093,8 @@ O. Workers, lanes y frontera de commit
 
 --- PAGE 19 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 19
 DEFAULT procesa Intake/Recon/Sentinel y programación local. DELIVERY sólo procesa entregas y no ejecuta scheduler ni monta
 secretos fuente. Ambos comparten metadata y StorageProvider; el delivery-worker sólo monta secretos de destino. El Job incluye
@@ -1102,8 +1160,8 @@ La comprobación no permite decidir.
 
 --- PAGE 20 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 20
 DeliveryOperationalReview conserva org, Run, attempt, reviewer_id, snapshot de nombre, outcome, nota, verified_at y created_at.
 La migración nueva 0009_delivery_reviews crea sólo esta tabla con FKs, índices y CHECK de outcomes. No modifica 0001..0008.
@@ -1162,8 +1220,8 @@ local.
 
 --- PAGE 21 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 21
 null se muestra como N/D. Cero es un conteo conocido, nunca una sustitución cosmética de null. Los nuevos DTOs/evidencias
 añaden metric_semantics versión 1; la lectura de manifests 0.5.0 sin el bloque sigue siendo válida y no reescribe bytes. Los timings
@@ -1216,8 +1274,8 @@ V. Linaje persistido y auditoría
 
 --- PAGE 22 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 22
 source_type -> target_type
 relation real
@@ -1252,8 +1310,8 @@ estable y no permiten cruzar attempt/Run/organización.
 X. Backup, restauración y compatibilidad
 El backup conserva PostgreSQL, artifacts, secretos fuente/destino y ambas claves. Manifest mantiene schema 2; state pasa a 5
 para seis tablas nuevas de identidad, notificaciones y target policy, además de campos aditivos. El restore nativo exige igualdad
-exacta de filas, hashes, relaciones y secretos. SMTP/OIDC sólo utilizan variables externas: .env y client secrets no forman parte del
-backup.
+exacta de filas, hashes, relaciones y secretos. Los secretos OIDC sólo utilizan variables externas: .env y client secrets no forman
+parte del backup.
 Backups 0.5.1/0009/state4, 0.5.0/0008/state3 y 0.4.x/0007/state2 se actualizan a 0012 y comparan con snapshot-legacy-v4/v3/v2.
 La proyección valida primero integridad y migración de identidad, admite roles/grants sembrados y elimina sólo adiciones
 esperadas. Rechaza actividad nueva en tablas que debían estar vacías; no oculta filas, errores de referencias ni alteraciones de
@@ -1275,8 +1333,8 @@ storage/temporales; outcome, conteos y motivo real de parada. Los picos muestrea
 
 --- PAGE 23 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 23
 contadores cgroup incluyen actividad incidental del contenedor. Recurso insuficiente produce NOT_RUN_RESOURCE_LIMIT,
 nunca PASS. Los resultados medidos se publican en el informe específico y JSON sanitizados 0.5.1.
@@ -1355,8 +1413,8 @@ fuera del conteo físico de Trackvance.
 
 --- PAGE 24 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 24
 La aceptación exige tests nuevos de reparación sin DataSink, historial UNKNOWN inmutable, semántica nullable, conteos reales
 por versión de motor, temporalidad sin coerción, linaje exacto, benchmark y code splitting. Además se repiten las suites base,
@@ -1406,8 +1464,8 @@ desde un respaldo verificable o declararse no disponible.
 
 --- PAGE 25 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 25
 7. Profiling, identificadores y transforms
 La política actual es EXACT_OBSERVED, metric_definition_version=2. No se recortan espacios, cambia case ni normaliza Unicode
@@ -1450,8 +1508,8 @@ centraliza en config_semantics y manifests, evitando condiciones de versión dis
 
 --- PAGE 26 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 26
 8. Reglas portables y Data Intake
 RuleDefinition declara type, column o columnas en parameters, severity ERROR/WARNING, enabled, parameters, when opcional,
@@ -1515,8 +1573,8 @@ gobierna por la política declarada.
 
 --- PAGE 27 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 27
 Editor y resultados
 Al elegir dataset, el editor carga su esquema. Columnas obligatorias, sin duplicados, numéricas y positivas usan multiselect con
@@ -1571,8 +1629,8 @@ política de denominador cero EXACT_ONLY. Umbral inclusivo.
 
 --- PAGE 28 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 28
 Regla
 Semántica
@@ -1618,8 +1676,8 @@ igualdad no los convierte en instantes; DATE_TOLERANCE requiere su propio contra
 
 --- PAGE 29 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 29
 10. Sentinel y métricas históricas
 Sentinel ejecuta monitores sobre una DatasetVersion y produce checks explicables. Los controles legacy SCHEMA_REQUIRED,
@@ -1677,8 +1735,8 @@ schedule se incluye en execution_plan y manifest.
 
 --- PAGE 30 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 30
 COALESCE_LATEST agrupa intervalos vencidos tras una pausa; SKIP_WHILE_ACTIVE evita solapar runs del mismo monitor.
 NO_DATASET_VERSION documenta la ausencia de entrada. Cursor, ocurrencia, Run, Job y auditoría se confirman en una sola
@@ -1730,8 +1788,8 @@ Caso cerrado que vuelve a gestión con comentario y nueva fecha de referencia.
 
 --- PAGE 31 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 31
 Criterios de elegibilidad
 Se requiere un Run posterior SUCCESS, de la misma organización y el mismo configuration_id. Publicar otra versión de
@@ -1782,8 +1840,8 @@ UNKNOWN de Delivery: no se recicla Exception como sustituto de su registro opera
 
 --- PAGE 32 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 32
 12. Centro de Control y navegación
 El Centro de Control es un cockpit operativo calculado por backend. El usuario puede identificar qué falla, qué requiere atención y
@@ -1835,8 +1893,8 @@ navegador.
 
 --- PAGE 33 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 33
 13. StorageProvider, artefactos y linaje
 StorageProvider es el puerto de almacenamiento interno. temporary_path asigna staging local temporal; put_file publica bytes y
@@ -1883,8 +1941,8 @@ implementarse con referencias transaccionales y auditoría.
 
 --- PAGE 34 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 34
 14. Manifest schema 2 y auditoría
 Cada Run completado publica un manifest inmutable con schema_version=2. Excepción operativa explícita: si una entrega ya
@@ -1932,8 +1990,8 @@ manifest original del Run.
 
 --- PAGE 35 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 35
 15. Reportes Excel de negocio
 IMPLEMENTADO. La UI ofrece Exportar Excel y genera .xlsx mediante openpyxl. CSV permanece únicamente como endpoint
@@ -1991,8 +2049,8 @@ Preflight no permite ejecutar; no se simula resultado.
 
 --- PAGE 36 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 36
 Estado técnico
 Significado
@@ -2057,8 +2115,8 @@ Configuración inmutable, referencia de secreto y config_hash.
 
 --- PAGE 37 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 37
 Tabla
 Identidad / relación principal
@@ -2135,8 +2193,8 @@ Policy física irreversible y DeliveryAttempt.system_audit.
 
 --- PAGE 38 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 38
 La revisión vigente es 0012_delivery_target_audit. Todas las evoluciones son migraciones aditivas nuevas; no se modifican
 migraciones aplicadas. API startup aplica Alembic y backfill idempotente. SQLite legacy sólo se adopta cuando coincide con un
@@ -2144,9 +2202,9 @@ schema reconocido; no se fuerza sobre estructuras desconocidas. Downgrade/upgrad
 sobre datos operativos.
 18. API y errores
 La base es /api/v1. El runtime FastAPI y backend/API_CONTRACT.md describen los campos exactos implementados. El inventario
-siguiente se genera desde backend/openapi.json; el snapshot 0.6.0 añade roles, usuarios, primer acceso, proveedores/SSO,
-notificaciones y target policy al inventario existente. La tabla siguiente forma parte del inventario ejecutable revisado antes de
-construir el PDF.
+siguiente se genera desde backend/openapi.json; el snapshot 0.6.1 añade la emisión efímera y regeneración, conserva SSO/target
+policy y marca deprecated la lectura histórica de notificaciones. La tabla siguiente forma parte del inventario ejecutable revisado
+antes de construir el PDF.
 Método
 Ruta
 Operación
@@ -2238,8 +2296,8 @@ Cancel Run
 
 --- PAGE 39 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 39
 Método
 Ruta
@@ -2359,8 +2417,8 @@ Update Destination
 
 --- PAGE 40 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 40
 Método
 Ruta
@@ -2457,35 +2515,38 @@ DELETE
 Delete User
 POST
 /api/v1/users/{user_id}/reset-password
-Resend Credentials (legacy)
+Regenerate Credentials (legacy)
 POST
 /api/v1/users/{user_id}/resend-credentials
-Resend Credentials
+Regenerate Credentials (legacy)
+POST
+/api/v1/users/{user_id}/regenerate-credentials
+Regenerate Credentials
 DELETE
 /api/v1/users/{user_id}/external-identities/{identity_id}
 Unlink Identity
 GET
 /api/v1/notifications/status
-Notification Status
+Notification Status (legacy)
 GET
 /api/v1/notifications/deliveries
-Notification Deliveries
+Notification Deliveries (legacy)
 GET
 /api/v1/exceptions
 Exceptions
-GET
-/api/v1/exceptions/assignees
-Assignees
 
 
 --- PAGE 41 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 41
 Método
 Ruta
 Operación
+GET
+/api/v1/exceptions/assignees
+Assignees
 GET
 /api/v1/exceptions/{case_id}
 Detail
@@ -2551,25 +2612,27 @@ Auditor
 Lectura/exports/auditoría/usuarios/sistema y metadata de conexiones; sin mutaciones
 operativas.
 La tabla anterior describe grants iniciales de migración, editables en los roles no protegidos. El catálogo, sus dependencias y la
-matriz exhaustiva se documentan en permission-matrix-0.6.0.md y el capítulo 34. No existe fallback para rutas desconocidas. Los
+matriz exhaustiva se documentan en permission-matrix.md y el capítulo 34. No existe fallback para rutas desconocidas. Los
 módulos compartidos filtran por read y verifican el módulo del recurso. Administrator deriva todos los permisos del catálogo;
 users:manage y roles:manage no se delegan a roles custom.
+
+
+--- PAGE 42 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+42
 Administración de identidad implementada
 Administrator administra roles y usuarios con baja lógica, CAS y bloqueo por organización para preservar el último admin. Un rol
 asociado a cualquier usuario no eliminado, incluso inactivo, no puede desactivarse ni eliminarse. Cambiar permisos afecta
 inmediatamente a las siguientes peticiones; /me refresca la UI. Cambiar Role de un usuario revoca sesiones y exige autenticarse de
 nuevo.
-
-
---- PAGE 42 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-42
 El alta solicita nombres/apellidos/username/email/role_id y genera una temporal de 32 caracteres, hash Argon2 y expiración de 24
-horas. El servicio NotificationDelivery intenta enviarla por SMTP sin persistir body/password. Un fallo conserva el usuario y estado
-FAILED. Regenerar produce otra temporal y revoca sesiones. Login username/email es compatible; primer acceso local y SSO
-exige definir contraseña propia y rota la sesión/CSRF antes de acceder a módulos.
+horas. La respuesta directa UserCredentialIssueResponse contiene UserResponse y temporary_credentials; únicamente alta y
+regeneración autorizadas la producen, con Cache-Control: no-store. La UI abre el modal obligatorio y elimina su estado al cerrarlo.
+GET nunca permite recuperarla. Regenerar produce otra temporal, invalida la anterior y revoca sesiones. No se envía email ni se
+crean registros de notificación. Login username/email es compatible; primer acceso local y SSO exige definir contraseña propia y
+rota la sesión/CSRF antes de acceder a módulos.
 Microsoft common personal/corporativo y Google Gmail/Workspace autentican con Code+PKCE/OIDC. No crean usuarios ni
 conceden roles: sólo vinculan cuentas preprovisionadas verificadas a provider/issuer/subject estable. Los capítulos 25..29 y 32..33
 detallan la separación entre autenticación y autorización.
@@ -2614,6 +2677,15 @@ proceso.
 DEMO_ACCESS_ENABLED
 Habilita únicamente el login demo explícito; garantiza la
 identidad y organización mínimas, no datos sintéticos.
+
+
+--- PAGE 43 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+43
+Variable
+Función / default
 DEMO_SEED_ENABLED
 Habilita únicamente el seed idempotente de datasets,
 configuraciones, ejecuciones, hallazgos y excepciones
@@ -2624,15 +2696,6 @@ TRACKVANCE_WORKER_MEMORY_SOFT_BYTES
 Presupuesto blando del planner.
 TRACKVANCE_TEMP_MIN_FREE_BYTES
 Reserva mínima de disco temporal.
-
-
---- PAGE 43 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-43
-Variable
-Función / default
 TRACKVANCE_RUN_TIMEOUT_SECONDS
 Valor del plan; no timeout duro certificado.
 Para conservar el cierre seguro de instalaciones anteriores, si DEMO_ACCESS_ENABLED está ausente hereda el valor de
@@ -2653,11 +2716,11 @@ esperados. Detiene temporalmente web, scheduler y ambos workers, captura el esta
 pg_dump custom de PostgreSQL. Copia trackvance_data, connection_credentials, connection_keys, delivery_credentials y
 delivery_keys con su inventario; no copia en caliente el data directory PostgreSQL. Finalmente restaura sólo los contenedores que
 estaban activos al comenzar.
-El formato nativo 0.6.0 usa backup-manifest.json schema 2 y state.json schema 5. El verificador etiqueta la huella según la
-revisión real y el inventario congelado del runtime: 0007/state 2, 0008/state 3, 0009/state 4 o 0012/state 5; no según la versión del
-script copiado. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git, imágenes y
-hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias. verify
-comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto
+El formato nativo 0.6.0/0.6.1 usa backup-manifest.json schema 2 y state.json schema 5. El verificador etiqueta la huella
+según la revisión real y el inventario congelado del runtime: 0007/state 2, 0008/state 3, 0009/state 4 o 0012/state 5; no según la
+versión del script copiado. El manifest registra consistencia quiesced, fecha, proyecto, Alembic, versión PostgreSQL, revisión Git,
+imágenes y hashes/tamaños de cada componente. state.json conserva la huella verificable de metadata, artifacts y referencias.
+verify comprueba manifest, componentes exactos, hashes, rutas y archivos; rechaza enlaces y archivos no declarados. El conjunto
 contiene la clave necesaria para descifrar las credenciales y debe guardarse con acceso restringido. .env se conserva
 separadamente y no se imprime ni se incluye automáticamente en el backup.
 Reconocer la huella 0007 no amplía la topología del CLI de backup actual: exige seis volúmenes y dos workers. Para crear un
@@ -2673,6 +2736,13 @@ staging. El backup SQLite copia a un destino nuevo y verifica tamaño/hash antes
 sustituidos por una carrera TOCTOU entre inventario y uso.
 python scripts/docker_state.py backup --project trackvance-local --destination backups/local
 python scripts/docker_state.py verify --source backups/local
+
+
+--- PAGE 44 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+44
 Restauración en proyecto nuevo
 restore exige nombre distinto del origen y ningún recurso preexistente. Reconstruye volúmenes nuevos, restaura el dump en una
 transacción, repone artifacts y ambos pares credenciales/clave, inicia API y valida Alembic y la igualdad de la huella. Sólo inicia el
@@ -2680,13 +2750,6 @@ resto del sistema con --start; sin esa opción deja el destino detenido tras ver
 un ensayo aislado con identidad demo disponible. La salida es un recibo de restauración con hash del manifest y estado de
 verificación, sin secretos.
 python scripts/docker_state.py restore --source backups/local `
-
-
---- PAGE 44 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-44
   --target-project trackvance-restored --web-port 3200 --start
 La instalación destino debe disponer del código/imágenes y configuración de entorno compatibles. Una restauración fallida detiene
 el proyecto nuevo para diagnóstico; no borra el origen ni lo reemplaza. La prueba E2E destruye sólo su entorno temporal, restaura y
@@ -2724,15 +2787,15 @@ Esa actualización histórica no utilizó la instalación principal para pruebas
 
 --- PAGE 45 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 45
 20A. Benchmark reproducible y límites comprobados
 scripts/tests/benchmark_cycle.py ejecuta un proyecto Docker aislado con archivos sintéticos, fuentes PostgreSQL/SQL Server
 reales, materialización canónica, Intake, ReconOps y Sentinel. Registra bytes, filas, duración, throughput, CPU, memoria, I/O,
 snapshots, plan y éxito/fallo; watchdog detiene su proyecto si supera recursos o tiempo. La progresión exige preflight y termina ante
 una restricción de recursos. Los tamaños no ejecutados se marcan como tales.
-Antecedente de volumen 0.4.0; no certifica 0.6.0
+Antecedente de volumen 0.4.0; no certifica 0.6.1
 El ciclo principal trackvance-bench-22852-894497 terminó PASS. Su fixture nominal de 100 MiB mide 106.194.531 bytes, 50.000
 filas y cuatro columnas, con payload determinista variado SHAKE256_URLSAFE_V1. Docker Desktop 29.1.3 dispuso de 16 CPU y
 16.326.524.928 bytes de memoria. La duración total fue 79,46 segundos. Las duraciones siguientes son tiempos de pared del
@@ -2782,8 +2845,8 @@ este ciclo.
 
 --- PAGE 46 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 46
 21. Arquitectura final de producto
 OBJETIVO. El producto final conserva los mismos módulos y contratos funcionales. Evoluciona la entrega de jobs,
@@ -2841,8 +2904,8 @@ Pasos de evolución sin cambiar reglas
 
 --- PAGE 47 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 47
 5. Integrar IdP, secretos y observabilidad; aplicar tests de aislamiento y recuperación.
 
@@ -2857,109 +2920,116 @@ elimina únicamente esos datos al terminar.
 Verificación
 Resultado ejecutado
 Corte y procedencia
-26 septiembre 2026, rama feat/local-prototype; baseline
-4519ed354202ea8f220682758da234e07b6df3ed. Implementación 979cc0f y corrección de
-harness 35c88fa2f0fd0c59dacda7faf76713e064364d25. Ejecuciones nuevas 0.6.0; no se
-heredan resultados 0.5.1.
+27 septiembre 2026; feat/local-prototype. Baseline
+587909bc4462683e87e403dd2ea29a1d6d4afe08, sin commits remotos posteriores al iniciar.
+Implementación 4d3c656ab0bc250f50eb53972d22839da9e4485c. Ejecuciones nuevas 0.6.1; no
+se heredan éxitos 0.6.0.
 Backend local
-1.141 pytest backend/scripts PASS en 79,57 s, 0 FAIL, 0 SKIP tras la corrección CI. Dos avisos
-upstream Starlette/httpx y AnyIO. Ruff PASS, Mypy: 42 archivos PASS, uv sync --frozen PASS.
-Se repitieron 20 pruebas focales del runner tras la corrección.
+1.192 pytest backend/scripts PASS en 106,280 s, 0 FAIL/0 SKIP; 54 focales identidad/SSO
+PASS. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Dos avisos upstream:
+Starlette/httpx y AnyIO BlockingPortal.
 Frontend local
-Instalación pnpm congelada, ESLint, TypeScript y production build PASS. 164 Vitest / 19
-archivos PASS en 10,46 s. Cinco capturas sintéticas inspeccionadas sin credenciales.
+174 Vitest / 20 archivos PASS en 13,056 s; 0 FAIL/0 SKIP. Instalación pnpm congelada, ESLint,
+TypeScript y production build PASS. Modal, cierre/pagehide, respuesta tardía y query/mutation
+cache comprobados.
 OpenAPI y permisos
-Runtime 0.6.0: 95 paths, 116 operaciones, 87 schemas; snapshot exacto probado. Catálogo: 41
-códigos y 104 reglas protegidas, desconocidas denegadas. Nueva cadena 0010/0011/0012;
-0001..0009 sin diferencias.
+0.6.1: 96 paths, 117 operaciones, 89 schemas; snapshot exacto probado. 41 permisos y 105
+reglas protegidas. 31 tablas, head 0012_delivery_target_audit, cero nuevas migraciones.
+Modelos persistentes y 0001..0012 intactos; hashes de bytes antes/después coinciden.
 Migraciones PostgreSQL
-PostgreSQL 16 real: upgrade/check/downgrade/upgrade PASS, paridad ORM, 24 tablas
-históricas 0008 y 8 vínculos conservados. SQLite poblada con FK reales también comprobada.
+PostgreSQL 16 real: upgrade/check/downgrade/upgrade, paridad ORM y preservación histórica
+PASS. Roundtrip 0008↔0012 conserva 24 tablas y ocho vínculos Delivery, con
+COMMITTED/UNKNOWN. Contenedor desechable eliminado.
 Compose integral
-PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 117,646 s. Doctor,
-migraciones, política restart=no y snapshot exacto tras restart PASS. Volúmenes desechables
-propios retirados.
-Conexiones reales
-PASS: 96 comprobaciones PostgreSQL / SQL Server; smoke 84; Playwright 30 PASS / 11 opt-in
-SKIP / 0 FAIL en 159,572 s. Matriz temporal, adquisición/refresh/historia y módulos; secretos y
-persistencia tras reinicio PASS.
+PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 125,025 s. Doctor,
+migraciones, restart=no, snapshot exacto tras restart y cleanup PASS. El tercer intento corrigió
+sincronización del test y CRLF del clipboard Windows; ambos fallos anteriores están registrados.
 Identity/SSO
-9/9 Playwright PASS en 42,930 s con el verificador por stdin; total 112,142 s. Local
-temporal/primer acceso, roles dinámicos y cuatro perfiles OIDC simulados RS256. Expiración,
-SMTP FAILED/regeneración, ausencia de plaintext DB/log, restart y cleanup PASS. La
-recreación API no se observó en esta corrida local. CI: 9/9 en 54,267 s; recreación API
-observada y verificación por stdin PASS.
-Clean demo
-1/1 Playwright PASS con Compose base, seed=false y demoaccess=true; colecciones vacías
-comprobadas. Proyecto nuevo eliminado, 0 recursos restantes.
-Cobertura de navegador
-41 escenarios distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1
-demo limpio. Las repeticiones de casos comunes no se suman como tests únicos. Los SKIP son
-opt-in y se ejecutan por separado.
+9/9 Playwright PASS en 45,173 s; ciclo 104,251 s. Temporal/primer
+acceso/regeneración/revocación, roles y cuatro perfiles OIDC mock RS256. Expiración, cero
+entregas nuevas, privacidad y restart PASS. No Mailpit.
+Privacidad ejecutada
+Alta y regeneración nunca entran en mutation cache. Copiar3, cerrar y ausencia en
+DOM/storage/cookies/URL PASS. Probe stdin: 14 secretos RAM en Compose y 15 en identidad,
+DB/log/artifacts/archivos de navegador PASS. Backups decodificados nativo/060/051 y
+excepciones inyectadas PASS. Sin screenshots, trace, vídeo ni contexto DOM sensible
+publicado.
+Conexiones reales
+96 comprobaciones PostgreSQL/SQL Server y smoke 84 PASS. Playwright 30 PASS / 11 opt-in
+SKIP / 0 FAIL en 166,452 s. Tipos temporales, adquisición/refresh/historia y módulos; secretos y
+persistencia tras reinicio PASS.
 Delivery real
-308 comprobaciones PASS en PostgreSQL 16/18 y SQL Server, audit
-columns/estrategias/policy/drift/identidad interna. Playwright 1/1 PASS en 6,816 s, scan de
-credenciales/reinicio PASS. Nueva ejecución final con reporte saneado.
+308 comprobaciones PostgreSQL 16/18 y SQL Server PASS; Playwright 1/1 en 5,189 s.
+fechaIngesta/usuario, policies, CREATE/APPEND/OVERWRITE/UPSERT, drift,
+receipt/manifest/linaje y actor interno local/SSO conservados; reinicio y scans PASS.
 UNKNOWN y límites
-PASS para pérdida de acknowledgement inyectada en adapter después de commit SQL real,
-política required y recuperación deliberada sin replay. Fallo físico de red en ventana exacta:
-NOT_RUN_NONDETERMINISTIC. No se equiparan ambos escenarios.
-Recovery nativo
-PASS: 9 artifacts, 2 secretos SQL y 269 relaciones exactas, 6 roles / 95 grants, 1 ExternalIdentity
-y 1 OIDC attempt consumido de fixture, 1 notificación y 1 target policy. Origen desechable
-destruido antes de restore; no reenvío SQL.
+Pérdida de acknowledgement inyectada en el adaptador después de commit SQL real PASS,
+con policy required y sin replay. Fallo físico de red en ventana exacta:
+NOT_RUN_NONDETERMINISTIC. No se equiparan esas pruebas.
+Demo limpia y cobertura
+Demo sin seed 1/1 PASS en 1,878 s; ciclo 61,566 s, restart y cleanup PASS. 41 escenarios
+distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio.
+Repeticiones no se suman; SKIP opt-in cubiertos por suites dedicadas.
 
 
 --- PAGE 48 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 48
 Verificación
 Resultado ejecutado
-Restore0.5.1
-PASS desde build auténtico 4519ed3 / 0009 / state 4 hasta 0012 / state 5. 78 artifacts y
-proyección histórica SHA-256 idéntica; 140,886 s. Restore incluye 5 roles y 1 usuario migrado.
-Restore0.4.1/0.5.0
-Nuevos drills PASS de backups auténticos 0007/state 2 y 0008/state 3; 7/9 artifacts y 1/2
-secretos respectivamente. DTOs y bytes receipt/manifest/Parquet históricos intactos. Instalación
-principal y backup original no alterados por drills.
+Recovery nativo 0.6.1
+PASS: 9 artifacts, dos secretos SQL, 269 relaciones, 6 roles/95 grants y tablas operativas
+pobladas. Notificación histórica declarada como fixture sintética; alta/regeneración no añaden
+filas. Origen destruido antes de restore. Dump decodificado y 15 archivos examinados contra
+seis secretos conocidos, sin fugas.
+Restore auténtico 0.6.0
+PASS desde 587909b/0012/state5: 78 artifacts y estado histórico exacto; una entrega
+FAILED/NO_PROVIDER real de la baseline preservada. Nuevas emisiones 0.6.1 sin entregas
+adicionales. Backup decodificado (82 archivos), logs y cleanup PASS; 143,074 s. Dos fallos
+iniciales del harness se corrigieron y documentaron.
+Restore auténtico 0.5.1
+PASS desde 4519ed3/0009/state4: 78 artifacts, proyección histórica SHA-256 idéntica, migración
+a0012/state5, cinco roles y usuario heredado. Emisión/regeneración y backup sin plaintext ni
+nuevas notificaciones; cleanup PASS, 136,233 s. Drills041/050 permanecen antecedentes060,
+no se atribuyen como nuevas ejecuciones061.
 Benchmarks acotados
-General file-only PASS: 1.074.923 bytes / 1.000 filas / 4 columnas en 38,665 s, pico 390.311.443
-bytes, sin OOM. Delivery smoke 8/8 PASS mismo input en 148,814 s; versión observada 0.6.0.
-Sin certificación de capacidad ni percentiles.
+General file-only PASS: 1,074,923 bytes / 1,000 filas / cuatro columnas, 38,509 s, pico
+muestreado 391,066,417 bytes. Delivery smoke 8/8 PASS, mismo input, 140,991 s, versión0.6.1.
+Sin OOM ni certificación de capacidad o percentiles.
 Proveedores externos
-Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS.
-SMTP externo también NOT_RUN; Mailpit real PASS. Guías de registro/consentimiento/variables
-y validación separadas; secretos no suministrados ni subidos.
+Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS
+por alcance explícito. SSO implementado, opcional y disabled by default. SMTP fue retirado: no
+es un proveedor pendiente de certificar ni una dependencia. Canal de futuras notificaciones sin
+decidir.
 Instalación Docker real
-PASS: trackvance-certification, http://localhost:3100. Origen detectado 0.5.0/0008; backup nuevo
-PASS, upgrade 0.6.0/0012, proyección legacy-v3 exacta y restart state5 exacto. API y ambos
-workers 0.6.0; cinco servicios saludables, restart=no; doctor, login, footer y paneles PASS.
-Conservados 3 datasets, 1 usuario, 1 conexión, 1 destino, 4 Runs, 9 artifacts y 2 secretos SQL; 5
-roles migrados. Sin mutaciones de negocio.
+PASS: trackvance-certification en http://localhost:3100; contenedores existentes 0.6.0 iniciados
+para backup verificado y upgrade 0.6.1 sin borrar volúmenes. State 5 exacto antes/después y
+tras reinicio; cinco servicios healthy, API/ambos workers 0.6.1, restart=no, doctor y Alembic 0012.
+UI/health/footer 0.6.1, Usuarios/Roles/Autenticación sin Notificaciones, local habilitado y
+Microsoft/Google disabled. Conservados 3 datasets, 2 usuarios, una conexión, un destino, cuatro
+Runs, nueve artifacts y dos secretos SQL. Acceso demo existente comprobado en principal; login
+con contraseña local probado en desechables. Sin mutaciones de negocio para validar.
 GitHub Actions producto
-SUCCESS: nueve jobs, commit 35c88fa2f0fd0c59dacda7faf76713e064364d25, workflow
-36289364326, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e,
+SUCCESS: nueve jobs, commit 4d3c656ab0bc250f50eb53972d22839da9e4485c, workflow
+36327154050, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e,
 identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke.
-https://github.com/eddiesan422/TrackvanceCore/actions/runs/36289364326. Primer workflow de
-979cc0f: 8 SUCCESS / 1 FAIL del verificador post-restart; corregido con commit nuevo, sin rerun
-cosmético.
+https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050
 GitHub Actions publicación
-El commit documental se somete de nuevo a los nueve jobs. El informe de entrega identifica su
-HEAD SHA, workflow inmutable, resultados y duración después de observar SUCCESS. El PDF
-no incorpora el SHA de su propio commit para evitar una referencia circular.
+El commit documental se somete de nuevo a los nueve jobs. Sólo se entrega tras observar
+SUCCESS del HEAD final. Su SHA, workflow y jobs quedan en el informe externo de entrega,
+evitando una referencia circular en el PDF.
 Publicación PDF
-Candidato renderizado e inspeccionado antes de --publish. Páginas, SHA-256, hashes de
-fuente/OpenAPI/validación, source commit e inspección completa se registran en
-pdf-verification.json. La edición oficial en Documentación se sincroniza después de revisar y
-conserva 0.5.1 archivada.
-Certificación incremental 0.6.0
+Candidato renderizado e inspeccionado por completo antes de --publish. Páginas, SHA-256,
+hash de fuente/OpenAPI/validación, source commit y revisión se registran en
+pdf-verification.json. Copia oficial sincronizada en Documentación; edición060 archivada intacta.
+Certificación incremental 0.6.1
 La evidencia de esta edición proviene de nuevas ejecuciones. Cada suite, motor, migración, benchmark y job CI tiene resultado
 propio; un escenario no ejecutado mantiene NOT_RUN con motivo. La prueba determinista de UNKNOWN no se presenta como
 reproducción física de una pérdida exacta de confirmación remota. La revisión visual del PDF se realiza después de incorporar los
 resultados finales.
-Antecedente certificado 0.5.0 (no certifica 0.6.0)
+Antecedente certificado 0.5.0 (no certifica 0.6.1)
 Ningún éxito de 0.4.1 se hereda como certificación de 0.5.0. La aceptación debe cubrir suite backend/scripts, calidad estática,
 frontend, migración 0008, Compose/persistencia, Conexiones, Data Delivery con ambos motores, UI, estado UNKNOWN,
 secretos/linaje y backup/restore con entrega posterior. Resultado final: 869 pruebas Python y 128 Vitest aprobadas; calidad estática
@@ -2967,19 +3037,19 @@ y build PASS; Playwright 20 aprobadas/5 opt-in omitidas; smoke 84/84, Conexiones
 y Playwright Delivery 1/1; recovery y compatibilidad real 0.4.1→0.5.0 PASS. GitHub Actions: workflow 35875426350, commit
 57c0319ae2f0ef27ae63eced8e354258efc0854d, siete jobs SUCCESS sin reintentos: backend, frontend, compose-e2e,
 connections-e2e, delivery-e2e, backup-restore-e2e y benchmark-smoke. La URL está en la tabla de resultados.
+
+
+--- PAGE 49 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+49
 CI registró Python 869/869 en 50,08 s y frontend 128/128; Playwright Compose 19 aprobadas/6 opt-in omitidas más demo limpio
 1/1, Conexiones 23 aprobadas/2 omitidas y Delivery focal 1/1. Estas ejecuciones no se suman como escenarios únicos; el cruce de
 nombres confirma 25 escenarios distintos con al menos un PASS. Los cuatro opt-in de fuentes SQL pasan en Conexiones, demo
 limpio en su paso separado y Delivery en su job. La compatibilidad con el baseline 0.4.1 se certificó localmente; no es un job
 adicional de CI. Los JSON saneados de las pruebas locales y sus límites están en docs/development/evidence/0.5.0. El commit
 posterior del PDF y del dato de Actions es un cierre documental del código de producto certificado.
-
-
---- PAGE 49 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-49
 Base certificada de 0.4.1
 La tabla histórica de 0.4.1 fue la fuente explícita de esa revisión; ningún éxito se hereda de 0.4.0. En local aprobaron 533 tests
 backend/scripts, Ruff, Mypy sobre 33 archivos, ESLint, TypeScript, build y 119 tests Vitest en 13 archivos. El bundle principal fue de
@@ -3029,18 +3099,18 @@ multiselect de Sentinel por esquema y regreso al inicio tras logout.
 El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/delivery/recuperación con entornos
 temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación.
 Conexiones usa usuarios SELECT; Delivery usa destinos PostgreSQL/SQL Server aislados. Ambos buscan fugas de secretos y no
+
+
+--- PAGE 50 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+50
 apuntan a la instalación principal. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security
 scanning/SBOM y gates de producción permanecen en el objetivo final.
 La revisión 0.4.1 quedó certificada en GitHub Actions por el workflow 35638817011, commit
 38a8c7a3dd14ecc1c6b730f2a4a98e419707281e: seis de seis jobs terminaron SUCCESS (backend, frontend,
 connections-e2e, compose-e2e, benchmark-smoke y backup-restore-e2e). Este resultado corresponde al mismo código de
-
-
---- PAGE 50 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-50
 producto y fuentes documentales usados para la publicación; la incorporación posterior del PDF y del dato de CI es un cierre
 documental.
 Incidencia CI identificada y corrección
@@ -3065,8 +3135,8 @@ fallos o gates sin certificar se identifican explícitamente en validación y be
 
 --- PAGE 51 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 51
 23. Decisiones vigentes y control documental
 Decisión
@@ -3115,11 +3185,30 @@ Data Delivery, transacciones,
 UNKNOWN, lanes y secretos de
 destino
 docs/adr/0015-data-delivery.md.
+RBAC dinámico y credenciales
+efímeras de usuarios
+docs/adr/0016-dynamic-rbac-identity.md, actualizado en 0.6.1.
+SSO Microsoft/Google OIDC,
+opcional y deshabilitado por defecto
+docs/adr/0017-oidc-sso.md.
+Retiro de SMTP y preservación del
+historial de notificaciones
+docs/adr/0018-notification-delivery.md, decisión vigente 0.6.1.
+Auditoría permanente de destinos
+Delivery
+docs/adr/0019-delivery-target-audit.md.
 Precedencia y cambios de esta revisión
 Esta revisión sustituye las afirmaciones de implementación de la edición inicial de 52 páginas. La edición inicial se conserva
 archivada con su hash, como antecedente. Los diagramas aspiracionales de worker-spark, tablas de organizaciones, librerías no
 instaladas, exports CSV principales y endpoints futuros ya no se presentan como realidad operativa. Roles y permisos persistidos sí
 forman parte de la implementación 0.6.0.
+
+
+--- PAGE 52 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+52
 Se actualizan arquitectura local/final, esquema real de 31 tablas, contrato HTTP, cinco lectores, Conexiones PostgreSQL/SQL
 Server, DataSink y Data Delivery SQL, SecretStores separados, lanes/workers, UNKNOWN, backup, UI y evidencia. Se preservan
 snapshots, profiling, reglas avanzadas, ReconOps, Sentinel, excepciones, usuarios/RBAC, Parquet canónico, manifests v2, Excel,
@@ -3127,13 +3216,6 @@ cockpit, auditoría, persistencia Docker y arranque manual.
 El código y OpenAPI determinan el contrato ejecutable. Un cambio posterior de semántica requiere ADR, pruebas, actualización de
 esta fuente y del PDF; un cambio de base de datos requiere Alembic nuevo. Las versiones de configs/manifests/métricas se
 gestionan separadas de la versión del producto.
-
-
---- PAGE 52 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-52
 Registro
 Fecha
 Revisión
@@ -3179,19 +3261,23 @@ según evidencia 0.5.1.
 26-09-2026
 v1.1, IMPLEMENTACIÓN 0.6.0
 RBAC dinámico, local/SSO, SMTP y
-Delivery audit; capítulos 25..34 y evidencia
-nueva.
+Delivery audit; antecedente conservado.
+27-09-2026
+v1.1, IMPLEMENTACIÓN 0.6.1
+Temporal visible una sola vez; SMTP
+retirado; SSO opcional conservado;
+capítulo 35 y evidencia propia.
 La fuente editable y el generador portable acompañan al PDF en docs/specification; la copia oficial se conserva en Documentación.
 README, arquitectura, catálogo, ADRs, OpenAPI y documentación de operación complementan esta especificación con comandos
-y contratos de detalle. OpenAPI 0.6.0, el informe validation_results_0.6.0.json y esta fuente son entradas explícitas del generador.
+y contratos de detalle. OpenAPI 0.6.1, el informe validation_results_0.6.1.json y esta fuente son entradas explícitas del generador.
 Publicar exige candidato y revisión visual completa; la tabla de validación conserva resultados locales y CI separados. Los archivos
-de resultados 0.5.0 y anteriores permanecen como antecedentes, nunca como certificación 0.6.0.
+de resultados 0.6.0 y anteriores permanecen como antecedentes, nunca como certificación 0.6.1.
 
 
 --- PAGE 53 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 53
 24. Antecedente: cambios funcionales y técnicos 0.5.1
 1. Reparación local de evidencia COMMITTED
@@ -3240,8 +3326,8 @@ driver/lector pierda fracción, invente zona o convierta un texto sólo porque p
 
 --- PAGE 54 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 54
 Solución: matrices de precisión PostgreSQL y SQL Server, casos null/offset y valores exactos, refresh e historia,
 Intake/Sentinel/Recon y entrega. Archivos: test_dataset_sources.py, test_data_sinks.py, connections_cycle.py y fixtures. No cambia
@@ -3283,8 +3369,8 @@ de una feature puede requerir su descarga; una caché o red defectuosa debe most
 
 --- PAGE 55 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 55
 25. RBAC dinámico y administración real de roles
 En 0.5.1 cada usuario contenía una etiqueta de rol y permissions.py resolvía un diccionario estático. Cambiar accesos exigía un
@@ -3323,8 +3409,8 @@ que ya ha sido administrado. Los roles desconocidos heredados fallan cerrado.
 
 --- PAGE 56 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 56
  Activo
  Crear / editar
@@ -3359,49 +3445,135 @@ FastAPI.
 
 --- PAGE 57 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 57
-26. Usuarios, login local y primer acceso
-El formulario de alta requiere nombres, apellidos, username, email, rol y estado. Los nombres/apellidos heredados siguen nulos
-hasta una edición explícita; no se deducen a partir de un display name. Para usuarios nuevos, name es la unión de nombres y
-apellidos. Username acepta 3 a 80 caracteres ASCII entre letras, números, punto, guion bajo y guion. Se normaliza para unicidad
-global sin importar mayúsculas; el email también se compara normalizado. Las cuentas eliminadas no liberan esos identificadores.
-La migración obtiene una base determinista del email y resuelve colisiones de forma ordenada y reproducible. El username nuevo
-sirve para login y futuras entregas; no reemplaza el actor almacenado en auditorías anteriores. Un cambio posterior de username
-no cambia el snapshot de una Run ya encolada.
-La pantalla acepta usuario o correo con contraseña. El error de login es genérico para no confirmar si existe una cuenta. La
-autenticación local sigue disponible cuando SSO y SMTP están deshabilitados. La API de alta no acepta una contraseña elegida
-por el administrador: genera una credencial criptográfica de al menos 20 caracteres, guarda únicamente Argon2 y establece cambio
-obligatorio con expiración a 24 horas. El plaintext vive en memoria durante el envío SMTP; no aparece en DTOs, frontend
-administrativo, auditoría, logs ni tabla de entregas.
- Alta + Argon2
- Temporal 24 horas
- SMTP
- SENT / FAILED
- Sesion restringida
- Local o SSO
- Nueva password + sesion rotada
- Limpiar temporal; revocar sesiones; habilitar permisos actuales
-Si SMTP falla, el usuario permanece creado y se muestra el estado de entrega. Regenerar y reenviar crea otra contraseña,
-sustituye el hash, renueva la expiración, reactiva la obligación y revoca sesiones. No recupera la credencial anterior ni permite verla
-al administrador. La operación necesita versión esperada; su evento no contiene el password ni su hash.
-Una sesión con must_change_password=true únicamente puede usar /me, logout y el cambio de primer acceso. No puede
-consultar Datasets, publicar Delivery ni invocar endpoints indirectos. La contraseña definitiva tiene mínimo 12 caracteres y no puede
-coincidir con la temporal vigente. Tras el cambio se actualiza password_changed_at, se limpia la expiración y se emite una
-sesión nueva con CSRF nuevo. Las sesiones antiguas dejan de autorizar peticiones.
-Desactivar fija active=false y revoca sesiones. Eliminar fija deleted=true, active=false y deleted_at, conservando FKs e historia. La
-UI presenta username, nombre, correo, rol, estado, último acceso y métodos vinculados. USER_CREATED, USER_UPDATED,
-USER_ROLE_CHANGED, USER_DISABLED, USER_DELETED, USER_CREDENTIALS_REGENERATED y
-USER_PASSWORD_CHANGED permiten investigar cambios sin registrar material secreto.
+26. Usuarios, credenciales y primer acceso
+Alta e identidad estable
+El formulario conserva nombres, apellidos, username, correo electrónico, rol y estado. Email sigue siendo metadata de identidad y
+puede participar en SSO; no se usa para entregar credenciales. Para usuarios nuevos, name une nombres y apellidos. Los campos
+heredados nulos no se inventan. Username admite 3 a 80 caracteres ASCII (letras, números, punto, guion y guion bajo) y se
+normaliza para unicidad global; email también. La baja lógica conserva identificadores, FKs e historia. Cambiar username no
+reescribe auditoría anterior ni el snapshot del actor de una Run encolada.
+Emisión efímera y entrega externa
+POST /users requiere users:manage, sesión normal y CSRF. Genera mediante CSPRNG una temporal de 32 caracteres, persiste
+únicamente su hash Argon2 y fija must_change_password=true y temporary_password_expires_at=ahora+24h. No acepta una
+contraseña elegida por el administrador. La respuesta 201 separa explícitamente UserResponse del DTO de emisión
+UserCredentialIssueResponse:
+{
+  "user": {"id": "...", "username": "usuario", "must_change_password": true},
+  "temporary_credentials": {
+    "username": "usuario",
+    "temporary_password": "<valor efímero, ejemplo no utilizable>",
+    "expires_at": "<UTC ahora + 24 horas>",
+    "must_change_password": true
+  }
+}
+La respuesta lleva Cache-Control: no-store y Pragma: no-cache. El DTO normal nunca contiene el secreto: GET /users, GET
+/users/{id}, /me y auditoría no lo devuelven. No existe consulta para recuperar una temporal. Si la respuesta se pierde, el usuario
+puede haber quedado creado; se consulta su estado y se regenera con la versión vigente. No se repite el alta a ciegas ni se supone
+que una entrega por red se completó.
 
 
 --- PAGE 58 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
 58
+ Administrator
+ Sesion normal y users:manage
+ Crear usuario
+ Identidad, email, rol y estado
+ Generar password temporal
+ CSPRNG, 32 caracteres y 24 horas
+ Argon2 en DB
+ Solo hash persistido
+ Mostrar UNA VEZ
+ Modal con acciones de copia
+ Administrador entrega credenciales externamente
+ Canal elegido por el administrador
+ Usuario inicia sesion
+ Username o email y temporal vigente
+ Cambio obligatorio
+ Contraseña propia, sesion y CSRF nuevos
+ Sesion normal
+ La temporal queda invalidada
+Modal obligatorio y ciclo de vida del plaintext
+Al completar el alta aparece «Usuario creado» con nombre, username, contraseña temporal, vigencia y rol. El texto indica: «Guarda
+estas credenciales ahora. La contraseña temporal sólo se muestra una vez y Trackvance no podrá recuperarla posteriormente».
+Permite copiar username, contraseña o ambas credenciales, y mostrar/ocultar la temporal. Cerrar elimina el objeto de estado;
+desmontar la pantalla también lo elimina y descarta respuestas tardías. Volver a Usuarios o navegar atrás no puede restaurarlo.
+La petición se realiza directamente, fuera del mutation cache de React Query. No se escribe el secreto en localStorage,
+sessionStorage, cookies, URL, query string ni estado persistido. La memoria del navegador no ofrece borrado criptográfico
+verificable; el contrato elimina referencias controladas por la aplicación y evita retención persistente. Copiar es una acción explícita
+del administrador: el portapapeles y el canal externo elegido quedan fuera del almacenamiento de Trackvance. El producto no
+promete borrar portapapeles, historiales del sistema ni mensajes enviados por ese canal.
+
+
+--- PAGE 59 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+59
+Regeneración y concurrencia
+POST /users/{id}/regenerate-credentials recibe la versión esperada. Una operación exitosa genera una temporal nueva, reemplaza
+el hash, renueva 24h, restablece el cambio obligatorio y revoca sesiones en la misma operación persistente antes de devolver la
+respuesta 200. La UI presenta el mismo modal con título «Credenciales regeneradas». La temporal anterior y la contraseña previa
+quedan inválidas. Un conflicto de versión devuelve 409 y no emite un secreto nuevo. El alias /resend-credentials y el alias histórico
+/reset-password se conservan deprecated con esta misma semántica; ninguno envía email.
+ Administrator
+ Regenerar + version
+ Nueva temporal
+ Password anterior invalida
+ Revocar sesiones
+ Commit antes de responder
+ Modal UNA VEZ
+ Entregar nueva temporal
+ Primer login
+ Obligatorio nuevamente
+ Sesion normal
+ Password propia y CSRF nuevo
+Login, expiración y primer acceso
+Login acepta username o email y aplica un error genérico. La temporal vencida no permite login local; el administrador debe
+regenerarla. Una sesión must_change_password sólo puede consultar /me, cerrar sesión o invocar
+/auth/first-login/change-password. Se bloquean los módulos y sus endpoints indirectos. La nueva contraseña tiene mínimo 12
+caracteres, debe confirmarse y no puede coincidir con la temporal vigente. Al cambiarla se fija must_change_password=false,
+temporary_password_expires_at=null y password_changed_at, se invalidan sesiones anteriores y se emiten nueva sesión y nuevo
+CSRF.
+Errores inesperados de hashing o persistencia durante emisión y primer cambio se convierten en CREDENTIAL_ISSUE_FAILED o
+PASSWORD_CHANGE_FAILED con texto fijo y rollback cuando corresponde. La excepción original no llega al logger general; las
+regresiones inyectan texto secreto para comprobar que no aparece en respuesta ni log.
+ Alta + Argon2
+ Temporal 24 horas
+ Modal una vez
+ Entrega externa
+ Sesion restringida
+ Local o SSO
+ Nueva password + sesion rotada
+ Limpiar temporal; revocar sesiones; habilitar permisos actuales
+SSO no omite este paso: una cuenta preprovisionada que entra primero con Microsoft o Google y mantiene la obligación recibe una
+sesión restringida hasta definir contraseña local. La temporal obtenida por el administrador no se mantiene como alternativa activa
+después del cambio. Local sigue habilitado aunque ambos proveedores estén deshabilitados.
+
+
+--- PAGE 60 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+60
+Estado, permisos y auditoría
+Usuarios muestra «Primer acceso pendiente», «Contraseña definida» o «Contraseña temporal vencida»; no muestra estado SMTP.
+Acciones: Acceso, Editar, Regenerar credenciales y Eliminar. Desactivar revoca sesiones; eliminar fija deleted, active=false y
+deleted_at. El último Administrator y el rol del sistema conservan sus protecciones. USER_CREATED, USER_UPDATED,
+USER_ROLE_CHANGED, USER_DISABLED, USER_DELETED, USER_CREDENTIALS_REGENERATED y
+USER_PASSWORD_CHANGED no contienen plaintext ni password_hash. No se producen NOTIFICATION_SENT/FAILED por
+altas o regeneraciones 0.6.1; los eventos históricos se conservan.
 27. SSO Microsoft y Google
+SSO está implementado pero deshabilitado por defecto. Configuración → Autenticación muestra login local habilitado y
+Microsoft/Google deshabilitados en la instalación estándar. Su activación se decide durante la implantación según el cliente; no es
+requisito para usar ni certificar una instalación local. No se prueban proveedores reales en esta edición:
+NOT_RUN_EXTERNAL_CREDENTIALS. Las guías del capítulo 32 son opcionales y no justifican introducir secretos externos en
+CI.
  Proveedor
  Code + PKCE
  Validar ID token
@@ -3429,7 +3601,14 @@ como verificado tiempo atrás. Después del enlace se usa issuer/sub, no el emai
 calendarios ni scopes de escritura: únicamente openid, profile y email.
 SSO como primer acceso no elimina la obligación de contraseña local. Si User todavía conserva una temporal, el login externo
 válido crea una sesión restringida y obliga a definir una contraseña local nueva. Sólo completar ese paso invalida definitivamente la
-temporal. Así todas las cuentas mantienen un método local en 0.6.0 sin dejar contraseñas de incorporación activas indefinidamente.
+temporal. Así todas las cuentas mantienen un método local en 0.6.1 sin dejar contraseñas de incorporación activas indefinidamente.
+
+
+--- PAGE 61 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+61
 Usuarios desactivados/eliminados no pueden acceder por ningún proveedor. Roles y permisos continúan resolviéndose en
 Trackvance; claims de grupos, directorios o roles externos nunca elevan privilegios. Un Administrator puede desvincular la identidad
 externa desde Métodos de acceso sin borrar User. Los eventos SSO_LINKED, SSO_UNLINKED, SSO_LOGIN_SUCCESS y
@@ -3438,65 +3617,78 @@ Los proveedores deshabilitados o incompletos no muestran botón y no bloquean el
 expone estado público. Discovery, JWKS y token exchange se hacen durante autenticación, no como requisito de salud de workers.
 El modo de proveedor falso exige un indicador explícito de test y vive en un overlay desechable; no está habilitado en Compose
 base.
+28. Notificaciones: historia preservada y backlog
+Decisión funcional posterior a 0.6.0
+0.6.0 incorporó NotificationService y SMTPNotificationDelivery para intentar enviar la temporal por correo. La entrega podía terminar
+SENT, FAILED/NO_PROVIDER o PENDING. 0.6.1 revierte deliberadamente esa decisión: SMTP añadía configuración y
+complejidad innecesaria al onboarding. Alta y regeneración entregan la temporal al administrador mediante una respuesta efímera y
+un modal; el administrador elige un mecanismo externo.
+ 0.6.0
+ Intento SMTP
+ 0.6.1
+ Envio retirado
+ Backlog
+ Canal por decidir
+ NotificationDeliveryRecord historico
+ 0011 y filas conservadas; sin productor de notificaciones
+Compatibilidad histórica sin servicio operativo
+Se retiran el adaptador SMTP, servicio de envío, consumidores de sus variables y overlay Mailpit. .env.example y Compose base no
+anuncian SMTP. Configuración ya no incluye la pestaña Notificaciones. No hay mecanismo para habilitar envíos en 0.6.1.
+La migración 0011_notification_delivery y NotificationDeliveryRecord permanecen intactos. notification_deliveries conserva filas
+0.6.0, estados, códigos, snapshots de destinatario y fechas, sin convertirlos en resultados de 0.6.1. Se conserva lectura autorizada
+legacy deprecated; el estado de infraestructura declara HISTORICAL_ONLY, enabled=false. Nunca se genera una entrega nueva
+por alta/regeneración. No se reescriben los eventos previos. El modelo histórico no guarda cuerpo, contraseña, hash, tokens ni
+secretos SMTP/OAuth.
+Eventos futuros, canal por decidir
+RUN_COMPLETED, RUN_FAILED, DELIVERY_FAILED, DELIVERY_UNKNOWN, SENTINEL_ALERT y EXCEPTION_ASSIGNED
+vuelven al backlog. La definición funcional, destinatarios, reintentos, retención y canal se decidirán según necesidades del cliente.
+SMTP, Teams, Slack y Webhook no son tecnologías elegidas ni capacidades implementadas por esta edición. Conservar la tabla
+no obliga a reutilizar un servicio de envío retirado.
 
 
---- PAGE 59 ---
+--- PAGE 62 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-59
-28. Infraestructura reutilizable de notificaciones
- NotificationService
- Evento y template
- Delivery port
- Mensaje en memoria
- SMTP adapter
- TLS + resultado
- NotificationDeliveryRecord
- Solo metadata; nunca body, password, tokens ni secretos
-En 0.5.1 había una frontera preparada sin transporte operativo. En 0.6.0 NotificationService recibe el evento/template y delega un
-mensaje efímero en el puerto NotificationDelivery. SMTPNotificationDelivery implementa EMAIL. El primer template funcional es
-USER_TEMPORARY_CREDENTIALS: nombre, username, contraseña temporal, expiración, URL de Trackvance y avisos de
-cambio y seguridad.
-NotificationDeliveryRecord guarda organización, tipo de evento, template, canal, recipient_type, recipient_user_id, email snapshot,
-provider_key, número de intento, estado PENDING/SENT/FAILED, error_code y fechas. No guarda subject/body que contengan
-contraseña, hashes Argon2, cabeceras Authorization ni credenciales SMTP. El estado PENDING se confirma antes de enviar; una
-interrupción del proceso puede dejarlo pendiente. Recuperarse exige una regeneración explícita: no existe una cola que pueda
-reenviar un cuerpo secreto persistido.
-SMTP acepta STARTTLS y SSL/TLS con validación de certificados; NONE requiere habilitación explícita de entorno local/test.
-Errores de autenticación, conexión o configuración se convierten en códigos controlados. La ausencia de proveedor produce
-FAILED/NO_PROVIDER y no interrumpe el arranque. Configuración muestra remitente y estado, nunca usuario/password SMTP o
-secretos OAuth.
-El destinatario operativo es USER. El puerto y los metadatos están preparados para futuros resolutores
-USER/USERS/ROLE/DOMAIN/GROUP, pero no se implementan envíos masivos ni resolución de grupos en este release. Tampoco
-se envían aún RUN_COMPLETED, DELIVERY_FAILED, DELIVERY_UNKNOWN o SENTINEL_ALERT. Añadir esos eventos
-reutilizará este servicio en lugar de crear otro motor de email.
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+62
+29. Persistencia, recuperación y pruebas de identidad
+Sin nueva migración en 0.6.1
+0010_dynamic_rbac_identity añadió roles, role_permissions, external_identities, oidc_login_attempts, campos de User y método de
+sesión en 0.6.0. 0011_notification_delivery añadió historia de entregas; 0012_delivery_target_audit añadió políticas de destino y
+metadata por intento. 0.6.1 sólo cambia el flujo y contrato: mantiene 31 tablas y head 0012_delivery_target_audit. 0001..0012 se
+verifican byte por byte contra la baseline y no hay 0013. Upgrade/downgrade/upgrade y Alembic check se ejecutan sobre
+PostgreSQL desechable; downgrade nunca se usa sobre los datos activos de la instalación principal.
+Backups nativos y heredados
+El formato nativo 0.6.1 conserva manifest schema 2 y state 5. La recuperación nativa exige igualdad de filas, relaciones, hashes,
+artifacts y stores/keys de conexiones y destinos. La fixture histórica de notificación del drill nativo se declara sintética. El drill 0.6.0
+usa código auténtico 587909b, genera su registro FAILED/NO_PROVIDER sin servidor SMTP y restaura esa historia sin alterarla;
+altas y regeneraciones posteriores 0.6.1 no añaden notificaciones. La restauración 0.5.1 compara exactamente su proyección state
+4 y verifica las adiciones 0010..0012. Las compatibilidades anteriores conservan su contrato.
+Las temporales se conservan únicamente en memoria durante los ensayos y se buscan en pg_dump, auditoría, stdout/stderr
+capturados, logs de contenedores/acceso, artifacts, manifests, receipts y backups (dump decodificado y tar descomprimidos). No se
+guardan en archivos de evidencia. .env y secretos OAuth externos no forman parte del respaldo; deben custodiarse
+separadamente. Los secretos cifrados de fuentes/destinos sí forman parte del backup verificado con sus claves y controles de
+acceso.
+Recorridos de navegador y SSO conservado
+Playwright crea desde UI, captura el modal sólo en RAM, comprueba copiar y cierre sin retención, usa la temporal, completa primer
+acceso y valida el rol. Regenera desde otro administrador, comprueba sesiones revocadas y contraseñas anteriores inválidas y
+repite el primer acceso. También crea/asigna/edita/desactiva/elimina roles con propagación de permisos. La evidencia del recorrido
+no incluye screenshot, vídeo, trace ni snapshot automático del modal; los errores se sanitizan y se desactiva el contexto automático
+que podría contener campos secretos. Se escanean storage de navegador, URL, DOM tras cierre y cachés de la aplicación cuando
+son accesibles a la prueba.
+El mock OIDC conserva Microsoft personal/organizacional y Gmail/Workspace, code+PKCE, tokens RS256, state/nonce,
+issuer/audience/expiración, replay y sujetos estables. Microsoft/Google reales quedan NOT_RUN_EXTERNAL_CREDENTIALS por
+alcance explícito; no se requieren secretos externos ni se atribuye al mock validación de esos servicios.
+Fuera de 0.6.1: auto-provisioning, group-to-role/domain, gobierno ampliado, notificaciones operativas, canales nuevos, Secret
+Manager, SHIST/SCD, masking, retención avanzada y plataformas distribuidas. DatasetVersion continúa como versionado
+inmutable interno.
 
 
---- PAGE 60 ---
+--- PAGE 63 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-60
-29. Migración de identidad, recuperación y pruebas
-0010_dynamic_rbac_identity añade roles, role_permissions, external_identities, oidc_login_attempts, los nuevos campos de
-usuarios y el método de sesión. 0011_notification_delivery añade los metadatos de entrega.
-0012_delivery_target_audit añade políticas físicas y metadata por intento. Las migraciones 0001..0009 permanecen sin
-modificaciones. Upgrade, downgrade y upgrade se prueban únicamente sobre bases desechables. Un downgrade descarta las
-capacidades nuevas; no es un procedimiento de operación para datos 0.6.0 activos.
-La verificación de almacenamiento incorpora claves compuestas y una huella nueva state 5. Restore de 0.5.1 produce una
-proyección state 4 que excluye únicamente las adiciones definidas; exige identidad exacta de las filas/campos históricos. Los
-formatos anteriores soportados mantienen su proyección propia. .env y los secretos SMTP/OAuth externos no forman parte del
-backup: deben restaurarse desde la configuración privada del operador.
-La certificación debe demostrar autorización con petición manipulada, aislamiento de organización, dependencias, protección del
-último administrador, cambios de rol/permisos y revocación. Mailpit permite obtener la temporal exclusivamente desde el entorno de
-test y comprobar expiración, regeneración, primer acceso y ausencia de plaintext en DB/logs. El mock OIDC usa code+PKCE y
-tokens RS256 reales para probar navegador, replay, state/nonce, issuer/audience/expiración, usuarios
-inexistentes/desactivados/eliminados y sujeto estable. Estos resultados se publican con sus conteos reales; no certifican el servicio
-externo.
-Fuera de 0.6.0: auto-provisioning, group-to-role/domain, dominios administrables, gobierno ampliado, notificaciones de ejecución,
-SMTP OAuth2, secretos cloud, SHIST/SCD, masking, retención avanzada y plataformas distribuidas. DatasetVersion sigue siendo
-el versionado inmutable interno.
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+63
 30. Auditoría técnica de Data Delivery
 Cambio funcional respecto a 0.5.1
 Data Delivery ya publicaba DatasetVersion inmutables a PostgreSQL y SQL Server, con destinos versionados, mapping técnico,
@@ -3527,13 +3719,6 @@ incluso si la primera Run no se ejecuta o falla.
 7. Ejecutar una Run con la DatasetVersion publicada. El worker vuelve a comprobar
 
 el target y ejecuta DDL/DML juntos cuando corresponde.
-
-
---- PAGE 61 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-61
 Si la política ya existe, el builder muestra ambas columnas activadas y bloquea su deshabilitación con el texto: «Esta tabla utiliza
 auditoría de ingesta de Trackvance. Todas las entregas posteriores deben registrar fechaIngesta y usuario». La API también
 rechaza drafts manipulados; ocultar un checkbox no es autorización.
@@ -3563,6 +3748,15 @@ APPEND
 Sólo las filas nuevas reciben valores; filas previas quedan intactas
 OVERWRITE
 DELETE e INSERT transaccionales; todas las filas resultantes reciben valores
+
+
+--- PAGE 64 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+64
+Estrategia
+Efecto de auditoría
 UPSERT INSERT
 La nueva fila recibe ambos valores
 UPSERT UPDATE
@@ -3595,13 +3789,6 @@ Modelo persistente y migración
 0012_delivery_target_audit es aditiva y sucede a 0011_notification_delivery. No modifica migraciones históricas.
 Agrega delivery_target_policies y delivery_attempts.system_audit JSON. Los intentos históricos reciben {}; no se
 inventan usernames ni timestamps retrospectivos.
-
-
---- PAGE 62 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-62
 La política contiene identidad estable, organización, destino inicial, fingerprint único por organización, motor, host, puerto, base,
 schema, tabla, audit_columns_required=true, habilitador user ID/username y fechas de habilitación/materialización/creación.
 La restricción CHECK impide false y no hay endpoint de deshabilitación o borrado. El User se conserva con baja lógica, de forma
@@ -3611,6 +3798,13 @@ SQL, secret_reference ni TLS. Normaliza host DNS e IP; conserva el case de ident
 casefold de base/schema/tabla conservadoramente: aliases de mayúsculas no evaden la política, pero dos tablas distintas sólo por
 mayúsculas en un servidor case-sensitive comparten obligación. Aliases DNS diferentes no se resuelven como un único servidor
 físico automáticamente. Ese límite del locator configurado requiere gobierno de conexiones, no acceso a credenciales.
+
+
+--- PAGE 65 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+65
  Ausente
  Publicar audit=true
  Required
@@ -3658,11 +3852,11 @@ privilegios SQL apropiados. PostgreSQL ALTER requiere ownership efectivo/superus
 HAS_PERMS_BY_NAME para ALTER.
 
 
---- PAGE 63 ---
+--- PAGE 66 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-63
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+66
 Drift, fallos y estado UNKNOWN
 Estado observado
 Respuesta
@@ -3717,46 +3911,48 @@ faltantes y materialized_at. Intentos, receipt y sección delivery del manifest 
 }
 
 
---- PAGE 64 ---
+--- PAGE 67 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-64
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+67
 COMMITTED y materialized se persisten antes de publicar archivos locales. Un fallo de ArtifactStore no provoca replay; reparación
 local conserva los valores persistidos y verifica su consistencia con Run/Attempt. Configuraciones históricas sin el nuevo flag
 mantienen sus hashes canónicos y no se reescriben manifests para agregar campos. El linaje añade AUDITED_TARGET entre Run
 y policy.
 La auditoría registra DELIVERY_TARGET_AUDIT_ENABLED, DELIVERY_TARGET_AUDIT_COLUMNS_CREATED y
-DELIVERY_TARGET_AUDIT_DRIFT. La metadata permitida incluye IDs y fingerprint, nunca credenciales SQL/SMTP/SSO, bodies
-de notificaciones, tokens ni datos de negocio completos.
+DELIVERY_TARGET_AUDIT_DRIFT. La metadata permitida incluye IDs y fingerprint, nunca credenciales SQL/SSO, bodies de
+notificaciones, tokens ni datos de negocio completos.
 Backup/restore, pruebas y límites
 Backups incluyen política y snapshots de intentos en la misma base de metadata, junto con roles, usuarios y artifacts. .env
-continúa fuera del archivo; SMTP y secretos de cliente SSO siguen configurándose externamente. Un restore debe conservar el
-requisito incluso si el destino configurado rota su password. El downgrade controlado de metadata no borra columnas en servidores
-externos.
+continúa fuera del archivo; configuración y secretos de cliente SSO siguen configurándose externamente. Un restore debe
+conservar el requisito incluso si el destino configurado rota su password. El downgrade controlado de metadata no borra columnas
+en servidores externos.
 Las pruebas de unidad/API comprueban fingerprint, publicación atómica, rechazo de deshabilitación, tipos, permisos, snapshots,
 evidencia, UNKNOWN y rollback. El runner scripts/tests/delivery_cycle.py usa proyectos/volúmenes exclusivos,
-PostgreSQL y SQL Server reales, Mailpit y OIDC firmado desechable en overlays. Certifica CREATE con/sin auditoría, APPEND,
-OVERWRITE, UPSERT INSERT/UPDATE, históricos NULL, adopción parcial/completa, ALTER denegado, mapping reservado,
-drift, receipt/manifest, usuarios local/Microsoft/Google y restart.
+PostgreSQL y SQL Server reales y OIDC firmado desechable en overlays, sin Mailpit. Certifica CREATE con/sin auditoría,
+APPEND, OVERWRITE, UPSERT INSERT/UPDATE, históricos NULL, adopción parcial/completa, ALTER denegado, mapping
+reservado, drift, receipt/manifest, usuarios local/Microsoft/Google y restart.
 La prueba UNKNOWN hace commit real y pierde deliberadamente el acknowledgement del adaptador; su nombre y evidencia
-declaran la simulación. No certifica un fallo de red físico ni a Google/Microsoft reales. El resultado ejecutado de cada matriz queda
-en docs/development/evidence/0.6.0/; este documento describe casos, no convierte escenarios preparados en PASS. Los
-providers reales requieren credenciales externas y su estado se informa por separado.
+declaran la simulación. No certifica un fallo de red físico ni a Google/Microsoft reales. El resultado ejecutado de cada matriz actual
+queda en docs/development/evidence/0.6.1/; este documento describe casos, no convierte escenarios preparados en
+PASS. Los providers reales requieren credenciales externas y su estado se informa por separado.
 No se agregan scheduling Delivery, nuevos DataSink, SHIST, masking, retención avanzada ni gestores empresariales de secretos.
 Los límites de volumen y métricas de 0.5.1 siguen vigentes: rows_written mide filas fuente enviadas en un commit confirmado, no
 un inventario remoto post-trigger. La inspección y locks protegen nuestras transacciones; los cambios fuera de Trackvance
 pertenecen al gobierno del target.
-31. Cambios funcionales y técnicos 0.6.0
+31. Antecedente: cambios funcionales y técnicos 0.6.0
+Este capítulo conserva la decisión y alcance de 0.6.0. El envío SMTP aquí descrito fue retirado deliberadamente en 0.6.1; no
+representa una capacidad vigente ni una configuración habilitable. La validación histórica está en evidence/0.6.0.
 Este capítulo une situación anterior, riesgo, decisión y solución con los contratos desarrollados en los capítulos anteriores. El estado
 de pruebas se toma del informe ejecutado, nunca de los requisitos o de una certificación histórica.
 
 
---- PAGE 65 ---
+--- PAGE 68 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-65
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+68
 A. Roles y catálogo de permisos
 Aspecto
 Cambio y evidencia de diseño
@@ -3829,11 +4025,11 @@ configuración.
 Gobierno de múltiples organizaciones y mapeo de grupos no se implementan.
 
 
---- PAGE 66 ---
+--- PAGE 69 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-66
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+69
 C. Notificaciones
 Aspecto
 Cambio y evidencia de diseño
@@ -3905,112 +4101,14 @@ conservador.
 Scheduling Delivery, SHIST/SCD, targets nuevos y gobierno ampliado fuera de alcance.
 
 
---- PAGE 67 ---
+--- PAGE 70 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-67
-Resultados ejecutados de la edición
-Verificación
-Resultado ejecutado
-Corte y procedencia
-26 septiembre 2026, rama feat/local-prototype; baseline
-4519ed354202ea8f220682758da234e07b6df3ed. Implementación 979cc0f y corrección de
-harness 35c88fa2f0fd0c59dacda7faf76713e064364d25. Ejecuciones nuevas 0.6.0; no se
-heredan resultados 0.5.1.
-Backend local
-1.141 pytest backend/scripts PASS en 79,57 s, 0 FAIL, 0 SKIP tras la corrección CI. Dos avisos
-upstream Starlette/httpx y AnyIO. Ruff PASS, Mypy: 42 archivos PASS, uv sync --frozen PASS.
-Se repitieron 20 pruebas focales del runner tras la corrección.
-Frontend local
-Instalación pnpm congelada, ESLint, TypeScript y production build PASS. 164 Vitest / 19
-archivos PASS en 10,46 s. Cinco capturas sintéticas inspeccionadas sin credenciales.
-OpenAPI y permisos
-Runtime 0.6.0: 95 paths, 116 operaciones, 87 schemas; snapshot exacto probado. Catálogo: 41
-códigos y 104 reglas protegidas, desconocidas denegadas. Nueva cadena 0010/0011/0012;
-0001..0009 sin diferencias.
-Migraciones PostgreSQL
-PostgreSQL 16 real: upgrade/check/downgrade/upgrade PASS, paridad ORM, 24 tablas
-históricas 0008 y 8 vínculos conservados. SQLite poblada con FK reales también comprobada.
-Compose integral
-PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 117,646 s. Doctor,
-migraciones, política restart=no y snapshot exacto tras restart PASS. Volúmenes desechables
-propios retirados.
-Conexiones reales
-PASS: 96 comprobaciones PostgreSQL / SQL Server; smoke 84; Playwright 30 PASS / 11 opt-in
-SKIP / 0 FAIL en 159,572 s. Matriz temporal, adquisición/refresh/historia y módulos; secretos y
-persistencia tras reinicio PASS.
-Identity/SSO
-9/9 Playwright PASS en 42,930 s con el verificador por stdin; total 112,142 s. Local
-temporal/primer acceso, roles dinámicos y cuatro perfiles OIDC simulados RS256. Expiración,
-SMTP FAILED/regeneración, ausencia de plaintext DB/log, restart y cleanup PASS. La
-recreación API no se observó en esta corrida local. CI: 9/9 en 54,267 s; recreación API
-observada y verificación por stdin PASS.
-Clean demo
-1/1 Playwright PASS con Compose base, seed=false y demoaccess=true; colecciones vacías
-comprobadas. Proyecto nuevo eliminado, 0 recursos restantes.
-Cobertura de navegador
-41 escenarios distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1
-demo limpio. Las repeticiones de casos comunes no se suman como tests únicos. Los SKIP son
-opt-in y se ejecutan por separado.
-Delivery real
-308 comprobaciones PASS en PostgreSQL 16/18 y SQL Server, audit
-columns/estrategias/policy/drift/identidad interna. Playwright 1/1 PASS en 6,816 s, scan de
-credenciales/reinicio PASS. Nueva ejecución final con reporte saneado.
-UNKNOWN y límites
-PASS para pérdida de acknowledgement inyectada en adapter después de commit SQL real,
-política required y recuperación deliberada sin replay. Fallo físico de red en ventana exacta:
-NOT_RUN_NONDETERMINISTIC. No se equiparan ambos escenarios.
-Recovery nativo
-PASS: 9 artifacts, 2 secretos SQL y 269 relaciones exactas, 6 roles / 95 grants, 1 ExternalIdentity
-y 1 OIDC attempt consumido de fixture, 1 notificación y 1 target policy. Origen desechable
-destruido antes de restore; no reenvío SQL.
-Restore0.5.1
-PASS desde build auténtico 4519ed3 / 0009 / state 4 hasta 0012 / state 5. 78 artifacts y
-proyección histórica SHA-256 idéntica; 140,886 s. Restore incluye 5 roles y 1 usuario migrado.
-Restore0.4.1/0.5.0
-Nuevos drills PASS de backups auténticos 0007/state 2 y 0008/state 3; 7/9 artifacts y 1/2
-secretos respectivamente. DTOs y bytes receipt/manifest/Parquet históricos intactos. Instalación
-principal y backup original no alterados por drills.
-Benchmarks acotados
-General file-only PASS: 1.074.923 bytes / 1.000 filas / 4 columnas en 38,665 s, pico 390.311.443
-bytes, sin OOM. Delivery smoke 8/8 PASS mismo input en 148,814 s; versión observada 0.6.0.
-Sin certificación de capacidad ni percentiles.
-
-
---- PAGE 68 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-68
-Verificación
-Resultado ejecutado
-Proveedores externos
-Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS.
-SMTP externo también NOT_RUN; Mailpit real PASS. Guías de registro/consentimiento/variables
-y validación separadas; secretos no suministrados ni subidos.
-Instalación Docker real
-PASS: trackvance-certification, http://localhost:3100. Origen detectado 0.5.0/0008; backup nuevo
-PASS, upgrade 0.6.0/0012, proyección legacy-v3 exacta y restart state5 exacto. API y ambos
-workers 0.6.0; cinco servicios saludables, restart=no; doctor, login, footer y paneles PASS.
-Conservados 3 datasets, 1 usuario, 1 conexión, 1 destino, 4 Runs, 9 artifacts y 2 secretos SQL; 5
-roles migrados. Sin mutaciones de negocio.
-GitHub Actions producto
-SUCCESS: nueve jobs, commit 35c88fa2f0fd0c59dacda7faf76713e064364d25, workflow
-36289364326, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e,
-identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke.
-https://github.com/eddiesan422/TrackvanceCore/actions/runs/36289364326. Primer workflow de
-979cc0f: 8 SUCCESS / 1 FAIL del verificador post-restart; corregido con commit nuevo, sin rerun
-cosmético.
-GitHub Actions publicación
-El commit documental se somete de nuevo a los nueve jobs. El informe de entrega identifica su
-HEAD SHA, workflow inmutable, resultados y duración después de observar SUCCESS. El PDF
-no incorpora el SHA de su propio commit para evitar una referencia circular.
-Publicación PDF
-Candidato renderizado e inspeccionado antes de --publish. Páginas, SHA-256, hashes de
-fuente/OpenAPI/validación, source commit e inspección completa se registran en
-pdf-verification.json. La edición oficial en Documentación se sincroniza después de revisar y
-conserva 0.5.1 archivada.
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+70
+Resultados del antecedente
+Los resultados 0.6.0 permanecen en validation_results_0.6.0.json y evidence/0.6.0. La tabla de validación actual de los capítulos 22
+y 35 corresponde sólo a 0.6.1.
 32. Configuración y prueba real SSO
 Estas instrucciones permiten ejecutar pruebas externas opt-in. El mock de CI certifica el cliente OIDC de Trackvance; no certifica
 cuentas ni servicios reales. Mientras no se hayan configurado credenciales y ejecutado cada caso, el resultado es
@@ -4024,8 +4122,8 @@ TRACKVANCE_WEB_ORIGIN coherentes en el .env privado. En HTTPS las cookies deben 
 credenciales, query strings ni fragmentos como URL pública.
 2. En Configuración → Usuarios crea primero la cuenta con el correo exacto de la
 
-identidad que vas a probar y un rol de Trackvance. No existe auto-provisioning. No es necesario que SMTP esté configurado para
-autenticar por SSO, pero el primer acceso seguirá exigiendo definir una contraseña local.
+identidad que vas a probar y un rol de Trackvance. No existe auto-provisioning. La temporal se muestra una sola vez al
+administrador, sin envío de correo. El primer acceso seguirá exigiendo definir una contraseña local.
 3. Registra una aplicación Web con callback exacto para cada proveedor. El secreto
 
 permanece sólo en la API, no en React ni en los workers. No habilites implicit grant ni scopes de correo/calendario/Graph.
@@ -4040,13 +4138,6 @@ A. Cuenta personal Microsoft: Outlook, Hotmail, Live
 1. Abre el centro de administración de Microsoft Entra,
 
 entra en App registrations y registra una aplicación para Trackvance.
-
-
---- PAGE 69 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-69
 2. En Supported account types selecciona Accounts in any organizational directory and personal Microsoft accounts. La
  audiencia correspondiente es
 AzureADandPersonalMicrosoftAccount. Una aplicación sólo de un tenant o sólo organizacional no cubre esta prueba.
@@ -4065,6 +4156,13 @@ common para Code Flow + PKCE; no pide Microsoft Graph.
  primer enlace personal
 requiere el tenant consumer de Microsoft y un dominio personal reconocido (Outlook/Hotmail/Live/MSN); otras identidades
 ambiguas se rechazan.
+
+
+--- PAGE 71 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+71
 7. Si es primer acceso, define una contraseña local nueva. Confirma el mismo
 
 username/rol interno en /me, luego consulta Métodos de acceso en Usuarios: Microsoft vinculado y último acceso. La fecha de
@@ -4099,13 +4197,6 @@ selecciona esa cuenta y concede sólo openid/email/profile. Define contraseña l
 Google vinculado y rol local.
 El cliente Web y la redirect URI se documentan en el flujo OAuth para aplicaciones Web. La referencia OIDC describe issuer/sub y
 los claims de email.
-
-
---- PAGE 70 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-70
 D. Google Workspace
 Reutiliza un cliente Web cuya audiencia/consentimiento permita ese dominio. Una aplicación de audiencia Internal puede limitarse a
 su propia organización; para probar también Gmail debe elegirse una configuración que admita ambas cuentas. El administrador
@@ -4122,6 +4213,13 @@ como SSO.
 Un Administrator abre Configuración → Usuarios → Métodos de acceso y desvincula Microsoft o Google. Esto elimina únicamente
 el vínculo de autenticación, conserva User e historia y revoca las sesiones afectadas según el contrato. Para volver a enlazar se
 aplica de nuevo la validación inicial; no se heredan grupos externos.
+
+
+--- PAGE 72 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+72
 Guarda por caso una evidencia saneada: proveedor, tipo de cuenta, hora, commit, resultado, user_id de fixture, permisos
 comprobados y error genérico si falló. No guardes callback completo, código, tokens, cookies, ID token ni capturas de secretos. En
 real-provider-results.json distingue PASS, FAIL y NOT_RUN con motivo.
@@ -4152,60 +4250,46 @@ Error de red o firma
 Discovery/JWKS accesibles, reloj del host correcto, secret vigente; no desactivar validación.
 La prueba real depende de credenciales y consentimiento externos. La suite identity-sso-e2e usa un mock desechable y no
 requiere esas credenciales.
+33. Operación de credenciales y retiro de SMTP
+Antecedente 0.6.0
+La edición previa incluyó configuración SMTP genérica con TLS, Mailpit de prueba y consideraciones de autenticación
+Gmail/Microsoft. Esa integración se retiró en 0.6.1. La edición 0.6.0 queda archivada para interpretar instalaciones y registros
+históricos; sus variables y guía no son instrucciones habilitables en la versión actual. SMTP y SSO siempre fueron integraciones
+distintas: retirar correo no retira Microsoft/Google OIDC, no cambia sus client secrets ni requiere modificar
+TRACKVANCE_PUBLIC_URL.
+Operación estándar 0.6.1
+1. Administrator abre Configuración → Usuarios locales → Nuevo usuario.
+
+2. Completa identidad, email, rol y estado. La API genera una temporal de 24 horas.
+
+3. En «Usuario creado», verifica nombre/rol/vigencia y copia username y temporal.
+
+4. Entrega las credenciales mediante el mecanismo externo que considere apropiado.
+
+5. Cierra el modal. Trackvance ya no puede devolver esa misma temporal.
+
+6. El usuario inicia sesión local, define y confirma su contraseña antes de usar módulos.
+
+Si se perdió la respuesta, cerró el modal o venció la temporal, use Regenerar credenciales sobre el usuario existente. No hay
+«recordar» ni «reenviar» email. Regenerar revoca las sesiones y sustituye cualquier contraseña anterior, incluso si la cuenta ya
+completó su primer acceso. Es una acción autorizada y auditada, sujeta a versión esperada.
+Configuración e instalación del cliente
+La instalación estándar no requiere servidor de correo ni proveedor de identidad externo. Autenticación muestra local habilitado y
+Microsoft/Google deshabilitados. Las variables TRACKVANCE_SSO_MICROSOFT_*, TRACKVANCE_SSO_GOOGLE_* y
+TRACKVANCE_PUBLIC_URL permanecen disponibles para activación posterior; consulte la guía opcional del capítulo 32.
 
 
---- PAGE 71 ---
+--- PAGE 73 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-71
-33. Configuración SMTP y operación de credenciales
-SMTP y SSO son integraciones independientes. Un client secret Google/Microsoft para login no sirve como contraseña SMTP y el
-adaptador no reutiliza tokens SSO.
-SMTP genérico
-En el .env privado establece TRACKVANCE_SMTP_ENABLED=true, host, puerto, remitente y modo de seguridad. Los nombres
-completos están en .env.example. Para submission con STARTTLS utiliza normalmente puerto 587 y
-TRACKVANCE_SMTP_SECURITY=STARTTLS; para TLS implícito utiliza el puerto que indique el proveedor (habitualmente 465) y
-SSL o TLS. El adaptador valida el certificado con el almacén de confianza del sistema. Configura username/password sólo cuando
-el servidor los requiera y autorice esa modalidad.
-Recrea la API conservando volúmenes. Configuración → Notificaciones muestra configurado/no configurado, remitente y estado de
-entrega. Crear un usuario envía una contraseña temporal de 24 horas. Si falla, el usuario se conserva y la entrega muestra un
-código controlado. Una vez corregida la integración, usa Regenerar y reenviar credenciales; esto crea otra contraseña e invalida
-la anterior. No existe recuperación ni vista administrativa del plaintext.
-NONE se limita a un entorno local/test explícito con TRACKVANCE_SMTP_ALLOW_INSECURE=true. No se activa por omitir TLS.
-Cuando SMTP está incompleto o deshabilitado, Trackvance inicia y crea usuarios con entrega FAILED/NO_PROVIDER. No se
-incluyen body/password en notificaciones persistidas.
-Mailpit de pruebas
-Los runners añaden deploy/docker/compose.mailpit-test.yml a un proyecto nuevo, con SMTP interno 1025 y API/UI
-ligada a loopback. No añadas ese overlay al Compose de la instalación habitual. El test obtiene la contraseña desde
-/api/v1/messages y /api/v1/message/{id} únicamente en memoria para completar primer acceso; no la publica en reports,
-logs o artifacts. La documentación de Mailpit describe su API y el uso en Docker permite reproducir ese entorno desechable.
-Gmail y App Password
-Cuando la cuenta y sus políticas lo permiten, activa 2-Step Verification y genera una contraseña de aplicación específica para este
-SMTP. Guarda ese valor en TRACKVANCE_SMTP_PASSWORD, con el correo completo como username. No uses la contraseña
-normal de Google ni un secreto OAuth de SSO. La disponibilidad de App Passwords depende del tipo de cuenta y sus restricciones;
-consulta la guía oficial. Usa el host/puerto/TLS de SMTP que Google documente para tu modalidad de cuenta.
-Microsoft SMTP
-Este adaptador implementa SMTP con credenciales y TLS; no implementa SASL OAuth2. Sólo puede usar un servidor/relay
-Microsoft cuya configuración autorice esa modalidad. No se afirma compatibilidad general con SMTP AUTH de Microsoft 365: las
-políticas del tenant, Security defaults y evolución de Basic Authentication pueden impedirlo. No reduzcas la seguridad del tenant
-para cumplir la prueba. Si exige OAuth, el caso queda NOT_RUN_UNSUPPORTED_SMTP_AUTH hasta incorporar un adaptador
-apropiado. Consulta SMTP AUTH en Exchange Online y SMTP con OAuth.
-Operación y recuperación
-La tabla conserva sólo destinatario, template, proveedor, intentos, resultado y fechas; NOTIFICATION_SENT/FAILED aportan
-auditoría. SENT significa aceptación por el servidor SMTP, no confirmación de lectura o entrega final en la bandeja. Una
-interrupción entre envío y actualización local puede dejar PENDING: no reenvíes el mismo secreto; genera credenciales nuevas
-explícitamente.
-.env y passwords SMTP/client secrets SSO están fuera del backup. Conserva su configuración en el mecanismo privado del
-operador y reintégrala tras restore. Nunca incluyas esos valores ni correos con contraseñas en evidencia de CI. En 0.6.0 sólo se
-envían credenciales USER; alertas de Runs, roles, dominios y grupos permanecen pendientes aunque el puerto pueda reutilizarse.
-
-
---- PAGE 72 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-72
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+73
+No incluya temporales en tickets, logs, capturas o informes automáticos de Trackvance. El canal de entrega y portapapeles son
+responsabilidad operativa del administrador; la aplicación no persiste una copia para recuperación. La contraseña definitiva se
+almacena con Argon2 igual que la temporal, sin devolverla en respuestas administrativas.
+Notificaciones futuras
+El historial permanece consultable por las APIs legacy autorizadas. No existe una pestaña ni configuración SMTP operativa. Las
+notificaciones funcionales de ejecuciones, Delivery, Sentinel y Excepciones se diseñarán posteriormente, con canal por decidir.
 34. Matriz completa de autorización
 Inventario explícito generado de permissions.py. Prefijo /api/v1; los aliases absolutos /health y /health/ready son
 públicos. Cada ruta protegida desconocida devuelve denegación: no existe permiso de fallback. RolePermission es la única fuente
@@ -4286,6 +4370,16 @@ Sí
 intake:execute
 datasets:read, intake:read
 Sí
+
+
+--- PAGE 74 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+74
+Permiso
+Dependencias directas
+Delegable
 intake:read
 Ninguna
 Sí
@@ -4301,16 +4395,6 @@ Sí
 recon:execute
 datasets:read, recon:read
 Sí
-
-
---- PAGE 73 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-73
-Permiso
-Dependencias directas
-Delegable
 recon:read
 Ninguna
 Sí
@@ -4350,6 +4434,13 @@ No
 users:read
 Ninguna
 Sí
+
+
+--- PAGE 75 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+75
 Endpoints públicos y de sesión
 Método
 Ruta
@@ -4401,11 +4492,11 @@ GET
 Sesión; permitido durante primer acceso
 
 
---- PAGE 74 ---
+--- PAGE 76 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-74
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+76
 Endpoints protegidos
 Método
 Ruta
@@ -4520,11 +4611,11 @@ POST
 destinations:use
 
 
---- PAGE 75 ---
+--- PAGE 77 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-75
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+77
 Método
 Ruta
 Permiso base
@@ -4639,11 +4730,11 @@ GET
 notifications:read
 
 
---- PAGE 76 ---
+--- PAGE 78 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-76
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+78
 Método
 Ruta
 Permiso base
@@ -4738,21 +4829,24 @@ DELETE
 /users/{id}/external-identities/{identity_id}
 users:manage
 POST
-/users/{id}/resend-credentials
+/users/{id}/regenerate-credentials
 users:manage
 POST
-/users/{id}/reset-password
+/users/{id}/resend-credentials (deprecated)
+users:manage
+POST
+/users/{id}/reset-password (deprecated)
 users:manage
 Controles adicionales por recurso y operación
 La matriz es la puerta de entrada, no reemplaza organización, estado/versionado, CSRF ni comprobaciones del objeto. Una sesión
 first-login sólo accede a /me, logout y change-password. User/Role activos se resuelven en cada petición.
 
 
---- PAGE 77 ---
+--- PAGE 79 ---
 TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.0
-Trackvance Colombia SAS · 26 septiembre 2026
-77
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+79
 Operación
 Comprobación adicional
 Runs, Findings y dashboard
@@ -4777,4 +4871,190 @@ Target audit
 Policy irreversible, columnas reservadas, drift y privilegios SQL; manipular audit=false no
 desactiva policy.
 notifications:manage está reservado en el catálogo para evolución del servicio; no expone un editor de secretos ni una ruta de
-envío arbitrario. Configuración SMTP/OIDC sigue exclusivamente en el entorno del servidor.
+envío arbitrario. Configuración OIDC sigue exclusivamente en el entorno del servidor; SMTP fue retirado en 0.6.1.
+35. Cambios funcionales y técnicos 0.6.1
+1. Situación 0.6.0
+0.6.0 generaba la temporal y la pasaba a NotificationService para intentar entregarla por SMTP. Persistía Argon2 e historia de
+entrega, con estados SENT/FAILED/PENDING. El administrador no veía la temporal. RBAC, SSO y Delivery se incorporaron en la
+misma release y continúan implementados. El antecedente y su PDF permanecen archivados.
+2. Problema funcional
+La incorporación de un usuario dependía operativamente de configurar correo, de su conectividad y de políticas del proveedor. Esa
+complejidad no era necesaria para la administración local. Un fallo podía dejar al usuario creado sin una temporal entregada.
+3. Decisión de producto
+Revertir el envío automático y mostrar la temporal una sola vez al administrador autorizado. Trackvance genera, vence y valida la
+credencial; el administrador decide cómo comunicarla. Notificaciones de negocio vuelven al backlog, sin canal predeterminado.
+4. Solución funcional
+Alta → temporal de 24h → modal → entrega externa → login → cambio obligatorio → sesión normal. Regenerar → nueva temporal
+→ revocación de sesiones y contraseña anterior → modal → primer acceso nuevamente. Email del usuario se conserva como
+identidad.
+5. Solución técnica
+CSPRNG de 32 caracteres, hash Argon2 y campos existentes de User. El endpoint emite un DTO efímero separado;
+no-store/no-cache evita almacenamiento HTTP ordinario. La UI usa una llamada directa y estado local del modal, fuera de mutation
+cache. Cierre, desmontaje y respuesta tardía eliminan referencias controladas por la aplicación.
+6. Cambios API
+POST /users devuelve 201 UserCredentialIssueResponse; POST /users/{id}/regenerate-credentials devuelve 200 con el mismo
+envelope y exige versión. Alias legacy deprecated no envían correo. GET y UserResponse no contienen temporal ni
+credential_delivery. Lectura legacy de notificaciones permanece deprecated y declara HISTORICAL_ONLY. La matriz incorpora el
+nuevo endpoint sin delegar users:manage a roles personalizados.
+
+
+--- PAGE 80 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+80
+7. Cambios UI
+Modal de alta/regeneración con nombre, username, temporal, expiración y rol; copiar username/password/ambas, mostrar/ocultar y
+cerrar. La tabla presenta pendiente, definida o vencida. Se elimina Notificaciones de Configuración; Usuarios locales, Roles y
+permisos y Autenticación permanecen. Los botones SSO sólo aparecen con proveedores habilitados.
+8. Persistencia
+No hay 0013: Alembic sigue 0012_delivery_target_audit y el modelo conserva 31 tablas. 0001..0012 permanecen byte por byte.
+notification_deliveries y auditoría histórica no se borran ni reescriben. Alta/regeneración no insertan entregas nuevas. Data Delivery
+conserva políticas, columnas técnicas, receipts, manifests y linaje de 0.6.0.
+9. Seguridad y límites de memoria
+La temporal sólo se genera en memoria, cruza la respuesta autorizada y vive en el modal. No es un atributo recuperable de User ni
+se guarda en auditoría, logs, artifacts, backups o navegador persistente. Las pruebas buscan coincidencias de las temporales
+reales sin imprimirlas. Los informes E2E evitan captura automática de secretos incluso ante fallo. No se garantiza borrado forense
+de RAM ni del portapapeles externo. Perder la respuesta obliga a regenerar; un GET nunca resuelve esa pérdida.
+10. Compatibilidad
+El envelope de alta cambia deliberadamente respecto a 0.6.0 y los clientes deben leer user y temporary_credentials. Los alias
+preservan la URL, no la semántica de correo. SSO conserva OIDC, PKCE, state, nonce, JOSE y ExternalIdentity, incluido primer
+acceso. El login local permanece disponible. Restore nativo061/060 y heredado051 valida la compatibilidad persistente, sin atribuir
+ese resultado a todos los clientes HTTP previos.
+11. E2E y privacidad de evidencia
+Recorridos compose, identidad con cuatro perfiles OIDC mock, conexiones, Delivery y demo limpia verifican integración. El
+navegador captura temporales exclusivamente en RAM y valida cierre, primer acceso, regeneración y revocación. Se escanean
+PostgreSQL, logs, artifacts, backups, storage de navegador, URL y DOM. No se requiere Mailpit y no se ejecutan proveedores
+Microsoft/Google reales: NOT_RUN_EXTERNAL_CREDENTIALS.
+12. Upgrade Docker real
+trackvance-certification se actualiza desde 0.6.0 a 0.6.1 con backup previo verificado, sin borrar volúmenes ni modificar datos de
+negocio para probar. Se comprueban ausencia de trabajo activo, igualdad state5, artifacts, secretos, reinicio, doctor, salud de cinco
+servicios, Alembic y versiones/footer. La creación desde UI se ensaya en entornos desechables; la instalación principal se revisa
+mediante navegación de lectura.
+13. CI y trazabilidad documental
+Se exige éxito de los nueve jobs en el commit de producto y nuevamente en el HEAD final tras documentación/PDF. La evidencia
+registra workflow ID, SHA y jobs. Este PDF registra el commit de implementación usado para certificar; el informe final externo al
+repo registra el HEAD documental y su CI para evitar una referencia circular de commit.
+14. Limitaciones
+No se prueba SSO real ni se requieren secretos externos. No hay envío de correo, notificaciones operativas, auto-provisioning o
+recuperación de temporales cerradas. Los benchmarks smoke validan los casos medidos, no capacidad empresarial general. La UI
+no controla el canal externo ni el historial de portapapeles del administrador.
+15. Pendientes posteriores
+Diseñar eventos funcionales y sus destinatarios/canales cuando exista una necesidad real. Decidir activación SSO por cliente y
+entonces planear su validación externa. Mantener en backlog gobierno, masking, retención y Secret Manager; no se implementan
+nuevos conectores, destinos, scheduling Delivery ni plataformas distribuidas aquí.
+
+
+--- PAGE 81 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+81
+Resultados ejecutados 0.6.1
+Verificación
+Resultado ejecutado
+Corte y procedencia
+27 septiembre 2026; feat/local-prototype. Baseline
+587909bc4462683e87e403dd2ea29a1d6d4afe08, sin commits remotos posteriores al iniciar.
+Implementación 4d3c656ab0bc250f50eb53972d22839da9e4485c. Ejecuciones nuevas 0.6.1; no
+se heredan éxitos 0.6.0.
+Backend local
+1.192 pytest backend/scripts PASS en 106,280 s, 0 FAIL/0 SKIP; 54 focales identidad/SSO
+PASS. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Dos avisos upstream:
+Starlette/httpx y AnyIO BlockingPortal.
+Frontend local
+174 Vitest / 20 archivos PASS en 13,056 s; 0 FAIL/0 SKIP. Instalación pnpm congelada, ESLint,
+TypeScript y production build PASS. Modal, cierre/pagehide, respuesta tardía y query/mutation
+cache comprobados.
+OpenAPI y permisos
+0.6.1: 96 paths, 117 operaciones, 89 schemas; snapshot exacto probado. 41 permisos y 105
+reglas protegidas. 31 tablas, head 0012_delivery_target_audit, cero nuevas migraciones.
+Modelos persistentes y 0001..0012 intactos; hashes de bytes antes/después coinciden.
+Migraciones PostgreSQL
+PostgreSQL 16 real: upgrade/check/downgrade/upgrade, paridad ORM y preservación histórica
+PASS. Roundtrip 0008↔0012 conserva 24 tablas y ocho vínculos Delivery, con
+COMMITTED/UNKNOWN. Contenedor desechable eliminado.
+Compose integral
+PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 125,025 s. Doctor,
+migraciones, restart=no, snapshot exacto tras restart y cleanup PASS. El tercer intento corrigió
+sincronización del test y CRLF del clipboard Windows; ambos fallos anteriores están registrados.
+Identity/SSO
+9/9 Playwright PASS en 45,173 s; ciclo 104,251 s. Temporal/primer
+acceso/regeneración/revocación, roles y cuatro perfiles OIDC mock RS256. Expiración, cero
+entregas nuevas, privacidad y restart PASS. No Mailpit.
+Privacidad ejecutada
+Alta y regeneración nunca entran en mutation cache. Copiar3, cerrar y ausencia en
+DOM/storage/cookies/URL PASS. Probe stdin: 14 secretos RAM en Compose y 15 en identidad,
+DB/log/artifacts/archivos de navegador PASS. Backups decodificados nativo/060/051 y
+excepciones inyectadas PASS. Sin screenshots, trace, vídeo ni contexto DOM sensible
+publicado.
+Conexiones reales
+96 comprobaciones PostgreSQL/SQL Server y smoke 84 PASS. Playwright 30 PASS / 11 opt-in
+SKIP / 0 FAIL en 166,452 s. Tipos temporales, adquisición/refresh/historia y módulos; secretos y
+persistencia tras reinicio PASS.
+Delivery real
+308 comprobaciones PostgreSQL 16/18 y SQL Server PASS; Playwright 1/1 en 5,189 s.
+fechaIngesta/usuario, policies, CREATE/APPEND/OVERWRITE/UPSERT, drift,
+receipt/manifest/linaje y actor interno local/SSO conservados; reinicio y scans PASS.
+UNKNOWN y límites
+Pérdida de acknowledgement inyectada en el adaptador después de commit SQL real PASS,
+con policy required y sin replay. Fallo físico de red en ventana exacta:
+NOT_RUN_NONDETERMINISTIC. No se equiparan esas pruebas.
+Demo limpia y cobertura
+Demo sin seed 1/1 PASS en 1,878 s; ciclo 61,566 s, restart y cleanup PASS. 41 escenarios
+distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio.
+Repeticiones no se suman; SKIP opt-in cubiertos por suites dedicadas.
+Recovery nativo 0.6.1
+PASS: 9 artifacts, dos secretos SQL, 269 relaciones, 6 roles/95 grants y tablas operativas
+pobladas. Notificación histórica declarada como fixture sintética; alta/regeneración no añaden
+filas. Origen destruido antes de restore. Dump decodificado y 15 archivos examinados contra
+seis secretos conocidos, sin fugas.
+Restore auténtico 0.6.0
+PASS desde 587909b/0012/state5: 78 artifacts y estado histórico exacto; una entrega
+FAILED/NO_PROVIDER real de la baseline preservada. Nuevas emisiones 0.6.1 sin entregas
+adicionales. Backup decodificado (82 archivos), logs y cleanup PASS; 143,074 s. Dos fallos
+iniciales del harness se corrigieron y documentaron.
+
+
+--- PAGE 82 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+82
+Verificación
+Resultado ejecutado
+Restore auténtico 0.5.1
+PASS desde 4519ed3/0009/state4: 78 artifacts, proyección histórica SHA-256 idéntica, migración
+a0012/state5, cinco roles y usuario heredado. Emisión/regeneración y backup sin plaintext ni
+nuevas notificaciones; cleanup PASS, 136,233 s. Drills041/050 permanecen antecedentes060,
+no se atribuyen como nuevas ejecuciones061.
+Benchmarks acotados
+General file-only PASS: 1,074,923 bytes / 1,000 filas / cuatro columnas, 38,509 s, pico
+muestreado 391,066,417 bytes. Delivery smoke 8/8 PASS, mismo input, 140,991 s, versión0.6.1.
+Sin OOM ni certificación de capacidad o percentiles.
+Proveedores externos
+Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS
+por alcance explícito. SSO implementado, opcional y disabled by default. SMTP fue retirado: no
+es un proveedor pendiente de certificar ni una dependencia. Canal de futuras notificaciones sin
+decidir.
+Instalación Docker real
+PASS: trackvance-certification en http://localhost:3100; contenedores existentes 0.6.0 iniciados
+para backup verificado y upgrade 0.6.1 sin borrar volúmenes. State 5 exacto antes/después y
+tras reinicio; cinco servicios healthy, API/ambos workers 0.6.1, restart=no, doctor y Alembic 0012.
+UI/health/footer 0.6.1, Usuarios/Roles/Autenticación sin Notificaciones, local habilitado y
+Microsoft/Google disabled. Conservados 3 datasets, 2 usuarios, una conexión, un destino, cuatro
+Runs, nueve artifacts y dos secretos SQL. Acceso demo existente comprobado en principal; login
+con contraseña local probado en desechables. Sin mutaciones de negocio para validar.
+GitHub Actions producto
+SUCCESS: nueve jobs, commit 4d3c656ab0bc250f50eb53972d22839da9e4485c, workflow
+36327154050, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e,
+identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke.
+https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050
+GitHub Actions publicación
+El commit documental se somete de nuevo a los nueve jobs. Sólo se entrega tras observar
+SUCCESS del HEAD final. Su SHA, workflow y jobs quedan en el informe externo de entrega,
+evitando una referencia circular en el PDF.
+Publicación PDF
+Candidato renderizado e inspeccionado por completo antes de --publish. Páginas, SHA-256,
+hash de fuente/OpenAPI/validación, source commit y revisión se registran en
+pdf-verification.json. Copia oficial sincronizada en Documentación; edición060 archivada intacta.

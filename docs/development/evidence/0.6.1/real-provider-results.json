@@ -1,0 +1,11 @@
+{
+  "version": "0.6.1",
+  "microsoft_personal": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "microsoft_organizational": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "google_gmail": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "google_workspace": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "reason": "Explicit user scope; mock OIDC tested instead",
+  "smtp": "REMOVED_FROM_PRODUCT",
+  "default_local_auth": true,
+  "default_sso_enabled": false
+}

@@ -62,8 +62,32 @@ de fórmulas en las celdas de negocio. No reinicia ni elimina datos.
 Las imágenes y paquetes se descargan durante la preparación. Una vez construidos,
 la aplicación, los archivos, PostgreSQL y los workers funcionan localmente. No hay
 storage, fuentes, analítica ni procesamiento cloud obligatorio. El login local
-funciona sin SMTP ni SSO. El correo SMTP y Microsoft/Google SSO son integraciones
-opcionales que requieren acceso a sus proveedores cuando están habilitadas.
+funciona sin SSO. En 0.6.1 no existe envío operativo de credenciales por SMTP:
+alta y regeneración muestran la temporal una sola vez al administrador. Microsoft/
+Google SSO siguen implementados, deshabilitados por defecto y opcionales; su
+activación se decide durante la implantación y requiere acceso al proveedor.
+
+### Credenciales locales 0.6.1
+
+Configuración conserva Usuarios locales, Roles y permisos y Autenticación; la
+pestaña SMTP/Notificaciones ya no pertenece al flujo operativo. El alta solicita
+nombres, apellidos, username, email, rol y estado. Email conserva su función de
+identidad y posible primer vínculo SSO, pero no entrega credenciales.
+
+Después de crear o regenerar, guardar la temporal desde el modal y comunicarla
+por el mecanismo externo elegido por el administrador. Al cerrarlo desaparece
+de la UI y no puede recuperarse con GET User ni reabriendo la ficha. Si se pierde
+o vence a las 24 horas, **Regenerar credenciales** crea otra, invalida la anterior
+y revoca sesiones. No se intenta recuperar ni reenviar el secreto anterior.
+
+El primer login local o SSO restringido sigue exigiendo definir una contraseña
+local nueva. Crear usuarios no necesita SMTP, no registra entregas nuevas y no
+genera NOTIFICATION_SENT/FAILED. Las filas y eventos históricos 0.6.0 se conservan.
+No guardar temporales en tickets, capturas, archivos de evidencia, URLs ni logs.
+
+Antecedente: en 0.6.0 se intentaba enviar la temporal por SMTP. 0.6.1 revierte esa
+decisión expresamente; el adaptador activo se retira, mientras el modelo y la
+migración histórica de notificaciones se conservan para preservar instalaciones.
 
 El override siguiente coloca PostgreSQL, API y worker en una red Docker interna.
 Si el proyecto ya existe, se recrea únicamente su red conservando los volúmenes:
@@ -84,14 +108,15 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual 0.6.0 llega a `0012_delivery_target_audit`, precedida por
+La revisión actual 0.6.1 permanece en `0012_delivery_target_audit`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
 `0006_local_identity_exceptions`, `0007_monitor_scheduling`, `0008_data_delivery`,
 `0009_delivery_reviews`, `0010_dynamic_rbac_identity` y
-`0011_notification_delivery`. Las
-correcciones se incorporan con nuevas migraciones; el desacoplamiento mediante
-puertos no requiere modificar el schema. La API aplica las migraciones al iniciar.
+`0011_notification_delivery`. No se necesita 0013: la emisión efímera y la retirada
+del transporte SMTP no cambian el schema. 0001..0012 permanecen byte por byte
+intactas; las modificaciones que sí requieran schema se incorporarían mediante
+nuevas migraciones. La API aplica las migraciones pendientes al iniciar.
 En bases SQLite previas sin tabla Alembic, el adaptador
 solo adopta un schema original reconocido o uno que coincida con el modelo actual;
 un schema desconocido exige revisión y no se modifica a ciegas.
@@ -141,7 +166,7 @@ Si se recrea el contenedor, debe copiarse de nuevo el script temporal antes de l
 segunda captura. No ejecutar login, exports, smoke ni pruebas durante el intervalo:
 son operaciones auditadas y agregan registros legítimos que cambiarían la huella.
 
-## Actualización y recuperación 0.6.0
+## Actualización y recuperación 0.6.1
 
 La actualización de una instalación existente requiere conservar su nombre Compose,
 puerto, configuración externa y los seis volúmenes. Antes de reconstruir, esperar
@@ -152,16 +177,22 @@ no cancela ni vuelve a ejecutar una entrega remota para desbloquear el respaldo.
 1. Inspeccionar el proyecto explícito y hacer backup con las herramientas compatibles
    con su versión. Validar el backup y conservarlo en ubicación privada fuera de Git.
 2. Guardar por separado la configuración del despliegue, `.env` o `external.env`,
-   secretos SMTP/OAuth, registros de aplicaciones y callbacks. Estos archivos no son
-   componentes del backup. No imprimirlos ni anexarlos a evidencia de validación.
-3. Reconstruir API, ambos workers y web desde la misma versión 0.6.0; conservar
-   PostgreSQL y los volúmenes. API migra a 0012 antes de declararse saludable.
+   secretos OAuth, registros de aplicaciones y callbacks. Estos archivos no son
+   componentes del backup. Las antiguas variables SMTP no tienen consumidor
+   operativo en 0.6.1; no son necesarias para crear usuarios. No imprimir valores
+   privados ni anexarlos a evidencia de validación.
+3. Reconstruir API, ambos workers y web desde la misma versión 0.6.1; conservar
+   PostgreSQL y los volúmenes. Una fuente 0.6.0 ya está en 0012 y no cambia de
+   revisión. Fuentes anteriores aplican las migraciones hasta 0012.
 4. Ejecutar readiness/doctor y verificar la migración. Para comparar la historia
    anterior a 0.6.0, usar su proyección legacy correspondiente antes de generar
-   datos nuevos. No comparar directamente state 4 contra state 5 como si sus
-   columnas y tablas fueran idénticas.
-5. Comprobar login de una cuenta local histórica y el rol asignado. Probar SMTP/SSO
-   sólo si se configuraron; reactivar los schedules previstos. El smoke completo
+   datos nuevos. Entre 0.6.0 y 0.6.1 se exige igualdad exacta de state 5; entre
+   0.5.1 y 0.6.1 se usa legacy-v4. No comparar directamente state 4 contra state 5
+   como si sus columnas y tablas fueran idénticas.
+5. Comprobar login de una cuenta local histórica y el rol asignado. Autenticación
+   debe mostrar login local habilitado y Microsoft/Google deshabilitados si el
+   despliegue no los configuró. No habilitar SSO ni crear usuarios de prueba sólo
+   para validar la instalación habitual. Reactivar los schedules previstos. El smoke completo
    crea datasets/runs y se reserva para una copia aislada si se requiere preservar
    sin adiciones la instalación operativa.
 
@@ -170,8 +201,8 @@ Ejemplo con un nombre elegido expresamente para la instalación:
 ```powershell
 $env:COMPOSE_PROJECT_NAME = 'trackvance-core'
 python scripts/docker_state.py inventory --project trackvance-core
-python scripts/docker_state.py backup --project trackvance-core --destination backups/pre-060
-python scripts/docker_state.py verify --source backups/pre-060
+python scripts/docker_state.py backup --project trackvance-core --destination backups/pre-061
+python scripts/docker_state.py verify --source backups/pre-061
 docker compose -p trackvance-core up -d --build --wait
 python scripts/doctor.py --base-url http://localhost:3000 --docker --project trackvance-core --recovery-ready
 ```
@@ -181,7 +212,8 @@ mediante su `--env-file` o el mecanismo de despliegue establecido. `external.env
 no se carga automáticamente por su nombre; `bootstrap.ps1` prepara `.env`. Los
 comandos Python de operación deben heredar las mismas variables necesarias para
 construir el destino. Restaurar PostgreSQL no recupera valores ausentes del entorno.
-Mantener SMTP/SSO deshabilitados permite comprobar recuperación local sin esos secretos.
+Mantener SSO deshabilitado permite comprobar recuperación local sin esos secretos.
+No se necesita restaurar configuración SMTP para administrar usuarios 0.6.1.
 
 El rollback operativo es restaurar el backup anterior en un proyecto fresco con
 la versión adecuada y cambiar la entrada de acceso después de verificarlo. No se
@@ -191,15 +223,16 @@ COMMITTED; los cambios remotos no pertenecen al backup de Trackvance.
 
 ### Formatos de backup y proyección histórica
 
-El backup Docker actual conserva **manifest 2** y avanza la huella a **state 5**,
+El backup Docker actual conserva **manifest 2** y **state 5**,
 revisión `0012_delivery_target_audit`. Los números de manifest y state son contratos
 distintos. State 5 cubre 31 tablas: las 25 de 0.5.1 y `roles`, `role_permissions`,
 `external_identities`, `oidc_login_attempts`, `notification_deliveries`,
 `delivery_target_policies`. Incluye por hash los nuevos campos de User, AuthSession
 y DeliveryAttempt. Verifica además artifacts, FK, linaje y ambas familias de secretos.
 
-| Fuente | Manifest / state / migración | Validación al restaurar con 0.6.0 |
+| Fuente | Manifest / state / migración | Validación al restaurar con 0.6.1 |
 | --- | --- | --- |
+| 0.6.1 | 2 / 5 / 0012 | Igualdad exacta de la huella completa antes de smoke |
 | 0.6.0 | 2 / 5 / 0012 | Igualdad exacta de la huella completa antes de smoke |
 | 0.5.1 | 2 / 4 / 0009 | Migración a 0012 y proyección `snapshot-legacy-v4` exactamente igual |
 | 0.5.0 | 2 / 3 / 0008 | Migración a 0012, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
@@ -232,10 +265,11 @@ incluyen como los pares de volúmenes existentes; son un dominio diferente de lo
 secretos OAuth/SMTP. No publicar el dump, archivos de volúmenes o carpetas de backup.
 
 Después de restaurar, una notificación SENT describe una entrega pasada y no se
-reenvía. FAILED permanece FAILED y PENDING no presume envío. Reenviar credenciales
-desde Usuarios genera una nueva temporal y revoca las anteriores/sesiones. Si SMTP
-no está configurado, el usuario existe pero la entrega falla explícitamente; revisar
-[SMTP](smtp-setup.md). Los vínculos SSO recuperados necesitan el proveedor y callback
+reenvía. FAILED permanece FAILED y PENDING no presume envío. Esos registros son
+históricos: alta y regeneración 0.6.1 no agregan nuevas entregas. **Regenerar
+credenciales** desde Usuarios devuelve una nueva temporal una sola vez y revoca
+las anteriores/sesiones, sin email. Un backup no permite recuperar el plaintext.
+Los vínculos SSO recuperados necesitan el proveedor y callback
 correctos; ver [SSO](sso-setup.md). No crear cuentas duplicadas para reparar un vínculo.
 
 Una política Delivery requerida continúa requerida aunque cambien contraseña,
@@ -250,30 +284,92 @@ requiere `delivery:repair_evidence`; la revisión externa requiere
 
 ```powershell
 python scripts/tests/docker_backup_cycle.py
-python scripts/tests/identity_legacy_restore_cycle.py
-python scripts/tests/legacy_restore_cycle.py --legacy041-backup RUTA_BACKUP_041 --baseline-image-project trackvance-certification --evidence-dir .codex-local/legacy-restore/060-nuevo
+python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
+python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.5.1
+python scripts/tests/legacy_restore_cycle.py --legacy041-backup RUTA_BACKUP_041 --baseline-image-project PROYECTO_CON_IMAGENES_050 --evidence-dir .codex-local/legacy-restore/061-nuevo
 ```
 
 El primero destruye sólo su aplicación fuente recién creada y exige recuperación
 exacta de la huella y funcionamiento de credenciales SQL. Incluye roles/permisos,
-notificaciones y primer acceso, un vínculo externo sintético y un intento OIDC
-consumido sin tokens, auditoría Delivery, COMMITTED reparado y UNKNOWN revisado.
+primer acceso y una notificación histórica sintética declarada, un vínculo externo
+sintético y un intento OIDC consumido sin tokens, auditoría Delivery, COMMITTED
+reparado y UNKNOWN revisado. Comprueba que alta y regeneración no crean
+notificaciones; inspecciona en memoria el dump descomprimido, tar de artifacts,
+manifests y logs buscando las temporales emitidas, sin publicar sus bytes.
 Las fixtures OIDC prueban persistencia; el flujo OAuth firmado/PKCE se certifica
 por separado con `identity_sso_cycle.py` y `delivery_cycle.py`.
 
-El segundo construye el commit real 0.5.1 en su directorio privado, crea su backup,
-destruye ese origen y restaura en 0.6.0. El tercero usa un backup auténtico 0.4.1 y
+El runner de identidad construye el commit auténtico elegido en un directorio
+privado: 0.6.0 `587909b` o 0.5.1 `4519ed3`. Verifica su versión por health, crea
+backup, destruye ese origen y restaura en 0.6.1. La fuente 0.6.0 crea una
+notificación FAILED/NO_PROVIDER mediante su API auténtica sin SMTP externo;
+el vínculo OIDC y policy no materializada son fixtures explícitas de persistencia.
+Se comparan todas las filas históricas antes de cualquier alta nueva. Después,
+alta/regeneración 0.6.1 deben conservar el número de notificaciones y el nuevo
+backup debe estar libre de las temporales conocidas. Esto no certifica un login
+externo real ni una materialización SQL de la policy sintética.
+
+El último runner usa un backup auténtico 0.4.1 y
 las imágenes inmutables 0.5.0 de un proyecto existente **sólo para inspección**:
 levanta esas imágenes en otro proyecto, prueba la Delivery histórica y verifica
 que la instalación existente y el backup original no cambien. El proyecto indicado
-debe seguir conteniendo imágenes reales 0.5.0; no reconstruirlo para preparar esta prueba.
+debe seguir conteniendo imágenes reales 0.5.0; no reconstruirlo para preparar esta
+prueba. `trackvance-certification` ya fue actualizado y no es una fuente 0.5.0.
 
 Todos rechazan nombres propios que ya tengan recursos antes de crear nada y limpian
 exclusivamente sus proyectos temporales. Sus carpetas privadas pueden contener
 backups y claves; publicar sólo `result.json` revisado y saneado. La comprobación web
 del drill nativo es HTTP/HTML; no atribuirle una prueba Playwright que no ejecuta.
 
-La ejecución 0.6.0 conserva estos resultados saneados:
+La ejecución 0.6.1 del 27 de septiembre de 2026 confirmó estos resultados locales:
+
+La instalación real `trackvance-certification` se actualizó desde 0.6.0 con
+backup nuevo verificado en `backups/pre-061-20260927`. Se iniciaron sus
+contenedores existentes antes del backup, sin aplicar todavía imágenes nuevas.
+El upgrade y reinicio conservaron state 5 exactamente y los seis volúmenes:
+3 datasets, **2 usuarios existentes**, 1 conexión, 1 destino, 4 Runs, 9 artifacts,
+2 secretos SQL, 5 roles/94 grants y una notificación histórica 0.6.0.
+Los cinco servicios quedaron healthy, API y ambos workers en 0.6.1,
+Alembic0012, doctor PASS y restart=no. UI/footer muestran 0.6.1; Configuración
+conserva Usuarios locales, Roles y permisos y Autenticación, sin Notificaciones.
+Microsoft/Google permanecen deshabilitados y local habilitado. El acceso demo
+existente se comprobó en principal; login con contraseña y modal se probaron
+en desechables. No se crearon usuarios ni datos de negocio para validar el
+principal. [Resultado](evidence/0.6.1/local-installation/result.json) y
+[navegación de lectura](evidence/0.6.1/local-installation/ui.json) conservan sólo
+agregados; sesiones/auditorías legítimas del login ocurrieron después de comparar
+el estado del upgrade/reinicio.
+
+| Simulacro | Resultado y alcance comprobado |
+| --- | --- |
+| [Nativo 0.6.1](evidence/0.6.1/native-recovery/result.json) | PASS; 9 artifacts, 2 secretos SQL, 269 relaciones, 6 roles, 95 grants y una notificación histórica sintética declarada. Huella exacta, credenciales SQL recuperadas utilizables y UNKNOWN sin replay. Alta/regeneración sin nuevas notificaciones; dump descomprimido y 15 archivos de tar sin las 6 credenciales conocidas. |
+| [0.6.0 a 0.6.1](evidence/0.6.1/restore-0.6.0/result.json) | PASS, 143,074 s; código auténtico `587909b`, 78 artifacts y state 5 exactamente igual. Conserva una notificación auténtica FAILED/NO_PROVIDER creada por la API 0.6.0 sin SMTP, un vínculo/estado OIDC y una policy sintéticos declarados, y un secreto SQL cifrado. Alta/regeneración posterior conserva una sola notificación; escaneo de 82 archivos de tar y dump descomprimido PASS. |
+| [0.5.1 a 0.6.1](evidence/0.6.1/restore-0.5.1/result.json) | PASS, 136,233 s; código auténtico `4519ed3`, 78 artifacts, proyección legacy-v4 exacta y migración a 0012. Cinco roles y un usuario histórico; cero notificaciones antes/después de emitir/regenerar. Escaneo de 80 archivos de tar y dump descomprimido PASS. |
+
+Los tres destruyeron el origen antes de restaurar y limpiaron sus proyectos. El
+[resumen de intentos iniciales](evidence/0.6.1/restore-0.6.0/initial-attempts.json)
+conserva dos fallos del harness 0.6.0: resolución de una ruta relativa antes de crear
+contenedores y login demo deshabilitado después de verificar la historia exacta.
+Se corrigieron con pruebas de regresión y se repitió el ciclo completo; no fueron
+fallos de preservación del producto. La habilitación demo posterior se limita al
+destino desechable y mantiene el seed desactivado.
+
+La regresión SQL 0.6.1 también se ejecutó en proyectos nuevos:
+
+| Ciclo | Resultado observado |
+| --- | --- |
+| [Delivery](evidence/0.6.1/delivery/result.json) | PASS, 308 comprobaciones y navegador 1/1; PostgreSQL 16/18 y SQL Server reales, cuatro estrategias, permisos, drift, políticas tras reinicio, receipts/manifests y ausencia de secretos. Pérdida controlada del acuse tras commit real PASS; caída física no determinista de red NOT_RUN. |
+| [Connections](evidence/0.6.1/connections/result.json) | PASS, 96 comprobaciones y smoke general; PostgreSQL/SQL Server reales, snapshots, precisión temporal, reconexión y persistencia tras reinicio. Navegador completo: 30 PASS, 11 omitidas por alcance y cero flaky; escaneo de 14 temporales en DB/logs/229 artifacts/24 archivos de navegador PASS. |
+| [Benchmark general smoke](evidence/0.6.1/benchmark/result.json) | PASS, 1.074.923 bytes y 1.000 filas, sólo archivos; 38,509 s de ciclo medido. Intake 1,066 s, Recon 1,078 s y Sentinel 1,055 s. Limpieza de cinco contenedores/seis volúmenes confirmada por receipt. Es regresión acotada, no certificación de capacidad. |
+| [Benchmark Delivery smoke](evidence/0.6.1/delivery-benchmark/result.json) | PASS, ocho casos: cuatro estrategias × PostgreSQL/SQL Server, 1.074.923 bytes y 1.000 filas; todos COMMITTED con conteos y receipt/manifest verificados. Ciclo medido 140,991 s; escritura PostgreSQL 0,018–0,044 s y SQL Server 0,384–1,561 s. Limpieza de siete contenedores/ocho volúmenes confirmada; no certifica capacidad productiva. |
+
+Los resúmenes de navegador conservan sólo conteos, ubicaciones saneadas y
+agregados de privacidad; no se publican capturas, traces, HTML ni cuerpos de
+respuesta con credenciales. Los ciclos eliminaron sus recursos al terminar.
+La planificación de 100 MiB del benchmark general no equivale a ejecución en este
+ciclo; 500 MiB, 1 GiB, 2 GiB y 5 GiB permanecen NOT_RUN_RESOURCE_LIMIT.
+
+La ejecución histórica 0.6.0 conserva estos resultados saneados:
 
 | Simulacro | Resultado y alcance comprobado |
 | --- | --- |

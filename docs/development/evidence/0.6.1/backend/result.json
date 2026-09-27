@@ -1,0 +1,68 @@
+{
+  "status": "PASS",
+  "version": "0.6.1",
+  "backend_and_scripts_pytest": {
+    "command": "uv run pytest tests ../scripts/tests -q --tb=short --show-capture=no",
+    "passed": 1192,
+    "failed": 0,
+    "warnings": 2,
+    "duration_seconds": 106.28,
+    "warning_categories": [
+      "StarletteDeprecationWarning: httpx TestClient integration",
+      "DeprecationWarning: anyio BlockingPortal alias"
+    ]
+  },
+  "identity_and_sso_pytest": {
+    "passed": 54,
+    "failed": 0,
+    "warnings": 2
+  },
+  "ruff": {
+    "command": "uv run ruff check src tests ../scripts",
+    "status": "PASS"
+  },
+  "mypy": {
+    "command": "uv run mypy src/trackvance --check-untyped-defs --ignore-missing-imports",
+    "status": "PASS",
+    "source_files": 42
+  },
+  "frozen_dependencies": {
+    "command": "uv sync --frozen",
+    "status": "PASS",
+    "packages_checked": 58
+  },
+  "postgresql_migrations": {
+    "status": "PASS",
+    "evidence": "postgresql-migrations.json",
+    "cleanup": "PASS"
+  },
+  "migration_immutability": {
+    "status": "PASS",
+    "files": 12,
+    "evidence": "migration-immutability.json",
+    "head": "0012_delivery_target_audit",
+    "new_migrations": 0
+  },
+  "openapi": {
+    "version": "0.6.1",
+    "paths": 96,
+    "operations": 117,
+    "schemas": 89
+  },
+  "rbac": {
+    "catalog_codes": 41,
+    "protected_matrix_entries": 105
+  },
+  "privacy": {
+    "only_issuance_response_contains_plaintext": "PASS",
+    "no_store_no_cache": "PASS",
+    "get_audit_database_logs_storage_no_plaintext": "PASS",
+    "unexpected_issuance_errors_sanitized": "PASS",
+    "no_operational_smtp": "PASS",
+    "no_new_notification_records": "PASS",
+    "historical_notifications_preserved": "PASS",
+    "unexpected_first_login_errors_sanitized": "PASS"
+  },
+  "external_microsoft_google": "NOT_RUN_EXTERNAL_CREDENTIALS",
+  "product_sha": "4d3c656ab0bc250f50eb53972d22839da9e4485c"
+}

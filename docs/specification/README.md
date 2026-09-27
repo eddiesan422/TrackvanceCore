@@ -1,8 +1,8 @@
 # Especificación técnica
 
 Esta carpeta versiona la **Especificación Técnica v1.1** y su fuente editable para
-la evolución funcional local `0.6.0`. El nombre v1.1 identifica el documento;
-0.6.0 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
+la evolución funcional local `0.6.1`. El nombre v1.1 identifica el documento;
+0.6.1 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
 en el texto; la productización permanece fuera del roadmap local 1–10.
 
 - `Trackvance_Core_Especificacion_Tecnica_v1.1.md`: fuente editable oficial.
@@ -10,8 +10,9 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
   generar candidato y revisar renderizado.
 - `build_specification.py`: generador portable reportlab/pypdf, separado de las
   dependencias de ejecución del producto.
-- `validation_results_0.6.0.json`: entrada de resultados de esta revisión,
+- `validation_results_0.6.1.json`: entrada de resultados de esta revisión,
   preparada durante el cierre; un archivo o gate pendiente no se presume aprobado.
+- `validation_results_0.6.0.json`: resultados históricos 0.6.0, preservados.
 - `validation_results_0.5.1.json`: resultados históricos 0.5.1, preservados.
 - `validation_results_0.5.0.json`: resultados históricos 0.5.0, preservados.
 - `validation_results_0.4.1.json`: evidencia histórica de la entrega anterior.
@@ -20,10 +21,11 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
 
 ## Generación y publicación
 
-La ampliación 0.6.0 desarrolla RBAC dinámico, usuarios/primer acceso, Microsoft y
-Google OIDC, NotificationDelivery/SMTP y auditoría Delivery permanente. Conserva
-los antecedentes 0.5.1 y añade flujos, tablas de contratos, modelo persistente,
-decisiones de seguridad, guías de configuración y matriz exhaustiva de permisos.
+La corrección 0.6.1 reemplaza SMTP por emisión efímera y un modal visible una vez,
+conservando primer acceso, RBAC dinámico, Microsoft/Google OIDC y auditoría
+Delivery. Actualiza contratos, seguridad, operación y pruebas, añade el capítulo
+35 y dos flujos de credenciales. SSO permanece opcional y disabled by default;
+la historia de notificaciones y todas las migraciones se conservan intactas.
 El generador admite índice y marcadores de dos niveles, diagramas de arquitectura,
 secuencia y estados, y bloques JSON paginables. La salida es determinista con los mismos inputs;
 permite contrastar el hash del candidato revisado con el PDF publicado.
@@ -32,7 +34,7 @@ Mientras los gates estén en curso se usa `--draft` y no se publica.
 En un entorno de autoría con Python, reportlab y pypdf, desde el repositorio:
 
 ```sh
-python docs/specification/build_specification.py --draft --results docs/specification/validation_results_0.6.0.json
+python docs/specification/build_specification.py --draft --results docs/specification/validation_results_0.6.1.json
 ```
 
 El generador usa esta fuente, `backend/openapi.json`, el logo del repositorio y
@@ -45,7 +47,7 @@ El candidato queda en `tmp/pdfs/specification-candidate.pdf`. Revisa las página
 renderizadas, tablas, encabezados, índice y diagramas antes de publicar con:
 
 ```sh
-python docs/specification/build_specification.py --results docs/specification/validation_results_0.6.0.json --publish
+python docs/specification/build_specification.py --results docs/specification/validation_results_0.6.1.json --publish
 ```
 
 `--draft` marca un candidato cuya certificación sigue en curso e impide combinarlo
@@ -62,10 +64,33 @@ sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
 [validación](../development/validation.md) y la
-[matriz de aceptación 0.6.0](../development/acceptance-0.6.0.md).
+[matriz de aceptación 0.6.1](../development/acceptance-0.6.1.md).
 El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histórico.
 
-## Publicación 0.6.0
+## Publicación 0.6.1
+
+La implementación `4d3c656ab0bc250f50eb53972d22839da9e4485c` completó los
+nueve jobs SUCCESS del [workflow 36327154050](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050), intento 1.
+La edición final tiene **82 páginas, 179 marcadores y 38 secciones principales**.
+Todas las páginas se renderizaron a 110 dpi y se inspeccionaron antes de publicar.
+Se compactó el índice para evitar una página casi vacía, se completaron las
+referencias ADR 0016–0019 y se corrigió una flecha de primer acceso. Se volvieron
+a renderizar todas las páginas; 74 cuerpos eran idénticos pixel a pixel al
+candidato revisado, y se inspeccionaron los cambios y la numeración completa.
+
+SHA-256 del candidato revisado y publicado: `48100cc80bb64f047426e858fc95f17833f06d3dda9b0711d6317a18d032cc41`.
+`--publish` produjo exactamente los mismos bytes. Fuente, generador, resultados,
+PDF y texto extraído coinciden por hash con la copia oficial en
+`ProductOne/Documentación`. Las ediciones original, 0.5.1 y 0.6.0 permanecen
+archivadas e intactas. [Registro completo](../development/evidence/0.6.1/pdf-verification.json)
+conserva hashes, OpenAPI, source commit, revisión y avisos de render.
+
+El informe externo de entrega identifica el HEAD documental y su workflow
+final una vez observados los nueve SUCCESS, sin autorreferencia circular en el PDF.
+Microsoft/Google reales conservan NOT_RUN_EXTERNAL_CREDENTIALS. SMTP se retiró
+como capacidad operativa y no es un gate pendiente.
+
+## Publicación histórica 0.6.0
 
 El producto y su harness `35c88fa2f0fd0c59dacda7faf76713e064364d25` completaron
 los nueve jobs SUCCESS del workflow [36289364326](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36289364326), intento 1.

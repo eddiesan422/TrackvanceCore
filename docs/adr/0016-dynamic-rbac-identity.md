@@ -1,6 +1,6 @@
 # ADR 0016 — Roles persistentes y ciclo de vida de identidades
 
-Fecha: 2026-09-27. Estado: implementado en 0.6.0; evidencia de certificación en `docs/development/evidence/0.6.0/`.
+Fecha: 2026-09-27. Estado: RBAC implementado en 0.6.0 y conservado en 0.6.1; emisión de credenciales actualizada en 0.6.1. Evidencia por versión en `docs/development/evidence/`.
 
 ## Problema y decisión
 
@@ -22,9 +22,9 @@ Modificar permisos incrementa la versión del rol y afecta la petición siguient
 
 ## Usuarios y credenciales
 
-Nuevos usuarios requieren nombres, apellidos, username, correo, role_id y actividad. El nombre mostrado concatena nombres y apellidos. Username admite 3–80 caracteres ASCII (`a-z`, dígitos, `.`, `_`, `-`), se normaliza a minúsculas y es globalmente único; el correo conserva login compatible. Login por username o email utiliza mensajes genéricos. El registro mantiene `must_change_password`, expiración temporal, fechas de contraseña/último acceso, revisión y baja lógica.
+Nuevos usuarios requieren nombres, apellidos, username, correo y role_id; active es opcional y vale true por defecto. El nombre mostrado concatena nombres y apellidos. Username admite 3–80 caracteres ASCII (`a-z`, dígitos, `.`, `_`, `-`), se normaliza a minúsculas y es globalmente único; el correo conserva login compatible. Login por username o email utiliza mensajes genéricos. El registro mantiene `must_change_password`, expiración temporal, fechas de contraseña/último acceso, revisión y baja lógica.
 
-Crear o regenerar produce 32 caracteres URL-safe de entropía criptográfica; únicamente se guarda su hash Argon2. La expiración es de 24 horas. El password se entrega a NotificationService sólo en memoria y nunca forma parte de DTOs, logs, auditorías o metadata de notificación. Un fallo de envío conserva el usuario y registra estado FAILED; reenviar siempre regenera y revoca, nunca recupera el secreto anterior.
+Crear o regenerar produce 32 caracteres URL-safe de entropía criptográfica; únicamente se guarda su hash Argon2. La expiración es de 24 horas. En 0.6.0 se entregaba por SMTP. Desde 0.6.1 se emite sólo en la respuesta inmediata de alta/regeneración `UserCredentialIssueResponse={user,temporary_credentials:{username,temporary_password,expires_at,must_change_password:true}}`, con no-store/no-cache. El modal administrativo muestra el secreto una vez y descarta su estado al cerrar/desmontar; no usa almacenamiento ni caché del navegador. UserResponse normal y GET nunca lo contienen. No se envía correo ni se generan notificaciones. Regenerar sustituye el hash y revoca todas las sesiones; nunca recupera el secreto anterior.
 
 Una sesión de primer acceso sólo puede usar `/me`, `/auth/first-login/change-password` y `/auth/logout`. La nueva contraseña tiene 12–1024 caracteres y debe diferir de la temporal. El cambio elimina expiración/restricción, revoca todas las sesiones y crea cookie/CSRF nuevos. Una sesión local restringida deja de servir si vence la contraseña temporal. SSO puede iniciar este mismo primer acceso aunque la temporal ya haya expirado. Todos los usuarios conservan autenticación local.
 
@@ -36,9 +36,11 @@ Una sesión de primer acceso sólo puede usar `/me`, `/auth/first-login/change-p
 
 Las migraciones SQLite que reconstruyen tablas se ejecutan en una transacción explícita, suspendiendo FK solamente en la conexión de migración y comprobando `foreign_key_check` antes del commit; el estado original se restaura. Se prueba upgrade de usuarios/sesiones poblados, downgrade/upgrade y paridad ORM. PostgreSQL conserva sus constraints normales.
 
+0.6.1 no cambia modelo ni esquema: 0001..0012 se mantienen byte a byte; no existe 0013. NotificationDeliveryRecord y sus filas históricas se conservan según ADR 0018.
+
 ## Contratos y auditoría
 
-`GET /roles/permissions`, `GET/POST /roles`, `GET/PATCH/DELETE /roles/{id}`; PATCH/DELETE reciben versión esperada. `GET /users/roles` permanece como listado compatible. Users usa GET/POST/PATCH/DELETE y `/users/{id}/resend-credentials`; `/reset-password` queda alias de regeneración sin password en input. La baja siempre es lógica. Los detalles incluyen método de acceso y metadata del último envío.
+`GET /roles/permissions`, `GET/POST /roles`, `GET/PATCH/DELETE /roles/{id}`; PATCH/DELETE reciben versión esperada. `GET /users/roles` permanece como listado compatible. Users usa GET/POST/PATCH/DELETE y `/users/{id}/regenerate-credentials` con `{version}`. `/resend-credentials` y `/reset-password` quedan aliases deprecated de emisión, sin SMTP ni password en input. El alta responde 201 y la regeneración 200 con el envelope efímero. La baja siempre es lógica. Los detalles incluyen métodos de acceso y estado de cambio/expiración, nunca la contraseña ni metadata de envío.
 
 Eventos: ROLE_CREATED, ROLE_UPDATED, ROLE_PERMISSIONS_CHANGED, ROLE_DISABLED, ROLE_DELETED, USER_CREATED, USER_UPDATED, USER_ROLE_CHANGED, USER_DISABLED, USER_DELETED, USER_CREDENTIALS_REGENERATED y USER_PASSWORD_CHANGED. Sólo identificadores, nombres de campos, códigos de permisos, revisión y estado entran en metadata sanitizada.
 

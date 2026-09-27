@@ -1,0 +1,22 @@
+{
+  "status": "PASS",
+  "startTime": "2026-09-27T14:43:28.530Z",
+  "duration": 45173.041,
+  "expected": 9,
+  "skipped": 0,
+  "unexpected": 0,
+  "flaky": 0,
+  "credential_privacy_probes": [
+    {
+      "artifact_files_scanned": 2,
+      "artifacts": "PASS",
+      "browser_files_scanned": 2,
+      "container_logs": "PASS",
+      "database": "PASS",
+      "secrets_scanned": 15,
+      "status": "PASS"
+    }
+  ],
+  "artifact_credentials_scan": "PASS",
+  "raw_artifacts_published": false
+}

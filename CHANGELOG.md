@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.1 — 2026-09-27 — credenciales temporales de una sola presentación
+
+- Revierte deliberadamente el envío SMTP de credenciales incorporado en 0.6.0.
+  Alta y regeneración devuelven un envelope efímero separado de UserResponse:
+  username, temporal criptográfica y expiración. Sólo se guarda Argon2.
+- Añade POST users/{id}/regenerate-credentials; conserva resend-credentials como
+  alias deprecated con la misma emisión en pantalla y sin correo. Responses
+  no-store, permisos administrativos, versión esperada y auditoría sin secretos.
+- Añade modal obligatorio con copia de username/password/ambos y limpieza al
+  cerrar. No almacena la respuesta en React Query ni almacenamiento del navegador.
+  Usuarios muestra primer acceso pendiente, contraseña definida o temporal vencida.
+- Retira SMTP operativo, su configuración estándar, Mailpit de las pruebas y la
+  pestaña Notificaciones. Conserva lectura y persistencia histórica de 0.6.0.
+  No modifica 0001..0012, no añade migración ni borra notification_deliveries.
+- Conserva primer acceso, vencimiento, revocación, RBAC, Microsoft/Google OIDC y
+  Data Delivery. SSO sigue deshabilitado por defecto y se prueba con mock firmado.
+- Amplía comprobaciones de fugas y recovery nativo/0.6.0/0.5.1; mantiene nueve jobs
+  CI. Resultados observados en validation.md; no se heredan PASS anteriores.
+
+
 ## 0.6.0 — 2026-09-26 — identidad dinámica y auditoría de publicación
 
 - Sustituye autorización por nombres de roles estáticos por Role/RolePermission

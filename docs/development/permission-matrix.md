@@ -1,6 +1,9 @@
-# Matriz de permisos HTTP y catálogo 0.6.0
+# Matriz de permisos HTTP y catálogo 0.6.1
 
 Fuente autoritativa: `backend/src/trackvance/permissions.py`. Esta tabla enumera métodos y rutas del producto; una ruta protegida no enumerada se deniega incluso a Administrator. El prefijo común es `/api/v1`.
+
+El catálogo conserva 41 códigos y la matriz contiene 105 entradas protegidas.
+0.6.1 añade regenerate-credentials y conserva los aliases deprecated de emisión.
 
 Los controles por organización, CSRF, primer acceso y disponibilidad del recurso se añaden al permiso de ruta. Administrator resuelve todos los códigos del catálogo sin grants estáticos. `users:manage` y `roles:manage` son exclusivos de ese rol de sistema.
 
@@ -158,6 +161,7 @@ El backend exige la clausura transitiva completa y rechaza códigos ajenos al ca
 | GET | `/users/{id}` | `users:read` |
 | PATCH | `/users/{id}` | `users:manage` |
 | DELETE | `/users/{id}/external-identities/{identity_id}` | `users:manage` |
+| POST | `/users/{id}/regenerate-credentials` | `users:manage` |
 | POST | `/users/{id}/resend-credentials` | `users:manage` |
 | POST | `/users/{id}/reset-password` | `users:manage` |
 
@@ -256,6 +260,14 @@ logout y change-password. User/Role activos se resuelven en cada petición.
 | Roles y usuarios | CAS/version, no delegables, último admin, propio administrador y roles asociados protegidos. |
 | Target audit | Policy irreversible, columnas reservadas, drift y privilegios SQL; manipular audit=false no desactiva policy. |
 
-`notifications:manage` está reservado en el catálogo para evolución del servicio;
-no expone un editor de secretos ni una ruta de envío arbitrario. Configuración
-SMTP/OIDC sigue exclusivamente en el entorno del servidor.
+`notifications:read` sólo protege los dos GET deprecated de historial/estado;
+el estado es siempre HISTORICAL_ONLY, enabled=false y configured=false.
+`notifications:manage` permanece reservado por compatibilidad: no habilita un
+servicio, transporte, editor de secretos o envío. SMTP no existe como capacidad
+operativa ni puede activarse por entorno en 0.6.1. OIDC conserva configuración
+opcional en el servidor y ambos proveedores están deshabilitados por defecto.
+
+Crear y regenerar usuarios exige users:manage y devuelve la temporal sólo en
+esa respuesta no-store/no-cache. `/resend-credentials` y `/reset-password` son
+aliases deprecated de regenerate-credentials; no envían correo. No se crean
+filas de notificaciones y ningún GET permite recuperar una credencial.

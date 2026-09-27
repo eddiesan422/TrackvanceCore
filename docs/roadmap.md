@@ -18,15 +18,30 @@ La evolución funcional local precede a la productización. Este orden sustituye
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.
 
-## Ciclo 0.6.0: identidad dinámica y auditoría técnica
+## Ciclo 0.6.1: simplificar la entrega de credenciales
+
+El administrador recibe una temporal nueva una sola vez en pantalla y decide cómo
+comunicarla externamente. Se retira SMTP del onboarding, de Configuración y de las
+variables estándar. Se conservan email como identidad, primer acceso obligatorio,
+24 horas de vencimiento, RBAC y SSO opcional deshabilitado por defecto.
+No cambia el schema ni la funcionalidad de Data Delivery. La validación se repite
+contra mocks OIDC y SQL real; las pruebas externas no forman parte de este ciclo.
+
+Las notificaciones funcionales regresan al backlog: RUN_COMPLETED, RUN_FAILED,
+DELIVERY_FAILED, DELIVERY_UNKNOWN, SENTINEL_ALERT y EXCEPTION_ASSIGNED son posibles
+eventos futuros. No se decide todavía SMTP, Teams, Slack o Webhook como tecnología;
+el canal dependerá del contexto del cliente. La metadata 0.6.0 queda histórica.
+
+## Antecedente 0.6.0: identidad dinámica y auditoría técnica
 
 RBAC administrable, login username/email, credenciales temporales por SMTP,
 primer acceso, Microsoft personal/corporativo y Google Gmail/Workspace mediante
 OIDC, y auditoría fechaIngesta/usuario en Delivery son alcance de esta versión.
-La evidencia concreta se publica en validation.md; no se heredan resultados.
+La evidencia de aquel ciclo se conserva en
+[validation-0.6.0.md](development/validation-0.6.0.md); no se heredan resultados.
 SHIST/SCD, vigencias y tablas históricas paralelas quedan excluidos. DatasetVersion
 sigue siendo el versionado inmutable interno. SSO no auto-provisiona ni mapea
-grupos/roles externos. SMTP sólo entrega credenciales USER por ahora.
+grupos/roles externos. En aquel ciclo SMTP sólo entregaba credenciales USER; 0.6.1 revierte esa decisión.
 
 Gobierno ampliado, dominios/grupos administrables, notificaciones de ejecución,
 scheduling Delivery, nuevos Source/Sink, masking, retención avanzada, secretos

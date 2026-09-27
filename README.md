@@ -1,35 +1,40 @@
 # Trackvance Core
 
-## Evolución funcional local 0.6.0
+## Corrección funcional local 0.6.1
 
-0.6.0 incorpora **roles persistentes y permisos granulares**, usuarios con
-username y credenciales temporales por email, primer acceso obligatorio,
-**Microsoft/Google OIDC** sin auto-provisioning y **fechaIngesta/usuario en Data
-Delivery** mediante una política permanente por tabla. SSO autentica y Trackvance
-autoriza. DatasetVersion conserva su versionado interno inmutable; no se
-implementan SHIST/SCD ni históricos de vigencias.
+0.6.1 simplifica el alta y regeneración: Trackvance genera una contraseña temporal
+de 32 caracteres, persiste sólo Argon2 y la muestra **una sola vez** al
+Administrator autorizado. El modal permite copiar username, contraseña o ambas
+credenciales. Al cerrarlo no se pueden recuperar: si se pierden, hay que generar
+una temporal nueva. Vence a las 24 horas y el primer login exige cambiarla.
 
-Administrator es un rol protegido que recibe siempre el catálogo completo.
-Cambiar permisos afecta la siguiente petición y `/me` actualiza la interfaz;
-cambiar el rol de un usuario revoca sesiones. Las bajas de usuarios/roles son
-lógicas, con protección del último administrador y de roles con usuarios
-asociados. SMTP envía credenciales sin persistir cuerpos ni passwords plaintext.
-SMTP/SSO deshabilitados no impiden iniciar el sistema.
+**No se envían correos ni se necesita SMTP.** La decisión de 0.6.0 de intentar
+entregar credenciales por email se revierte deliberadamente. Se retiran el
+adaptador SMTP, las variables estándar, Mailpit de los E2E y la pestaña
+Notificaciones. La tabla y sus registros históricos se conservan; notificaciones
+de ejecuciones y sus canales vuelven al backlog.
 
-La cadena Alembic vigente termina en `0012_delivery_target_audit`, después de
-`0010_dynamic_rbac_identity` y `0011_notification_delivery`. Las migraciones
-0001..0009 permanecen intactas. El Compose principal conserva cinco servicios y
-`restart: "no"`; Mailpit y el proveedor OIDC falso pertenecen sólo a pruebas.
+Se conservan RBAC dinámico, Administrator protegido, bajas lógicas, aislamiento,
+propagación de permisos y revocación de sesiones. Microsoft/Google OIDC están
+implementados y **deshabilitados por defecto**: su activación se decide durante
+la implantación según el cliente. Login local no depende de SSO. No se ejecutan
+pruebas contra proveedores externos en este ciclo; el mock OIDC sigue vigente.
 
-- [Identidad/RBAC/primer acceso/notificaciones](docs/development/identity-060.md).
-- [Configurar Microsoft personal/corporativo y Google Gmail/Workspace](docs/development/sso-setup.md).
-- [Configurar SMTP y Mailpit](docs/development/smtp-setup.md).
-- [Auditoría de publicación y política por target](docs/development/delivery-audit.md).
-- [Resultados reales, fallos, omisiones y CI](docs/development/validation.md).
+Data Delivery conserva fechaIngesta/usuario, política permanente por tabla,
+estrategias SQL, drift, UNKNOWN y evidencia. DatasetVersion permanece inmutable.
+No hay cambio de schema: Alembic sigue `0012_delivery_target_audit`, state 5 y
+31 tablas; **0001..0012 no se modifican**. Compose conserva cinco servicios y
+`restart: "no"`.
 
-Los resultados de 0.5.1 que se conservan debajo son antecedentes; no certifican
-automáticamente 0.6.0. Las pruebas externas sin client IDs/secrets se registran
-`NOT_RUN_EXTERNAL_CREDENTIALS`, separadas del mock OIDC automatizado.
+- [Identidad, credenciales de una sola presentación y primer acceso](docs/development/identity-060.md).
+- [Configuración opcional de Microsoft y Google](docs/development/sso-setup.md).
+- [Retirada de SMTP y antecedente 0.6.0](docs/development/smtp-setup.md).
+- [Auditoría de Delivery conservada](docs/development/delivery-audit.md).
+- [Validación ejecutada y limitaciones](docs/development/validation.md).
+
+Los resultados de versiones anteriores conservados debajo son antecedentes,
+no certificación automática de 0.6.1. El cambio funcional se documenta en
+CHANGELOG y en la especificación técnica sin borrar la historia 0.6.0.
 
 ### Base funcional conservada de 0.5.1
 
@@ -256,7 +261,9 @@ volumen nuevos; la autenticación local y RBAC no cambian.
    alertas internas.
    Actualizar datos desde una conexión sigue siendo una operación separada.
 7. **Usuarios:** como Administrator, abre Configuración para crear/editar cuentas,
-   asignar roles, activar/desactivar, consultar permisos y restablecer contraseñas.
+   asignar roles, activar/desactivar, consultar permisos y regenerar credenciales.
+   El alta/regeneración abre el modal efímero; copia y entrega esas credenciales
+   externamente antes de cerrarlo. Trackvance no las envía ni las puede recuperar.
    Los cambios sensibles revocan sesiones; el último administrador queda protegido.
    **Cerrar sesión** limpia los datos de sesión del navegador y vuelve al inicio.
 8. **Data Delivery:** administra un destino PostgreSQL o SQL Server con una cuenta
@@ -420,8 +427,10 @@ revisiones nuevas se informa en validación, sin reutilizar el PASS histórico.
 0.6.0 llega a `0012_delivery_target_audit` y state 5, con roles/permisos, vínculos
 SSO, notificaciones y políticas de auditoría Delivery. Su restore admite también
 0.5.1/state 4; las fuentes anteriores se comparan con su proyección legacy exacta.
-La instalación encontrada en 0.5.0 necesita `snapshot-legacy-v3` al comprobar su
-upgrade; `.env`/`external.env` y secretos SMTP/OAuth se conservan por separado.
+En el ciclo histórico 0.6.0, la instalación encontrada en 0.5.0 se comprobó con
+`snapshot-legacy-v3`. El upgrade actual 0.6.0→0.6.1 compara state 5 exactamente;
+`.env`/`external.env` y secretos OAuth se conservan por separado. Los registros
+SMTP anteriores permanecen históricos, sin nuevos envíos en 0.6.1.
 Docker copia cada componente a staging privado/read-only y vuelve a verificar
 tamaño/hash antes de consumirlo. El state 2 legacy no contenía una huella DDL del
 catálogo; la certificación compara su proyección canónica exacta de 21 tablas sin
@@ -542,7 +551,7 @@ compose.yml    Entorno PostgreSQL local
 
 - Roles administrables y catálogo controlado; Microsoft/Google autentican cuentas
   preprovisionadas. Grupos externos y administración de múltiples organizaciones
-  quedan fuera de esta entrega. SMTP sólo notifica credenciales USER.
+  quedan fuera de esta entrega. No hay SMTP operativo ni notificaciones externas en 0.6.1.
 - Archivos CSV/TXT UTF-8, XLSX, JSON y Parquet de máximo 10 MiB, 100.000
   filas y 100 columnas. La inspección usa una muestra de hasta 100 filas salvo
   el esquema embebido de Parquet; la carga completa sigue siendo síncrona.
