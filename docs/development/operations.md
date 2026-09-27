@@ -346,6 +346,13 @@ el estado del upgrade/reinicio.
 | [0.6.0 a 0.6.1](evidence/0.6.1/restore-0.6.0/result.json) | PASS, 143,074 s; código auténtico `587909b`, 78 artifacts y state 5 exactamente igual. Conserva una notificación auténtica FAILED/NO_PROVIDER creada por la API 0.6.0 sin SMTP, un vínculo/estado OIDC y una policy sintéticos declarados, y un secreto SQL cifrado. Alta/regeneración posterior conserva una sola notificación; escaneo de 82 archivos de tar y dump descomprimido PASS. |
 | [0.5.1 a 0.6.1](evidence/0.6.1/restore-0.5.1/result.json) | PASS, 136,233 s; código auténtico `4519ed3`, 78 artifacts, proyección legacy-v4 exacta y migración a 0012. Cinco roles y un usuario histórico; cero notificaciones antes/después de emitir/regenerar. Escaneo de 80 archivos de tar y dump descomprimido PASS. |
 
+El [ciclo nativo repetido](evidence/0.6.1/native-recovery/post-ci-result.json) después del
+fallo de preparación PostgreSQL del primer CI documental también pasó. Los PostgreSQL
+externos de los runners de recovery, Connections y Delivery esperan disponibilidad TCP
+para excluir el servidor temporal de initdb. La reproducción aislada confirmó esa
+condición defectuosa; no permite recuperar la causa exacta del log original suprimido.
+El runner conserva ahora sólo exit code y categoría de diagnóstico, nunca SQL ni stderr.
+
 Los tres destruyeron el origen antes de restaurar y limpiaron sus proyectos. El
 [resumen de intentos iniciales](evidence/0.6.1/restore-0.6.0/initial-attempts.json)
 conserva dos fallos del harness 0.6.0: resolución de una ruta relativa antes de crear

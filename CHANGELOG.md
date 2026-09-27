@@ -18,6 +18,9 @@
   Data Delivery. SSO sigue deshabilitado por defecto y se prueba con mock firmado.
 - Amplía comprobaciones de fugas y recovery nativo/0.6.0/0.5.1; mantiene nueve jobs
   CI. Resultados observados en validation.md; no se heredan PASS anteriores.
+- El runner de recovery espera el PostgreSQL externo definitivo por TCP y
+  conserva diagnósticos cerrados sin salida sensible; evita aceptar el servidor
+  temporal de initdb como listo para preparar los datos del ensayo.
 
 
 ## 0.6.0 — 2026-09-26 — identidad dinámica y auditoría de publicación

@@ -216,7 +216,7 @@ Pasos de evolución sin cambiar reglas
 22. Calidad, pruebas y aceptación
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 48
 Certificación incremental 0.6.1
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 48
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 49
 Antecedente certificado 0.5.0 (no certifica 0.6.1)
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 49
 Base certificada de 0.4.1
@@ -1978,11 +1978,11 @@ DATASET_UPLOADED, DATASET_DERIVED, CONFIGURATION_PUBLISHED, RUN_QUEUED, RUN_COMP
 EXCEPTION_CREATED, EXCEPTION_UPDATED y EXCEPTION_VALIDATION_CHECKED documentan el ciclo.
 EXPORT_DOWNLOADED, EVIDENCE_DOWNLOADED y ARTIFACT_DOWNLOADED registran el acceso relevante a evidencia.
 La UI enlaza recursos desde los eventos.
-La administración añade USER_CREATED, USER_UPDATED y USER_PASSWORD_RESET. La gestión operativa audita
-comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Delivery registra
-publicación, encolado, STARTED, COMMITTED, FAILED o UNKNOWN con actor estable y referencias, nunca contraseña ni filas.
-Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos
-eventos.
+La administración añade USER_CREATED, USER_UPDATED, USER_CREDENTIALS_REGENERATED y
+USER_PASSWORD_CHANGED. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación
+conserva revisiones y eventos de despacho. Delivery registra publicación, encolado, STARTED, COMMITTED, FAILED o
+UNKNOWN con actor estable y referencias, nunca contraseña ni filas. Las filas de negocio recibidas, credenciales, hashes de
+contraseña y sesiones nunca forman parte del payload público de estos eventos.
 Se excluyen claves de passwords, tokens y secretos de metadata/evidencia. Los casos legacy sin identidad demostrable se marcan
 como legacy; no se atribuyen a un UUID de usuario inventado. Las auditorías de exportación agregan evidencia sin alterar el
 manifest original del Run.
@@ -2925,9 +2925,11 @@ Corte y procedencia
 Implementación 4d3c656ab0bc250f50eb53972d22839da9e4485c. Ejecuciones nuevas 0.6.1; no
 se heredan éxitos 0.6.0.
 Backend local
-1.192 pytest backend/scripts PASS en 106,280 s, 0 FAIL/0 SKIP; 54 focales identidad/SSO
-PASS. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Dos avisos upstream:
-Starlette/httpx y AnyIO BlockingPortal.
+1.197 pytest backend/scripts PASS en 95,850 s tras corregir el runner; 0 FAIL y dos avisos
+upstream conocidos. Incluye cinco regresiones nuevas de diagnóstico seguro; 70 focales del
+harness PASS. Antes: 1.192 PASS y 54 focales identidad/SSO PASS, conservados como
+ejecución inicial. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Overlays SQL de
+prueba validados con Compose y healthcheck TCP.
 Frontend local
 174 Vitest / 20 archivos PASS en 13,056 s; 0 FAIL/0 SKIP. Instalación pnpm congelada, ESLint,
 TypeScript y production build PASS. Modal, cierre/pagehide, respuesta tardía y query/mutation
@@ -2966,10 +2968,6 @@ UNKNOWN y límites
 Pérdida de acknowledgement inyectada en el adaptador después de commit SQL real PASS,
 con policy required y sin replay. Fallo físico de red en ventana exacta:
 NOT_RUN_NONDETERMINISTIC. No se equiparan esas pruebas.
-Demo limpia y cobertura
-Demo sin seed 1/1 PASS en 1,878 s; ciclo 61,566 s, restart y cleanup PASS. 41 escenarios
-distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio.
-Repeticiones no se suman; SKIP opt-in cubiertos por suites dedicadas.
 
 
 --- PAGE 48 ---
@@ -2979,11 +2977,16 @@ Trackvance Colombia SAS · 27 septiembre 2026
 48
 Verificación
 Resultado ejecutado
+Demo limpia y cobertura
+Demo sin seed 1/1 PASS en 1,878 s; ciclo 61,566 s, restart y cleanup PASS. 41 escenarios
+distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio.
+Repeticiones no se suman; SKIP opt-in cubiertos por suites dedicadas.
 Recovery nativo 0.6.1
 PASS: 9 artifacts, dos secretos SQL, 269 relaciones, 6 roles/95 grants y tablas operativas
 pobladas. Notificación histórica declarada como fixture sintética; alta/regeneración no añaden
 filas. Origen destruido antes de restore. Dump decodificado y 15 archivos examinados contra
-seis secretos conocidos, sin fugas.
+seis secretos conocidos, sin fugas. Ciclo completo repetido después del ajuste TCP: PASS, con
+preservación, scan y limpieza.
 Restore auténtico 0.6.0
 PASS desde 587909b/0012/state5: 78 artifacts y estado histórico exacto; una entrega
 FAILED/NO_PROVIDER real de la baseline preservada. Nuevas emisiones 0.6.1 sin entregas
@@ -3017,9 +3020,10 @@ SUCCESS: nueve jobs, commit 4d3c656ab0bc250f50eb53972d22839da9e4485c, workflow
 identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke.
 https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050
 GitHub Actions publicación
-El commit documental se somete de nuevo a los nueve jobs. Sólo se entrega tras observar
-SUCCESS del HEAD final. Su SHA, workflow y jobs quedan en el informe externo de entrega,
-evitando una referencia circular en el PDF.
+Primer cierre afb8f8d, workflow 36328842735: 8/9 SUCCESS; falló preparar PostgreSQL externo
+antes de iniciar Trackvance. Causa exacta no recuperable; condición prematura de readiness
+reproducida y corregida con TCP. Nativo y pytest repetidos PASS. El informe externo sólo cierra
+cuando los nueve jobs del HEAD corregido terminen SUCCESS.
 Publicación PDF
 Candidato renderizado e inspeccionado por completo antes de --publish. Páginas, SHA-256,
 hash de fuente/OpenAPI/validación, source commit y revisión se registran en
@@ -3029,6 +3033,13 @@ La evidencia de esta edición proviene de nuevas ejecuciones. Cada suite, motor,
 propio; un escenario no ejecutado mantiene NOT_RUN con motivo. La prueba determinista de UNKNOWN no se presenta como
 reproducción física de una pérdida exacta de confirmación remota. La revisión visual del PDF se realiza después de incorporar los
 resultados finales.
+
+
+--- PAGE 49 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+49
 Antecedente certificado 0.5.0 (no certifica 0.6.1)
 Ningún éxito de 0.4.1 se hereda como certificación de 0.5.0. La aceptación debe cubrir suite backend/scripts, calidad estática,
 frontend, migración 0008, Compose/persistencia, Conexiones, Data Delivery con ambos motores, UI, estado UNKNOWN,
@@ -3037,13 +3048,6 @@ y build PASS; Playwright 20 aprobadas/5 opt-in omitidas; smoke 84/84, Conexiones
 y Playwright Delivery 1/1; recovery y compatibilidad real 0.4.1→0.5.0 PASS. GitHub Actions: workflow 35875426350, commit
 57c0319ae2f0ef27ae63eced8e354258efc0854d, siete jobs SUCCESS sin reintentos: backend, frontend, compose-e2e,
 connections-e2e, delivery-e2e, backup-restore-e2e y benchmark-smoke. La URL está en la tabla de resultados.
-
-
---- PAGE 49 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.1
-Trackvance Colombia SAS · 27 septiembre 2026
-49
 CI registró Python 869/869 en 50,08 s y frontend 128/128; Playwright Compose 19 aprobadas/6 opt-in omitidas más demo limpio
 1/1, Conexiones 23 aprobadas/2 omitidas y Delivery focal 1/1. Estas ejecuciones no se suman como escenarios únicos; el cruce de
 nombres confirma 25 escenarios distintos con al menos un PASS. Los cuatro opt-in de fuentes SQL pasan en Conexiones, demo
@@ -3091,6 +3095,13 @@ Sentinel v3
 Excepciones
 Bloqueo sin validación; Run posterior correcto habilita RESOLVED; cierre administrativo
 separado.
+
+
+--- PAGE 50 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.6.1
+Trackvance Colombia SAS · 27 septiembre 2026
+50
 La base 0.4.0 incluye cinco formatos, hoja Excel, delimitador TXT, JSON anidado simple, esquema embebido Parquet, overrides,
 identificadores/Todos, selectores de reglas, navegación, dashboard, VALUE_MISMATCH, not_future, schema drift,
 XLSX/MIME/filename/formula injection, RBAC/CSRF y lineage. La cobertura incremental 0.4.1 comprueba el selector único de
@@ -3099,13 +3110,6 @@ multiselect de Sentinel por esquema y regreso al inicio tras logout.
 El workflow ci.yml declara checks backend/frontend, migraciones y ciclos Compose/conexiones/delivery/recuperación con entornos
 temporales y evidencia de navegador. Los jobs realmente ejecutados y su resultado se registran en la tabla de validación.
 Conexiones usa usuarios SELECT; Delivery usa destinos PostgreSQL/SQL Server aislados. Ambos buscan fugas de secretos y no
-
-
---- PAGE 50 ---
-TRACKVANCE CORE
-Especificación v1.1 | Implementación 0.6.1
-Trackvance Colombia SAS · 27 septiembre 2026
-50
 apuntan a la instalación principal. La ejecución local no equivale a una ejecución remota de GitHub Actions. Security
 scanning/SBOM y gates de producción permanecen en el objetivo final.
 La revisión 0.4.1 quedó certificada en GitHub Actions por el workflow 35638817011, commit
@@ -4935,6 +4939,11 @@ mediante navegación de lectura.
 Se exige éxito de los nueve jobs en el commit de producto y nuevamente en el HEAD final tras documentación/PDF. La evidencia
 registra workflow ID, SHA y jobs. Este PDF registra el commit de implementación usado para certificar; el informe final externo al
 repo registra el HEAD documental y su CI para evitar una referencia circular de commit.
+El primer cierre documental afb8f8d (workflow 36328842735) obtuvo ocho SUCCESS y un fallo al preparar PostgreSQL externo,
+antes de iniciar Trackvance. Se reprodujo una condición prematura del healthcheck por socket durante initdb; el runner ahora
+espera TCP del servidor definitivo. La causa exacta del fallo original no es recuperable porque se suprimió stderr. El diagnóstico
+nuevo conserva sólo exit code y categoría cerrada, nunca SQL ni salida cruda. La reproducción no se confunde con prueba de
+causalidad retrospectiva; el cierre exige repetir los nueve jobs en el HEAD corregido.
 14. Limitaciones
 No se prueba SSO real ni se requieren secretos externos. No hay envío de correo, notificaciones operativas, auto-provisioning o
 recuperación de temporales cerradas. Los benchmarks smoke validan los casos medidos, no capacidad empresarial general. La UI
@@ -4959,9 +4968,11 @@ Corte y procedencia
 Implementación 4d3c656ab0bc250f50eb53972d22839da9e4485c. Ejecuciones nuevas 0.6.1; no
 se heredan éxitos 0.6.0.
 Backend local
-1.192 pytest backend/scripts PASS en 106,280 s, 0 FAIL/0 SKIP; 54 focales identidad/SSO
-PASS. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Dos avisos upstream:
-Starlette/httpx y AnyIO BlockingPortal.
+1.197 pytest backend/scripts PASS en 95,850 s tras corregir el runner; 0 FAIL y dos avisos
+upstream conocidos. Incluye cinco regresiones nuevas de diagnóstico seguro; 70 focales del
+harness PASS. Antes: 1.192 PASS y 54 focales identidad/SSO PASS, conservados como
+ejecución inicial. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Overlays SQL de
+prueba validados con Compose y healthcheck TCP.
 Frontend local
 174 Vitest / 20 archivos PASS en 13,056 s; 0 FAIL/0 SKIP. Instalación pnpm congelada, ESLint,
 TypeScript y production build PASS. Modal, cierre/pagehide, respuesta tardía y query/mutation
@@ -5008,7 +5019,8 @@ Recovery nativo 0.6.1
 PASS: 9 artifacts, dos secretos SQL, 269 relaciones, 6 roles/95 grants y tablas operativas
 pobladas. Notificación histórica declarada como fixture sintética; alta/regeneración no añaden
 filas. Origen destruido antes de restore. Dump decodificado y 15 archivos examinados contra
-seis secretos conocidos, sin fugas.
+seis secretos conocidos, sin fugas. Ciclo completo repetido después del ajuste TCP: PASS, con
+preservación, scan y limpieza.
 Restore auténtico 0.6.0
 PASS desde 587909b/0012/state5: 78 artifacts y estado histórico exacto; una entrega
 FAILED/NO_PROVIDER real de la baseline preservada. Nuevas emisiones 0.6.1 sin entregas
@@ -5051,9 +5063,10 @@ SUCCESS: nueve jobs, commit 4d3c656ab0bc250f50eb53972d22839da9e4485c, workflow
 identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke.
 https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050
 GitHub Actions publicación
-El commit documental se somete de nuevo a los nueve jobs. Sólo se entrega tras observar
-SUCCESS del HEAD final. Su SHA, workflow y jobs quedan en el informe externo de entrega,
-evitando una referencia circular en el PDF.
+Primer cierre afb8f8d, workflow 36328842735: 8/9 SUCCESS; falló preparar PostgreSQL externo
+antes de iniciar Trackvance. Causa exacta no recuperable; condición prematura de readiness
+reproducida y corregida con TCP. Nativo y pytest repetidos PASS. El informe externo sólo cierra
+cuando los nueve jobs del HEAD corregido terminen SUCCESS.
 Publicación PDF
 Candidato renderizado e inspeccionado por completo antes de --publish. Páginas, SHA-256,
 hash de fuente/OpenAPI/validación, source commit y revisión se registran en

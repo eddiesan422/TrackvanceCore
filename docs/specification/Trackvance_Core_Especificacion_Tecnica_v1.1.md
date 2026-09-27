@@ -1186,7 +1186,7 @@ AuditEvent conserva actor_type, actor_id estable, actor visible, actor_legacy, e
 
 DATASET_UPLOADED, DATASET_DERIVED, CONFIGURATION_PUBLISHED, RUN_QUEUED, RUN_COMPLETED, EXCEPTION_CREATED, EXCEPTION_UPDATED y EXCEPTION_VALIDATION_CHECKED documentan el ciclo. EXPORT_DOWNLOADED, EVIDENCE_DOWNLOADED y ARTIFACT_DOWNLOADED registran el acceso relevante a evidencia. La UI enlaza recursos desde los eventos.
 
-La administración añade USER_CREATED, USER_UPDATED y USER_PASSWORD_RESET. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Delivery registra publicación, encolado, STARTED, COMMITTED, FAILED o UNKNOWN con actor estable y referencias, nunca contraseña ni filas. Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos eventos.
+La administración añade USER_CREATED, USER_UPDATED, USER_CREDENTIALS_REGENERATED y USER_PASSWORD_CHANGED. La gestión operativa audita comentarios, adjuntos y resolución automática; la programación conserva revisiones y eventos de despacho. Delivery registra publicación, encolado, STARTED, COMMITTED, FAILED o UNKNOWN con actor estable y referencias, nunca contraseña ni filas. Las filas de negocio recibidas, credenciales, hashes de contraseña y sesiones nunca forman parte del payload público de estos eventos.
 
 Se excluyen claves de passwords, tokens y secretos de metadata/evidencia. Los casos legacy sin identidad demostrable se marcan como legacy; no se atribuyen a un UUID de usuario inventado. Las auditorías de exportación agregan evidencia sin alterar el manifest original del Run.
 
@@ -2919,6 +2919,14 @@ Se exige éxito de los nueve jobs en el commit de producto y nuevamente en el HE
 tras documentación/PDF. La evidencia registra workflow ID, SHA y jobs. Este PDF registra
 el commit de implementación usado para certificar; el informe final externo al repo
 registra el HEAD documental y su CI para evitar una referencia circular de commit.
+
+El primer cierre documental afb8f8d (workflow 36328842735) obtuvo ocho SUCCESS
+y un fallo al preparar PostgreSQL externo, antes de iniciar Trackvance. Se reprodujo
+una condición prematura del healthcheck por socket durante initdb; el runner ahora
+espera TCP del servidor definitivo. La causa exacta del fallo original no es recuperable
+porque se suprimió stderr. El diagnóstico nuevo conserva sólo exit code y categoría
+cerrada, nunca SQL ni salida cruda. La reproducción no se confunde con prueba de
+causalidad retrospectiva; el cierre exige repetir los nueve jobs en el HEAD corregido.
 
 ### 14. Limitaciones
 

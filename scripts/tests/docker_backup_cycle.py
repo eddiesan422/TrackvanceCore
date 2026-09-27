@@ -93,6 +93,36 @@ def scan_backup_plaintext(backup: Path, application: list[str], environment: dic
             "raw_contents_published": False}
 
 
+class RecoveryCommandError(RuntimeError):
+    """Retain only an exit code and an allowlisted diagnostic, never child output."""
+
+    categories: ClassVar[frozenset[str]] = frozenset({"CONNECTION", "SQL", "UNKNOWN"})
+
+    def __init__(self, exit_code: int, category: str) -> None:
+        if type(exit_code) is not int or category not in self.categories:
+            raise ValueError("Diagnóstico de subproceso inválido.")
+        super().__init__(f"Falló el subproceso (exit {exit_code}; {category}); salida suprimida.")
+        self.exit_code = exit_code
+        self.category = category
+
+
+def command_failure_category(arguments: list[str], stderr: str) -> str:
+    """Classify psql output in memory; return no text originating from the child."""
+    if "psql" not in arguments:
+        return "UNKNOWN"
+    if re.search(
+        r"psql:.*(?:connection to server|could not connect to server)|"
+        r"server closed the connection unexpectedly|"
+        r"terminating connection due to administrator command|"
+        r"database system is (?:starting up|shutting down)",
+        stderr, re.IGNORECASE,
+    ):
+        return "CONNECTION"
+    if re.search(r"^(?:psql:[^\n]*:\s*)?ERROR:\s", stderr, re.MULTILINE):
+        return "SQL"
+    return "UNKNOWN"
+
+
 def execute(arguments: list[str], environment: dict[str, str], *, timeout: int = 1800,
             input_text: str | None = None, credentials: tuple[str, ...] = ()) -> str:
     # Credentials may enter the child only via environment or stdin, never argv.
@@ -101,9 +131,10 @@ def execute(arguments: list[str], environment: dict[str, str], *, timeout: int =
     result = subprocess.run(arguments, cwd=ROOT, env=environment, capture_output=True,
                             text=True, encoding="utf-8", errors="replace",
                             timeout=timeout, check=False, input=input_text)
+    if result.returncode:
+        raise RecoveryCommandError(
+            result.returncode, command_failure_category(arguments, result.stderr))
     assert_no_secrets(result.stdout + result.stderr, credentials)
-    ensure(not result.returncode,
-           f"Falló {Path(arguments[0]).name} (exit {result.returncode}); salida suprimida.")
     return result.stdout
 
 
@@ -191,7 +222,8 @@ def fixture_compose() -> dict[str, Any]:
             },
             "volumes": ["source_data:/var/lib/postgresql/data"],
             "healthcheck": {
-                "test": ["CMD-SHELL", "pg_isready -U recovery_admin -d recovery_source"],
+                # initdb's temporary server accepts sockets but never TCP.
+                "test": ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U recovery_admin -d recovery_source"],
                 "interval": "2s", "timeout": "3s", "retries": 30,
             },
         }}, "volumes": {"source_data": {}},
@@ -1102,6 +1134,8 @@ def main() -> int:
         result.update({"failed_stage": stage, "error_type": type(error).__name__})
         if isinstance(error, DeliveryEvidenceError):
             result["error_code"] = error.code
+        if isinstance(error, RecoveryCommandError):
+            result.update({"exit_code": error.exit_code, "error_category": error.category})
         print(f"ERROR: recuperación en {stage} ({type(error).__name__}); detalle suprimido.",
               file=sys.stderr)
     finally:

@@ -65,6 +65,7 @@ def test_fixture_never_persists_credentials_or_publishes_database_port():
     assert "ports" not in database
     assert "external" not in fixture["volumes"]["source_data"]
     assert database["restart"] == "no"
+    assert "-h 127.0.0.1" in database["healthcheck"]["test"][1]
 
 
 def test_source_bootstrap_password_only_in_stdin_and_reader_is_select_only(monkeypatch):
@@ -109,6 +110,33 @@ def test_execute_transports_migration_and_review_unicode_as_utf8(monkeypatch):
     source = "0008→0009; revisión de confirmación"
     assert runner.execute(["docker", "exec", "fixture", "python", "-"], {}, input_text=source) == "ok"
     assert observed["encoding"] == "utf-8" and observed["input"] == source
+
+
+@pytest.mark.parametrize("stderr, category", [
+    ('psql: error: connection to server on socket failed: private-synthetic-password', "CONNECTION"),
+    ('psql:<stdin>:2: ERROR: private-synthetic-password', "SQL"),
+    ('unrecognized driver diagnostic private-synthetic-password', "UNKNOWN"),
+])
+def test_failed_subprocess_retains_only_safe_exit_and_category(monkeypatch, capsys, stderr, category):
+    password = "private-synthetic-password"
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs:
+        subprocess.CompletedProcess(args[0], 2, stdout=password, stderr=stderr))
+    with pytest.raises(runner.RecoveryCommandError) as caught:
+        runner.execute(["docker", "exec", "fixture", "psql"], {},
+                       input_text=f"SELECT '{password}';", credentials=(password,))
+    error = caught.value
+    assert error.exit_code == 2 and error.category == category
+    assert error.__dict__ == {"exit_code": 2, "category": category}
+    output = capsys.readouterr()
+    assert password not in str(error) + repr(error) + output.out + output.err
+    assert stderr not in str(error)
+
+
+def test_subprocess_diagnostic_rejects_untrusted_categories():
+    with pytest.raises(ValueError, match="inválido"):
+        runner.RecoveryCommandError(1, "private-untrusted-diagnostic")
+    with pytest.raises(ValueError, match="inválido"):
+        runner.RecoveryCommandError("private-untrusted-exit", "UNKNOWN")
 
 
 def test_http_error_never_exposes_response_body():
@@ -515,6 +543,33 @@ def test_recovery_report_emits_only_allowlisted_evidence_readiness_error_code(mo
     assert "error_message" not in result
     with pytest.raises(KeyError):
         runner.DeliveryEvidenceError("untrusted provider error")
+
+
+def test_recovery_report_preserves_safe_subprocess_diagnostic(monkeypatch, tmp_path, capsys):
+    evidence, _, _, _ = setup_main(monkeypatch, tmp_path)
+    password = "private-synthetic-password"
+    monkeypatch.setattr(runner, "assert_fresh", lambda project: None)
+    monkeypatch.setattr(runner, "cleanup", lambda *args: None)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs:
+        subprocess.CompletedProcess(args[0], 2, stdout=password,
+            stderr=f"psql: error: connection to server failed: {password}"))
+    original_execute = runner.execute
+    monkeypatch.setattr(runner, "execute", lambda *args, **kwargs: "")
+
+    def initialize(*args):
+        original_execute(["docker", "exec", "fixture", "psql"], {}, credentials=(password,))
+
+    monkeypatch.setattr(runner, "initialize_source", initialize)
+    assert runner.main() == 1
+    serialized = (evidence / "result.json").read_text()
+    result = json.loads(serialized)
+    assert result["status"] == "FAIL"
+    assert result["failed_stage"] == "external_postgresql"
+    assert result["error_type"] == "RecoveryCommandError"
+    assert result["exit_code"] == 2 and result["error_category"] == "CONNECTION"
+    assert "error_message" not in result and "stderr" not in result
+    output = capsys.readouterr()
+    assert password not in serialized + output.out + output.err
 
 
 @pytest.mark.parametrize("keep", [False, True])

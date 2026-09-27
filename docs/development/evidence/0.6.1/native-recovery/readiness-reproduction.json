@@ -1,0 +1,46 @@
+{
+  "status": "PASS",
+  "project": "trackvance-recovery-db-readiness-89ee7ec2c5",
+  "scope": "CONTROLLED_STARTUP_READINESS_REPRODUCTION_NOT_CI_CAUSE_ATTRIBUTION",
+  "published_raw_output": false,
+  "image_id": "sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685",
+  "during_initialization": {
+    "old-socket": {
+      "init_callback_active": true,
+      "docker_health": "healthy",
+      "socket_pg_isready_exit": 0,
+      "tcp_pg_isready_exit": 2
+    },
+    "new-tcp": {
+      "init_callback_active": true,
+      "docker_health": "starting",
+      "socket_pg_isready_exit": 0,
+      "tcp_pg_isready_exit": 2
+    }
+  },
+  "compose_wait_during_initialization": {
+    "old_socket_exit": 0,
+    "new_tcp_exit": 1
+  },
+  "query_started_on_temporary_server": {
+    "exit_code": 2,
+    "category": "ADMINISTRATOR_SHUTDOWN",
+    "seconds_after_release": 0.76,
+    "raw_error_published": false
+  },
+  "after_final_server_start": {
+    "old-socket": {
+      "docker_health": "healthy",
+      "init_callback_finished": true,
+      "tcp_pg_isready_exit": 0,
+      "query_exit": 0
+    },
+    "new-tcp": {
+      "docker_health": "healthy",
+      "init_callback_finished": true,
+      "tcp_pg_isready_exit": 0,
+      "query_exit": 0
+    }
+  },
+  "cleanup": "PASS"
+}

@@ -69,26 +69,27 @@ El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histór
 
 ## Publicación 0.6.1
 
-La implementación `4d3c656ab0bc250f50eb53972d22839da9e4485c` completó los
-nueve jobs SUCCESS del [workflow 36327154050](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050), intento 1.
-La edición final tiene **82 páginas, 179 marcadores y 38 secciones principales**.
-Todas las páginas se renderizaron a 110 dpi y se inspeccionaron antes de publicar.
-Se compactó el índice para evitar una página casi vacía, se completaron las
-referencias ADR 0016–0019 y se corrigió una flecha de primer acceso. Se volvieron
-a renderizar todas las páginas; 74 cuerpos eran idénticos pixel a pixel al
-candidato revisado, y se inspeccionaron los cambios y la numeración completa.
+El producto `4d3c656ab0bc250f50eb53972d22839da9e4485c` completó nueve jobs SUCCESS
+del [workflow 36327154050](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050).
+El primer cierre documental `afb8f8d` falló en la preparación del PostgreSQL
+externo del runner de recovery, antes de iniciar Trackvance. Se preservó el
+resultado, se corrigió la condición prematura de healthcheck y se repitieron
+pruebas. La causa exacta de aquel fallo no es recuperable porque el diagnóstico
+original suprimió stderr; no se declara demostrada por la reproducción posterior.
 
-SHA-256 del candidato revisado y publicado: `48100cc80bb64f047426e858fc95f17833f06d3dda9b0711d6317a18d032cc41`.
+La edición revisada tiene **82 páginas, 179 marcadores y 38 secciones
+principales**. Todas las páginas se renderizaron a 110 dpi y se inspeccionaron
+antes de publicar. Incluye resultados posteriores a la corrección del runner.
+SHA-256 del candidato aprobado y publicado: `3d60da10b31e12bcbf93562405b1850606a6f0c5aa22b4bf0c07cb6941e55af6`.
 `--publish` produjo exactamente los mismos bytes. Fuente, generador, resultados,
-PDF y texto extraído coinciden por hash con la copia oficial en
-`ProductOne/Documentación`. Las ediciones original, 0.5.1 y 0.6.0 permanecen
-archivadas e intactas. [Registro completo](../development/evidence/0.6.1/pdf-verification.json)
-conserva hashes, OpenAPI, source commit, revisión y avisos de render.
+PDF y extracción coinciden con la copia oficial en `ProductOne/Documentación`.
+Las ediciones original, 0.5.1 y 0.6.0 permanecen archivadas e intactas.
+[Registro de publicación](../development/evidence/0.6.1/pdf-verification.json)
+conserva hashes, OpenAPI, procedencia, revisión visual y avisos de render.
 
-El informe externo de entrega identifica el HEAD documental y su workflow
-final una vez observados los nueve SUCCESS, sin autorreferencia circular en el PDF.
-Microsoft/Google reales conservan NOT_RUN_EXTERNAL_CREDENTIALS. SMTP se retiró
-como capacidad operativa y no es un gate pendiente.
+El informe externo registra el HEAD corregido y los nueve SUCCESS observados
+antes de la entrega, sin autorreferencia circular en el PDF. Microsoft/Google
+reales permanecen NOT_RUN_EXTERNAL_CREDENTIALS; SMTP fue retirado del producto.
 
 ## Publicación histórica 0.6.0
 

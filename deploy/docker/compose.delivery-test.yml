@@ -10,7 +10,7 @@ services:
     volumes:
       - destination_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U delivery_admin -d trackvance_delivery']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U delivery_admin -d trackvance_delivery']
       interval: 3s
       timeout: 3s
       retries: 40
@@ -46,7 +46,7 @@ services:
     volumes:
       - destination_postgres18_data:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U delivery_admin -d trackvance_delivery']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U delivery_admin -d trackvance_delivery']
       interval: 3s
       timeout: 3s
       retries: 40
