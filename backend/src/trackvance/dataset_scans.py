@@ -48,6 +48,39 @@ def version_paths(db: Session, version: DatasetVersion) -> list[Path]:
             expected_size=version.size_bytes if not version.original_path else None)]
 
 
+def sample_paths(paths: list[Path], columns: list[str], limit: int = 20, *,
+                 byte_limit: int = 8 * 1024 * 1024,
+                 observed_record_bytes_upper_bound: int | None = None) -> Iterator[dict]:
+    """Read only a presentation sample from already verified Parquet parts.
+
+    The persisted profile contains global statistics. No COUNT, DISTINCT or
+    analytical connection is needed to present its first records. Arrow batches
+    are bounded before conversion to Python; historical unknown widths use one
+    record. The caller applies the encoded JSON response budget to these rows.
+    """
+    import pyarrow.parquet as pq  # type: ignore[import-untyped]
+
+    if not 0 <= limit <= 100 or byte_limit < 1:
+        raise ValueError("El límite de la muestra debe ser positivo y acotado.")
+    width = observed_record_bytes_upper_bound
+    batch_rows = (max(1, min(limit or 1, byte_limit // width))
+                  if type(width) is int and width > 0 else 1)
+    remaining = limit
+    for path in paths:
+        if not remaining:
+            return
+        with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
+            if not set(columns) <= set(parquet.schema_arrow.names):
+                raise ArtifactIntegrityError("DATASET_PART_INVALID: Faltan columnas en la muestra.")
+            for batch in parquet.iter_batches(batch_size=min(batch_rows, remaining),
+                                              columns=columns, use_threads=False):
+                for row in batch.to_pylist():
+                    yield row
+                    remaining -= 1
+                    if not remaining:
+                        return
+
+
 @contextmanager
 def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None):
     effective = limits or AcquisitionLimits.configured()

@@ -482,14 +482,28 @@ def main() -> int:
     evidence = args.evidence_dir or ROOT / ".codex-local" / "connections-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
     compose = isolate_compose(compose, environment, evidence, project)
+    # Small connector/browser fixtures still exercise all nine real processes.
+    # Their private limits leave room for the separate, idle core installation.
+    private_profile = evidence / "private-compose.json"
+    profile = json.loads(private_profile.read_text(encoding="utf-8"))
+    limits = {"postgres": "512m", "api": "768m", "worker": "512m", "acquisition-worker": "512m",
+              "delivery-worker": "768m", "scheduler": "128m", "events-chaining": "128m",
+              "events-notifications": "128m", "web": "128m"}
+    for name, memory in limits.items():
+        if name in profile["services"]:
+            profile["services"][name]["mem_limit"] = memory
+    private_profile.write_text(json.dumps(profile, indent=2), encoding="utf-8")
 
     def command(arguments, **kwargs):
         return execute(arguments, environment=environment, credentials=credentials, **kwargs)
 
     def run(arguments, **kwargs):
+        if command(["docker", "context", "show"], capture=True).strip() != docker_context:
+            raise RuntimeError("El contexto Docker cambió; se rechaza operar o limpiar el proyecto.")
         return command([*compose, *arguments], **kwargs)
 
     inventory_reader = lambda arguments: command(arguments, capture=True)
+    docker_context = command(["docker", "context", "show"], capture=True).strip()
     main_before = main_inventory(inventory_reader)
 
     started = False
@@ -500,7 +514,9 @@ def main() -> int:
                             f"label=com.docker.compose.project={project}"], capture=True).strip()
         volumes = command(["docker", "volume", "ls", "-q", "--filter",
                            f"label=com.docker.compose.project={project}"], capture=True).strip()
-        if existing or volumes:
+        networks = command(["docker", "network", "ls", "-q", "--filter",
+                            f"label=com.docker.compose.project={project}"], capture=True).strip()
+        if existing or volumes or networks:
             raise RuntimeError(f"El proyecto {project} ya tiene recursos; utiliza otro nombre.")
         started = True
         run(["up", "-d", "--wait", "--wait-timeout", "300", "source-postgres", "source-sqlserver"])

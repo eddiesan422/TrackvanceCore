@@ -840,8 +840,11 @@ def upload_version(
 def profile(version_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     version = owned(db, DatasetVersion, version_id, user)
     artifact = verify_registered_file(db, version.canonical_path, user.organization_id)
-    from .delivery_streams import DatasetRecords, DeliveryLimits
-    records = DatasetRecords(storage_provider.dataset_paths(artifact), [column["name"] for column in version.schema_json])
+    from .dataset_scans import sample_paths
+    from .delivery_streams import DeliveryLimits
+    records = sample_paths(storage_provider.dataset_paths(artifact),
+                           [column["name"] for column in version.schema_json],
+                           observed_record_bytes_upper_bound=(version.profile or {}).get("observed_record_bytes_upper_bound"))
     sample, sample_bytes, limited = bounded_profile_sample(records)
     return {**version_dto(version, db), "sample": sample, "sampled_rows": len(sample),
             "sample_bytes": sample_bytes, "sample_limited": limited,
@@ -851,9 +854,12 @@ def profile(version_id: str, db: Session = Depends(get_db), user: User = Depends
 
 def bounded_profile_sample(records, *, byte_limit: int = 8 * 1024 * 1024):
     """Bound only the presentation sample; the stored global profile is unchanged."""
+    from itertools import islice
+
     sample: list[dict[str, object]] = []
     sample_bytes = 2  # JSON array delimiters
-    for record in records.head(20):
+    rows = records.head(20) if hasattr(records, "head") else records
+    for record in islice(rows, 20):
         encoded = json.dumps(jsonable_encoder(record), ensure_ascii=False,
                              separators=(",", ":")).encode("utf-8")
         size = len(encoded) + int(bool(sample))

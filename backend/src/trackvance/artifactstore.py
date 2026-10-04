@@ -184,12 +184,11 @@ class FileArtifactStore:
         descriptor = self.dataset_descriptor(artifact)
         if descriptor is None:
             return [self.materialize(artifact)]
-        import duckdb
         import polars as pl
+        import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
         expected_schema = descriptor["schema"]
         paths = []
-        connection = duckdb.connect(":memory:", config={"threads": "1"})
         try:
             for part in descriptor["parts"]:
                 path = self.materialize_reference(str(self.root / part["path"]),
@@ -197,14 +196,13 @@ class FileArtifactStore:
                                                   expected_size=part["size_bytes"])
                 schema = [{"name": key, "type": str(value)}
                           for key, value in pl.read_parquet_schema(path).items()]
-                count = connection.execute("SELECT num_rows FROM parquet_file_metadata(?)", [str(path)]).fetchone()
-                if schema != expected_schema or not count or count[0] != part["row_count"]:
+                with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
+                    count = parquet.metadata.num_rows
+                if schema != expected_schema or count != part["row_count"]:
                     raise ArtifactIntegrityError("DATASET_PART_INVALID: El esquema o conteo de una parte no coincide.")
                 paths.append(path)
-        except (duckdb.Error, pl.exceptions.PolarsError, OSError):
+        except (pl.exceptions.PolarsError, OSError, ValueError):
             raise ArtifactIntegrityError("DATASET_PART_INVALID: No fue posible verificar una parte Parquet.") from None
-        finally:
-            connection.close()
         return paths
 
     def put_dataset(self, db: Session, parts: list[Path], kind: str,
@@ -216,15 +214,14 @@ class FileArtifactStore:
         leave unreferenced immutable bytes; it cannot expose a DatasetVersion or
         overwrite the result of another attempt.
         """
-        import duckdb
         import polars as pl
+        import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
         if not parts or len(parts) > 100_000:
             raise ArtifactIntegrityError("DATASET_DESCRIPTOR_INVALID: Se requiere al menos una parte.")
         identity = artifact_id or uid()
         descriptions: list[dict] = []
         schema = None
-        connection = duckdb.connect(":memory:", config={"threads": "1"})
         try:
             for ordinal, path in enumerate(parts):
                 current_schema = [{"name": key, "type": str(value)}
@@ -232,9 +229,8 @@ class FileArtifactStore:
                 if schema is not None and schema != current_schema:
                     raise ArtifactIntegrityError("DATASET_SCHEMA_MISMATCH: Las partes tienen esquemas distintos.")
                 schema = current_schema
-                count = connection.execute("SELECT num_rows FROM parquet_file_metadata(?)", [str(path)]).fetchone()
-                if count is None:
-                    raise ArtifactIntegrityError("DATASET_PART_INVALID: Falta el conteo de una parte.")
+                with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
+                    count = parquet.metadata.num_rows
                 part_identity = str(uuid5(NAMESPACE_URL, f"trackvance:dataset:{organization_id}:{identity}:{ordinal}"))
                 artifact = self.put_file(db, path, f"{kind}_PART", organization_id,
                                          f"part-{ordinal:06d}.parquet", part_identity,
@@ -242,7 +238,7 @@ class FileArtifactStore:
                 descriptions.append({"ordinal": ordinal, "artifact_id": artifact.id,
                                      "path": self.checked_path(artifact.path).relative_to(self.root).as_posix(),
                                      "sha256": artifact.sha256, "size_bytes": artifact.size_bytes,
-                                     "row_count": int(count[0])})
+                                     "row_count": count})
             descriptor = {"schema_version": 1, "kind": "PARQUET_DATASET", "schema": schema,
                           "parts": descriptions, "row_count": sum(p["row_count"] for p in descriptions),
                           "data_size_bytes": sum(p["size_bytes"] for p in descriptions),
@@ -260,10 +256,8 @@ class FileArtifactStore:
                 link_artifact(db, organization_id, "DATASET_PART", "ARTIFACT", result.id,
                               "ARTIFACT", part["artifact_id"])
             return result
-        except (duckdb.Error, pl.exceptions.PolarsError, OSError):
+        except (pl.exceptions.PolarsError, OSError, ValueError):
             raise ArtifactIntegrityError("DATASET_PART_INVALID: No fue posible publicar el conjunto Parquet.") from None
-        finally:
-            connection.close()
 
     def materialize_reference(
         self,
