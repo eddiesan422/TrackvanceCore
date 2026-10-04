@@ -20,6 +20,7 @@ from docker_backup_cycle import (
     notification_count,
     scan_backup_plaintext,
 )
+from isolation_profile import assert_main_unchanged, main_inventory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import docker_state
@@ -177,6 +178,7 @@ def main() -> int:
               "source_version": options.source_version, "target_version": TARGET_VERSION,
               "source_project": source, "target_project": target}
     stage = "freshness"
+    main_before = None
 
     def run(arguments, *, cwd=ROOT, input_text=None):
         assert_no_secrets(" ".join(arguments), credentials)
@@ -189,6 +191,7 @@ def main() -> int:
         return completed.stdout
 
     try:
+        main_before = main_inventory(run)
         docker_state.ensure_fresh_project(source)
         docker_state.ensure_fresh_project(target)
         stage = "authentic_source_build"
@@ -283,6 +286,12 @@ def main() -> int:
             result.update(status="FAIL", cleanup="FAIL")
         else:
             result["cleanup"] = "PASS"
+        if main_before is not None:
+            try:
+                assert_main_unchanged(main_before, run)
+                result["main_inventory"] = "UNCHANGED"
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                result.update(status="FAIL", main_inventory="CHANGED_OR_UNVERIFIABLE")
         os.environ.clear()
         os.environ.update(original_environment)
         result["duration_seconds"] = round(time.monotonic() - began, 3)

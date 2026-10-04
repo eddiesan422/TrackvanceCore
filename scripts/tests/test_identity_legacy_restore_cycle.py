@@ -24,6 +24,8 @@ def test_relative_evidence_is_resolved_before_running_from_archived_checkout(mon
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(runner.sys, "argv", ["restore", "--source-version", "0.6.0", "--evidence-dir", "private"])
     monkeypatch.setattr(runner.os, "environ", dict(os.environ))
+    monkeypatch.setattr(runner, "main_inventory", lambda _: [])
+    monkeypatch.setattr(runner, "assert_main_unchanged", lambda *_: None)
     monkeypatch.setattr(runner.docker_state, "ensure_fresh_project", lambda _: None)
     calls = []
 
@@ -90,6 +92,8 @@ def test_restore_compares_immutable_state_before_enabling_disposable_demo_access
     evidence = tmp_path / "evidence"
     monkeypatch.setattr(runner.sys, "argv", ["restore", "--source-version", "0.5.1", "--evidence-dir", str(evidence)])
     monkeypatch.setattr(runner.os, "environ", dict(os.environ))
+    monkeypatch.setattr(runner, "main_inventory", lambda _: [])
+    monkeypatch.setattr(runner, "assert_main_unchanged", lambda *_: None)
     monkeypatch.setattr(runner, "available_port", iter([3201, 3202]).__next__)
     monkeypatch.setattr(runner.docker_state, "ensure_fresh_project", lambda _: None)
     versions = iter(["0.5.1", "0.7.0"])
@@ -109,8 +113,8 @@ def test_restore_compares_immutable_state_before_enabling_disposable_demo_access
     monkeypatch.setattr(runner, "scan_backup_plaintext", lambda *args: {"status": "PASS"})
 
     def restore(*args, **kwargs):
-        assert kwargs == {"start": True, "web_port": 3202}
-        return {"status": "RUNNING_VERIFIED"}
+        assert kwargs == {"start": False, "web_port": 3202}
+        return {"status": "STOPPED_VERIFIED"}
 
     monkeypatch.setattr(runner.docker_state, "restore", restore)
     monkeypatch.setattr(runner.docker_state, "inventory", lambda _: {"containers": [{"service": "api", "id": "api"}]})
@@ -128,11 +132,15 @@ def test_restore_compares_immutable_state_before_enabling_disposable_demo_access
             with zipfile.ZipFile(arguments[arguments.index("--output") + 1], "w") as bundle:
                 bundle.writestr("compose.yml", "services: {}")
         if "up" in arguments and "--build" not in arguments:
-            assert state["compared"]
             assert kwargs["env"]["WEB_PORT"] == "3202"
-            assert kwargs["env"]["DEMO_ACCESS_ENABLED"] == "true"
             assert kwargs["env"]["DEMO_SEED_ENABLED"] == "false"
-            state["demo_enabled"] = True
+            assert arguments[-2:] == ["api", "web"]
+            assert "--env-file" in arguments
+            if kwargs["env"]["DEMO_ACCESS_ENABLED"] == "true":
+                assert state["compared"]
+                state["demo_enabled"] = True
+            else:
+                assert not state["compared"]
         return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
 
     monkeypatch.setattr(runner.subprocess, "run", command)
@@ -146,3 +154,4 @@ def test_restore_compares_immutable_state_before_enabling_disposable_demo_access
     assert runner.main() == 0
     result = json.loads((evidence / "result.json").read_text())
     assert result["exact_historical_state"] == result["current_credentials"]["status"] == "PASS"
+    assert result["automatic_processes_started"] is False
