@@ -44,23 +44,23 @@ test('CSV, XLSX, JSON, Parquet y TXT convergen al mismo contrato de Intake', asy
   const parquet = await fixture('multiformat.parquet')
   const sources = [
     {
-      format: 'CSV', filename: 'reader.csv', mimeType: 'text/csv',
+      format: 'CSV', formatLabel: 'CSV', filename: 'reader.csv', mimeType: 'text/csv',
       buffer: Buffer.from('record_key,amount\nA,10\nB,-2\n'),
     },
     {
-      format: 'XLSX', filename: 'reader.xlsx',
+      format: 'XLSX', formatLabel: 'Excel XLSX', filename: 'reader.xlsx',
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: xlsx,
     },
     {
-      format: 'JSON', filename: 'reader.json', mimeType: 'application/json',
+      format: 'JSON', formatLabel: 'JSON tabular', filename: 'reader.json', mimeType: 'application/json',
       buffer: Buffer.from('[{"record_key":"A","amount":10},{"record_key":"B","amount":-2}]'),
     },
     {
-      format: 'PARQUET', filename: 'reader.parquet',
+      format: 'PARQUET', formatLabel: 'Apache Parquet', filename: 'reader.parquet',
       mimeType: 'application/vnd.apache.parquet', buffer: parquet,
     },
     {
-      format: 'TXT', filename: 'reader.txt', mimeType: 'text/plain',
+      format: 'TXT', formatLabel: 'TXT delimitado', filename: 'reader.txt', mimeType: 'text/plain',
       buffer: Buffer.from('record_key|amount\nA|10\nB|-2\n'),
     },
   ]
@@ -81,7 +81,7 @@ test('CSV, XLSX, JSON, Parquet y TXT convergen al mismo contrato de Intake', asy
       buffer: source.buffer,
     })
     expect((await inspected).status()).toBe(201)
-    await expect(dialog).toContainText(source.format)
+    await expect(dialog.getByText(new RegExp(`^${source.formatLabel} · muestra de`))).toBeVisible()
 
     if (source.format === 'XLSX') {
       await expect(dialog.getByLabel('Hoja', { exact: true })).toBeVisible()

@@ -109,11 +109,11 @@ jobs:
         with:
           name: browser-evidence
           path: |
-            .codex-local/architecture-e2e/**/result.json
-            .codex-local/architecture-e2e/**/browser-summary.json
-            .codex-local/architecture-e2e/**/before.json
-            .codex-local/architecture-e2e/**/after.json
-            .codex-local/architecture-e2e/**/migrations.json
+            .codex-local/v070/trackvance-v070-test-e2e-*/result.json
+            .codex-local/v070/trackvance-v070-test-e2e-*/browser-summary.json
+            .codex-local/v070/trackvance-v070-test-e2e-*/before.json
+            .codex-local/v070/trackvance-v070-test-e2e-*/after.json
+            .codex-local/v070/trackvance-v070-test-e2e-*/migrations.json
           include-hidden-files: true
           if-no-files-found: ignore
   identity-sso-e2e:
@@ -176,6 +176,7 @@ jobs:
           path: |
             .codex-local/connections-e2e/**/result.json
             .codex-local/connections-e2e/**/browser-summary.json
+            .codex-local/connections-e2e/**/runtime-diagnostics.json
           include-hidden-files: true
           if-no-files-found: ignore
   delivery-e2e:
@@ -208,6 +209,7 @@ jobs:
           path: |
             .codex-local/delivery-e2e/**/result.json
             .codex-local/delivery-e2e/**/browser-summary.json
+            .codex-local/delivery-e2e/**/runtime-diagnostics.json
           include-hidden-files: true
           if-no-files-found: ignore
   backup-restore-e2e:

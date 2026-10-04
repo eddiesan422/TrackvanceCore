@@ -330,21 +330,28 @@ test('la carga JSON detecta formato, aplana columnas y conserva metadata', async
 test('la tabla de datasets ordena sus columnas en ambas direcciones', async ({ page }) => {
   await signIn(page)
   await page.goto('/datasets')
-  await expect(page.locator('tbody tr').first()).toBeVisible()
+  const table = page.getByRole('table').filter({ has: page.getByRole('columnheader', { name: /Registros/ }) })
+  await expect(table).toHaveCount(1)
+  await expect(table.locator('tbody tr').first()).toBeVisible()
 
   for (const column of ['Área', 'Registros', 'Versiones', 'Estado', 'Última actualización']) {
-    const ascending = page.getByRole('button', { name: `Ordenar ${column} ascendente` })
+    const ascending = table.getByRole('button', { name: `Ordenar ${column} ascendente` })
     await ascending.click()
-    const descending = page.getByRole('button', { name: `Ordenar ${column} descendente` })
+    const descending = table.getByRole('button', { name: `Ordenar ${column} descendente` })
     await expect(descending.locator('xpath=..')).toHaveAttribute('aria-sort', 'ascending')
 
     if (column === 'Registros') {
-      const values = (await page.locator('tbody tr td:nth-child(4)').allTextContents()).map(value => Number(value.replace(/\D/g, '')))
+      const values = (await table.locator('tbody tr td:nth-child(4)').allTextContents()).map(value => Number(value.replace(/\D/g, '')))
+      expect(values.length).toBeGreaterThan(0)
       expect(values).toEqual([...values].sort((left, right) => left - right))
     }
 
     await descending.click()
-    await expect(page.getByRole('button', { name: `Ordenar ${column} ascendente` }).locator('xpath=..')).toHaveAttribute('aria-sort', 'descending')
+    await expect(table.getByRole('button', { name: `Ordenar ${column} ascendente` }).locator('xpath=..')).toHaveAttribute('aria-sort', 'descending')
+    if (column === 'Registros') {
+      const values = (await table.locator('tbody tr td:nth-child(4)').allTextContents()).map(value => Number(value.replace(/\D/g, '')))
+      expect(values).toEqual([...values].sort((left, right) => right - left))
+    }
   }
 })
 

@@ -873,6 +873,9 @@ def validate_postgres_dump(source: Path) -> None:
             "--rm",
             "--network",
             "none",
+            "--cpus", "1",
+            "--memory", "512m",
+            "--pids-limit", "128",
             "--mount",
             f"type=bind,src={source.resolve()},dst=/backup,readonly",
             "postgres:16-alpine",
@@ -885,9 +888,24 @@ def validate_postgres_dump(source: Path) -> None:
 
 
 def compose(project: str, *arguments: str, environment: Mapping[str, str] | None = None) -> str:
+    child_environment = {**os.environ, **(environment or {})}
+    private_env = child_environment.get('TRACKVANCE_COMPOSE_ENV_FILE')
+    private_overlay = child_environment.get('TRACKVANCE_COMPOSE_OVERRIDE_FILE')
+    command = ["docker", "compose"]
+    if private_env or private_overlay:
+        if (not private_env or not private_overlay or
+                child_environment.get('TRACKVANCE_CERTIFICATION_PROJECT') != project or
+                not re.fullmatch(r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}', project)):
+            raise OperationError('El perfil Compose privado no coincide con el proyecto desechable.')
+        if not Path(private_env).is_file() or not Path(private_overlay).is_file():
+            raise OperationError('El perfil Compose privado no existe.')
+        command.extend(['--env-file', private_env])
+    command.extend(['-p', project, '-f', str(ROOT / 'compose.yml')])
+    if private_overlay:
+        command.extend(['-f', private_overlay])
     return str(
         execute(
-            ["docker", "compose", "-p", project, "-f", str(ROOT / "compose.yml"), *arguments],
+            [*command, *arguments],
             timeout=1800,
             environment=environment,
         )

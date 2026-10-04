@@ -11,6 +11,21 @@ const received = { upload: { id: 'received-file', filename: 'orders.csv', size_b
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(uploadBinary).mockResolvedValue(received) })
 
 describe('Durable asynchronous acquisition', () => {
+  it.each([
+    ['CSV', 'CSV', 'orders.csv'],
+    ['XLSX', 'Excel XLSX', 'orders.xlsx'],
+    ['JSON', 'JSON tabular', 'orders.json'],
+    ['PARQUET', 'Apache Parquet', 'orders.parquet'],
+    ['TXT', 'TXT delimitado', 'orders.txt'],
+  ])('shows the detected %s label beside its inspected sample', async (format, formatLabel, filename) => {
+    vi.mocked(uploadBinary).mockResolvedValue({ ...received, inspection: { ...received.inspection, format, format_label: formatLabel } })
+    const user = userEvent.setup()
+    renderApp(<AcquisitionDialog open onClose={vi.fn()} datasetId="orders" datasetName="Pedidos"/>)
+    await user.upload(screen.getByLabelText('Archivo'), new File(['fixture'], filename))
+    expect(await screen.findByText(`${formatLabel} · muestra de 2 registros`)).toBeInTheDocument()
+    expect(api).not.toHaveBeenCalled()
+  })
+
   it('receives untouched raw bytes before registering a confirmed request with a retry key', async () => {
     vi.mocked(api).mockResolvedValue(queued)
     const close = vi.fn(), user = userEvent.setup()

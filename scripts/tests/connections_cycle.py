@@ -24,7 +24,12 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from browser_evidence import run_browser
-from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
+from isolation_profile import (
+    assert_main_unchanged,
+    isolate_compose,
+    main_inventory,
+    runtime_diagnostics,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-connections-e2e-"
@@ -601,6 +606,13 @@ def main() -> int:
         return 1
     finally:
         if started:
+            try:
+                diagnostics = runtime_diagnostics(project, inventory_reader)
+                (evidence / "runtime-diagnostics.json").write_text(
+                    json.dumps(diagnostics, indent=2), encoding="utf-8"
+                )
+            except (OSError, RuntimeError, ValueError):
+                pass
             run(["down", "-v", "--remove-orphans"])
         assert_main_unchanged(main_before, inventory_reader)
 

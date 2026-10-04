@@ -525,7 +525,7 @@ def test_delivery_operational_target_is_separate_from_post_restore_credential_te
 
 def setup_main(monkeypatch, tmp_path):
     evidence = tmp_path / "evidence"
-    source, target, database = (f"trackvance-recovery-{part}-unit" for part in ("src", "dst", "db"))
+    source, target, database = (f"trackvance-v070-test-recovery-{part}-0123456789ab" for part in ("src", "dst", "db"))
     monkeypatch.setattr(runner.sys, "argv", [str(SCRIPT), "--source-project", source,
         "--target-project", target, "--database-project", database,
         "--source-port", "3101", "--target-port", "3102", "--skip-build",
@@ -539,7 +539,7 @@ def test_existing_project_is_never_cleaned_when_guard_fails(monkeypatch, tmp_pat
     cleaned, executed = [], []
 
     def existing(project):
-        if project == f"trackvance-recovery-{existing_role}-unit":
+        if project == f"trackvance-v070-test-recovery-{existing_role}-0123456789ab":
             raise RuntimeError("Existing project")
 
     monkeypatch.setattr(runner, "assert_fresh", existing)
@@ -601,11 +601,13 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     if keep:
         runner.sys.argv.append("--keep")
     calls = []
+    monkeypatch.setenv('TRACKVANCE_SSO_GOOGLE_ENABLED', 'true')
+    monkeypatch.setenv('TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET', 'unrelated-live-secret')
     monkeypatch.setattr(runner, "assert_fresh", lambda project: calls.append(("fresh", project)))
     monkeypatch.setattr(runner, "cleanup", lambda project, path: calls.append(("cleanup", project)))
     monkeypatch.setattr(runner, "initialize_source", lambda *args: None)
     monkeypatch.setattr(runner, "attach_external_network", lambda *args: None)
-    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.6.1"}))
+    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.7.0"}))
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
     monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
     monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: args[-1])
@@ -615,26 +617,35 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner.docker_state, "digest", lambda path: "a" * 64)
 
     def execute(args, env, **kwargs):
+        if args[:2] == ['docker', 'compose'] and 'up' in args and source in args:
+            assert '--env-file' in args
+            assert env['POSTGRES_USER'] == env['POSTGRES_DB'] == 'tv_v070_test'
+            assert env['TRACKVANCE_SSO_GOOGLE_ENABLED'] == 'false'
+            assert 'TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET' not in env
+            profile = json.loads(Path(env['TRACKVANCE_COMPOSE_OVERRIDE_FILE']).read_text())['services']
+            assert len(profile) == 9
+            assert all(row.get('cpus') and row.get('mem_limit') and row.get('pids_limit') for row in profile.values())
+        if args[:2] == ['docker', 'compose'] and 'up' in args and target in args:
+            assert ('restore', target) in calls
         if args[-3:] == ["api", "python", "-"]:
             assert "seed_delivery_baseline" in kwargs["input_text"]
             return json.dumps({"status": "PASS"})
         if "backup" in args:
             (evidence / "backup").mkdir()
             (evidence / "backup" / "state.json").write_text(json.dumps({
-                "schema_version": 5,
+                "schema_version": 6, 'migration': runner.docker_state.CURRENT_MIGRATION,
                 "verified_secrets": 2, "verified_source_secrets": 1,
                 "verified_delivery_secrets": 1,
                 "verified_artifacts": 4, "validated_relationships": 8,
                 "tables": {name: {"one": "hash", **({"two": "hash"} if name == "monitor_schedule_versions" else {})}
-                           for name in ("exceptions", "exception_attachments", "monitor_schedules",
-                                        "monitor_schedule_versions", "monitor_occurrences", "metric_history",
-                                        "delivery_attempts", "delivery_reviews", "roles", "role_permissions",
-                                        "notification_deliveries", "delivery_target_policies",
-                                        "external_identities", "oidc_login_attempts")}}))
+                           for name in runner.docker_state.CURRENT_STATE_TABLES}}))
             calls.append(("backup", source))
         if "restore" in args:
             assert ("destroy", source) in calls
+            assert '--start' not in args and '--smoke' not in args
+            assert env['TRACKVANCE_CERTIFICATION_PROJECT'] == target
             calls.append(("restore", target))
+            return json.dumps({'status':'STOPPED_VERIFIED', 'verified_state_sha256':'a'*64})
         return ""
 
     monkeypatch.setattr(runner, "execute", execute)
@@ -655,6 +666,8 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     assert runner.main() == 0
     result = json.loads((evidence / "result.json").read_text())
     assert result["source_destroyed_before_restore"] is True
+    assert result['immutable_comparison_before_automatic_processes'] == 'PASS'
+    assert result['main_inventory'] == 'UNCHANGED'
     assert result["recovery"]["restored_credential_used"] is True
     assert result["ui_validation"] == {"html_http_status": 200, "playwright": "NOT_RUN_IN_THIS_DRILL"}
     assert calls.index(("backup", source)) < calls.index(("destroy", source)) < calls.index(("restore", target))
@@ -664,6 +677,43 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     else:
         assert result["retained_projects"] == []
         assert [project for event, project in calls if event == "cleanup"] == [target, source, database]
+
+
+@pytest.mark.parametrize('change', ['missing', 'unknown', 'replace', 'schema', 'migration'])
+def test_native_fingerprint_never_ignores_unknown_or_missing_tables(change):
+    state = {'schema_version':6, 'migration':runner.docker_state.CURRENT_MIGRATION,
+             'tables':{name:{} for name in runner.docker_state.CURRENT_STATE_TABLES}}
+    runner.assert_native_fingerprint(state)
+    if change in {'missing', 'replace'}:
+        state['tables'].pop('internal_notifications')
+    if change in {'unknown', 'replace'}:
+        state['tables']['unknown_application_table'] = {}
+    if change == 'schema':
+        state['schema_version'] = 5
+    if change == 'migration':
+        state['migration'] = runner.docker_state.IDENTITY_MIGRATION
+    with pytest.raises(RuntimeError, match='42 tablas'):
+        runner.assert_native_fingerprint(state)
+
+
+@pytest.mark.parametrize('terminal', ['SUCCESS', 'FAILED', 'CANCELLED', 'UNPUBLISHED'])
+def test_acquisition_poll_uses_exact_published_output_or_rejects_terminal_failure(monkeypatch, terminal):
+    monkeypatch.setattr(runner.time, 'sleep', lambda _: None)
+    replies = iter([{'status':'RUNNING'}, {'status':'SUCCESS' if terminal == 'UNPUBLISHED' else terminal,
+                    'output_version_id':None if terminal == 'UNPUBLISHED' else 'version-exact', 'dataset_id':'dataset'}])
+    calls = []
+    def request(method, path):
+        calls.append((method, path))
+        if path.startswith('/acquisitions/'):
+            return next(replies)
+        return {'versions':[{'id':'other'}, {'id':'version-exact'}]}
+    if terminal == 'SUCCESS':
+        assert runner.wait_acquisition(SimpleNamespace(json=request), {'id':'acquisition'}) == {'id':'version-exact'}
+        assert calls[-1] == ('GET', '/datasets/dataset')
+    else:
+        with pytest.raises(RuntimeError, match='no publicó'):
+            runner.wait_acquisition(SimpleNamespace(json=request), {'id':'acquisition'})
+        assert all(path.startswith('/acquisitions/') for _, path in calls)
 
 
 @pytest.mark.parametrize("leak", ["dump", "artifact", "metadata", None])

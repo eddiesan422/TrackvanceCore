@@ -31,18 +31,25 @@ from threading import Barrier
 from typing import Any, BinaryIO, ClassVar
 from uuid import uuid4
 
+from isolation_profile import (
+    assert_main_unchanged,
+    isolate_compose,
+    main_inventory,
+    runtime_diagnostics,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import docker_state
 
 PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-(?:src|dst)-[a-z0-9-]+|trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12})")
-DATABASE_PROJECT_PATTERN = re.compile(r"trackvance-recovery-db-[a-z0-9-]+")
+DATABASE_PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-db-[a-z0-9-]+|trackvance-v070-test-recovery-db-[a-f0-9]{12})")
 DATABASE_SERVICE = "recovery-postgres"
 
 
 def validated_project_name(value: str, *, database: bool = False) -> str:
     pattern = DATABASE_PROJECT_PATTERN if database else PROJECT_PATTERN
-    if not pattern.fullmatch(value):
+    if not pattern.fullmatch(value) or (not database and DATABASE_PROJECT_PATTERN.fullmatch(value)):
         raise ValueError("El proyecto debe tener el prefijo trackvance-recovery y ser aislado.")
     docker_state.validate_project(value)
     return value
@@ -63,6 +70,12 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
     text = contents.decode("utf-8", errors="replace") if isinstance(contents, bytes) else contents
     ensure(not any(value and value in text for value in credentials),
            "Se detectó una credencial en la salida; el contenido fue suprimido.")
+
+
+def assert_native_fingerprint(state: dict[str, Any]) -> None:
+    ensure(state.get('schema_version') == 6 and set(state.get('tables', {})) == docker_state.CURRENT_STATE_TABLES
+           and state.get('migration') == docker_state.CURRENT_MIGRATION,
+           'La captura no contiene las 42 tablas y la revisión nativa 0.7.0.')
 
 
 def assert_stream_no_secrets(stream: BinaryIO, credentials: tuple[str, ...]) -> None:
@@ -116,7 +129,7 @@ def scan_backup_plaintext(backup: Path, application: list[str], environment: dic
 class RecoveryCommandError(RuntimeError):
     """Retain only an exit code and an allowlisted diagnostic, never child output."""
 
-    categories: ClassVar[frozenset[str]] = frozenset({"CONNECTION", "SQL", "UNKNOWN"})
+    categories: ClassVar[frozenset[str]] = frozenset({"CONNECTION", "SQL", "UNHEALTHY", "BUILD", "UNKNOWN"})
 
     def __init__(self, exit_code: int, category: str) -> None:
         if type(exit_code) is not int or category not in self.categories:
@@ -128,6 +141,11 @@ class RecoveryCommandError(RuntimeError):
 
 def command_failure_category(arguments: list[str], stderr: str) -> str:
     """Classify psql output in memory; return no text originating from the child."""
+    if arguments[:2] == ['docker', 'compose']:
+        if 'unhealthy' in stderr.lower():
+            return 'UNHEALTHY'
+        if 'failed to solve' in stderr.lower():
+            return 'BUILD'
     if "psql" not in arguments:
         return "UNKNOWN"
     if re.search(
@@ -236,6 +254,7 @@ def fixture_compose() -> dict[str, Any]:
     return {
         "services": {DATABASE_SERVICE: {
             "image": "postgres:16-alpine", "restart": "no",
+            "cpus": 0.5, "mem_limit": "512m", "pids_limit": 128,
             "environment": {
                 "POSTGRES_USER": "recovery_admin", "POSTGRES_DB": "recovery_source",
                 "POSTGRES_PASSWORD": "${RECOVERY_SOURCE_PASSWORD:?Required disposable credential}",
@@ -299,9 +318,9 @@ TO tv_recovery_writer;
 def attach_external_network(project: str, database: str, environment: dict[str, str]) -> None:
     application, fixture = docker_state.inventory(project), docker_state.inventory(database)
     clients = [item for item in application["containers"]
-               if item["service"] in {"api", "delivery-worker"}]
-    ensure(len(clients) == 2 and all(item["running"] for item in clients),
-           "API o delivery-worker aislado no disponible.")
+               if item["service"] in {"api", "delivery-worker", "acquisition-worker"}]
+    ensure(len(clients) == 3 and all(item["running"] for item in clients),
+           "API o workers SQL aislados no disponibles.")
     ensure(len(fixture["networks"]) == 1, "La fuente externa necesita una única red aislada.")
     ensure(len(fixture["containers"]) == 1 and fixture["containers"][0]["running"],
            "La fuente PostgreSQL externa no está disponible.")
@@ -326,6 +345,19 @@ def wait_existing_run(api: RecoveryApi, run_id: str) -> dict[str, Any]:
             return run
         time.sleep(0.5)
     raise RuntimeError("La ejecución aislada no terminó a tiempo.")
+
+
+def wait_acquisition(api: RecoveryApi, acquisition: dict[str, Any]) -> dict[str, Any]:
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        run = api.json('GET', f"/acquisitions/{acquisition['id']}")
+        if run['status'] in {'SUCCESS', 'FAILED', 'CANCELLED'}:
+            ensure(run['status'] == 'SUCCESS' and bool(run['output_version_id']),
+                   'La adquisición SQL aislada no publicó una versión completa.')
+            dataset = api.json('GET', f"/datasets/{run['dataset_id']}")
+            return next(version for version in dataset['versions'] if version['id'] == run['output_version_id'])
+        time.sleep(0.5)
+    raise RuntimeError('La adquisición SQL aislada no terminó a tiempo.')
 
 
 class DeliveryEvidenceError(RuntimeError):
@@ -509,11 +541,11 @@ def capture_original(api: RecoveryApi, password: str,
                        "?schema_name=recovery_data&object_name=transactions&limit=2")
     ensure(preview["sampled_rows"] == 2 and len(preview["columns"]) == 6,
            "La vista previa PostgreSQL no coincide con la fixture.")
-    registered = api.json("POST", f"/connections/{connection_id}/datasets", {
+    registered = api.json("POST", f"/connections/{connection_id}/acquisitions", {
         "name": "Recuperación - fuente PostgreSQL", "domain": "Pruebas aisladas",
         "schema_name": "recovery_data", "object_name": "transactions",
-    }, expected=201)
-    dataset_id, version = registered["dataset"]["id"], registered["version"]
+    }, expected=202)
+    dataset_id, version = registered["dataset"]["id"], wait_acquisition(api, registered['acquisition'])
     ensure(version["source_type"] == "POSTGRESQL" and version["row_count"] == 4,
            "El snapshot de origen no corresponde a los datos externos.")
     source = version["ingestion_metadata"]["source"]
@@ -964,7 +996,8 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
              "-d", "recovery_source", "-v", "ON_ERROR_STOP=1"], environment,
             input_text="UPDATE recovery_data.transactions SET amount=2.00 WHERE record_id='002';",
             credentials=credentials)
-    refreshed = api.json("POST", f"/datasets/{dataset_id}/refresh-source", {}, expected=201)
+    queued_refresh = api.json("POST", f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202)
+    refreshed = wait_acquisition(api, queued_refresh)
     ensure(refreshed["id"] != restored_version["id"] and refreshed["version"] == 2
            and refreshed["ingestion_metadata"]["source"]["connection_version_id"]
            == original["connection_version_id"], "El refresh no generó un nuevo snapshot trazable.")
@@ -1017,10 +1050,10 @@ def main() -> int:
 
         return native_cycle(options.v070_context, options.evidence_dir)
     parser = argparse.ArgumentParser(description=__doc__)
-    suffix = f"{os.getpid()}-{uuid4().hex[:6]}"
-    parser.add_argument("--source-project", default=f"trackvance-recovery-src-{suffix}")
-    parser.add_argument("--target-project", default=f"trackvance-recovery-dst-{suffix}")
-    parser.add_argument("--database-project", default=f"trackvance-recovery-db-{suffix}")
+    suffix = uuid4().hex[:12]
+    parser.add_argument("--source-project", default=f"trackvance-v070-test-recovery-src-{suffix}")
+    parser.add_argument("--target-project", default=f"trackvance-v070-test-recovery-dst-{suffix}")
+    parser.add_argument("--database-project", default=f"trackvance-v070-test-recovery-db-{suffix}")
     parser.add_argument("--source-port", type=int, default=0)
     parser.add_argument("--target-port", type=int, default=0)
     parser.add_argument("--skip-build", action="store_true")
@@ -1037,7 +1070,8 @@ def main() -> int:
     if source == target:
         parser.error("Los proyectos fuente y destino deben ser diferentes.")
     source_port, target_port = options.source_port or available_port(), options.target_port or available_port()
-    if source_port == target_port or not all(1 <= value <= 65535 for value in (source_port, target_port)):
+    if (source_port == target_port or 3100 in {source_port, target_port} or
+            not all(1 <= value <= 65535 for value in (source_port, target_port))):
         parser.error("Los puertos deben ser distintos y válidos.")
     evidence = (options.evidence_dir or ROOT / ".codex-local" / "recovery"
                 / f"{source}-to-{target}").resolve()
@@ -1049,6 +1083,8 @@ def main() -> int:
     credentials = (internal_password, external_password, reader_password, delivery_password)
     environment = {
         **os.environ, "POSTGRES_PASSWORD": internal_password,
+        "POSTGRES_USER": "tv_v070_test", "POSTGRES_DB": "tv_v070_test",
+        'TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES': 'true' if options.skip_build else 'false',
         "RECOVERY_SOURCE_PASSWORD": external_password,
         "DEMO_ACCESS_ENABLED": "true", "DEMO_SEED_ENABLED": "false",
         "WEB_PORT": str(source_port), "TRACKVANCE_WEB_ORIGIN": f"http://localhost:{source_port}",
@@ -1056,6 +1092,7 @@ def main() -> int:
     # A failed freshness guard must never schedule cleanup of existing resources.
     # Claim only proven-empty projects immediately before attempting their creation.
     claimed: list[str] = []
+    main_before = None
     result: dict[str, Any] = {
         "status": "FAIL", "schema_version": 4, "source_project": source,
         "target_project": target, "external_database_project": database,
@@ -1067,9 +1104,24 @@ def main() -> int:
     try:
         for project in (source, target, database):
             assert_fresh(project)
+        main_before = main_inventory(lambda arguments: execute(arguments, environment, credentials=credentials))
+        compose = isolate_compose(['docker', 'compose', '-p', source, '-f', str(ROOT / 'compose.yml')],
+                                  environment, evidence / 'source-profile', source)
+        environment.update(TRACKVANCE_COMPOSE_ENV_FILE=compose[compose.index('--env-file') + 1],
+                           TRACKVANCE_COMPOSE_OVERRIDE_FILE=compose[-1],
+                           TRACKVANCE_CERTIFICATION_PROJECT=source)
+        target_environment = {**environment, 'WEB_PORT': str(target_port),
+                              'TRACKVANCE_WEB_ORIGIN': f'http://localhost:{target_port}',
+                              'TRACKVANCE_PUBLIC_URL': f'http://localhost:{target_port}'}
+        target_compose = isolate_compose(['docker', 'compose', '-p', target, '-f', str(ROOT / 'compose.yml')],
+                                        target_environment, evidence / 'target-profile', target)
+        target_environment.update(TRACKVANCE_COMPOSE_ENV_FILE=target_compose[target_compose.index('--env-file') + 1],
+                                  TRACKVANCE_COMPOSE_OVERRIDE_FILE=target_compose[-1],
+                                  TRACKVANCE_CERTIFICATION_PROJECT=target)
         fixture_file = evidence / "external-postgres.compose.json"
         fixture_file.write_text(json.dumps(fixture_compose(), indent=2), encoding="utf-8")
-        fixture = ["docker", "compose", "-p", database, "-f", str(fixture_file)]
+        fixture = ["docker", "compose", '--env-file', environment['TRACKVANCE_COMPOSE_ENV_FILE'],
+                   "-p", database, "-f", str(fixture_file)]
         stage = "external_postgresql"
         claimed.append(database)
         execute([*fixture, "up", "-d", "--wait"], environment, credentials=credentials)
@@ -1077,8 +1129,7 @@ def main() -> int:
             fixture, environment, credentials, reader_password, delivery_password)
         stage = "source_trackvance"
         claimed.append(source)
-        compose = ["docker", "compose", "-p", source, "-f", str(ROOT / "compose.yml")]
-        up = [*compose, "up", "-d", "--wait"]
+        up = [*compose, "up", "-d", "--wait", '--wait-timeout', '300']
         if not options.skip_build:
             up.append("--build")
         execute(up, environment, credentials=credentials)
@@ -1094,6 +1145,7 @@ def main() -> int:
         attach_external_network(source, database, environment)
         source_api = RecoveryApi(source_port, credentials)
         result["version"] = source_api.json("GET", "/health")["version"]
+        ensure(result['version'] == '0.7.0', 'La fuente no ejecuta la versión objetivo.')
         original = capture_original(source_api, reader_password, delivery_password)
         stage = "delivery_operational_fixtures"
         prepare_delivery_operations(source_api, original, compose, fixture, environment, credentials)
@@ -1104,6 +1156,7 @@ def main() -> int:
                  "--project", source, "--destination", str(backup)], environment,
                 credentials=credentials)
         state = json.loads((backup / "state.json").read_text(encoding="utf-8"))
+        assert_native_fingerprint(state)
         result["plaintext_backup_scan"] = scan_backup_plaintext(backup, compose, environment, credentials)
         result["state_schema_version"] = state["schema_version"]
         ensure(state.get("verified_secrets") == 2
@@ -1115,6 +1168,7 @@ def main() -> int:
             "monitor_occurrences", "metric_history", "delivery_attempts", "delivery_reviews",
             "roles", "role_permissions", "notification_deliveries", "delivery_target_policies",
             "external_identities", "oidc_login_attempts",
+            'acquisition_runs', 'outbox_events', 'event_consumptions', 'internal_notifications',
         )}
         ensure(all(counts.values()) and counts["monitor_schedule_versions"] == 2,
                "El respaldo no contiene todos los registros operativos del ciclo.")
@@ -1136,18 +1190,25 @@ def main() -> int:
         stage = "restore"
         assert_fresh(target)
         claimed.append(target)
-        execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "restore",
-                 "--source", str(backup), "--target-project", target, "--start", "--smoke",
-                 "--web-port", str(target_port)], environment, credentials=credentials)
-        attach_external_network(target, database, environment)
+        receipt = json.loads(execute([sys.executable, str(ROOT / "scripts" / "docker_state.py"), "restore",
+                 "--source", str(backup), "--target-project", target,
+                 "--web-port", str(target_port)], target_environment, credentials=credentials))
+        ensure(receipt['status'] == 'STOPPED_VERIFIED' and
+               receipt['verified_state_sha256'] == docker_state.digest(backup / 'state.json'),
+               'La restauración no preservó la huella completa antes de activar procesos.')
+        result['immutable_comparison_before_automatic_processes'] = 'PASS'
+        # Every destination here is the separately created, guarded PostgreSQL fixture.
+        # The schedule was explicitly paused; all historical runs already completed.
+        execute([*target_compose, 'up', '-d', '--wait', '--wait-timeout', '300'],
+                target_environment, credentials=credentials)
+        attach_external_network(target, database, target_environment)
         stage = "functional_recovery"
         result["recovery"] = validate_restored(
-            RecoveryApi(target_port, credentials), original, fixture, environment, credentials)
+            RecoveryApi(target_port, credentials), original, fixture, target_environment, credentials)
         stage = "doctor_and_logs"
         execute([sys.executable, str(ROOT / "scripts" / "doctor.py"), "--base-url",
                  f"http://127.0.0.1:{target_port}", "--docker", "--project", target,
-                 "--recovery-ready", "--json"], environment, credentials=credentials)
-        target_compose = ["docker", "compose", "-p", target, "-f", str(ROOT / "compose.yml")]
+                 "--recovery-ready", "--json"], target_environment, credentials=credentials)
         for command in (target_compose, fixture):
             execute([*command, "logs", "--no-color"], environment, credentials=credentials)
         with urllib.request.urlopen(f"http://127.0.0.1:{target_port}/", timeout=15) as response:
@@ -1164,6 +1225,14 @@ def main() -> int:
             result["error_code"] = error.code
         if isinstance(error, RecoveryCommandError):
             result.update({"exit_code": error.exit_code, "error_category": error.category})
+            for project in claimed:
+                if project == database:
+                    continue
+                try:
+                    result.setdefault('runtime_diagnostics', {})[project] = runtime_diagnostics(
+                        project, lambda arguments: execute(arguments, environment, credentials=credentials))
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                    result['runtime_diagnostics_status'] = 'UNAVAILABLE'
         print(f"ERROR: recuperación en {stage} ({type(error).__name__}); detalle suprimido.",
               file=sys.stderr)
     finally:
@@ -1179,6 +1248,12 @@ def main() -> int:
             item["project"] for item in result.get("cleanup_failures", [])]
         if options.keep and result["source_destroyed_before_restore"]:
             result["retained_projects"] = [item for item in claimed if item != source]
+        if main_before is not None:
+            try:
+                assert_main_unchanged(main_before, lambda arguments: execute(arguments, environment, credentials=credentials))
+                result['main_inventory'] = 'UNCHANGED'
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                result.update(status='FAIL', main_inventory='CHANGED_OR_UNVERIFIABLE')
         serialized = json.dumps(result, indent=2, sort_keys=True)
         assert_no_secrets(serialized, credentials)
         (evidence / "result.json").write_text(serialized, encoding="utf-8")

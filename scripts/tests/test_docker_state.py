@@ -44,6 +44,36 @@ def test_project_guard_rejects_non_trackvance_compose_names(project):
         docker_state.validate_project(project)
 
 
+def test_private_compose_scope_is_explicit_and_cannot_target_main(monkeypatch, tmp_path):
+    project = 'trackvance-v070-test-recovery-dst-0123456789ab'
+    private_env = tmp_path / 'private.empty.env'
+    private_env.write_text('')
+    overlay = tmp_path / 'private-compose.json'
+    overlay.write_text('{}')
+    environment = {'TRACKVANCE_COMPOSE_ENV_FILE':str(private_env),
+                   'TRACKVANCE_COMPOSE_OVERRIDE_FILE':str(overlay),
+                   'TRACKVANCE_CERTIFICATION_PROJECT':project}
+    observed = []
+    monkeypatch.setattr(docker_state, 'execute', lambda arguments, **kwargs: observed.append(arguments) or '')
+    docker_state.compose(project, 'config', '--services', environment=environment)
+    assert observed[0][:4] == ['docker', 'compose', '--env-file', str(private_env)]
+    assert observed[0][-4:] == ['-f', str(overlay), 'config', '--services']
+    with pytest.raises(docker_state.OperationError, match='proyecto desechable'):
+        docker_state.compose('trackvance-certification', 'up', environment=environment)
+    assert len(observed) == 1
+
+
+def test_postgres_dump_list_helper_has_resource_limits(monkeypatch, tmp_path):
+    observed = []
+    monkeypatch.setattr(docker_state, 'execute', lambda arguments, **kwargs: observed.append(arguments))
+    docker_state.validate_postgres_dump(tmp_path)
+    arguments = observed[0]
+    assert arguments[arguments.index('--cpus') + 1] == '1'
+    assert arguments[arguments.index('--memory') + 1] == '512m'
+    assert arguments[arguments.index('--pids-limit') + 1] == '128'
+    assert 'none' in arguments and arguments[-2:] == ['--list', '/backup/postgres.dump']
+
+
 def test_backup_inventory_rejects_unknown_volume():
     state = sample_inventory()
     state["volumes"].append({"name": "foreign", "logical_name": "foreign_data"})

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
@@ -192,7 +192,7 @@ describe('Dataset list sorting', () => {
     { id: 'gamma', name: 'Gamma', domain: 'Operaciones', row_count: 10, version_count: 1, status: 'ACTIVE', updated_at: '2026-09-13T10:00:00Z' },
   ]
 
-  const renderedOrder = () => screen.getAllByRole('row').slice(1).map(row => row.querySelector('.table-primary')?.textContent)
+  const renderedOrder = () => within(screen.getByRole('columnheader', { name: /Registros/ }).closest('table')!).getAllByRole('row').slice(1).map(row => row.querySelector('.table-primary')?.textContent)
 
   it.each([
     ['Área', ['Beta', 'Gamma', 'Alpha'], ['Alpha', 'Gamma', 'Beta']],
@@ -201,10 +201,14 @@ describe('Dataset list sorting', () => {
     ['Estado', ['Beta', 'Gamma', 'Alpha'], ['Alpha', 'Beta', 'Gamma']],
     ['Última actualización', ['Alpha', 'Gamma', 'Beta'], ['Beta', 'Gamma', 'Alpha']],
   ])('orders %s in both directions', async (column, ascending, descending) => {
-    vi.mocked(api).mockResolvedValue({ items: datasets, total: datasets.length })
+    vi.mocked(api).mockImplementation(async path => path.startsWith('/acquisitions') ? {
+      items: [{ id: 'historical-acquisition', dataset_id: 'alpha', filename: 'unrelated.csv', status: 'SUCCESS', stage: 'COMPLETED', processed_rows: 99, processed_bytes: 1600, initiated_by: 'Operador 100', created_at: '2026-10-03T12:00:00Z', output_version_id: 'published-version' }], total: 1,
+    } : { items: datasets, total: datasets.length })
     const user = userEvent.setup()
-    renderApp(<DatasetsPage/>)
+    renderApp(<DatasetsPage/>, { permissions: ['datasets:read', 'datasets:write'] })
     await screen.findByText('Alpha')
+    await screen.findByText('unrelated.csv')
+    expect(screen.getAllByRole('table')).toHaveLength(2)
 
     const ascendingButton = screen.getByRole('button', { name: `Ordenar ${column} ascendente` })
     await user.click(ascendingButton)
