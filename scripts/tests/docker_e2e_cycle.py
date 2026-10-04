@@ -25,6 +25,9 @@ from browser_evidence import run_browser
 from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+import docker_state
+
 PROJECT_PREFIX = "trackvance-v070-test-e2e-"
 
 
@@ -65,7 +68,7 @@ def storage_snapshot(compose: list[str], environment: dict[str, str]) -> str:
     """The API may be recreated on readiness; submit the verifier each time."""
     return execute([*compose, "exec", "-T", "api", "python", "-", "snapshot"],
                    environment=environment, capture=True,
-                   input_text=(ROOT / "scripts/verify_storage.py").read_text(encoding="utf-8"))
+                   input_text=docker_state.snapshot_stdin_source())
 
 
 def validated_project_name(value: str) -> str:

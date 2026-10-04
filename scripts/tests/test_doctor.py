@@ -34,7 +34,10 @@ def recovery_inventory(monkeypatch):
             {"logical_name": "delivery_keys", "name": "delivery-key-volume"},
         ],
     }
-    fake_module = SimpleNamespace(inventory=lambda _project: state)
+    snapshot_spec = importlib.util.spec_from_file_location("doctor_snapshot_tools", SCRIPT.with_name("docker_state.py"))
+    snapshot_tools = importlib.util.module_from_spec(snapshot_spec)
+    snapshot_spec.loader.exec_module(snapshot_tools)
+    fake_module = SimpleNamespace(inventory=lambda _project: state, snapshot_bootstrap=snapshot_tools.snapshot_bootstrap)
     monkeypatch.setitem(sys.modules, "docker_state", fake_module)
     monkeypatch.setattr(doctor, "command_check", lambda *_args, **_kwargs: (True, "OK"))
     return state

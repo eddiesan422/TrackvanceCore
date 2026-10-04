@@ -146,12 +146,13 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
     checks = {
         "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok and acquisition_worker_ok and metadata_ok
     }
-    verify = ROOT / "scripts" / "verify_storage.py"
-    copied = command_check(
-        ["docker", "cp", str(verify), f"{api['id']}:/tmp/verify_storage.py"], timeout=30
-    )[0]
+    copied = True
+    for filename in ("verify_storage.py", "physical_schema_guard.py"):
+        copied = command_check(
+            ["docker", "cp", str(ROOT / "scripts" / filename), f"{api['id']}:/tmp/{filename}"], timeout=30
+        )[0] and copied
     snapshot_ok = copied and command_check(
-        ["docker", "exec", api["id"], "python", "/tmp/verify_storage.py", "snapshot"],
+        ["docker", "exec", api["id"], "python", "-c", docker_state.snapshot_bootstrap(), "snapshot"],
         timeout=300,
     )[0]
     checks["Huella/linaje/SecretStore"] = snapshot_ok

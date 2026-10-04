@@ -32,6 +32,8 @@ from isolation_profile import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+import docker_state
 
 
 def available_port() -> int:
@@ -50,7 +52,7 @@ def storage_snapshot(run, compose: list[str]) -> dict:
     """Submit the verifier anew; a recreated API has no prior /tmp helper file."""
     return json.loads(run(
         [*compose, "exec", "-T", "api", "python", "-", "snapshot"], capture=True,
-        input_text=(ROOT / "scripts/verify_storage.py").read_text(encoding="utf-8"),
+        input_text=docker_state.snapshot_stdin_source(),
         stage="storage_snapshot",
     ))
 

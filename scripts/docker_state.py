@@ -26,6 +26,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = ROOT / "scripts" / "verify_storage.py"
+PHYSICAL_SCHEMA_GUARD = ROOT / "scripts" / "physical_schema_guard.py"
 BACKUP_SCHEMA_VERSION = 2
 LEGACY_BACKUP_SCHEMA_VERSION = 1
 SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
@@ -475,14 +476,50 @@ def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None
                 execute(["docker", "start", str(container["id"])], timeout=180)
 
 
+def snapshot_bootstrap() -> str:
+    """Verify both copied tools before invoking the requested snapshot command."""
+    checks = {f"/tmp/{script.name}": digest(script) for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD)}
+    return (
+        "import hashlib,pathlib,runpy,sys\n"
+        f"expected={checks!r}\n"
+        "valid=all(hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()==value "
+        "for path,value in expected.items())\n"
+        "if not valid:\n    raise SystemExit('Las herramientas de huella copiadas no coinciden')\n"
+        "sys.argv=['/tmp/verify_storage.py',sys.argv[1]]\n"
+        "runpy.run_path('/tmp/verify_storage.py',run_name='__main__')"
+    )
+
+
+def snapshot_stdin_source() -> str:
+    """Carry the complete verifier into even a freshly recreated API process."""
+    sources = {script.name: base64.b64encode(script.read_bytes()).decode("ascii")
+               for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD)}
+    checks = {name: hashlib.sha256(base64.b64decode(content)).hexdigest() for name, content in sources.items()}
+    return (
+        "import base64,hashlib,pathlib,runpy,sys,tempfile\n"
+        f"sources={sources!r}\nchecks={checks!r}\n"
+        "with tempfile.TemporaryDirectory(prefix='trackvance-state-') as directory:\n"
+        "    root=pathlib.Path(directory)\n"
+        "    for name, encoded in sources.items():\n"
+        "        contents=base64.b64decode(encoded,validate=True)\n"
+        "        if hashlib.sha256(contents).hexdigest()!=checks[name]:\n"
+        "            raise SystemExit('Las herramientas de huella no coinciden')\n"
+        "        (root/name).write_bytes(contents)\n"
+        "    sys.argv=[str(root/'verify_storage.py'),sys.argv[1]]\n"
+        "    runpy.run_path(str(root/'verify_storage.py'),run_name='__main__')\n"
+    )
+
+
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
     if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5"}:
         raise OperationError("Comando de huella persistente no reconocido.")
-    execute(["docker", "cp", str(VERIFY_SCRIPT), f"{api_id}:/tmp/verify_storage.py"])
+    bootstrap = snapshot_bootstrap()
+    for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
+        execute(["docker", "cp", str(script), f"{api_id}:/tmp/{script.name}"])
     output = execute(
-        ["docker", "exec", api_id, "python", "/tmp/verify_storage.py", command],
+        ["docker", "exec", api_id, "python", "-c", bootstrap, command],
         timeout=600,
     )
     try:

@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import io
 import json
@@ -376,7 +377,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -389,7 +390,82 @@ def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path,
     destination = tmp_path / "state.json"
     assert docker_state._copy_snapshot("fixture-api", destination, command=command) == expected
     assert json.loads(destination.read_text()) == expected
-    assert calls[-1] == ["docker", "exec", "fixture-api", "python", "/tmp/verify_storage.py", command]
+    assert calls[:2] == [
+        ["docker", "cp", str(docker_state.VERIFY_SCRIPT), "fixture-api:/tmp/verify_storage.py"],
+        ["docker", "cp", str(docker_state.PHYSICAL_SCHEMA_GUARD), "fixture-api:/tmp/physical_schema_guard.py"],
+    ]
+    assert calls[-1][:5] == ["docker", "exec", "fixture-api", "python", "-c"]
+    assert calls[-1][-1] == command
+    bootstrap = calls[-1][-2]
+    assert docker_state.digest(docker_state.VERIFY_SCRIPT) in bootstrap
+    assert docker_state.digest(docker_state.PHYSICAL_SCHEMA_GUARD) in bootstrap
+
+
+@pytest.mark.parametrize("tampered", [None, "verify_storage.py", "physical_schema_guard.py"])
+def test_snapshot_checks_real_copied_bytes_before_running_verifier(monkeypatch, tmp_path, tampered):
+    source, remote = tmp_path / "source", tmp_path / "remote"
+    source.mkdir()
+    remote.mkdir()
+    marker = tmp_path / "verifier-ran"
+    verifier = source / "verify_storage.py"
+    verifier.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
+        "print('{\"schema_version\": 6, \"tables\": {}}')\n", encoding="utf-8")
+    helper = source / "physical_schema_guard.py"
+    helper.write_text("# exact helper bytes\n", encoding="utf-8")
+    monkeypatch.setattr(docker_state, "VERIFY_SCRIPT", verifier)
+    monkeypatch.setattr(docker_state, "PHYSICAL_SCHEMA_GUARD", helper)
+
+    def execute(arguments, **_kwargs):
+        if arguments[:2] == ["docker", "cp"]:
+            copied = Path(arguments[2])
+            content = copied.read_bytes() if copied.name != tampered else b"# changed after transport\n"
+            (remote / copied.name).write_bytes(content)
+            return ""
+        bootstrap = arguments[-2]
+        for script in (verifier, helper):
+            bootstrap = bootstrap.replace(repr(f"/tmp/{script.name}"), repr(str(remote / script.name)))
+        completed = subprocess.run([sys.executable, "-c", bootstrap, arguments[-1]],
+                                   capture_output=True, text=True, check=False)
+        if completed.returncode:
+            raise docker_state.OperationError("La verificación del transporte rechazó bytes alterados.")
+        return completed.stdout
+
+    monkeypatch.setattr(docker_state, "execute", execute)
+    destination = tmp_path / "result.json"
+    if tampered:
+        with pytest.raises(docker_state.OperationError, match="bytes alterados"):
+            docker_state._copy_snapshot("fixture-api", destination)
+        assert not marker.exists() and not destination.exists()
+    else:
+        assert docker_state._copy_snapshot("fixture-api", destination)["schema_version"] == 6
+        assert marker.exists()
+
+
+@pytest.mark.parametrize("tampered", [False, True])
+def test_stdin_snapshot_carries_required_guard_into_fresh_processes(monkeypatch, tmp_path, tampered):
+    verifier = tmp_path / "verify_storage.py"
+    verifier.write_text(
+        "import json,runpy\nfrom pathlib import Path\n"
+        "from sqlalchemy import Column,Integer,MetaData,Table,create_engine\n"
+        "guard=runpy.run_path(str(Path(__file__).with_name('physical_schema_guard.py')))\n"
+        "metadata=MetaData()\nTable('known',metadata,Column('id',Integer,primary_key=True))\n"
+        "engine=create_engine('sqlite+pysqlite:///:memory:')\nmetadata.create_all(engine)\n"
+        "print(json.dumps(guard['validate_physical_schema'](engine,metadata)))\n", encoding="utf-8")
+    monkeypatch.setattr(docker_state, "VERIFY_SCRIPT", verifier)
+    bundled = docker_state.snapshot_stdin_source()
+    if tampered:
+        encoded = base64.b64encode(docker_state.PHYSICAL_SCHEMA_GUARD.read_bytes()).decode("ascii")
+        bundled = bundled.replace(encoded, base64.b64encode(b"changed helper").decode("ascii"))
+    for _ in range(2):
+        completed = subprocess.run([sys.executable, "-", "snapshot"], input=bundled,
+                                   capture_output=True, text=True, check=False)
+        if tampered:
+            assert completed.returncode != 0 and not completed.stdout
+            assert "herramientas de huella no coinciden" in completed.stderr
+        else:
+            assert completed.returncode == 0
+            assert json.loads(completed.stdout) == {"tables": 1, "columns": 1, "foreign_keys": 0}
 
 
 def test_verify_backup_accepts_exact_041_format_and_routes_only_legacy_volumes(

@@ -78,7 +78,7 @@ def test_storage_snapshot_does_not_depend_on_an_old_container_file(monkeypatch):
     def execute(arguments, **kwargs):
         assert arguments[-2:] == ["-", "snapshot"]
         assert kwargs["capture"]
-        assert "def snapshot(" in kwargs["input_text"]
+        assert "physical_schema_guard.py" in kwargs["input_text"] and "verify_storage.py" in kwargs["input_text"]
         compile(kwargs["input_text"], "<storage-verifier>", "exec")
         submissions.append(kwargs["input_text"])
         return '{"tables": {}}'

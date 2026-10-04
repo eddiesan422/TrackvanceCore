@@ -41,7 +41,7 @@ def test_storage_verifier_survives_an_api_container_recreation():
         if arguments[-2:] != ["-", "snapshot"]:
             assert arguments[-2] in filesystem, "An ephemeral helper path cannot survive recreation"
         assert capture and stage == "storage_snapshot"
-        assert input_text and "def snapshot(" in input_text
+        assert input_text and "physical_schema_guard.py" in input_text and "verify_storage.py" in input_text
         compile(input_text, "<storage-verifier>", "exec")
         submissions.append(input_text)
         return json.dumps(snapshots)

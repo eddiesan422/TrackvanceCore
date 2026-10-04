@@ -471,7 +471,9 @@ def _snapshot_inputs() -> tuple[
     int,
     int,
 ]:
-    from sqlalchemy import inspect, select, text
+    import runpy
+
+    from sqlalchemy import select, text
 
     from trackvance.artifactstore import artifact_store, storage_provider
     from trackvance.credential_store import secret_store
@@ -490,9 +492,10 @@ def _snapshot_inputs() -> tuple[
             raise ValueError("Finaliza las ejecuciones pendientes antes de tomar la huella.")
 
         migration = session.scalar(text("SELECT version_num FROM alembic_version"))
-        actual_tables = set(inspect(session.connection()).get_table_names()) - {"alembic_version"}
-        if actual_tables != set(Base.metadata.tables):
-            raise ValueError("El catálogo físico contiene tablas desconocidas o faltantes; no se puede omitir estado.")
+        # Load the required sibling by path so copied verifiers and historical
+        # runtimes never depend on an ambient PYTHONPATH or omit this contract.
+        guard = runpy.run_path(str(Path(__file__).with_name("physical_schema_guard.py")))
+        guard["validate_physical_schema"](session.connection(), Base.metadata)
         rows: dict[str, list[Mapping[str, Any]]] = {
             name: list(session.execute(select(table)).mappings())
             for name, table in sorted(Base.metadata.tables.items())
