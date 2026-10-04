@@ -5,6 +5,8 @@ import json
 import subprocess
 import tarfile
 import urllib.error
+import warnings
+import zipfile
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -351,6 +353,89 @@ def test_artifact_download_uses_manifest_artifact_identity_and_checks_hash():
     assert calls == [("GET", "/artifacts/canonical/download")]
     with pytest.raises(RuntimeError, match="hash"):
         runner.artifact_hash(SimpleNamespace(request=lambda *args: b"tampered"), version)
+
+
+def multipart_fixture(*, mutation=None):
+    part_contents = [b'PAR1-first-part-bytes', b'PAR1-second-part-bytes']
+    parts = [{'ordinal': ordinal, 'path': f'datasets/canonical/part-{ordinal:06d}.parquet', 'size_bytes': len(content),
+              'row_count': 2, 'sha256': hashlib.sha256(content).hexdigest()}
+             for ordinal, content in enumerate(part_contents)]
+    descriptor = {'schema_version': 1, 'kind': 'PARQUET_DATASET', 'schema': [],
+                  'parts': parts, 'row_count': 4, 'data_size_bytes': sum(map(len, part_contents))}
+    if mutation == 'row_total':
+        descriptor['row_count'] = 5
+    if mutation == 'byte_total':
+        descriptor['data_size_bytes'] += 1
+    if mutation == 'duplicate_reference':
+        descriptor['parts'][1]['path'] = descriptor['parts'][0]['path']
+    if mutation == 'unsafe_reference':
+        descriptor['parts'][0]['path'] = '../outside.parquet'
+    raw = json.dumps(descriptor, indent=2).encode()
+    artifact = {'artifact_id': 'canonical', 'sha256': hashlib.sha256(raw).hexdigest(), 'size_bytes': len(raw),
+                'media_type': 'application/vnd.trackvance.parquet-set+json', 'kind': 'CANONICAL_PARQUET'}
+    buffer = io.BytesIO()
+    with warnings.catch_warnings(), zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_STORED) as bundle:
+        warnings.filterwarnings('ignore', message='Duplicate name:')
+        bundle.writestr('descriptor.json', raw + (b'\n' if mutation == 'descriptor_bytes' else b''))
+        for ordinal, part in enumerate(parts):
+            if mutation in {'missing', 'duplicate_reference'} and ordinal == 1:
+                continue
+            content = part_contents[ordinal]
+            if mutation == 'part_hash' and ordinal == 1:
+                content = content[:-1] + b'X'
+            if mutation == 'part_size' and ordinal == 1:
+                content += b'X'
+            bundle.writestr(part['path'], content)
+        if mutation == 'extra':
+            bundle.writestr('unregistered-private-data.txt', b'Unexpected bytes')
+        if mutation == 'duplicate_entry':
+            bundle.writestr('descriptor.json', raw)
+    version = {'canonical_artifact_id': 'canonical', 'row_count': 4, 'artifacts': [artifact]}
+    return buffer.getvalue(), version
+
+
+def test_multipart_artifact_verifies_registered_descriptor_and_all_parts_in_download_zip(monkeypatch):
+    contents, version = multipart_fixture()
+    expected = version['artifacts'][0]['sha256']
+    assert hashlib.sha256(contents).hexdigest() != expected
+    read = zipfile.ZipExtFile.read
+    part_reads = []
+
+    def bounded_read(stream, size=-1):
+        if stream.name.endswith('.parquet'):
+            part_reads.append(size)
+            assert 0 < size <= 1024 * 1024
+        return read(stream, size)
+
+    monkeypatch.setattr(zipfile.ZipExtFile, 'read', bounded_read)
+    assert runner.artifact_hash(SimpleNamespace(request=lambda *args: contents), version) == expected
+    assert len(part_reads) >= 2
+
+
+@pytest.mark.parametrize('mutation, code', [
+    ('descriptor_bytes', 'CANONICAL_DESCRIPTOR_HASH_MISMATCH'),
+    ('part_hash', 'CANONICAL_PART_HASH_MISMATCH'),
+    ('part_size', 'CANONICAL_PART_SIZE_MISMATCH'),
+    ('row_total', 'CANONICAL_DESCRIPTOR_TOTALS_MISMATCH'),
+    ('byte_total', 'CANONICAL_DESCRIPTOR_TOTALS_MISMATCH'),
+    ('extra', 'CANONICAL_BUNDLE_INVENTORY_MISMATCH'),
+    ('missing', 'CANONICAL_BUNDLE_INVENTORY_MISMATCH'),
+    ('duplicate_entry', 'CANONICAL_BUNDLE_INVENTORY_MISMATCH'),
+    ('duplicate_reference', 'CANONICAL_DESCRIPTOR_INVALID'),
+    ('unsafe_reference', 'CANONICAL_DESCRIPTOR_INVALID'),
+])
+def test_multipart_artifact_rejects_tampering_and_inexact_inventory(mutation, code):
+    contents, version = multipart_fixture(mutation=mutation)
+    with pytest.raises(runner.RecoveryCheckError) as caught:
+        runner.artifact_hash(SimpleNamespace(request=lambda *args: contents), version)
+    assert caught.value.code == code
+
+
+def test_multipart_artifact_rejects_invalid_zip_without_publishing_bytes():
+    _, version = multipart_fixture()
+    with pytest.raises(runner.RecoveryCheckError) as caught:
+        runner.artifact_hash(SimpleNamespace(request=lambda *args: b'private-corrupt-bundle'), version)
+    assert caught.value.code == 'CANONICAL_BUNDLE_INVALID' and 'private-corrupt-bundle' not in str(caught.value)
 
 
 def test_attachment_upload_has_version_and_binary_body_in_multipart():

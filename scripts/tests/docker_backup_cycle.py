@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.cookiejar
+import io
 import json
 import os
 import re
@@ -25,8 +26,9 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Barrier
 from typing import Any, BinaryIO, ClassVar
 from uuid import uuid4
@@ -414,9 +416,67 @@ def wait_for_delivery_evidence(
 def artifact_hash(api: RecoveryApi, version: dict[str, Any]) -> str:
     artifact = next(item for item in version["artifacts"]
                     if item["artifact_id"] == version["canonical_artifact_id"])
-    actual = hashlib.sha256(api.request("GET", f"/artifacts/{artifact['artifact_id']}/download")).hexdigest()
-    ensure(actual == artifact["sha256"], "El hash del snapshot canónico no coincide.")
+    contents = api.request("GET", f"/artifacts/{artifact['artifact_id']}/download")
+    if artifact.get('media_type') == 'application/vnd.trackvance.parquet-set+json':
+        return multipart_download_hash(contents, artifact, version)
+    actual = hashlib.sha256(contents).hexdigest()
+    ensure(actual == artifact["sha256"], "El hash del snapshot canónico no coincide.", code='CANONICAL_ARTIFACT_HASH_MISMATCH')
     return actual
+
+
+def multipart_download_hash(contents: bytes, artifact: dict[str, Any], version: dict[str, Any]) -> str:
+    """Compare the registered descriptor and every part, not its transport ZIP."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(contents)) as bundle:
+            names = bundle.namelist()
+            ensure(len(names) == len(set(names)) and 'descriptor.json' in names,
+                   'El paquete canónico tiene entradas repetidas o carece de descriptor.', code='CANONICAL_BUNDLE_INVENTORY_MISMATCH')
+            ensure(bundle.getinfo('descriptor.json').file_size <= 16 * 1024 * 1024,
+                   'El descriptor canónico supera el límite de verificación.', code='CANONICAL_DESCRIPTOR_INVALID')
+            raw_descriptor = bundle.read('descriptor.json')
+            actual = hashlib.sha256(raw_descriptor).hexdigest()
+            ensure(actual == artifact['sha256'] and len(raw_descriptor) == artifact['size_bytes'],
+                   'Los bytes del descriptor canónico no coinciden.', code='CANONICAL_DESCRIPTOR_HASH_MISMATCH')
+            descriptor = json.loads(raw_descriptor)
+            parts = descriptor['parts']
+            ensure(descriptor['schema_version'] == 1 and descriptor['kind'] == 'PARQUET_DATASET'
+                   and isinstance(parts, list) and 1 <= len(parts) <= 100_000
+                   and isinstance(descriptor['schema'], list),
+                   'El descriptor canónico no cumple el contrato.', code='CANONICAL_DESCRIPTOR_INVALID')
+            references, total_rows, total_bytes = set(), 0, 0
+            for ordinal, part in enumerate(parts):
+                reference = part['path']
+                ensure(isinstance(reference, str) and bool(reference) and '\\' not in reference and '\x00' not in reference
+                       and not PurePosixPath(reference).is_absolute() and '..' not in PurePosixPath(reference).parts
+                       and bool(PurePosixPath(reference).parts) and str(PurePosixPath(reference)) == reference
+                       and reference != 'descriptor.json' and type(part['ordinal']) is int and part['ordinal'] == ordinal
+                       and reference not in references and type(part['row_count']) is int and part['row_count'] >= 0
+                       and type(part['size_bytes']) is int and part['size_bytes'] >= 0
+                       and isinstance(part['sha256'], str) and bool(re.fullmatch('[a-f0-9]{64}', part['sha256'])),
+                       'Una parte canónica no cumple el contrato portable.', code='CANONICAL_DESCRIPTOR_INVALID')
+                references.add(reference)
+                total_rows += part['row_count']
+                total_bytes += part['size_bytes']
+            ensure(set(names) == {'descriptor.json', *references},
+                   'El paquete canónico tiene archivos faltantes o adicionales.', code='CANONICAL_BUNDLE_INVENTORY_MISMATCH')
+            ensure(type(descriptor['row_count']) is int and descriptor['row_count'] == total_rows
+                   and type(descriptor['data_size_bytes']) is int and descriptor['data_size_bytes'] == total_bytes
+                   and version['row_count'] == total_rows,
+                   'Los totales del descriptor canónico no coinciden.', code='CANONICAL_DESCRIPTOR_TOTALS_MISMATCH')
+            for part in parts:
+                info = bundle.getinfo(part['path'])
+                ensure(not info.is_dir() and info.file_size == part['size_bytes'],
+                       'El tamaño de una parte canónica no coincide.', code='CANONICAL_PART_SIZE_MISMATCH')
+                digest, observed_size = hashlib.sha256(), 0
+                with bundle.open(info) as stream:
+                    while block := stream.read(1024 * 1024):
+                        digest.update(block)
+                        observed_size += len(block)
+                ensure(observed_size == part['size_bytes'] and digest.hexdigest() == part['sha256'],
+                       'El hash de una parte canónica no coincide.', code='CANONICAL_PART_HASH_MISMATCH')
+            return actual
+    except (zipfile.BadZipFile, KeyError, TypeError, ValueError) as error:
+        raise RecoveryCheckError('El paquete canónico no se pudo verificar.', 'CANONICAL_BUNDLE_INVALID') from error
 
 
 def attachment_hash(api: RecoveryApi, case: dict[str, Any]) -> str:
