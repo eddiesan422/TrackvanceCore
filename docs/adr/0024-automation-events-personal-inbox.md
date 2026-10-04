@@ -32,4 +32,12 @@ ALL/READ/UNREAD. `read_at` persiste el estado personal; el parámetro legado
 
 ## Consecuencias y verificación
 
+La corrección C05 del 4 de octubre (ADR 0025) hace efectivo el despacho sólo
+metadata: no abre descriptores/partes ni calcula hashes en scheduler, CHAINING,
+manual o enqueue transitivo. Worker verifica bytes e identidades congeladas antes
+de STARTED fuera de locks prolongados. Corrupción después de encolar produce
+FAILED_PRECONDITION, sin escritura ni cambio de versión. C04 valida timezone
+draft y conserva starts_at. C06 añade setter idempotente read_at=NULL con la
+misma autorización personal y permisos actuales, sin generar nuevos eventos.
+
 Los registros terminales históricos no se recorren ni generan notificaciones retroactivas. La metadata permite recuperar consumidores y demostrar idempotencia sin deducir efectos a partir de un mensaje de transporte. Las pruebas ejercitan rollback de outbox, consumidores independientes, recuperación y agotamiento de lease, salida Intake exacta, no repetición, revocación, aislamiento entre usuarios y organizaciones, DST, integridad de artifacts, serialización y revisión de UNKNOWN. El runner `scripts/tests/automation_cycle.py` exige un proyecto y una base PostgreSQL desechables identificados explícitamente antes de certificar scheduler, SQL real y bandeja mediante API.

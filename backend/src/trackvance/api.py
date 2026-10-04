@@ -34,7 +34,9 @@ from . import (
     __version__,
     identity_bootstrap,  # noqa: F401
 )
+from .acquisition import AcquisitionOperationError
 from .acquisition_api import router as acquisition_router
+from .acquisition_errors import AcquisitionReadError
 from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
 from .automation import AutomationError
@@ -255,6 +257,16 @@ async def secret_store_error(request, _exc):
 @app.exception_handler(ProcessingError)
 async def processing_error(request, exc):
     return error_response(request, 422, "INVALID_DATA", str(exc))
+
+
+@app.exception_handler(AcquisitionReadError)
+async def acquisition_read_error(request, exc):
+    return error_response(request, 422, exc.code, exc.message, exc.details)
+
+
+@app.exception_handler(AcquisitionOperationError)
+async def acquisition_operation_error(request, exc):
+    return error_response(request, exc.status, exc.code, exc.message, exc.details)
 
 
 @app.exception_handler(UnsupportedDatasetFormat)
@@ -1408,7 +1420,7 @@ def engines():
     delivery = DeliveryLimits.configured()
     spark = runtime_status()
     components = {name: {"status": component_status(name)} for name in ("scheduler", "events-notifications", "events-chaining")}
-    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local y conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark / PySpark", "status": "ACTIVE" if spark["available"] else "UNAVAILABLE", "description": "Ejecución local[K] o Standalone client con agregaciones globales y partes inmutables.", **spark}], "worker": workers["DEFAULT"], "workers": workers, "components": components, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS, "result_page_bytes": 16 * 1024 * 1024, "profile_sample_bytes": 8 * 1024 * 1024, "acquisition": acquisition.as_dict(), "delivery": delivery.__dict__}, "mode": "local-prototype"}
+    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local y conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark / PySpark", "status": "ACTIVE" if spark["available"] else "UNAVAILABLE", "description": "Ejecución local[K] o Standalone client con agregaciones globales y partes inmutables.", **spark}], "worker": workers["DEFAULT"], "workers": workers, "components": components, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS, "result_page_bytes": 16 * 1024 * 1024, "profile_sample_bytes": 8 * 1024 * 1024, "acquisition": acquisition.as_dict(), "acquisition_formats": {name: acquisition.describe(name) for name in ("CSV", "TXT", "JSON", "JSON_LINES", "PARQUET", "XLSX", "POSTGRESQL", "SQLSERVER")}, "delivery": delivery.__dict__}, "mode": "local-prototype"}
 
 
 @router.get("/dashboard")

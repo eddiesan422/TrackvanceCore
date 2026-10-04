@@ -11,6 +11,10 @@ import polars as pl
 from .config import STORAGE_DIR
 
 
+class WorkloadMetadataError(ValueError):
+    """A dispatch estimate cannot substitute descriptor bytes for data bytes."""
+
+
 @dataclass(frozen=True)
 class ResourceBudget:
     memory_soft_bytes: int = 512 * 1024 * 1024
@@ -36,6 +40,30 @@ class WorkloadInput:
     column_count: int
     size_bytes: int
     observed_record_bytes: int | None = None
+
+    @classmethod
+    def from_metadata(cls, db, version) -> "WorkloadInput":
+        """Plan dispatch from publication facts; never open population storage.
+
+        Old multipart publications without a persisted data size require an
+        explicit metadata repair. Their small descriptor is not a safe estimate
+        of the population. Execution still uses ``from_version`` and verifies it.
+        """
+        from .models import Artifact
+
+        artifact = db.get(Artifact, version.canonical_artifact_id) if version.canonical_artifact_id else None
+        if artifact is None or artifact.organization_id != version.organization_id:
+            raise WorkloadMetadataError("WORKLOAD_METADATA_UNAVAILABLE")
+        size = artifact.size_bytes
+        if artifact.media_type == "application/vnd.trackvance.parquet-set+json":
+            size = (version.ingestion_metadata or {}).get("canonical_size_bytes")
+        counts = (version.row_count, version.column_count, size)
+        if version.profile_status != "READY" or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counts
+        ):
+            raise WorkloadMetadataError("WORKLOAD_METADATA_UNAVAILABLE")
+        return cls(version.row_count, version.column_count, size, observed_record_bound(version))
 
     @classmethod
     def from_version(cls, db, version) -> "WorkloadInput":

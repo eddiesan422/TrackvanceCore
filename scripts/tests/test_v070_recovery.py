@@ -76,6 +76,18 @@ def test_restored_services_use_only_private_images_and_read_only_working_source(
         assert all(mount['read_only'] for mount in service.get('volumes', []))
 
 
+def test_native_restore_reuses_source_uuid_images_and_rejects_main_alias(tmp_path):
+    prefix = 'trackvance-v070-test-corrections-0123456789ab'
+    path = recovery.target_override(tmp_path, 'trackvance-v070-test-recovery-abcdef012345',
+        backend_image=prefix + ':backend', web_image=prefix + ':web')
+    services = yaml.safe_load(path.read_text().replace('!reset null', 'null'))['services']
+    assert services['api']['image'] == prefix + ':backend'
+    assert services['web']['image'] == prefix + ':web'
+    with pytest.raises(ValueError, match='imágenes privadas'):
+        recovery.target_override(tmp_path, 'trackvance-v070-test-recovery-abcdef012345',
+                                backend_image='trackvance-core:backend')
+
+
 def test_compose_adapter_uses_explicit_env_file_and_rejects_other_project(tmp_path, monkeypatch):
     project = 'trackvance-v070-test-recovery-0123456789ab'
     env_file = tmp_path / 'test.env'

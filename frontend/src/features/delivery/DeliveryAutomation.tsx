@@ -8,47 +8,49 @@ import { usePermission } from '../../app/session'
 import { Badge, date, Empty, ErrorState, Field, Loading, Notice, PageHeading, Pagination } from '../../components/ui'
 import { DeliveryNavigation } from './DeliveryNavigation'
 import type { DeliveryConfiguration } from './types'
+import { timeZoneError, wallTime, zonedStart } from './automationTime'
+
+export { zonedStart } from './automationTime'
 
 type Settings = { mode: string; timezone: string; starts_at: string; interval_seconds: number; local_time: string; weekdays: number[]; source_policy: string; intake_configuration_id: string | null; allow_warnings: boolean; allow_empty: boolean; repeat_versions: boolean }
 type Automation = { id: string; name: string; configuration_id: string; responsible_name: string; responsible_user_id: string; version: number; enabled: boolean; next_run_at: string | null; settings: Settings }
 const modes = { ONCE: 'Una vez', INTERVAL: 'Cada intervalo', DAILY: 'Diaria', WEEKLY: 'Semanal', CHAINED: 'Después de Intake' }
 const policies = { FIXED_VERSION: 'Versión fija de la configuración', LATEST_REGISTERED: 'Última versión registrada', INTAKE_OUTPUT: 'Salida concreta del Intake disparador' }
 
-function wallTime(instant: Date, zone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant)
-  const value = (type: string) => parts.find(part => part.type === type)?.value || ''
-  return `${value('year')}-${value('month')}-${value('day')}T${value('hour')}:${value('minute')}`
-}
-
-export function zonedStart(local: string, zone: string) {
-  const base = Date.parse(`${local}:00Z`)
-  if (!Number.isFinite(base)) throw new Error('Selecciona una fecha de inicio válida.')
-  const candidates = new Set<number>()
-  for (const shift of [-86400000, 0, 86400000]) {
-    const probe = base + shift
-    const displayed = Date.parse(`${wallTime(new Date(probe), zone)}:00Z`)
-    const candidate = base - (displayed - probe)
-    if (wallTime(new Date(candidate), zone) === local) candidates.add(candidate)
-  }
-  if (!candidates.size) throw new Error('La hora seleccionada no existe en esa zona por el cambio de horario. Elige otra hora.')
-  return new Date(Math.min(...candidates)).toISOString()
-}
-
 function Editor({ item, configurations }: { item?: Automation; configurations: DeliveryConfiguration[] }) {
   const cache = useQueryClient(), navigate = useNavigate(), canSchedule = usePermission('delivery:schedule'), canIntake = usePermission('intake:read')
   const [name, setName] = useState(item?.name || ''), [configuration, setConfiguration] = useState(item?.configuration_id || configurations[0]?.id || '')
   const [enabled, setEnabled] = useState(item?.enabled ?? true), [settings, setSettings] = useState<Settings>(item?.settings || { mode: 'INTERVAL', timezone: 'America/Bogota', starts_at: '', interval_seconds: 3600, local_time: '09:00', weekdays: [0], source_policy: 'FIXED_VERSION', intake_configuration_id: null, allow_warnings: false, allow_empty: false, repeat_versions: false })
-  const [start, setStart] = useState(wallTime(new Date(Date.now() + 60000), settings.timezone))
+  const [timezoneText, setTimezoneText] = useState(settings.timezone)
+  const [start, setStart] = useState(() => {
+    if (timeZoneError(settings.timezone)) return ''
+    const instant = item ? new Date(item.settings.starts_at) : new Date(Date.now() + 60000)
+    return Number.isFinite(instant.getTime()) ? wallTime(instant, settings.timezone) : ''
+  })
+  const [startEdited, setStartEdited] = useState(false)
+  const zoneError = timeZoneError(timezoneText)
+  let startError = '', selectedInstant = ''
+  if (!zoneError) {
+    try { selectedInstant = item && start && Number.isFinite(Date.parse(item.settings.starts_at)) && !startEdited && settings.timezone === item.settings.timezone ? item.settings.starts_at : zonedStart(start, settings.timezone) }
+    catch (error) { startError = error instanceof Error ? error.message : 'Selecciona una fecha de inicio válida.' }
+  }
   const intake = useQuery({ queryKey: ['automation-intake-contracts'], queryFn: () => api<Collection>('/intake/contracts'), enabled: canIntake && settings.mode === 'CHAINED' })
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) => setSettings(previous => ({ ...previous, [key]: value }))
-  const save = useMutation({ mutationFn: () => post<Automation>(item ? `/delivery/automations/${item.id}/versions` : '/delivery/automations', { name, configuration_id: configuration, enabled, responsible_user_id: item?.responsible_user_id || null, expected_version: item?.version || null, settings: { ...settings, starts_at: zonedStart(start, settings.timezone) } }),
+  const save = useMutation({ mutationFn: () => {
+    if (zoneError || startError || !selectedInstant) throw new Error(zoneError || startError || 'Selecciona una fecha de inicio válida.')
+    return post<Automation>(item ? `/delivery/automations/${item.id}/versions` : '/delivery/automations', { name, configuration_id: configuration, enabled, responsible_user_id: item?.responsible_user_id || null, expected_version: item?.version || null, settings: { ...settings, starts_at: selectedInstant } })
+  },
     onSuccess: result => { void cache.invalidateQueries({ queryKey: ['delivery-automations'] }); void cache.invalidateQueries({ queryKey: ['delivery-automation', result.id] }); navigate(`/delivery/automation/${result.id}`) } })
-  return <form className="panel form-stack" onSubmit={event => { event.preventDefault(); save.mutate() }}><h2>{item ? 'Nueva revisión de la automatización' : 'Crear automatización'}</h2><div className="schedule-fields">
+  return <form className="panel form-stack" onSubmit={event => { event.preventDefault(); if (!zoneError && !startError && selectedInstant) save.mutate() }}><h2>{item ? 'Nueva revisión de la automatización' : 'Crear automatización'}</h2><div className="schedule-fields">
     <Field label="Nombre"><input required maxLength={160} value={name} onChange={event => setName(event.target.value)} disabled={!canSchedule}/></Field>
     <Field label="Configuración publicada"><select required value={configuration} onChange={event => setConfiguration(event.target.value)} disabled={!canSchedule}><option value="">Selecciona una entrega</option>{configurations.map(config => <option key={config.id} value={config.id}>{config.name} · v{config.version}</option>)}</select></Field>
     <Field label="Disparador"><select value={settings.mode} disabled={!canSchedule} onChange={event => setSettings(previous => ({ ...previous, mode: event.target.value, source_policy: event.target.value === 'CHAINED' ? 'INTAKE_OUTPUT' : 'FIXED_VERSION' }))}>{Object.entries(modes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-    <Field label="Zona horaria" hint="Zona IANA; la programación conserva la hora local al cambiar el horario de verano."><input required value={settings.timezone} disabled={!canSchedule} onChange={event => update('timezone', event.target.value)}/></Field>
-    <Field label="Inicio en la zona seleccionada"><input type="datetime-local" required value={start} disabled={!canSchedule} onChange={event => setStart(event.target.value)}/></Field>
+    <div><Field label="Zona horaria" hint="Zona IANA; la programación conserva la hora local al cambiar el horario de verano."><input required maxLength={80} value={timezoneText} disabled={!canSchedule} aria-invalid={!!zoneError} aria-describedby={zoneError ? 'automation-zone-error' : undefined} onChange={event => {
+      const value = event.target.value
+      setTimezoneText(value)
+      if (!timeZoneError(value)) update('timezone', value)
+    }}/></Field>{zoneError && <small id="automation-zone-error" role="alert">{zoneError}</small>}</div>
+    <div><Field label="Inicio en la zona seleccionada"><input type="datetime-local" required value={start} disabled={!canSchedule} aria-invalid={!!startError} aria-describedby={startError ? 'automation-start-error' : undefined} onChange={event => { setStart(event.target.value); setStartEdited(true) }}/></Field>{startError && <small id="automation-start-error" role="alert">{startError}</small>}</div>
     {settings.mode === 'INTERVAL' && <Field label="Intervalo (minutos)"><input type="number" min={1} max={44640} required value={settings.interval_seconds / 60} disabled={!canSchedule} onChange={event => update('interval_seconds', Number(event.target.value) * 60)}/></Field>}
     {['DAILY', 'WEEKLY'].includes(settings.mode) && <Field label="Hora local de ejecución"><input type="time" required value={settings.local_time} disabled={!canSchedule} onChange={event => update('local_time', event.target.value)}/></Field>}
     {settings.mode === 'WEEKLY' && <fieldset><legend>Días de ejecución</legend>{['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((day, index) => <label key={day}><input type="checkbox" disabled={!canSchedule} checked={settings.weekdays.includes(index)} onChange={event => update('weekdays', event.target.checked ? [...settings.weekdays, index] : settings.weekdays.filter(value => value !== index))}/>{day} </label>)}</fieldset>}
@@ -57,7 +59,7 @@ function Editor({ item, configurations }: { item?: Automation; configurations: D
     {settings.mode === 'CHAINED' && <label><input type="checkbox" checked={settings.allow_warnings} disabled={!canSchedule} onChange={event => update('allow_warnings', event.target.checked)}/> Permitir APPROVED_WITH_WARNINGS</label>}
     <label><input type="checkbox" checked={settings.allow_empty} disabled={!canSchedule} onChange={event => update('allow_empty', event.target.checked)}/> Permitir entrada vacía</label>
     <label><input type="checkbox" checked={settings.repeat_versions} disabled={!canSchedule} onChange={event => update('repeat_versions', event.target.checked)}/> Permitir procesar de nuevo la misma versión en futuras ocurrencias</label>
-    </div><Notice>{settings.mode === 'CHAINED' ? 'Entrega exclusivamente la salida publicada de la ejecución Intake que dispara esta automatización. SUCCESS + APPROVED es la condición inicial; REJECTED no habilita entregas.' : 'Los horarios atrasados se agrupan en una sola ocurrencia. Se omite el despacho mientras exista una entrega activa.'} Cada revisión conserva destino, target, columnas y estrategia de la configuración seleccionada.</Notice>{settings.allow_empty && <Notice>Una entrada vacía con OVERWRITE puede vaciar el target. Esta opción autoriza deliberadamente esa entrada.</Notice>}{intake.error && <ErrorState error={intake.error}/>} {save.error && <ErrorState error={save.error}/>}<button className="button primary" disabled={!canSchedule || save.isPending || !configuration}>{save.isPending ? 'Guardando…' : item ? 'Guardar nueva revisión' : 'Crear automatización'}</button></form>
+    </div><Notice>{settings.mode === 'CHAINED' ? 'Entrega exclusivamente la salida publicada de la ejecución Intake que dispara esta automatización. SUCCESS + APPROVED es la condición inicial; REJECTED no habilita entregas.' : 'Los horarios atrasados se agrupan en una sola ocurrencia. Se omite el despacho mientras exista una entrega activa.'} Cada revisión conserva destino, target, columnas y estrategia de la configuración seleccionada.</Notice>{settings.allow_empty && <Notice>Una entrada vacía con OVERWRITE puede vaciar el target. Esta opción autoriza deliberadamente esa entrada.</Notice>}{intake.error && <ErrorState error={intake.error}/>} {save.error && <ErrorState error={save.error}/>}<button className="button primary" disabled={!canSchedule || save.isPending || !configuration || !!zoneError || !!startError || !selectedInstant}>{save.isPending ? 'Guardando…' : item ? 'Guardar nueva revisión' : 'Crear automatización'}</button></form>
 }
 
 export function DeliveryAutomationPage() {

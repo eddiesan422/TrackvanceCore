@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-IMPLEMENTACIÓN 0.7.0 | 3 de octubre de 2026
+IMPLEMENTACIÓN 0.7.0 | Correcciones C01–C06 | 4 de octubre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -23,7 +23,13 @@ datasets multipartes, PySpark local y Standalone opcional, preflight persistido,
 preparación Delivery sellada en disco, scheduler independiente, Intake→Delivery,
 outbox PostgreSQL y bandeja personal. Las interfaces normales registran y siguen
 estos trabajos. El modelo final tiene 42 tablas y tres migraciones nuevas
-0013..0015; los bytes de 0001..0012 se conservan. La revisión de implementación
+0013..0015 en su publicación inicial; el ciclo C01–C06 añade exclusivamente
+0016_acquisition_diagnostics con dos campos nullable y mantiene 42 tablas.
+Los bytes de 0001..0015 se conservan. El ciclo parte del HEAD real
+12ca7061696d3581a18237dc7737348a3462e2c4, sin retroceder a una baseline anterior.
+Los originales de Excel no están disponibles; las causas reproducidas se
+declaran sobre sintéticos, sin reinterpretar adquisiciones históricas.
+La revisión de implementación
 y las ejecuciones conocidas se registran en el capítulo 22. El HEAD documental
 final y su CI se registran externamente para evitar la referencia circular del PDF.
 
@@ -178,7 +184,7 @@ para Spark/PySpark ni instalación a voluntad en cada carga del usuario.
 | events, notifications_api | Outbox atómica, consumos CAS, retries, resumen personal y consultas autorizadas. |
 | permissions, api, worker | Contratos HTTP, autoridad vigente, lanes y protección contra publicaciones de owners vencidos. |
 | frontend/features/datasets, delivery, notifications, runs | Recepción/seguimiento, automatización, preflight, bandeja y selector de engine. |
-| scripts/verify_storage, docker_state, backup_local | Huella state 6, conjuntos, separación de secretos y compatibilidad estricta. |
+| scripts/verify_storage, docker_state, backup_local | Huella state 7/0016, conjuntos, separación de secretos y proyección estricta state 6. |
 
 Las reglas de negocio permanecen en el núcleo portable. PySpark distribuye
 llamadas a esos kernels y las operaciones globales de agrupación/referencias;
@@ -212,9 +218,52 @@ recibida; cambiar de página después de registrar el Job no lo cancela.
 CSV/TXT/TSV conservan registros CSV multilínea y número estable del origen.
 JSONL/NDJSON lee registros por línea; Parquet recorre batches de sus partes.
 Un lote tiene doble cota de filas y bytes observados; una sola celda gigante
-produce rechazo funcional. XLSX y JSON array/objeto conservan lectura limitada
-de 10 MiB y 100.000 filas por defecto; no se anuncian como streaming ilimitado.
+produce rechazo funcional. XLSX asíncrono usa lectura incremental propia con
+default de 1 millón de filas de datos y 1 GiB comprimido. JSON array/objeto
+conserva 10 MiB y 100.000 filas. La carga rápida legacy mantiene sus cotas.
 Opciones de hoja y delimitador permanecen explícitas e inmutables en la versión.
+
+### C01: hoja XLSX incremental y memoria acotada
+
+La ruta anterior llegaba al lector legacy completo y rechazaba 100.001 filas
+antes de producir el primer lote. openpyxl read_only precarga shared strings y
+estilos: ese modo por sí solo no garantiza memoria acotada. El lector nuevo
+comprueba EOCD/directorio central antes de crear ZipFile y consume XML mediante
+SAX/chunks de 64 KiB. Shared strings y líderes de fórmulas compartidas se indexan
+en SQLite privado con caché acotada. No conserva listas de filas, DataFrames o
+diccionarios de población. La reducción de tipos mantiene sólo estado por
+columna y considera también cambios después de la fila 100.000.
+
+La dimensión declarada/max_row es orientativa. Se recorre la hoja elegida hasta
+su final real, se ignoran filas sólo formateadas y se reconoce el primer
+encabezado no vacío. Se conserva su número físico y la posición física de cada
+registro, incluso con encabezado desplazado. Fórmulas se observan como texto
+sin ejecutar; fechas usan el estilo y epoch 1900/1904. Las fechas ISO OOXML
+preservan el texto validado exacto, incluido offset/Z y fracción; un serial de
+fecha/hora sin zona no inventa una zona ni clasificación TIMESTAMP. Filas
+preencabezado totalmente vacías se omiten y celdas vacías finales del encabezado
+se recortan; los valores vacíos/espacios de datos se preservan. El ZIP original, opciones,
+semántica de lectura y metadata quedan registrados sin reinterpretar versiones
+anteriores. Macros, rutas inválidas, XML DTD/entidades y estructuras incompatibles
+se rechazan; la expansión cuenta bytes reales, además de la declaración ZIP.
+
+Default XLSX: 4 GiB expandidos, 100 columnas, 100 millones de celdas de datos,
+64 KiB por celda, 1 MiB por registro, 8 MiB metadata, 4096 miembros y 65536
+estilos. Índice/caché de 8 MiB y disco temporal de 8 GiB complementan la reserva
+512 MiB, perfil DuckDB 256 MiB y deadline 1800 s. Los lotes conservan ambas cotas:
+5000 registros y 8 MiB observados. Caché/presupuesto analítico, RSS y hardcgroup
+son magnitudes distintas; las pruebas miden cada una que esté disponible.
+Excel permite 1048576 filas físicas incluyendo encabezado. La cota efectiva es
+el mínimo de filas de datos configuradas y filas físicas restantes; 5 millones
+no es un contrato válido para XLSX.
+
+HTTP consulta metadata y muestra de hasta 100 registros con presupuesto agregado
+4 MiB XML/5 s, sin construir el índice completo ni contar/perfilar la población.
+Si referencias compartidas exceden el presupuesto devuelve inspection_limited,
+total desconocido. Si el encabezado no se conoce, permite registrar sin overrides;
+overrides no vacíos producen ACQUISITION_INSPECTION_LIMITED. El worker valida toda
+la población. Checkpoints durante indexación y lectura comprueban cancelación,
+tiempo y lease; un intento perdido no puede publicar una salida parcial.
 
 ### Snapshots SQL reales y coherencia
 
@@ -303,9 +352,10 @@ vigentes, además del deadline acumulado de adquisición.
 CSV/TXT y NDJSON se recorren por registros. NDJSON descubre completamente la unión
 de columnas sin conservar registros y vuelve a recorrer el archivo para generar
 lotes. Parquet verifica footer, tamaño expandido y tamaño de grupos de lectura,
-materializando ventanas acotadas. XLSX y JSON no lineal tienen un contrato menor
-explícito: 10 MiB y 100.000 filas por defecto; su incumplimiento falla y recomienda
-un formato de volumen, sin truncar la población. Los límites se configuran mediante
+materializando ventanas acotadas. JSON no lineal mantiene el contrato de 10 MiB
+y 100.000 filas. XLSX asíncrono tiene cotas independientes para la hoja, ZIP/XML,
+índice, lote y recursos; su incumplimiento falla sin truncar la población.
+Los límites se configuran mediante
 `TRACKVANCE_ACQUISITION_*` y se conservan en cada adquisición.
 
 Los defaults de volumen son 1 GiB de archivo, cinco millones de registros, 2 GiB
@@ -345,7 +395,9 @@ run y parent. Los Parquet únicos anteriores mantienen su identidad y lectura.
 Las partes físicas contienen `__tv_record_number` Int64; el esquema de negocio
 y la muestra excluyen esa columna. CSV/TXT conserva la línea física inicial de
 cada registro, incluyendo campos multiline; JSON/Parquet usa ordinal de registro;
-SQL declara SNAPSHOT_ROW sin inventar una línea física de tabla. Accepted output
+SQL declara SNAPSHOT_ROW sin inventar una línea física de tabla; XLSX conserva
+la fila física de la hoja seleccionada, independiente de su dimensión declarada.
+Accepted output
 conserva el número del origen en lugar de renumerarlo. El contrato de bytes de
 DatasetVersion sigue asociado al Artifact que define su SHA; el costo materializado
 se declara separadamente como `ingestion_metadata.canonical_size_bytes`.
@@ -972,12 +1024,12 @@ estable y no permiten cruzar attempt/Run/organización.
 ### X. Backup, restauración y compatibilidad
 
 El backup conserva PostgreSQL, artifacts, secretos fuente/destino y ambas claves.
-Manifest mantiene schema 2; state 6 incorpora las 42 tablas y conjuntos multipartes. State 5/31 tablas de 0.6.1 es antecedente y se conserva su proyección estricta documentada. El restore nativo exige
+Manifest mantiene schema 2; state 7/0016 cubre las 42 tablas, diagnósticos nuevos y conjuntos multipartes. State 6/0015 corresponde a la publicación inicial 0.7.0 y tiene proyección estricta de ambos diagnósticos NULL. State 5/31 tablas de 0.6.1 es antecedente y se conserva su proyección estricta documentada. El restore nativo exige
 igualdad exacta de filas, hashes, relaciones y secretos. Los secretos OIDC sólo utilizan
-variables externas: .env y client secrets no forman parte del backup.
+variables externas: los archivos de configuración privados se conservan por separado de los archivos de datos estándar. El upgrade autorizado exige copiar y verificar también el .env privado vigente, sin publicarlo, y preservar secretos/claves de fuente y destino.
 
 Backups 0.5.1/0009/state4, 0.5.0/0008/state3 y 0.4.x/0007/state2 se actualizan
-a 0015 y comparan su proyección legacy-v4/v3/v2 más adiciones permitidas 0.7.0. La proyección valida primero
+a 0016 y comparan su proyección legacy-v4/v3/v2 más adiciones permitidas 0.7.0. La proyección valida primero
 integridad y migración de identidad, admite roles/grants sembrados y elimina sólo
 adiciones esperadas. Rechaza actividad nueva en tablas que debían estar vacías;
 no oculta filas, errores de referencias ni alteraciones de campos históricos.
@@ -1109,6 +1161,16 @@ En CSV multilínea el origen conserva su numeración aplicable; en SQL es posici
 estable de la extracción materializada. Spark no asigna identidad de negocio
 según orden accidental de partición. Las salidas aceptadas Intake fijan padre
 y output_version_id de la Run concreta y conservan sólo filas aceptadas completas.
+
+### C03: área de negocio y reutilización
+
+Adquisición normal y carga rápida comparten el selector de área. Incluye las
+cuatro áreas iniciales y dominios existentes de la organización, deduplicados y
+ordenados, con la acción Agregar nueva área y validación de 1..80 caracteres.
+El valor persiste en Dataset.domain; no añade una entidad de gobierno.
+Al reutilizar un dataset o registrar una nueva versión, se muestra su dominio
+real y no se sustituye por Operaciones. Nombres, dominios históricos, identidad
+del dataset y registro idempotente se conservan.
 
 ## 7. Profiling, identificadores y transforms
 
@@ -1675,6 +1737,14 @@ temporales, referencias, duplicados entre particiones, condiciones, transforms,
 agregaciones y comparaciones exactas. Las pruebas de volumen y la integración
 con Run/Job/publicación se registran por separado de una prueba directa de kernel.
 
+### C05: planificación ligera sobre metadata registrada
+
+La selección de entrada y el enqueue, incluidos schedules Sentinel, usan
+identidad, conteos y canonical_size_bytes persistidos. No abren un descriptor
+para estimar el tamaño y no escanean población. Metadata requerida ausente
+produce WORKLOAD_METADATA_UNAVAILABLE en lugar de inventar un tamaño cero.
+La ejecución conserva la validación física de fuentes y sus planes congelados.
+
 ## 17. Modelo persistente, restricciones y migraciones
 
 ### Migraciones aditivas y baseline conservada
@@ -1702,15 +1772,17 @@ un dueño. legacy_enabled_before_identity conserva el enabled anterior necesario
 para proyección estricta y recuperación del estado. La UI permite asignación
 explícita posterior sin reescribir actores de ocurrencias/ejecuciones históricas.
 
-El inventario final consta de 42 tablas. Las migraciones 0001..0012 permanecen
-byte a byte. Los backups identifican revisión real y state 6; la compatibilidad
-con state 5 proyecta únicamente los defaults/columnas documentados. Tablas nuevas
-deben estar vacías al comparar una migración legacy antes de iniciar despachos;
+El inventario final consta de 42 tablas. Las migraciones 0001..0015 permanecen
+byte a byte. Los backups actuales identifican revisión real 0016 y state 7; la
+compatibilidad con state 6 elimina sólo los dos diagnósticos cuando son NULL,
+conservando todas las tablas asíncronas pobladas. Para state 5 y anteriores la
+proyección mantiene únicamente los defaults/columnas documentados; las tablas
+nuevas deben estar vacías al comparar esas baselines antes de iniciar despachos;
 una tabla física desconocida o una diferencia fuera de esa proyección se rechaza.
 
 ### Campos y vínculos del inventario completo
 
-El inventario siguiente documenta las 42 tablas y sus 509 campos, 95 índices,
+El inventario siguiente documenta las 42 tablas y sus 511 campos, 95 índices,
 PK/FK, nulabilidad y restricciones CHECK/UNIQUE. Se genera desde el ORM vigente
 e identifica las once tablas nuevas, las tres estructuras evolucionadas y las
 28 estructuras preservadas. Los cambios de datos permitidos por migración y
@@ -1727,6 +1799,16 @@ almacena recipient_user_id/read_at y enlace personal. DeliveryTargetDecision
 vincula review histórica, actor real y nota, sin cambiar el intento UNKNOWN.
 
 @models
+
+### C02: migración aditiva de diagnósticos
+
+0016_acquisition_diagnostics añade acquisition_runs.error_details JSON nullable
+y error_reference String(64) nullable. No rellena, traduce ni sustituye códigos,
+mensajes o valores históricos. Estado nativo 7 cubre las mismas 42 tablas y sus
+campos actuales. La proyección estricta hacia state 6 elimina sólo estos dos
+campos cuando son NULL; un diagnóstico nuevo no puede esconderse para hacer
+coincidir un backup anterior. La conservación se comprueba con roundtrip real
+0015→0016 y comparación de todos los campos anteriores.
 
 ## 18. API, DTOs y errores
 
@@ -1748,6 +1830,13 @@ GET /acquisitions admite filtros/paginación; GET /acquisitions/{id} y POST /can
 permiten seguimiento/acción autorizada. El DTO expone status/stage, cantidades
 observadas/totales opcionales, fechas, attempts, error sanitizado y output_version_id.
 
+GET /acquisitions/limits?format=XLSX&route=ASYNC_ACQUISITION devuelve formato,
+ruta y límites efectivos del backend, cada uno con max/unidad, más espacio
+físico de la hoja, fila de encabezado conocida y estado de inspección. La ruta
+LEGACY_UPLOAD expresa las cotas de carga rápida. Stage/inspect incluyen el mismo
+descriptor ajustado a la hoja conocida. La UI consulta límites antes de enviar;
+no replica un límite 100k ni cuenta el archivo entero dentro de HTTP.
+
 ### Ejecución y preflight
 
 Intake/Recon/Sentinel aceptan requested_engine AUTO/POLARS/PYSPARK. El plan preview
@@ -1767,6 +1856,8 @@ la repetición en futuras ocurrencias y también está deshabilitada por defecto
 POST /delivery/runs/{id}/resume-target requiere review_id y nota, no crea otra Run.
 GET /notifications/inbox expone colección filtrada por usuario/org/permisos;
 GET /notifications/unread-count y POST /inbox/{id}/read /read-all persisten lectura.
+POST /inbox/{id}/unread fija read_at=NULL, de forma explícita e idempotente,
+con la misma autorización personal y del recurso enlazado.
 Los endpoints deprecated /notifications/status y /deliveries siguen HISTORICAL_ONLY.
 
 ### Ejemplo sanitizado
@@ -1783,6 +1874,22 @@ Los tokens representados son placeholders y no forman parte de evidencia.
 Errores usan {error:{code,message,details?,request_id}}. Una excepción inesperada
 registra sólo tipo/referencia en el log, sin excepción cruda del driver. Los
 códigos funcionales de recursos/cancelación/lease conservan significado específico.
+
+### C02: diagnóstico público estructurado
+
+Errores nuevos usan código estable, mensaje público, detalles seguros y referencia
+diagnóstica, coherentes en API, AcquisitionRun, historial, detalle y avisos.
+Se distinguen exceso de filas, ZIP comprimido/expandido, celda/registro, columnas,
+hoja ausente, estructura inválida, formato no soportado, timeout, disco, memoria
+y permisos. Los mapeos legacy reconocidos son explícitos; texto arbitrario de una
+excepción no define el código ni se expone como mensaje. Fallos desconocidos
+muestran mensaje genérico y referencia para correlación, sin rutas, credenciales
+ni valores de negocio. Los errores históricos permanecen intactos.
+
+Transferencia completa significa bytes recibidos y no una versión publicada.
+processed_rows cuenta registros realmente materializados; cero durante
+indexación no declara hoja vacía. Una detección de exceso sólo conoce el límite
+superado y los registros observados, no el total de una población aún no leída.
 
 ### Inventario ejecutable completo
 
@@ -1833,20 +1940,31 @@ efectivos y plan para que un cambio posterior no reinterprete su identidad.
 
 @parameters
 
-La cota legacy de 10 MiB/100.000 filas permanece en endpoints síncronos y formas
-JSON/XLSX limitadas. El perfil asíncrono default admite archivo 1 GiB, 5 millones
-de filas y 2 GiB de bytes observados. Los benchmarks usan perfil aislado declarado
+La cota legacy de 10 MiB/100.000 filas permanece en endpoints síncronos; JSON
+no lineal conserva sus cotas propias. El perfil asíncrono general admite archivo
+1 GiB, 5 millones de registros y 2 GiB observados. XLSX aplica además 1 millón de
+filas de datos y las cotas de ZIP/XML/hoja documentadas en el capítulo 5.
+Los benchmarks usan perfil aislado declarado
 cuando el formato/overhead real excede el tamaño nominal del escalón. Eso no
 certifica 2 GiB ni cambia silenciosamente .env de la instalación real.
 
-### Backup nativo state 6
+### Backup nativo state 7 y compatibilidad state 6
 
-backup-manifest.json conserva schema 2; state.json evoluciona a schema 6 con el
+backup-manifest.json conserva schema 2; state.json evoluciona a schema 7 con el
 inventario exacto de 42 tablas, artifacts y relaciones. El verificador reconoce
 la revisión real de runtime, no sólo el script copiado. Paths, SHA/tamaños,
 descriptor y todas las partes se verifican; archivos no declarados o symlinks
 se rechazan. Metadata y los cinco volúmenes de archivos/secretos/claves se
 respaldan de manera coordinada. .env se conserva aparte y privado.
+
+El backup actual state 6/0015 de la instalación 0.7.0 se admite como baseline
+auténtica. Restore aplica 0016 y obtiene state 7; snapshot-legacy-v6 recalcula
+exactamente los hashes anteriores quitando sólo los dos diagnósticos NULL.
+Conserva las 42 tablas con adquisiciones, errores, áreas, límites/opciones,
+numeración e inbox poblados; no exige vacías las tablas asíncronas de state 6.
+Un campo nuevo no NULL, falta de tabla, drift físico o cualquier cambio anterior
+rechaza la comparación. Las proyecciones v2–v5 encadenan sólo adiciones
+documentadas y conservan sus comprobaciones originales.
 
 Antes de leer las filas, physical_schema_guard contrasta el catálogo SQL físico
 con Base.metadata de la versión instalada: tablas y columnas exactas, y claves
@@ -1878,7 +1996,8 @@ ignorar esas diferencias. Tres regresiones focales de API con preflight persisti
 QUEUED, SUCCESS y CANCELLED comparan todos los valores de las 42 tablas tras dos
 backfills consecutivos.
 
-La restauración física posterior vuelve a importar el dump original sin editar
+El ensayo histórico de publicación inicial 0.7.0, anterior a C01–C06, vuelve a
+importar el dump original sin editar
 filas ni redefinir la huella esperada. Verifica 42 tablas/0015, 5.643 artefactos,
 cuatro secretos fuente y seis secretos Delivery; la huella origen/restaurada es
 ff709e8fe022e26b68f3ef65122412c41a5ff660accf99fc85219d1473c893f6.
@@ -1933,13 +2052,16 @@ se normaliza, pero sus identidades/valores se comparan estrictamente.
 Después de aprobar código/E2E/recovery/documentos y todos los jobs CI del HEAD
 final, se pausa nuevo despacho, comprueba ausencia de trabajos activos, respalda
 consistentemente con herramientas compatibles, registra inventario y verifica
-el backup. Sólo entonces recrea servicios desde revisión final, aplica 0013..0015
+el backup. Para el ciclo C01–C06 la instalación ya está en 0.7.0/0015:
+recrea servicios desde revisión final y aplica exclusivamente 0016,
 y conserva .env/puerto/origen/restart:no/demo seed false/SSO deshabilitado. No se usa down-v,
 prune, reset, fixture ni escritura de prueba en el proyecto del usuario.
 
 La verificación final no destructiva comprueba health, Alembic, los tres workers,
 scheduler/consumidores, storage, API/UI 0.7.0, imágenes/revisión y la preservación
-estricta state 5→6. Si falla, se usa el procedimiento de recuperación probado, sin
+estricta state 6→7 y proyección v6 idéntica. Comprueba además los límites XLSX
+efectivos de API/runtime/UI, sin fixtures ni adquisiciones nuevas sobre datos
+del usuario. Si falla, se usa el procedimiento de recuperación probado, sin
 downgrade destructivo improvisado. El informe externo identifica backup privado,
 revisión realmente desplegada y servicios/URL final.
 
@@ -2060,6 +2182,31 @@ API/worker/SQL; la cobertura de navegador se declara por separado.
 
 @diagram automation
 
+### C05: resolución sólo sobre metadata y verificación antes de STARTED
+
+La elegibilidad y registro de una ocurrencia consultan exclusivamente la base:
+organización, publicación, versión exacta, permiso actual, decisión Intake,
+conteos, hashes registrados y revisiones. La resolución anterior invocaba
+dataset_paths bajo el lock de DeliveryAutomation y verificaba bytes de toda
+la entrada; ahora ningún scheduler/CHAINING/manual/enqueue transitivo abre un
+descriptor, calcula hashes, escanea población o llama DataSink. Las pruebas
+arquitectónicas hacen fallar esas operaciones en cada ruta de despacho.
+
+Run congela identidad completa de DatasetVersion/configuración/destino y la
+ocurrencia conserva la entrada exacta. El worker compara esos valores y
+verifica descriptor, todas las partes, tamaños, hashes, esquema y conteos;
+prepara y sella PreparedRows fuera de transacciones prolongadas de metadata.
+Antes de STARTED vuelve a comprobar identidades, autorizaciones y fence.
+Una fuente corrupta o desaparecida después de despacho falla antes del intento
+remoto, sin DDL/DML, sustitución de hashes o selección de otra versión.
+StorageProvider.dataset_paths mantiene íntegra su verificación global, sin
+bypass o caché de autorización. Claims/target guard/transacción remota,
+UNKNOWN y PENDING_REPAIR conservan sus garantías.
+
+Latencia de dispatch/enqueue y espera de un Job en cola son relojes distintos.
+La prueba PostgreSQL de varias entradas grandes observa dispatch mientras un
+worker está ocupado; no presenta la espera de ejecución como tiempo de despacho.
+
 ### Tres identidades de idempotencia
 
 trigger_key identifica el slot/evento y UNIQUE(automation_id,trigger_key)
@@ -2077,6 +2224,18 @@ Ninguna garantía es deduplicación de negocio de APPEND. CREATE_AND_LOAD no cam
 APPEND/OVERWRITE si la tabla ya existe: se conserva el bloqueo de estrategia.
 
 ### Ticks, atraso, DST y solapamiento
+
+Editar campos de negocio conserva el ancla UTC histórica y next_run_at, aun
+si el inicio ya pasó. Una ancla nueva pasada se rechaza; cambios reales del
+calendario calculan el siguiente slot futuro y no rearman ONCE consumido.
+
+C04 separa la zona editable de la zona válida usada para convertir. Vacía,
+parcial o inválida muestra error de campo y bloquea guardar antes de Intl,
+sin RangeError ni fallback UTC/zona del navegador. No altera otros settings.
+Crear/editar/reabrir conserva starts_at persistido, incluidos segundos y
+fracciones al editar otros campos; sólo un cambio deliberado del inicio/zona
+produce otra conversión. El navegador verifica borrar, escribir parcial e
+inválida, corregir, guardar, reabrir y comparar el instante UTC persistido.
 
 Scheduler hace sólo despacho sobre metadata. COALESCE_LATEST evita avalanchas
 de slots vencidos al reiniciar y registra coalesced_intervals/motivo; SKIP_WHILE_ACTIVE
@@ -2147,9 +2306,39 @@ Las suites Docker dedicadas ejecutan los escenarios JVM obligatorios sin SKIP.
 Las pruebas E2E principales atraviesan navegador, API, PostgreSQL, workers,
 artefactos, Spark y SQL real; mocks de componente no las sustituyen.
 
-### Resultados ejecutados 0.7.0 y gates pendientes
+### Resultados históricos de la publicación inicial 0.7.0
 
 @validation
+
+### Certificación independiente C01–C06
+
+El ciclo requiere nuevas ejecuciones sobre su revisión de implementación.
+No hereda los verdes de 12ca706 ni resultados anteriores. El generador
+xlsx_fixtures.py produce 100k/100001/400k/1M con inline/shared strings de alta
+cardinalidad, dimensiones falsas, encabezado desplazado, cola formateada,
+Unicode, null/vacío, IDs, fechas, fórmulas y cambio de tipo después de 100k.
+Su oráculo independiente verifica todos los valores y detecta una alteración
+con igual número de filas; no basa capacidad en un workbook repetitivo pequeño.
+Source, accepted output y destino SQL se comparan mediante huella completa,
+además de numeración/perfil global. El flujo de navegador normal registra
+XLSX→adquisición→Intake PySpark APPROVED→Delivery encadenado→inbox→no leída.
+
+Métricas distinguen generación, transferencia, indexación/lectura/materialización,
+perfil/publicación, cola, procesamiento Spark y commit SQL cuando el reloj es
+observable. Transiciones detectadas por polling son intervalos observados,
+no cronómetros internos exactos; fases no instrumentadas se declaran desconocidas.
+RSS de procesos, memoria actual/pico cgroup, CPU y disco temporal se informan con
+método y alcance. La certificación no aumenta RAM/timeouts para ocultar fallos.
+El gate XLSX real forma parte de GitHub Actions, junto a toda la regresión previa.
+C05 registra cuatro programaciones sobre al menos dos datasets/versiones distintos
+de un millón de filas mientras una quinta entrega ocupa el worker; fija por ocurrencia
+la identidad correcta y separa preparación, despacho y espera de cola. El exceso
+real de un millón más una fila comprueba fallo sin versión parcial, conservación
+de una versión previa y diagnóstico idéntico en detalle, historial y bandeja.
+La transición no leída queda conservada durante reinicio de API y backup/restore
+con comparación íntegra de la huella de las 42 tablas.
+
+@corrections
 
 ### Matriz de requisitos, implementación y evidencia
 
@@ -2162,11 +2351,11 @@ artefactos, Spark y SQL real; mocks de componente no las sustituyen.
 | E Automatización | Horarios/timezone/revisiones, identity, no-repeat, aceptación salida exacta, target guard y unknown decisions. | test_automation_events/scheduler y chain_decisions; automation_cycle API/PostgreSQL: warnings default/opt-in, REJECTED, salida APPROVED vacía y eventos duplicados; Playwright real. |
 | F Notificaciones | Inbox personal, filters/read/count, permisos actuales, dedupe y enlaces. | automation/inbox tests; browser, recovery persistente, probes secretos. |
 | G Recuperación | Jobs leases, publicación fenced, parts/staging, outbox pendiente/retry y scheduler independiente. | fault injection determinista de suites, concurrencia PostgreSQL, worker/consumer recovery. |
-| H Compatibilidad | Nuevas migraciones, state 6 exacto, secrets separados, restauración multipart, auténtico 0.6.1→0.7.0. | check_postgres_migrations, native/legacy recovery results y hashes. |
+| H Compatibilidad | Migración aditiva 0016, state 7 exacto y proyección state 6 poblado, secretos separados, restauración multipart y baselines históricas. | check_postgres_migrations, native/legacy recovery results y hashes. |
 | I E2E integrado | Large acquire→Intake PySpark→aceptados exactos→Delivery SQL→bandeja del responsable. | volume_cycle/volume.spec y acquisition_timing_cycle --with-chain; negativa/revocación; target count/hash y reloj integral observado. |
 | Documentación/PDF | Capítulos vigentes, tablas/diagramas, generator/input/extraction, copias oficiales. | Hash/páginas/texto seleccionable + inspección visual completa final. |
 | Promoción | HEAD contiene código+migraciones+UI+tests+PDF, todos workflows/jobs aplicables aprobados. | URLs de runs GitHub, SHA exacto y conclusiones de jobs final externos. |
-| Instalación | Backup consistente, mismos volúmenes/PostgreSQL 16, runtime/UI 0.7.0, todos los servicios y huella. | Inventario/verificación del backup y state 5→6 sin fixtures en real. |
+| Instalación | Backup consistente, mismos volúmenes/PostgreSQL 16, runtime/UI 0.7.0, todos los servicios y huella. | Inventario/verificación de backup nuevo main 0.7.0, proyección state 6→7 idéntica y sólo 0016; sin fixtures en real. |
 
 ### Reglas de aislamiento y evidencia
 
@@ -2191,19 +2380,20 @@ de red no ejecutada. CI verde de otro SHA no es certificación final.
 | --- | --- |
 | Reglas/evidencia/puertos/conectores/Delivery/RBAC/SSO y auditoría histórica | ADR 0001..0019 se conservan y continúan aplicando donde no fueron evolucionadas explícitamente. |
 | Adquisición asíncrona y conjuntos Parquet | ADR 0020. |
-| Inventario state 6, proyección legacy y secretos/backup | ADR 0021. |
+| Inventario state 7, proyección estricta state 6/legacy y secretos/backup | ADR 0021. |
 | PySpark real, kernels portables y recursos | ADR 0022. |
 | Preparación/preflight de Delivery de volumen | ADR 0023. |
 | Automatización, outbox y bandeja personal | ADR 0024. |
+| XLSX incremental, diagnóstico, áreas/zona, despacho metadata y no leída | ADR 0025, correcciones C01–C06 sobre 0.7.0. |
 
 ### Fuente, candidato, revisión y publicación
 
-Revisión de implementación y runners conocida: `a5f12ddc2850dea4053ad77121835e42a37a72cf`, rama feat/local-prototype, baseline auténtica `6fac26b3648cb4a4b50c094ef12c1e103bc97ddd`. Los dos drivers Spark finales leyeron la misma huella de fuentes `3bdfe0166af8dab6e50ee916c83b02fda9d0c3a2b6908717766df443d2acc5d1`; los informes seguros registran hashes de inputs/resultados, entornos y alcance de cada ejecución. El cambio posterior 191ff280 sólo evita SQL nativo en metadata/vistas previas de Delivery API; la iteración poblacional y los engines Spark permanecen iguales. a5f12dd añade únicamente verificación física/transportes de recuperación y pruebas de selector de bandeja; no modifica los engines ni las fuentes de producto backend/frontend. Los ciclos Spark host conservan su procedencia anterior; los dos modos se reejecutan en CI sobre el HEAD final. Esta revisión antecede al commit documental final; sus gates GitHub y upgrade se registran en el informe externo después de aprobarse.
+Revisión histórica de implementación inicial y runners: `a5f12ddc2850dea4053ad77121835e42a37a72cf`, rama feat/local-prototype, baseline auténtica `6fac26b3648cb4a4b50c094ef12c1e103bc97ddd`. Los dos drivers Spark finales leyeron la misma huella de fuentes `3bdfe0166af8dab6e50ee916c83b02fda9d0c3a2b6908717766df443d2acc5d1`; los informes seguros registran hashes de inputs/resultados, entornos y alcance de cada ejecución. El cambio posterior 191ff280 sólo evita SQL nativo en metadata/vistas previas de Delivery API; la iteración poblacional y los engines Spark permanecen iguales. a5f12dd añade únicamente verificación física/transportes de recuperación y pruebas de selector de bandeja; no modifica los engines ni las fuentes de producto backend/frontend. Los ciclos Spark host conservan su procedencia anterior; los dos modos se reejecutan en CI sobre el HEAD final. Esta revisión antecede al commit documental final; sus gates GitHub y upgrade se registran en el informe externo después de aprobarse.
 
 Esta fuente editable, build_specification.py, backend/openapi.json,
 model_contract_0.7.0.json, permission_contract_0.7.0.json,
 parameters_0.7.0.json, volume_results_0.7.0.json y
-validation_results_0.7.0.json son entradas explícitas. Los resúmenes del ensayo
+validation_results_0.7.0.json son entradas históricas explícitas. corrections_results_0.7.0.json incorpora la certificación independiente C01–C06 y su revisión de implementación; el informe externo registra el HEAD documental final y CI de ese SHA. Los resúmenes del ensayo
 CSV adicional proceden de la evidencia saneada
 [acquisition-timing-certification.json](../development/evidence/0.7.0/acquisition-timing-certification.json),
 SHA-256 `f17fc85c2a2303cd4232013125f26339218f3adefb8387c9696b8ac257ec23a9`,
@@ -2232,6 +2422,7 @@ la promoción y gates correspondientes se verifican de nuevo.
 | --- | --- | --- |
 | 27-09-2026 | v1.1, implementación 0.6.1 | Temporal efímera, retiro de SMTP, SSO opcional, 31 tablas/0012. |
 | 03-10-2026 | v1.1, implementación 0.7.0 | Asincronía, multipartes, PySpark, Delivery de volumen, automatización, outbox, bandeja, 42 tablas/0015. |
+| 04-10-2026 | v1.1, correcciones C01–C06 sobre 0.7.0 | XLSX incremental, diagnósticos/límites, áreas, timezone, dispatch metadata, no leída, 42 tablas/0016/state 7; archivo íntegro de edición previa. |
 
 ## 24. Antecedente: cambios funcionales y técnicos 0.5.1
 
@@ -2633,9 +2824,24 @@ Evento y consumo se pueden recuperar de pending sin cambiar resultado original.
 
 La API exige organización, usuario destinatario y permiso actual del módulo
 enlazado además de notifications:read. Aplica la misma condición al contar,
-listar y marcar leído/read-all. Administrator no obtiene acceso a avisos ajenos.
+listar y marcar leído/read-all/no leída. Administrator no obtiene acceso a avisos ajenos.
 Los detalles vinculados revalidan permisos/propiedad; un enlace no concede
 acceso que el recurso haya perdido por revocación.
+
+### C06: no leída explícita y persistente
+
+Cada aviso leído ofrece Marcar como no leída. El endpoint emite UPDATE explícito
+con ámbito visible y fija read_at=NULL, incluso si otra sesión cambió la lectura
+y la entidad ORM conservaba un null anterior. La acción inversa también emite
+UPDATE con coalesce del valor persistido, conservando el primer timestamp al
+repetir read y superando una transición unread concurrente;
+repetir la petición conserva el mismo resultado y no alterna el estado. Tras
+confirmación, la UI refresca lista, filtro y contador inmediatamente. Un fallo
+mantiene el estado anterior y muestra el error; no usa una mutación optimista.
+Read/read-all/abrir detalle conservan su comportamiento. Leer→no leída→leer,
+recarga, logout y reinicio se verifican sobre la misma notificación persistida.
+La acción no crea una ejecución, evento outbox, entrega duplicada ni auditoría
+de negocio ficticia. Historia anterior no se reinterpreta ni se redistribuye.
 
 ### Historia y credenciales
 
@@ -2647,9 +2853,15 @@ Los avisos nunca conservan password, cookie, CSRF, token OIDC, DSN o excepción 
 
 ## 29. Persistencia y recuperación de identidad/automatización
 
+C01–C06 conserva dominios, opciones de lectura/numeración, límites capturados y
+diagnósticos antiguos, además de read_at de notificaciones y todas las revisiones
+de automatización. 0016 agrega campos nullable sin backfill. Backup/restore nativo
+state 7 compara los campos nuevos, mientras la proyección estricta state 6
+comprueba cada valor anterior; no ignora tablas asíncronas pobladas.
+
 Los usuarios/roles/grants/OIDC/notification_deliveries históricos conservan
 identidad. Nuevas tablas de bandeja y automatización no alteran roles personalizados
-ni el historial de intentos Delivery. state 6 incluye todo el inventario; unknown
+ni el historial de intentos Delivery. state 7 incluye todo el inventario; unknown
 tables no se omiten. Secrets cifrados y claves se conservan separados en restore.
 
 Sentinel sólo atribuye responsable si su Actor USER legacy es verificable dentro

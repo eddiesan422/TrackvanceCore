@@ -41,7 +41,7 @@ REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
 VERSION = "0.7.0"
-EDITION_DATE = "3 octubre 2026"
+EDITION_DATE = "4 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -532,6 +532,10 @@ def build(candidate: Path, results: dict, draft: bool):
             story.append(openapi_table())
         elif line == "@validation":
             story.append(table([["Verificación", "Resultado ejecutado"], *[[k, v] for k, v in results.items()]]))
+        elif line == "@corrections":
+            data = input_document("corrections_results")
+            story.append(table([["Corrección / prueba", "Evidencia independiente"], *[
+                [str(entry["label"]), str(entry["result"])] for entry in data["summary"]]]))
         elif line in {"@models", "@newmodels"}:
             story.extend(model_tables())
         elif line == "@permissions":

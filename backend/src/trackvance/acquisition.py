@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
@@ -12,12 +13,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+import duckdb
 import polars as pl
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from .acquisition_config import AcquisitionLimits
+from .acquisition_errors import AcquisitionReadError, limit_error, processing_diagnostic
 from .acquisition_models import AcquisitionRun, AcquisitionUpload
 from .artifactstore import ArtifactIntegrityError, artifact_store, link_artifact
 from .audit_context import Actor
@@ -50,10 +53,13 @@ from .services import audit
 
 LEASE_SECONDS = 90
 TERMINAL = frozenset({"SUCCESS", "FAILED", "CANCELLED"})
+logger = logging.getLogger(__name__)
 
 
 class AcquisitionOperationError(ConnectionOperationError):
-    pass
+    def __init__(self, status: int, code: str, message: str, details: dict | None = None):
+        super().__init__(status, code, message)
+        self.details = details
 
 
 class AcquisitionStopped(Exception):
@@ -71,6 +77,12 @@ def upload_dto(upload: AcquisitionUpload) -> dict:
 def acquisition_dto(run: AcquisitionRun) -> dict:
     end = run.finished_at or utcnow()
     duration = (end.replace(tzinfo=UTC) - run.started_at.replace(tzinfo=UTC)).total_seconds() if run.started_at else None
+    source_format = run.source_type if run.source_type != "UPLOAD" else run.source_snapshot.get("format_variant") or run.source_snapshot.get("source_format") or Path(run.filename).suffix.lstrip(".").upper()
+    source_format = {"NDJSON": "JSON_LINES", "JSONL": "JSON_LINES", "PQ": "PARQUET", "TSV": "TXT"}.get(source_format, source_format)
+    route_limits = None if source_format == "XLSX" and "xlsx_max_rows" not in run.effective_limits else AcquisitionLimits(**run.effective_limits).describe(source_format,
+        header_row=run.source_snapshot.get("physical_header_row_number"))
+    error = {"code": run.error_code, "message": run.error_message, "details": run.error_details,
+             "reference": run.error_reference} if run.error_code else None
     return {"id": run.id, "dataset_id": run.dataset_id, "source_type": run.source_type,
             "filename": run.filename, "status": run.status, "stage": run.stage,
             "attempt_id": run.attempt_id, "attempts": run.attempts,
@@ -82,7 +94,11 @@ def acquisition_dto(run: AcquisitionRun) -> dict:
             "error_message": run.error_message, "created_at": iso(run.created_at),
             "started_at": iso(run.started_at), "finished_at": iso(run.finished_at),
             "source_snapshot": run.source_snapshot, "reader_options": run.reader_options,
-            "column_overrides": run.column_overrides, "effective_limits": run.effective_limits}
+            "column_overrides": run.column_overrides, "effective_limits": run.effective_limits,
+            "route_limits": route_limits, "error": error,
+            "received_bytes": run.total_bytes, "materialized_rows": run.processed_rows,
+            "materialized_bytes": run.processed_bytes,
+            "published_rows": run.processed_rows if run.status == "SUCCESS" and run.output_version_id else None}
 
 
 def owned_acquisition(db: Session, identifier: str, user: User, *, lock=False) -> AcquisitionRun:
@@ -116,7 +132,10 @@ def _idempotent(db: Session, user: User, key: str | None, request_hash: str) -> 
 def register_upload(db: Session, user: User, dataset: Dataset, upload_id: str, *,
                     reader_options: dict | None = None, column_overrides: dict | None = None,
                     idempotency_key: str | None = None) -> AcquisitionRun:
-    options = ReaderOptions.from_mapping(reader_options).as_dict()
+    try:
+        options = ReaderOptions.from_mapping(reader_options).as_dict()
+    except ProcessingError:
+        raise AcquisitionReadError("ACQUISITION_READER_OPTIONS_INVALID", "Las opciones de lectura de adquisición no son válidas.") from None
     overrides = column_overrides or {}
     digest = _request_hash({"operation": "UPLOAD", "dataset_id": dataset.id, "upload_id": upload_id,
                             "reader_options": options, "column_overrides": overrides})
@@ -134,10 +153,17 @@ def register_upload(db: Session, user: User, dataset: Dataset, upload_id: str, *
     # Only inspection is synchronous; complete inference/override validation
     # follows in the durable acquisition worker over the full population.
     inspection = inspect_file(Path(upload.path), upload.filename, options, limits)
-    validate_column_overrides(overrides, [column["name"] for column in inspection["columns"]])
+    # Unknown sample values/headers are not guessed when HTTP reaches its
+    # metadata budget. The complete worker profile validates those overrides.
+    if inspection["columns"]:
+        validate_column_overrides(overrides, [column["name"] for column in inspection["columns"]])
+    elif overrides:
+        raise AcquisitionReadError("ACQUISITION_INSPECTION_LIMITED", "La inspección acotada no pudo observar el encabezado. Registra sin correcciones de tipos o elige otra hoja.")
     run = AcquisitionRun(id=uid(), organization_id=user.organization_id, dataset_id=dataset.id,
         upload_id=upload.id, source_type="UPLOAD", filename=upload.filename,
-        source_snapshot={"upload_id": upload.id, "sha256": upload.sha256, "size_bytes": upload.size_bytes},
+        source_snapshot={"upload_id": upload.id, "sha256": upload.sha256, "size_bytes": upload.size_bytes,
+                         "source_format": inspection["format"], "format_variant": "JSON_LINES" if inspection["effective_limits"]["format"] == "JSON_LINES" else None,
+                         "physical_header_row_number": inspection["effective_limits"]["header_row_number"]},
         reader_options=options, column_overrides=overrides, effective_limits=limits.as_dict(),
         request_hash=digest, idempotency_key=idempotency_key, initiated_by_id=user.id,
         initiated_by_name=user.name, total_bytes=upload.size_bytes)
@@ -325,7 +351,7 @@ def execute_acquisition(identifier: str, owner: str) -> None:
         nonlocal last_state_check
         moment = time.monotonic()
         if moment - started > limits.timeout_seconds:
-            raise AcquisitionStopped("ACQUISITION_TIMEOUT", "La adquisición excedió su tiempo efectivo.")
+            raise AcquisitionReadError("ACQUISITION_TIMEOUT", "La adquisición excedió su tiempo efectivo.", {"maximum_seconds": limits.timeout_seconds})
         # A narrow, byte-bounded SQL fetch can contain only a handful of rows.
         # Probe its persisted cancellation/lease at most four times per second;
         # every materialization/progress/stage boundary still probes immediately.
@@ -334,6 +360,10 @@ def execute_acquisition(identifier: str, owner: str) -> None:
             return
         if shutil.disk_usage(work).free < limits.min_free_bytes:
             raise AcquisitionStopped("RESOURCE_DISK_INSUFFICIENT", "No queda la reserva de disco requerida para completar la adquisición.")
+        if reader is not None and reader.format == "XLSX":
+            used = sum(item.stat().st_size for item in work.iterdir() if item.is_file())
+            if used > limits.xlsx_temp_bytes:
+                raise limit_error("ACQUISITION_TEMP_DISK_LIMIT", "temporary_bytes", limits.xlsx_temp_bytes, used)
         with SessionLocal() as state:
             job = state.scalar(select(Job).where(Job.acquisition_id == identifier))
             acquisition = state.get(AcquisitionRun, identifier)
@@ -353,6 +383,7 @@ def execute_acquisition(identifier: str, owner: str) -> None:
 
     if reader is not None:
         reader.check = checkpoint
+        reader.work_dir = work
     else:
         # The frozen source adapter uses the same cooperative checks between
         # fetches. No source credential is forwarded to a quality/Spark worker.
@@ -386,7 +417,14 @@ def execute_acquisition(identifier: str, owner: str) -> None:
                                for value in row if value is not None)
             checkpoint(stage="READING", rows=total_rows, size=total_bytes)
         checkpoint(stage="PROFILING")
-        profiled = profile_paths(paths, column_overrides=overrides, native_types=native, limits=limits, check=checkpoint)
+        spill_limit = None
+        if reader is not None and reader.format == "XLSX":
+            used = sum(item.stat().st_size for item in work.iterdir() if item.is_file())
+            spill_limit = limits.xlsx_temp_bytes - used
+            if spill_limit <= 0:
+                raise limit_error("ACQUISITION_TEMP_DISK_LIMIT", "temporary_bytes", limits.xlsx_temp_bytes, used)
+        profiled = profile_paths(paths, column_overrides=overrides, native_types=native, limits=limits, check=checkpoint,
+                                 temp_byte_limit=spill_limit)
         checkpoint(stage="PUBLISHING")
         with SessionLocal() as db:
             run = db.scalar(select(AcquisitionRun).where(AcquisitionRun.id == identifier).with_for_update())
@@ -477,7 +515,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
         run.attempts, run.attempt_id = candidate.attempts, uid()
         run.status, run.stage, run.started_at = "RUNNING", "READING", run.started_at or utcnow()
         run.processed_rows, run.processed_bytes = 0, 0
-        run.error_code, run.error_message = None, None
+        run.error_code, run.error_message, run.error_details, run.error_reference = None, None, None, None
         identity, job_id = run.id, candidate.id
         db.commit()
     active["job_id"] = job_id
@@ -486,17 +524,25 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
     except Exception as exc:  # noqa: BLE001 - worker boundary persists only sanitized closed errors.
         # Closed error categories only. Source adapters already sanitize driver
         # errors; parser/internal exceptions never cross into persistent text.
+        details = None
         if isinstance(exc, (AcquisitionStopped, SourceError)):
             code, message = exc.code, exc.message
         elif isinstance(exc, ArtifactIntegrityError):
             code, message = "ARTIFACT_INTEGRITY_ERROR", "La integridad de los datos de adquisición no coincide."
         elif isinstance(exc, ProcessingError):
-            code = str(exc).split(":", 1)[0]
-            if not code.startswith("ACQUISITION_") and code not in {"CANONICAL_SCHEMA_INVALID", "SOURCE_SCHEMA_DRIFT"}:
-                code = "ACQUISITION_INVALID_DATA"
-            message = "No se pudo completar la lectura, validación o perfil completo de la fuente; revisa el formato y los límites efectivos."
+            diagnostic = processing_diagnostic(exc)
+            code, message, details = diagnostic.code, diagnostic.message, diagnostic.details
+        elif isinstance(exc, (MemoryError, duckdb.OutOfMemoryException)):
+            code, message = "ACQUISITION_MEMORY_LIMIT", "No hay memoria suficiente para completar la adquisición dentro del presupuesto."
+        elif isinstance(exc, PermissionError):
+            code, message = "ACQUISITION_STORAGE_PERMISSION", "El almacenamiento no permite completar la adquisición."
+        elif isinstance(exc, OSError) and exc.errno == 28:
+            code, message = "RESOURCE_DISK_INSUFFICIENT", "No hay espacio de disco suficiente para completar la adquisición."
+        elif isinstance(exc, duckdb.IOException) and "max_temp_directory_size" in str(exc):
+            code, message = "ACQUISITION_TEMP_DISK_LIMIT", "El perfil completo excede el presupuesto efectivo de almacenamiento temporal."
         else:
             code, message = "ACQUISITION_FAILED", "No se pudo completar la adquisición. Conserva la referencia para diagnóstico."
+        logger.error("Acquisition failed reference=%s code=%s exception_type=%s", identity, code, type(exc).__name__)
         with SessionLocal() as db:
             run = db.scalar(select(AcquisitionRun).where(AcquisitionRun.id == identity).with_for_update())
             job = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
@@ -504,6 +550,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
                 run.status = "CANCELLED" if code == "ACQUISITION_CANCELLED" else "FAILED"
                 run.stage, run.finished_at = run.status, utcnow()
                 run.error_code, run.error_message = code, message
+                run.error_details, run.error_reference = details, run.id
                 job.status, job.last_error, job.lease_until = run.status, message, None
                 audit(db, "ACQUISITION_" + run.status, "acquisition", run.id, message,
                       Actor("WORKER", owner, "Worker adquisición"), run.organization_id,

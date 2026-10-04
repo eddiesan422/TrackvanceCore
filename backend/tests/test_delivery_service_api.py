@@ -1890,8 +1890,9 @@ def test_cancellation_after_started_preserves_known_remote_outcome(
         assert attempt is not None and attempt.status == expected_decision
 
 
+@pytest.mark.parametrize("poll_during_final_verification", [False, True])
 def test_cancellation_during_local_preparation_prevents_remote_attempt(
-    monkeypatch, authenticated, database, delivery_case
+    monkeypatch, authenticated, database, delivery_case, poll_during_final_verification
 ):
     config = publish_configuration(authenticated, delivery_case)
     run_response = queue_run(
@@ -1911,6 +1912,27 @@ def test_cancellation_during_local_preparation_prevents_remote_attempt(
 
     real_settings_for = delivery_service.settings_for
     calls = 0
+
+    if poll_during_final_verification:
+        # Exercise the cancellation poll after sealing the local spool. A fast
+        # fixture otherwise stays inside the 0.5-second throttle and reaches the
+        # final fence directly, concealing the control() exception branch.
+        real_clock = delivery_service.time
+        clock = [real_clock.monotonic()]
+        monkeypatch.setattr(delivery_service, "time", SimpleNamespace(
+            monotonic=lambda: clock[0], perf_counter=real_clock.perf_counter,
+        ))
+        real_verified_frame = delivery_service._verified_frame
+        verifications = 0
+
+        def verify_after_elapsed_preparation(version, artifact, control=None):
+            nonlocal verifications
+            verifications += 1
+            if verifications == 3:
+                clock[0] += 0.6
+            return real_verified_frame(version, artifact, control)
+
+        monkeypatch.setattr(delivery_service, "_verified_frame", verify_after_elapsed_preparation)
 
     def cancel_during_second_settings_lookup(destination, destination_version):
         nonlocal calls

@@ -743,7 +743,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
         if "backup" in args:
             (evidence / "backup").mkdir()
             (evidence / "backup" / "state.json").write_text(json.dumps({
-                "schema_version": 6, 'migration': runner.docker_state.CURRENT_MIGRATION,
+                "schema_version": runner.docker_state.VERIFY_SCHEMA_VERSION, 'migration': runner.docker_state.CURRENT_MIGRATION,
                 "verified_secrets": 2, "verified_source_secrets": 1,
                 "verified_delivery_secrets": 1,
                 "verified_artifacts": 4, "validated_relationships": 8,
@@ -791,7 +791,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
 
 @pytest.mark.parametrize('change', ['missing', 'unknown', 'replace', 'schema', 'migration'])
 def test_native_fingerprint_never_ignores_unknown_or_missing_tables(change):
-    state = {'schema_version':6, 'migration':runner.docker_state.CURRENT_MIGRATION,
+    state = {'schema_version':runner.docker_state.VERIFY_SCHEMA_VERSION, 'migration':runner.docker_state.CURRENT_MIGRATION,
              'tables':{name:{} for name in runner.docker_state.CURRENT_STATE_TABLES}}
     runner.assert_native_fingerprint(state)
     if change in {'missing', 'replace'}:

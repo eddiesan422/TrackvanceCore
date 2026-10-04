@@ -2,7 +2,7 @@
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 42 códigos; la matriz tiene 128 entradas protegidas.
+El catálogo contiene 42 códigos; la matriz tiene 130 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -63,6 +63,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | DELETE | `/users/{id}` | `users:manage` |
 | DELETE | `/users/{id}/external-identities/{identity_id}` | `users:manage` |
 | GET | `/acquisitions` | `datasets:read` |
+| GET | `/acquisitions/limits` | `datasets:read` |
 | GET | `/acquisitions/{id}` | `datasets:read` |
 | GET | `/artifacts/{id}/download` | `artifacts:download` |
 | GET | `/audit-events` | `audit:read` |
@@ -176,6 +177,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/monitors/{id}/versions` | `sentinel:configure` |
 | POST | `/notifications/inbox/read-all` | `notifications:read` |
 | POST | `/notifications/inbox/{id}/read` | `notifications:read` |
+| POST | `/notifications/inbox/{id}/unread` | `notifications:read` |
 | POST | `/recon/controls` | `recon:configure` |
 | POST | `/recon/controls/{id}/versions` | `recon:configure` |
 | POST | `/recon/runs` | `recon:execute` |

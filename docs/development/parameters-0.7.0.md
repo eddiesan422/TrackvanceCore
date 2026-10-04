@@ -9,8 +9,8 @@ Los tamaños expresados en KiB, MiB y GiB usan unidades binarias; los valores en
 | `TRACKVANCE_ACQUISITION_MAX_OBSERVED_BYTES` | 2147483648 bytes UTF-8 observados | 1 KiB..20 GiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
 | `TRACKVANCE_ACQUISITION_BATCH_ROWS` | 5000 registros/lote | 1..50.000. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
 | `TRACKVANCE_ACQUISITION_BATCH_BYTES` | 8388608 bytes/lote | 64 KiB..64 MiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
-| `TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_BYTES` | 10485760 bytes JSON no lineal/XLSX | 1 KiB..64 MiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
-| `TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_ROWS` | 100000 filas JSON no lineal/XLSX | 1..100.000. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
+| `TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_BYTES` | 10485760 bytes JSON no lineal | 1 KiB..64 MiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
+| `TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_ROWS` | 100000 filas JSON no lineal | 1..100.000. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
 | `TRACKVANCE_ACQUISITION_MEMORY_BYTES` | 268435456 bytes de analítica | 64 MiB..4 GiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
 | `TRACKVANCE_ACQUISITION_MIN_FREE_BYTES` | 536870912 bytes reserva de disco | 16 MiB..20 GiB. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
 | `TRACKVANCE_ACQUISITION_TIMEOUT_SECONDS` | 1800 segundos | 30..86.400. API / acquisition-worker. Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun. |
@@ -42,6 +42,26 @@ Los tamaños expresados en KiB, MiB y GiB usan unidades binarias; los valores en
 | `TRACKVANCE_EVENT_LEASE_SECONDS` | 300 segundos | 60..3.600. events-consumers. Lease CAS, heartbeat y fence final. |
 | `TRACKVANCE_EVENT_POLL_SECONDS` | 1 segundo | 1..60. events-consumers. Intervalo del bucle independiente. |
 
+## XLSX C01: límites independientes
+
+| Variable XLSX asíncrona | Default / unidad | Rango y control |
+|---|---|---|
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_ROWS` | 1000000 registros de datos | 1..1048575; espacio físico restante tras encabezado. Lectura completa; min con MAX_ROWS general y filas físicas disponibles. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_UPLOAD_BYTES` | 1073741824 bytes ZIP | 1 KiB..5 GiB. Recepción/registro/lectura; mínimo con upload general. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_EXPANDED_BYTES` | 4294967296 bytes XML expandidos | 1 KiB..20 GiB. Declaración ZIP y contador real de descompresión. |
+| `TRACKVANCE_ACQUISITION_XLSX_METADATA_BYTES` | 8388608 bytes | 64 KiB..64 MiB. Directorio central antes de ZipFile y XML de metadata. |
+| `TRACKVANCE_ACQUISITION_XLSX_INSPECTION_BYTES` | 4194304 bytes XML | 64 KiB..16 MiB. Presupuesto agregado de inspección HTTP; total desconocido si se agota. |
+| `TRACKVANCE_ACQUISITION_XLSX_CACHE_BYTES` | 8388608 bytes | 64 KiB..16 MiB. Caché SQLite/shared strings; no es hard limit de RSS. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_ENTRIES` | 4096 miembros ZIP | 4..16384. EOCD antes de asignación de directorio y validación del paquete. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_STYLES` | 65536 estilos | 1..65536. Control de índices y formatos durante parse de estilos. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_CELLS` | 100000000 celdas de datos | 1..104857600. Conteo completo al materializar; además límites físicos/columnas. |
+| `TRACKVANCE_ACQUISITION_XLSX_MAX_RECORD_BYTES` | 1048576 bytes UTF-8 por registro | 1 byte..8 MiB. Control antes de incorporar el registro al lote. |
+| `TRACKVANCE_ACQUISITION_XLSX_TEMP_BYTES` | 8589934592 bytes temporales | 1 KiB..40 GiB. Índice, partes privadas y spill de perfil del intento; además reserva libre. |
+| `TRACKVANCE_ACQUISITION_XLSX_METADATA_SECONDS` | 10 segundos | 1..60. Deadline de lectura de metadata. |
+| `TRACKVANCE_ACQUISITION_XLSX_INSPECTION_SECONDS` | 5 segundos | 1..30. Deadline agregado HTTP metadata/muestra; inspection_limited sin falso total. |
+
+La UI consulta `/acquisitions/limits?format=XLSX&route=ASYNC_ACQUISITION` antes de carga. Stage/inspect incorporan el descriptor efectivo. Excel tiene1048576 filas físicas incluyendo encabezado; el límite de datos también se reduce al espacio restante. No se anuncian5M filas XLSX. La carga rápida usa `route=LEGACY_UPLOAD` y conserva100k/10 MiB.
+
 ## Defaults de librería, Compose y certificación
 
 La tabla describe los defaults del código cuando no hay un override de entorno.
@@ -51,12 +71,13 @@ librería; también establece 1800 segundos para `TRACKVANCE_RUN_TIMEOUT_SECONDS
 frente a los 300 segundos de la librería. Las demás variables de la tabla
 conservan el mismo default en Compose, salvo un override explícito.
 
-El perfil de certificación aislado usa upload de 2 GiB y bytes observados de
+El ensayo CSV inicial de 0.7.0 usó upload de 2 GiB y bytes observados de
 4 GiB por el overhead real del fixture nominal de 1 GiB. Esos overrides no
 modifican la instalación del usuario ni certifican tamaños de 2/5 GiB sin
-haberlos ejecutado. Las cotas de JSON no lineal/XLSX siguen siendo menores.
+haberlos ejecutado. Las cotas de JSON no lineal siguen siendo menores.
 El endpoint `/system/engines` expone los valores efectivos para la UI y los
-benchmarks.
+benchmarks. La certificación C01–C06 de XLSX utiliza los defaults normales de
+Compose, sin overrides exclusivos de los tests (`xlsx_test_limit_overrides=false`).
 
 El overlay Standalone configura los puertos internos driver 7078/blockmanager
 7079 y `MASTER=spark://spark-master:7077`. Los ejecutores no reciben secretos de

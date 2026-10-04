@@ -396,6 +396,11 @@
     },
     {
       "method": "GET",
+      "path": "/acquisitions/limits",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
       "path": "/acquisitions/{id}",
       "permission": "datasets:read"
     },
@@ -957,6 +962,11 @@
     {
       "method": "POST",
       "path": "/notifications/inbox/{id}/read",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "POST",
+      "path": "/notifications/inbox/{id}/unread",
       "permission": "notifications:read"
     },
     {

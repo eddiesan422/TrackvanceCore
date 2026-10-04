@@ -35,9 +35,12 @@ vigentes, además del deadline acumulado de adquisición.
 CSV/TXT y NDJSON se recorren por registros. NDJSON descubre completamente la unión
 de columnas sin conservar registros y vuelve a recorrer el archivo para generar
 lotes. Parquet verifica footer, tamaño expandido y tamaño de grupos de lectura,
-materializando ventanas acotadas. XLSX y JSON no lineal tienen un contrato menor
-explícito: 10 MiB y 100.000 filas por defecto; su incumplimiento falla y recomienda
-un formato de volumen, sin truncar la población. Los límites se configuran mediante
+materializando ventanas acotadas. JSON no lineal conserva 10 MiB/100000 filas.
+La ampliación C01 del 4 de octubre, detallada en ADR 0025, hace XLSX incremental:
+default de 1M filas de datos, 1 GiB comprimido y 4 GiB expandido, índices privados
+acotados y numeración física sin confiar en dimensiones. La carga rápida conserva
+el contrato legacy. El incumplimiento falla sin truncar la población.
+Los límites se configuran mediante
 `TRACKVANCE_ACQUISITION_*` y se conservan en cada adquisición.
 
 Parquet utiliza `ParquetFile.iter_batches`, sin pre-buffer ni hilos, después de

@@ -82,14 +82,14 @@ def sample_paths(paths: list[Path], columns: list[str], limit: int = 20, *,
 
 
 @contextmanager
-def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None):
+def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None, *, temp_byte_limit: int | None = None):
     effective = limits or AcquisitionLimits.configured()
     temporary = storage_provider.temporary_path(".spill")
     temporary.mkdir()
     try:
         connection = duckdb.connect(":memory:", config={
             "memory_limit": f"{effective.memory_bytes}B", "threads": "1",
-            "temp_directory": str(temporary), "max_temp_directory_size": f"{effective.max_observed_bytes}B",
+            "temp_directory": str(temporary), "max_temp_directory_size": f"{min(effective.max_observed_bytes, temp_byte_limit) if temp_byte_limit is not None else effective.max_observed_bytes}B",
             "preserve_insertion_order": "true",
         })
         try:
@@ -168,7 +168,8 @@ def iter_version_batches(db: Session, version: DatasetVersion, batch_rows: int =
 def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
                   native_types: dict[str, str] | None = None,
                   limits: AcquisitionLimits | None = None,
-                  check: Callable[[], None] | None = None) -> tuple[list, dict, str]:
+                  check: Callable[[], None] | None = None,
+                  temp_byte_limit: int | None = None) -> tuple[list, dict, str]:
     """Full-population counts and uniqueness spill to disk; Decimal remains exact.
 
     One column's scalar statistics are accumulated with constant state. Distinct
@@ -184,7 +185,7 @@ def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
     native = native_types or {}
     schema, profiles = [], []
     observed_record_bytes_upper_bound = 0
-    with bounded_scan(paths, effective) as connection:
+    with bounded_scan(paths, effective, temp_byte_limit=temp_byte_limit) as connection:
         record = connection.execute("SELECT COUNT(*) FROM population").fetchone()
         assert record is not None
         count = int(record[0])

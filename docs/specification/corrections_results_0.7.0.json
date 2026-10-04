@@ -1,0 +1,21 @@
+{
+  "version": "0.7.0",
+  "cycle": "C01-C06",
+  "status": "OPEN",
+  "baseline_sha": "12ca7061696d3581a18237dc7737348a3462e2c4",
+  "implementation_sha": null,
+  "summary": [
+    {
+      "label": "Estado del ciclo",
+      "result": "Certificación independiente en curso. No se heredan resultados históricos."
+    },
+    {
+      "label": "XLSX sintético/oráculo",
+      "result": "100k/100001/400k/1M inline y shared: valores completos verificados en generación; ejecución producto aún pendiente."
+    },
+    {
+      "label": "CI y despliegue principal",
+      "result": "Pendientes del HEAD final y de todos sus jobs; upgrade autorizado, por ejecutar únicamente después de aprobar los gates."
+    }
+  ]
+}

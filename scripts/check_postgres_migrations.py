@@ -13,6 +13,168 @@ from uuid import uuid4
 from sqlalchemy.exc import SQLAlchemyError
 
 
+def seed_pre_corrections_baseline(connection) -> None:
+    """Populate only an isolated 0015 migration fixture through its real tables.
+
+    Reflection avoids inserting 0016 columns into the authentic old schema.
+    This helper neither reads artifacts nor resolves its deliberately inert
+    credential references. Its purpose is exact SQL preservation, not a live run.
+    """
+    import sqlalchemy as sa
+
+    from trackvance.db import Base
+
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    if "error_details" in metadata.tables["acquisition_runs"].c:
+        raise ValueError("La fixture histórica requiere exactamente la revisión 0015.")
+    for name, table in metadata.tables.items():
+        if name in Base.metadata.tables:
+            for column in table.columns:
+                column.default = Base.metadata.tables[name].c[column.name].default
+    now = datetime(2026, 9, 11, 12, 34, 56, 123456, tzinfo=UTC)
+    common = {"organization_id": "corrections-fixture", "created_at": now}
+
+    def insert(table_name, **values):
+        connection.execute(metadata.tables[table_name].insert().values(**common, **values))
+
+    insert("roles", id="c05-role", name="Historical role", normalized_name="historical role")
+    connection.execute(metadata.tables["role_permissions"].insert().values(
+        role_id="c05-role", permission_code="notifications:read"))
+    insert("users", id="c05-user", role_id="c05-role", username="historical.corrections",
+           name="Nombre histórico íntegro", email="corrections@example.test",
+           password_hash="historical-unchanged-password-hash", version=7,
+           password_changed_at=now, last_login_at=now)
+    insert("sessions", id="c05-session", user_id="c05-user", token_hash="f" * 64,
+           csrf_token="historical-csrf", authentication_method="LOCAL", expires_at=now)
+    insert("datasets", id="c05-dataset", name="Historical diagnostic source",
+           domain="Riesgo / área histórica", owner="Historical owner", description="No rewrite")
+    insert("external_connections", id="c05-connection", name="Historical offline source",
+           source_type="POSTGRESQL", enabled=False)
+    insert("external_connection_versions", id="c05-source-revision", connection_id="c05-connection", version=1,
+           host="migration-fixture.invalid", port=5432, database="historical", username="fixture_reader",
+           options={"sslmode": "require", "application_name": "histórico"},
+           secret_reference="fixture-opaque-source-reference", config_hash="a" * 64)
+    for kind, identifier, media in (("ORIGINAL_UPLOAD", "c05-original", "text/csv"),
+                                    ("CANONICAL_PARQUET", "c05-canonical", "application/vnd.apache.parquet")):
+        insert("artifacts", id=identifier, kind=kind, name=identifier,
+               path=f"migration-fixture/{identifier}", sha256="b" * 64,
+               size_bytes=42, media_type=media)
+    insert("dataset_versions", id="c05-version", dataset_id="c05-dataset", version=1,
+           filename="historical.csv", source_type="POSTGRESQL", sha256="b" * 64, schema_hash="c" * 64,
+           size_bytes=42, row_count=3, column_count=2, profile_status="READY",
+           original_path="migration-fixture/c05-original", canonical_path="migration-fixture/c05-canonical",
+           original_artifact_id="c05-original", canonical_artifact_id="c05-canonical",
+           schema_json=[{"name": "identifier", "logical_type": "STRING"},
+                        {"name": "amount", "logical_type": "DECIMAL"}],
+           profile={"row_count": 3, "null_count": 1, "metric_method": "FULL_DATASET"},
+           ingestion_metadata={"row_numbering": "PHYSICAL_LINE", "canonical_size_bytes": 42,
+               "reader_options": {"delimiter": ";", "encoding": "utf-8", "header": True},
+               "source": {"connection_id": "c05-connection", "connection_version_id": "c05-source-revision",
+                          "config_hash": "a" * 64, "schema_name": "historical", "table_name": "records"}})
+    insert("artifact_links", id="c05-lineage", relation="CANONICAL_OF", source_type="DATASET_VERSION",
+           source_id="c05-version", target_type="ARTIFACT", target_id="c05-canonical")
+    insert("acquisition_uploads", id="c05-upload", user_id="c05-user", filename="historical-failure.xlsx",
+           path="migration-fixture/expired-upload", sha256="d" * 64, size_bytes=12345,
+           source_format="XLSX", status="EXPIRED", expires_at=now)
+    insert("acquisition_runs", id="c05-acquisition", dataset_id="c05-dataset", upload_id="c05-upload",
+           source_type="UPLOAD", filename="historical-failure.xlsx", request_hash="e" * 64,
+           idempotency_key="historical-acquisition-failure", initiated_by_id="c05-user",
+           initiated_by_name="Nombre histórico íntegro", status="FAILED", stage="READING",
+           attempt_id="historical-attempt", attempts=1, processed_rows=17, processed_bytes=12345,
+           total_rows=400000, total_bytes=12345,
+           source_snapshot={"upload_id": "c05-upload", "sha256": "d" * 64, "size_bytes": 12345,
+                            "sheet_name": "Histórico", "row_numbering": "WORKSHEET_ROW"},
+           reader_options={"sheet_name": "Histórico", "header_row": 2, "identifier_columns": ["identifier"]},
+           column_overrides={"identifier": {"logical_type": "STRING", "semantic_tag": "IDENTIFIER"}},
+           effective_limits={"max_upload_bytes": 1073741824, "max_rows": 5000000,
+                             "batch_rows": 1000, "batch_bytes": 8388608},
+           error_code="HISTORICAL_XLSX_LIMIT", error_message="Fallo histórico conservado sin nueva interpretación.",
+           started_at=now, finished_at=now)
+    insert("jobs", id="c05-job", run_id=None, acquisition_id="c05-acquisition", lane="ACQUISITION",
+           status="FAILED", attempts=1, last_error="HISTORICAL_XLSX_LIMIT")
+    insert("outbox_events", id="c05-event", dedupe_key="historical:c05-acquisition", event_type="ACQUISITION_COMPLETED",
+           aggregate_type="ACQUISITION", aggregate_id="c05-acquisition", module="ACQUISITION",
+           payload={"recipient_user_id": "c05-user", "status": "FAILED", "error_code": "HISTORICAL_XLSX_LIMIT",
+                    "error_message": "Fallo histórico conservado sin nueva interpretación."})
+    insert("event_consumptions", id="c05-consumption", event_id="c05-event", consumer="NOTIFICATIONS",
+           status="DONE", attempts=1, available_at=now, completed_at=now)
+    insert("internal_notifications", id="c05-notification", event_id="c05-event", recipient_user_id="c05-user",
+           module="ACQUISITION", origin="MANUAL", status="FAILED", description="Aviso histórico leído",
+           resource_type="ACQUISITION", resource_id="c05-acquisition", detail_url="/datasets/acquisitions/c05-acquisition",
+           read_at=now)
+    insert("notification_deliveries", id="c05-email", event_type="TEMPORARY_PASSWORD_ISSUED",
+           template_key="temporary_password", recipient_user_id="c05-user", recipient_email_snapshot="corrections@example.test",
+           status="SENT", sent_at=now)
+
+
+def corrections_rows(connection):
+    """Return every application column/row and FK, including empty tables."""
+    import sqlalchemy as sa
+
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    rows = {name: [dict(row) for row in connection.execute(sa.select(table)).mappings()]
+            for name, table in metadata.tables.items() if name != "alembic_version"}
+    foreign_keys = [(name, fk.parent.name, fk.column.table.name, fk.column.name)
+                    for name, table in metadata.tables.items() if name != "alembic_version"
+                    for fk in table.foreign_keys]
+    return rows, foreign_keys
+
+
+def verify_corrections_preservation(connection, config) -> dict:
+    """Exercise 0015→0016→0015→0016 only in the checker's disposable DB."""
+    import sqlalchemy as sa
+    import verify_storage
+    from alembic import command
+    from physical_schema_guard import validate_physical_schema
+
+    from trackvance.db import Base
+
+    connection.rollback()
+    command.downgrade(config, verify_storage.PRE_CORRECTIONS_MIGRATION)
+    connection.commit()
+    seed_pre_corrections_baseline(connection)
+    connection.commit()
+    before, before_fks = corrections_rows(connection)
+    assert len(before) == 42
+    before_hashes = verify_storage._table_hashes(before)
+    relationships = verify_storage.validate_relationships(before, before_fks)
+    connection.rollback()
+    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    connection.commit()
+    after, after_fks = corrections_rows(connection)
+    report = verify_storage.legacy_v6_report(after, after_fks,
+        current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=len(before["artifacts"]),
+        verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert report["tables"] == before_hashes
+    assert report["validated_relationships"] == relationships
+    assert all(row["error_details"] is None and row["error_reference"] is None
+               for row in after["acquisition_runs"])
+    assert {column["name"] for column in sa.inspect(connection).get_columns("acquisition_runs")
+            if column["name"] not in before["acquisition_runs"][0]} == {"error_details", "error_reference"}
+    physical = validate_physical_schema(connection, Base.metadata)
+    connection.rollback()
+    command.downgrade(config, verify_storage.PRE_CORRECTIONS_MIGRATION)
+    connection.commit()
+    restored, restored_fks = corrections_rows(connection)
+    assert verify_storage._table_hashes(restored) == before_hashes
+    assert verify_storage.validate_relationships(restored, restored_fks) == relationships
+    connection.rollback()
+    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    connection.commit()
+    final, final_fks = corrections_rows(connection)
+    projected, projected_fks = verify_storage.project_corrections_upgrade(final, final_fks)
+    assert verify_storage._table_hashes(projected) == before_hashes
+    assert verify_storage.validate_relationships(projected, projected_fks) == relationships
+    return {"status": "PASS", "tables": 42, "rows": sum(map(len, before.values())),
+            "relationships": relationships, "physical_schema": physical,
+            "failed_acquisition_preserved": True, "historical_notification_read_at_preserved": True,
+            "domain_options_numbering_limits_preserved": True}
+
+
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     """Persist representative 0008 rows, not remote writes or credential files."""
     from sqlalchemy import MetaData
@@ -258,7 +420,7 @@ def check() -> dict:
                         if row["id"] == "0008-schedule-unresolved":
                             assert row["enabled"] is False
                             row["enabled"] = True  # Only the documented legacy safety pause is projected.
-                assert actual == historical, f"0012→0015 changed {name}"
+                assert actual == historical, f"0012→0016 changed {name}"
             schedule_table, revision_table = upgraded.tables["monitor_schedules"], upgraded.tables["monitor_schedule_versions"]
             unresolved = connection.execute(sa.select(schedule_table).where(schedule_table.c.id == "0008-schedule-unresolved")).mappings().one()
             assert unresolved["legacy_enabled_before_identity"] is True and unresolved["enabled"] is False
@@ -276,7 +438,7 @@ def check() -> dict:
                         if row["id"] == "0008-schedule-unresolved":
                             assert row["enabled"] is False
                             row["enabled"] = True
-                assert actual == historical, f"0008→0015 changed {name}"
+                assert actual == historical, f"0008→0016 changed {name}"
             migrated_user = connection.execute(sa.select(upgraded.tables["users"]).where(
                 upgraded.tables["users"].c.id == ids["users"])).mappings().one()
             assert migrated_user["username"] and migrated_user["role_id"]
@@ -306,7 +468,7 @@ def check() -> dict:
                 actual = [dict(row) for row in connection.execute(
                     sa.select(delivery_baseline.tables[name]).order_by(delivery_baseline.tables[name].c.id)
                 ).mappings()]
-                assert actual == historical, f"0015→0008 changed {name}"
+                assert actual == historical, f"0016→0008 changed {name}"
             connection.rollback()
             command.upgrade(config, "head")
             connection.commit()
@@ -317,13 +479,15 @@ def check() -> dict:
             connection.rollback()
             command.upgrade(config, "head")
             connection.commit()
+            corrections = verify_corrections_preservation(connection, config)
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
-                "0008_0015_roundtrip": "PASS", "0012_0015_preservation": "PASS",
+                "0008_0016_roundtrip": "PASS", "0012_0016_preservation": "PASS",
                 "sentinel_verified_executor": "PASS", "sentinel_legacy_safety_pause": "PASS",
                 "0012_tables_preserved": len(identity_rows), "0008_tables_preserved": len(baseline_rows),
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
-                "0008_delivery_lineage_edges_preserved": 8}
+                "0008_delivery_lineage_edges_preserved": 8,
+                "0015_0016_preservation": corrections}
     finally:
         if test_engine is not None:
             test_engine.dispose()

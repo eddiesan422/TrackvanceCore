@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-10-04 — correcciones C01–C06
+
+- C01: sustituye el fallback XLSX de adquisición por ZIP/XML incremental, índices
+  privados en disco, inferencia completa y cotas por formato; ignora dimensiones
+  falsas y preserva hoja, encabezado y numeración física. Default de 1M filas de
+  datos, 1 GiB ZIP y 4 GiB expandido; no cambia export Excel ni carga rápida.
+- C02: añade diagnósticos estructurados seguros, referencia persistida y límites
+  efectivos consultables antes de carga. 0016 añade campos nullable sin reescribir
+  errores anteriores; backup state 7 conserva compatibilidad estricta state 6.
+- C03: comparte selector de áreas, incorpora dominios de la organización y permite
+  agregar un área validada. Reutilización/nueva versión muestra el dominio real.
+- C04: valida timezone editable antes de formatear/convertir, muestra error inline
+  y conserva el instante guardado al reabrir o editar otros campos.
+- C05: scheduler, CHAINING/manual y enqueue transitivo usan sólo metadata. El
+  worker verifica todas las fuentes e identidades antes de STARTED, fuera de
+  locks prolongados; corrupción posterior al despacho impide cualquier DDL/DML.
+- C06: añade setter personal idempotente y acción Marcar como no leída, con
+  autorización actual y actualización confirmada de lista/filtros/contador.
+- Añade fixtures/oráculo de valores completos, gate CI XLSX real 400k/1M,
+  regresiones de arquitectura/UI/permisos y documentación de los controles.
+  Los resultados iniciales del 3 de octubre se conservan como históricos.
+
 ## 0.7.0 — 2026-10-03 — volumen y automatización operativa
 
 - Centraliza los mensajes de preflight por código y resultado, con diagnóstico

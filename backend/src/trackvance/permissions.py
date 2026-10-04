@@ -132,7 +132,7 @@ _routes("delivery:configure", "POST", "/delivery/preview", "/delivery/preflight"
 _routes("delivery:execute", "POST", "/delivery/runs")
 _routes("delivery:repair_evidence", "POST", "/delivery/runs/{id}/repair-evidence")
 _routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/reviews")
-_routes("datasets:read", "GET", "/acquisitions", "/acquisitions/{id}")
+_routes("datasets:read", "GET", "/acquisitions", "/acquisitions/limits", "/acquisitions/{id}")
 _routes("datasets:write", "POST", "/datasets/uploads/stage", "/datasets/{id}/acquisitions", "/acquisitions/{id}/cancel")
 _routes("datasets:write", "GET", "/datasets/uploads/{id}/inspect")
 _routes("connections:use", "POST", "/connections/{id}/acquisitions", "/datasets/{id}/acquisitions/refresh")
@@ -143,7 +143,7 @@ _routes("delivery:schedule", "POST", "/delivery/automations", "/delivery/automat
 _routes("delivery:execute", "POST", "/delivery/automations/{id}/dispatch")
 _routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/resume-target")
 _routes("notifications:read", "GET", "/notifications/inbox", "/notifications/unread-count")
-_routes("notifications:read", "POST", "/notifications/inbox/read-all", "/notifications/inbox/{id}/read")
+_routes("notifications:read", "POST", "/notifications/inbox/read-all", "/notifications/inbox/{id}/read", "/notifications/inbox/{id}/unread")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

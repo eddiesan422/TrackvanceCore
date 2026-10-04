@@ -1,7 +1,7 @@
 """Bounded observed-value readers, with deterministic source record positions.
 
-CSV/TXT, Parquet and NDJSON support the volume contract. XLSX and ordinary JSON
-retain the explicitly smaller legacy format bounds. Complete inference/profile
+CSV/TXT, Parquet, NDJSON and XLSX support the volume contract. Ordinary JSON
+retains its explicitly smaller format bounds. Complete inference/profile
 is performed later over all materialized parts, never over the inspection sample.
 """
 
@@ -19,9 +19,11 @@ import duckdb
 import polars as pl
 
 from .acquisition_config import AcquisitionLimits
+from .acquisition_errors import AcquisitionReadError, limit_error, processing_diagnostic
 from .dataset_readers import (
     DatasetReadResult,
     ReaderOptions,
+    UnsupportedDatasetFormat,
     _cell_text,
     _detect_delimiter,
     _flatten_json,
@@ -199,12 +201,19 @@ def _native_kind(value: Any) -> str:
 class FileBatchReader:
     def __init__(self, path: Path, filename: str, options: dict | None = None,
                  limits: AcquisitionLimits | None = None, check: Callable[[], None] | None = None,
-                 *, inspection: bool = False):
+                 *, inspection: bool = False, work_dir: Path | None = None):
         self.path, self.filename = path, filename
-        self.options = ReaderOptions.from_mapping(options)
+        try:
+            self.options = ReaderOptions.from_mapping(options)
+        except ProcessingError:
+            raise AcquisitionReadError("ACQUISITION_READER_OPTIONS_INVALID", "Las opciones de lectura de adquisición no son válidas.") from None
         self.limits, self.check = limits or AcquisitionLimits.configured(), check or (lambda: None)
         self.inspection = inspection
-        self.reader = dataset_reader_registry.resolve(path, filename)
+        self.work_dir = work_dir
+        try:
+            self.reader = dataset_reader_registry.resolve(path, filename)
+        except UnsupportedDatasetFormat:
+            raise AcquisitionReadError("ACQUISITION_UNSUPPORTED_FORMAT", "El formato de archivo no está soportado para adquisición.") from None
         self.metadata: dict[str, Any] = {}
         self.headers: list[str] = []
         self.native_schema: dict[str, str] = {}
@@ -226,8 +235,10 @@ class FileBatchReader:
                 batch, numbers, batch_bytes = [], [], 0
             total_rows += 1
             total_bytes += size
-            if total_rows > self.limits.max_rows or total_bytes > self.limits.max_observed_bytes:
-                raise ProcessingError("ACQUISITION_SIZE_LIMIT: La fuente supera los límites efectivos; no se publicaron datos parciales.")
+            if total_rows > self.limits.max_rows:
+                raise limit_error("ACQUISITION_ROW_LIMIT", "data_rows", self.limits.max_rows, total_rows)
+            if total_bytes > self.limits.max_observed_bytes:
+                raise limit_error("ACQUISITION_OBSERVED_SIZE_LIMIT", "observed_bytes", self.limits.max_observed_bytes, total_bytes)
             batch.append(normalized)
             numbers.append(number)
             batch_bytes += size
@@ -240,7 +251,8 @@ class FileBatchReader:
             self.total_rows = total_rows
 
     def _batch(self, rows: list, numbers: list[int]) -> DatasetBatch:
-        return DatasetBatch(_frame_from_rows(self.headers, rows), numbers, self.format,
+        frame = pl.DataFrame() if self.inspection and not self.headers else _frame_from_rows(self.headers, rows)
+        return DatasetBatch(frame, numbers, self.format,
                             self.reader.format_label, self.reader.media_type, self.row_numbering,
                             self.native_schema, dict(self.metadata))
 
@@ -268,11 +280,11 @@ class FileBatchReader:
             for record, _ in _json_line_records(self.path, self.check):
                 count += 1
                 if count > self.limits.max_rows:
-                    raise ProcessingError("ACQUISITION_SIZE_LIMIT: El archivo supera el límite de registros.")
+                    raise limit_error("ACQUISITION_ROW_LIMIT", "data_rows", self.limits.max_rows, count)
                 _, record_size = observed_row(list(record.values()))
                 size += record_size
                 if size > self.limits.max_observed_bytes:
-                    raise ProcessingError("ACQUISITION_SIZE_LIMIT: El archivo supera el límite de valores observados.")
+                    raise limit_error("ACQUISITION_OBSERVED_SIZE_LIMIT", "observed_bytes", self.limits.max_observed_bytes, size)
                 for name, value in record.items():
                     if name not in kinds:
                         self.headers.append(name)
@@ -306,8 +318,12 @@ class FileBatchReader:
                 largest_group = connection.execute("SELECT COALESCE(MAX(bytes),0) FROM (SELECT SUM(total_uncompressed_size) AS bytes FROM parquet_metadata(?) GROUP BY row_group_id)", [str(self.path)]).fetchone()
             finally:
                 connection.close()
-            if not footer or not expanded or footer[0] > self.limits.max_rows or expanded[0] > self.limits.max_observed_bytes:
-                raise ProcessingError("ACQUISITION_PARQUET_LIMIT: El contenido expandido supera el presupuesto.")
+            if not footer or not expanded:
+                raise AcquisitionReadError("ACQUISITION_PARQUET_INVALID_METADATA", "No se pudo verificar la contabilidad del footer Parquet.")
+            if footer[0] > self.limits.max_rows:
+                raise limit_error("ACQUISITION_ROW_LIMIT", "data_rows", self.limits.max_rows, int(footer[0]))
+            if expanded[0] > self.limits.max_observed_bytes:
+                raise limit_error("ACQUISITION_EXPANDED_SIZE_LIMIT", "expanded_bytes", self.limits.max_observed_bytes, int(expanded[0]))
             if not largest_group or largest_group[0] > self.limits.memory_bytes // 2:
                 raise ProcessingError("ACQUISITION_PARQUET_ROW_GROUP_LIMIT: Un grupo Parquet supera el presupuesto de descompresión; divide los grupos de origen.")
             self.total_rows = int(footer[0])
@@ -336,9 +352,31 @@ class FileBatchReader:
                             position += 1
                             yield list(row), position
             yield from self._batches(parquet_rows())
+        elif self.format == "XLSX":
+            from .xlsx_streaming import XlsxStreamingReader
+
+            self.row_numbering = "PHYSICAL_SHEET_ROW"
+            xlsx_source = XlsxStreamingReader(self.path, self.options, self.limits, self.check,
+                                         inspection=self.inspection, work_dir=self.work_dir)
+
+            def xlsx_rows():
+                iterator = iter(xlsx_source)
+                try:
+                    for row, number in iterator:
+                        self.headers, self.native_schema = xlsx_source.headers, xlsx_source.native_schema
+                        self.metadata = xlsx_source.metadata
+                        yield row, number
+                finally:
+                    iterator.close()
+                    self.headers, self.native_schema = xlsx_source.headers, xlsx_source.native_schema
+                    self.metadata = xlsx_source.metadata
+                    self.metadata["inspection_limited"] = xlsx_source.inspection_limited
+                    self.total_rows = xlsx_source.total_rows
+
+            yield from self._batches(xlsx_rows())
         else:
             if self.path.stat().st_size > self.limits.bounded_format_bytes:
-                raise ProcessingError("ACQUISITION_FORMAT_LIMIT: XLSX y JSON no lineal tienen un límite explícito menor; utiliza CSV, Parquet o NDJSON para volumen.")
+                raise limit_error("ACQUISITION_FORMAT_LIMIT", "compressed_bytes", self.limits.bounded_format_bytes, self.path.stat().st_size)
             result: DatasetReadResult = self.reader.inspect(self.path, self.options) if self.inspection else self.reader.read(self.path, self.options)
             if result.frame.height > self.limits.bounded_format_rows:
                 raise ProcessingError("ACQUISITION_FORMAT_LIMIT: El formato supera el límite de registros permitido.")
@@ -351,6 +389,15 @@ class FileBatchReader:
 
 def inspect_file(path: Path, filename: str, options: dict | None = None,
                  limits: AcquisitionLimits | None = None) -> dict:
+    try:
+        return _inspect_file(path, filename, options, limits)
+    except ProcessingError as exc:
+        diagnostic = processing_diagnostic(exc)
+        raise AcquisitionReadError(diagnostic.code, diagnostic.message, diagnostic.details) from None
+
+
+def _inspect_file(path: Path, filename: str, options: dict | None,
+                  limits: AcquisitionLimits | None) -> dict:
     reader = FileBatchReader(path, filename, options, limits, inspection=True)
     batches = iter(reader)
     try:
@@ -367,6 +414,10 @@ def inspect_file(path: Path, filename: str, options: dict | None = None,
                              "native_type": first.native_schema.get(column["name"])} for column in schema],
                 "sample": first.frame.head(20).to_dicts(), "sampled_rows": first.frame.height,
                 "row_count": reader.total_rows, "sampled": True,
-                "row_numbering": first.row_numbering}
+                "row_numbering": first.row_numbering,
+                "inspection_limited": bool(reader.metadata.get("inspection_limited", False)),
+                "effective_limits": reader.limits.describe("JSON_LINES" if reader.metadata.get("variant") == "JSON_LINES" else reader.format,
+                    header_row=reader.metadata.get("physical_header_row_number"),
+                    inspection_limited=bool(reader.metadata.get("inspection_limited", False)))}
     finally:
         batches.close()

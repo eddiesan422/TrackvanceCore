@@ -29,6 +29,24 @@ No añade Redis/Celery, Kubernetes, nuevos Source/Sink, gobierno, masking, canal
 externos ni notificaciones de asignación. El upgrade real es último gate y sólo
 ocurre después de pruebas/documentos/CI aprobados.
 
+### Correcciones C01–C06 — 4 de octubre de 2026
+
+Este ciclo conserva el alcance funcional de 0.7.0. Corrige la adquisición normal
+de XLSX mediante lectura incremental y límites propios, diagnósticos seguros y
+límites visibles, el selector compartido de áreas, la edición de zona horaria,
+el despacho por metadata y el setter personal de notificaciones no leídas.
+No abre puntos adicionales del roadmap. La migración aditiva 0016 sólo incorpora
+los dos campos opcionales del diagnóstico de adquisición, sin reescribir historia.
+
+La implementación y la certificación se distinguen en
+[validación C01–C06](development/validation.md). El cierre exige XLSX inline y
+shared de 400000/1000000 filas con verificación completa, navegador y Spark/SQL
+reales, PostgreSQL con cuatro programaciones sobre dos datasets grandes y un
+worker ocupado, recuperación, todas las regresiones, PDF completo revisado,
+todos los jobs del SHA final y upgrade controlado de la instalación existente.
+Hasta completar esos gates, las capacidades implementadas no constituyen una
+certificación cerrada.
+
 ## Antecedente 0.6.1: simplificar la entrega de credenciales
 
 El administrador recibe una temporal nueva una sola vez en pantalla y decide cómo

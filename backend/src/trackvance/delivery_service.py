@@ -423,14 +423,14 @@ def test_saved_destination(
     }
 
 
-def _owned_version(
+def _owned_version_metadata(
     db: Session, version_id: str, organization_id: str
-) -> tuple[DatasetVersion, Dataset, Artifact, DatasetRecords]:
+) -> tuple[DatasetVersion, Dataset, Artifact]:
     version = db.scalar(
         select(DatasetVersion).where(
             DatasetVersion.id == version_id,
             DatasetVersion.organization_id == organization_id,
-        )
+        ).execution_options(populate_existing=True)
     )
     if version is None:
         raise DeliveryOperationError(
@@ -440,31 +440,115 @@ def _owned_version(
         select(Dataset).where(
             Dataset.id == version.dataset_id,
             Dataset.organization_id == organization_id,
-        )
+        ).execution_options(populate_existing=True)
     )
     artifact = db.scalar(
         select(Artifact).where(
             Artifact.id == version.canonical_artifact_id,
             Artifact.organization_id == organization_id,
             Artifact.kind.in_({"CANONICAL_PARQUET", "INTAKE_ACCEPTED"}),
-        )
+        ).execution_options(populate_existing=True)
     )
-    if dataset is None or artifact is None:
+    if dataset is None or artifact is None or version.profile_status != "READY":
         raise DeliveryOperationError(
             412,
             "FAILED_PRECONDITION",
             "La versión no tiene un artifact canónico verificable.",
         )
+    return version, dataset, artifact
+
+
+def _verified_frame(version: DatasetVersion, artifact: Artifact, control=None) -> DatasetRecords:
+    if control:
+        control()
     try:
         frame = DatasetRecords(storage_provider.dataset_paths(artifact),
                                [column["name"] for column in version.schema_json])
+        if frame.height != version.row_count or frame.width != version.column_count:
+            raise ValueError("La población física no coincide con los conteos publicados.")
     except Exception as exc:
         raise DeliveryOperationError(
             412,
             "FAILED_PRECONDITION",
             "El artifact canónico no superó la comprobación de integridad.",
         ) from exc
-    return version, dataset, artifact, frame
+    if control:
+        control()
+    frame.control = control
+    return frame
+
+
+def _owned_version(
+    db: Session, version_id: str, organization_id: str, *,
+    release_metadata: bool = False, control=None,
+) -> tuple[DatasetVersion, Dataset, Artifact, DatasetRecords]:
+    version, dataset, artifact = _owned_version_metadata(db, version_id, organization_id)
+    if release_metadata:
+        # Worker preparation has no pending publication. Do not hold a metadata
+        # transaction or its table locks while hashing/scanning population bytes.
+        db.commit()
+    return version, dataset, artifact, _verified_frame(version, artifact, control)
+
+
+def _source_identity(source: DatasetVersion, canonical: Artifact) -> dict[str, Any]:
+    return {
+        "dataset_version_id": source.id, "source_sha256": source.sha256,
+        "schema_hash": source.schema_hash, "canonical_artifact_id": canonical.id,
+        "canonical_sha256": canonical.sha256, "row_count": source.row_count,
+        "column_count": source.column_count, "canonical_size_bytes": canonical.size_bytes,
+        "canonical_media_type": canonical.media_type, "source_run_id": source.source_run_id,
+    }
+
+
+def _source_matches_plan(run: Run, source: DatasetVersion, canonical: Artifact) -> bool:
+    frozen = run.execution_plan.get("source_identity")
+    if not isinstance(frozen, dict):
+        return False
+    current = _source_identity(source, canonical)
+    if run.execution_plan.get("dispatch_snapshot_version") == 1:
+        return frozen == current
+    # Runs queued before C05 retain their five registered identity/hash fields.
+    legacy_keys = {"dataset_version_id", "source_sha256", "schema_hash",
+                   "canonical_artifact_id", "canonical_sha256"}
+    return set(frozen) == legacy_keys and all(frozen[key] == current[key] for key in frozen)
+
+
+def _assert_dispatch_snapshot(db: Session, run: Run, draft: DeliveryDraft) -> None:
+    """Refresh immutable metadata against the queued identity, without byte I/O."""
+    source, dataset, canonical = _owned_version_metadata(db, run.dataset_version_id, run.organization_id)
+    config = db.get(Configuration, run.config_id, populate_existing=True)
+    destination = db.get(DeliveryDestination, draft.destination_id, populate_existing=True)
+    version = db.get(DeliveryDestinationVersion, draft.destination_version_id, populate_existing=True)
+    plan = run.execution_plan
+    try:
+        signature = [{"name": column["name"], "logical_type": column["logical_type"]}
+                     for column in source.schema_json]
+        schema_hash = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+    except (KeyError, TypeError, ValueError):
+        raise DeliveryOperationError(412, "DISPATCH_SNAPSHOT_MISMATCH",
+                                     "El schema publicado no es verificable.") from None
+    if (config is None or config.organization_id != run.organization_id or config.module != "DELIVERY"
+            or config.dataset_id != dataset.id or draft.dataset_version_id != source.id
+            or configuration_hash(config.config) != plan.get("config_hash")
+            or configuration_hash(draft.snapshot()) != plan.get("config_hash")
+            or not _source_matches_plan(run, source, canonical)
+            or schema_hash != source.schema_hash
+            or source.canonical_path != canonical.path):
+        raise DeliveryOperationError(412, "DISPATCH_SNAPSHOT_MISMATCH",
+                                     "La identidad publicada ya no coincide con la ejecución encolada.")
+    if (destination is None or destination.organization_id != run.organization_id
+            or version is None or version.organization_id != run.organization_id
+            or version.destination_id != destination.id
+            or version.config_hash != configuration_hash({**version.config, "credential_revision": version.secret_reference})
+            or any(plan.get(key) != value for key, value in {
+                "destination_id": destination.id, "destination_version_id": version.id,
+                "destination_version": version.version, "sink_type": destination.sink_type,
+                "target": draft.target.model_dump(), "write_strategy": draft.write_strategy,
+            }.items())
+            or (plan.get("dispatch_snapshot_version") == 1
+                and plan.get("destination_config_hash") != version.config_hash)):
+        raise DeliveryOperationError(412, "DISPATCH_SNAPSHOT_MISMATCH",
+                                     "El destino publicado ya no coincide con la ejecución encolada.")
 
 
 def preview_delivery(
@@ -870,10 +954,12 @@ def preflight_delivery(
     *,
     raise_on_failure: bool = True,
     control=None,
+    release_metadata: bool = False,
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     version, dataset, artifact, frame = _owned_version(
-        db, draft.dataset_version_id, organization_id
+        db, draft.dataset_version_id, organization_id,
+        release_metadata=release_metadata, control=control,
     )
     frame.control = control
     if control:
@@ -910,6 +996,8 @@ def preflight_delivery(
             412, "AUDIT_MAPPING_COLLISION", "El mapping no puede escribir columnas de auditoría."
         )
     _check(checks, "DESTINATION", True, "Destino y revisión inmutable disponibles.")
+    if release_metadata:
+        db.commit()
     sink = sink_registry.create(settings_for(destination, destination_version))
     sink.test()
     _check(checks, "CONNECTION", True, "Conexión al destino verificada.")
@@ -1324,7 +1412,9 @@ def enqueue_delivery(
             "La identidad versionada del destino ya no está disponible.",
         )
     canonical = db.get(Artifact, source.canonical_artifact_id)
-    if canonical is None or canonical.organization_id != config.organization_id:
+    if (source.organization_id != config.organization_id or source.profile_status != "READY"
+            or canonical is None or canonical.organization_id != config.organization_id
+            or canonical.kind not in {"CANONICAL_PARQUET", "INTAKE_ACCEPTED"}):
         raise DeliveryOperationError(412, "FAILED_PRECONDITION", "El artifact canónico no está disponible.")
     policy, _fingerprint, _identity = target_policy(
         db, destination, destination_version, draft.target.model_dump(), lock=True
@@ -1357,12 +1447,10 @@ def enqueue_delivery(
             "target": draft.target.model_dump(),
             "write_strategy": draft.write_strategy,
             "config_hash": configuration_hash(draft.snapshot()),
+            "dispatch_snapshot_version": 1,
+            "destination_config_hash": destination_version.config_hash,
             "evidence_engine_version": __version__,
-            "source_identity": {
-                "dataset_version_id": source.id, "source_sha256": source.sha256,
-                "schema_hash": source.schema_hash, "canonical_artifact_id": canonical.id,
-                "canonical_sha256": canonical.sha256,
-            },
+            "source_identity": _source_identity(source, canonical),
             "allowed": True,
             "reason_code": "DELIVERY_PREFLIGHT_REQUIRED_AT_EXECUTION",
         },
@@ -1874,10 +1962,13 @@ def execute_delivery_run(
         db.commit()
         return
     preflight_started = time.perf_counter()
+    control = delivery_control(run.id, lease_owner)
     try:
+        _assert_dispatch_snapshot(db, run, draft)
         authorize_automated_run(db, run)
         authorize_delivery_initiator(db, run, draft)
-        preflight = preflight_delivery(db, run.organization_id, draft, control=delivery_control(run.id, lease_owner))
+        preflight = preflight_delivery(db, run.organization_id, draft,
+                                      control=control, release_metadata=True)
     except (DeliveryOperationError, DeliveryError, AutomationError) as error:
         if error.code == "WORKER_LEASE_LOST":
             raise
@@ -1908,6 +1999,7 @@ def execute_delivery_run(
         db, destination, draft.destination_version_id
     )
     try:
+        _assert_dispatch_snapshot(db, run, draft)
         authorize_automated_run(db, run)
         authorize_delivery_initiator(db, run, draft)
         attempt_timestamp = utcnow()
@@ -1921,9 +2013,8 @@ def execute_delivery_run(
                 "columns": audit_preflight["columns"], "columns_created": None,
             }
         _version, _dataset, source_artifact, frame = _owned_version(
-            db, source.id, run.organization_id
+            db, source.id, run.organization_id, release_metadata=True, control=control,
         )
-        frame.control = delivery_control(run.id, lease_owner)
         selected_records = frame.select([column.source_name for column in draft.columns])
         sink = sink_registry.create(settings_for(destination, destination_version))
         prepared_target = draft.target.model_dump()
@@ -1988,7 +2079,13 @@ def execute_delivery_run(
             prepared.rows.verify({**preparation_binding, "sink_type": destination.sink_type,
                 "columns": prepared.columns, "target": prepared.target,
                 "strategy": prepared.strategy, "upsert_keys": prepared.upsert_keys})
+        # Verify the original descriptor/parts again after reading them into the
+        # sealed spool. A valid preparation cannot reuse a verification made
+        # before bytes changed during local preparation. This is still outside
+        # the short metadata transaction that persists STARTED.
+        _verified_frame(source, source_artifact, control)
         _fence_delivery_start(db, run, lease_owner)
+        _assert_dispatch_snapshot(db, run, draft)
         authorize_automated_run(db, run)
         authorize_delivery_initiator(db, run, draft)
         claim_delivery_target(db, run)
@@ -1999,6 +2096,9 @@ def execute_delivery_run(
             raise
         if isinstance(prepared.rows, PreparedRows):
             prepared.rows.remove()
+        # The integrity poll can observe cancellation before the normal STARTED
+        # fence. Do not replace a concurrent terminal state with a local failure.
+        _fence_delivery_start(db, run, lease_owner)
         run.status, run.decision, run.error = "FAILED_PRECONDITION", "FAILED", error.message
         run.finished_at, run.progress_stage = utcnow(), "Target bloqueado"
         audit(db, "DELIVERY_FAILED", "run", run.id, error.message, actor, run.organization_id, {"error_code": error.code}, run_id=run.id)
@@ -2007,7 +2107,7 @@ def execute_delivery_run(
     except (ValueError, OSError):
         if isinstance(prepared.rows, PreparedRows):
             prepared.rows.remove()
-        _fence_delivery_job(db, run, lease_owner)
+        _fence_delivery_start(db, run, lease_owner)
         run.status, run.decision, run.error = "FAILED_PRECONDITION", "FAILED", "La preparación local perdió su integridad o corresponde a otra configuración."
         run.finished_at, run.progress_stage = utcnow(), "Preparación local fallida"
         audit(db, "DELIVERY_FAILED", "run", run.id, run.error, actor, run.organization_id, {"error_code": "PREPARED_BINDING_MISMATCH"}, run_id=run.id)
@@ -2226,13 +2326,8 @@ def _repair_context(db: Session, run: Run) -> tuple[
             or draft.dataset_version_id != run.dataset_version_id):
         raise _evidence_problem("El hash o la DatasetVersion de la Configuration no coincide con el Run.")
     source, dataset, source_artifact, frame = _owned_version(db, run.dataset_version_id, run.organization_id)
-    source_identity = {
-        "dataset_version_id": source.id, "source_sha256": source.sha256,
-        "schema_hash": source.schema_hash, "canonical_artifact_id": source_artifact.id,
-        "canonical_sha256": source_artifact.sha256,
-    }
     if ("source_identity" in run.execution_plan
-            and run.execution_plan["source_identity"] != source_identity):
+            and not _source_matches_plan(run, source, source_artifact)):
         raise _evidence_problem("La identidad o los hashes del snapshot difieren del Run original.")
     signature = [{"name": column["name"], "logical_type": column["logical_type"]}
                  for column in source.schema_json]

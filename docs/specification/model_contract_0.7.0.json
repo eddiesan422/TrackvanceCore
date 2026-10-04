@@ -235,6 +235,20 @@
           "references": []
         },
         {
+          "name": "error_details",
+          "type": "JSON",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_reference",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
           "name": "started_at",
           "type": "DATETIME",
           "nullable": true,

@@ -49,7 +49,7 @@
     {
       "variable": "TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_BYTES",
       "default": "10485760",
-      "unit": "bytes JSON no lineal/XLSX",
+      "unit": "bytes JSON no lineal",
       "range": "1 KiB..64 MiB",
       "scope": "API / acquisition-worker",
       "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
@@ -58,7 +58,7 @@
     {
       "variable": "TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_ROWS",
       "default": "100000",
-      "unit": "filas JSON no lineal/XLSX",
+      "unit": "filas JSON no lineal",
       "range": "1..100.000",
       "scope": "API / acquisition-worker",
       "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
@@ -333,6 +333,123 @@
       "scope": "events-consumers",
       "guard": "Intervalo del bucle independiente.",
       "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_ROWS",
+      "default": "1000000",
+      "unit": "registros de datos",
+      "range": "1..1048575; espacio físico restante tras encabezado",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Lectura completa; min con MAX_ROWS general y filas físicas disponibles.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_UPLOAD_BYTES",
+      "default": "1073741824",
+      "unit": "bytes ZIP",
+      "range": "1 KiB..5 GiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Recepción/registro/lectura; mínimo con upload general.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_EXPANDED_BYTES",
+      "default": "4294967296",
+      "unit": "bytes XML expandidos",
+      "range": "1 KiB..20 GiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Declaración ZIP y contador real de descompresión.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_METADATA_BYTES",
+      "default": "8388608",
+      "unit": "bytes",
+      "range": "64 KiB..64 MiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Directorio central antes de ZipFile y XML de metadata.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_INSPECTION_BYTES",
+      "default": "4194304",
+      "unit": "bytes XML",
+      "range": "64 KiB..16 MiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Presupuesto agregado de inspección HTTP; total desconocido si se agota.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_CACHE_BYTES",
+      "default": "8388608",
+      "unit": "bytes",
+      "range": "64 KiB..16 MiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Caché SQLite/shared strings; no es hard limit de RSS.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_ENTRIES",
+      "default": "4096",
+      "unit": "miembros ZIP",
+      "range": "4..16384",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "EOCD antes de asignación de directorio y validación del paquete.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_STYLES",
+      "default": "65536",
+      "unit": "estilos",
+      "range": "1..65536",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Control de índices y formatos durante parse de estilos.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_CELLS",
+      "default": "100000000",
+      "unit": "celdas de datos",
+      "range": "1..104857600",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Conteo completo al materializar; además límites físicos/columnas.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_MAX_RECORD_BYTES",
+      "default": "1048576",
+      "unit": "bytes UTF-8 por registro",
+      "range": "1 byte..8 MiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Control antes de incorporar el registro al lote.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_TEMP_BYTES",
+      "default": "8589934592",
+      "unit": "bytes temporales",
+      "range": "1 KiB..40 GiB",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Índice, partes privadas y spill de perfil del intento; además reserva libre.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_METADATA_SECONDS",
+      "default": "10",
+      "unit": "segundos",
+      "range": "1..60",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Deadline de lectura de metadata.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_XLSX_INSPECTION_SECONDS",
+      "default": "5",
+      "unit": "segundos",
+      "range": "1..30",
+      "scope": "API / acquisition-worker; sólo ASYNC_ACQUISITION XLSX",
+      "guard": "Deadline agregado HTTP metadata/muestra; inspection_limited sin falso total.",
+      "restart": "Recrear servicios afectados; adquisición conserva límites capturados."
     }
   ],
   "fixed_limits": [
@@ -341,6 +458,7 @@
     "Celdas de adquisición: 64 KiB; columnas: 100. El lote de Delivery admite 8 MiB observados además de BATCH_ROWS.",
     "PreparedRows: binding, hash y conteos completos; no hay commit por lote.",
     "Reintentos del consumidor de eventos: máximo 5, persistidos; las reservas y leases no autorizan replay de UNKNOWN.",
-    "Página de resultados: hasta 100.000 filas y 16 MiB UTF-8 antes de decodificar; el exceso produce HTTP 422 RESULT_PAGE_BYTE_LIMIT, sin truncar. Muestra de perfil: hasta 20 filas y 8 MiB de JSON UTF-8."
+    "Página de resultados: hasta 100.000 filas y 16 MiB UTF-8 antes de decodificar; el exceso produce HTTP 422 RESULT_PAGE_BYTE_LIMIT, sin truncar. Muestra de perfil: hasta 20 filas y 8 MiB de JSON UTF-8.",
+    "XLSX: 1048576 filas físicas incluyendo encabezado, 16384 columnas físicas; contrato de negocio100 columnas y celda65536 bytes. Fórmulas observadas, no evaluadas; dimensiones no definen total."
   ]
 }

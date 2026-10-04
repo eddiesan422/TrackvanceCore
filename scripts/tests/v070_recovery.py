@@ -41,18 +41,22 @@ def load_private_environment(path):
     return values
 
 
-def target_override(directory, project):
+def target_override(directory, project, *, backend_image='trackvance-v070-isolated:backend', web_image='trackvance-v070-isolated:web'):
     guarded_project(project)
+    for image, role in ((backend_image, 'backend'), (web_image, 'web')):
+        if image != 'trackvance-v070-isolated:' + role and not re.fullmatch(
+                r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}:' + role, image):
+            raise ValueError('La restauración sólo acepta imágenes privadas de certificación.')
     services = {}
     for name in certification_v070.SERVICES:
         if name in {'postgres', 'web'}:
             continue
-        services[name] = {'build': None, 'image': 'trackvance-v070-isolated:backend', 'pids_limit': 256,
+        services[name] = {'build': None, 'image': backend_image, 'pids_limit': 256,
             'environment': {'PYTHONPATH': '/app/backend/src', 'TRACKVANCE_CERTIFICATION_PROJECT': project},
             'volumes': [{'type': 'bind', 'source': str(ROOT / 'backend/src'), 'target': '/app/backend/src', 'read_only': True},
                         {'type': 'bind', 'source': str(ROOT / 'backend/migrations'), 'target': '/app/backend/migrations', 'read_only': True},
                         {'type': 'bind', 'source': str(ROOT / 'scripts'), 'target': '/app/scripts', 'read_only': True}]}
-    services['web'] = {'build': None, 'image': 'trackvance-v070-isolated:web', 'pids_limit': 128}
+    services['web'] = {'build': None, 'image': web_image, 'pids_limit': 128}
     services['postgres'] = {'pids_limit': 256}
     # Compose ignores a plain JSON null when merging build. The reset tag
     # removes it so restore --build cannot rebuild or retag private images.
@@ -145,7 +149,9 @@ def native_cycle(context_path, evidence_path=None):
         raise ValueError('La evidencia debe permanecer dentro del contexto privado de certificación.')
     evidence.mkdir(parents=True, exist_ok=False)
     backup = evidence / 'backup'
-    override = target_override(evidence, target)
+    source_compose = json.loads((directory / 'compose.json').read_text(encoding='utf-8'))
+    override = target_override(evidence, target, backend_image=context['image'],
+                              web_image=source_compose['services']['web']['image'])
     target_environment = {**source_environment, 'WEB_PORT': str(available_port()),
         'DEMO_ACCESS_ENABLED': 'false', 'DEMO_SEED_ENABLED': 'false'}
     env_file = evidence / 'restore.env'
@@ -162,7 +168,7 @@ def native_cycle(context_path, evidence_path=None):
         docker_state.backup(source, backup)
         docker_state.verify_backup(backup)
         before = json.loads((backup / 'state.json').read_text(encoding='utf-8'))
-        if before['schema_version'] != 6 or before['migration'] != docker_state.CURRENT_MIGRATION or len(before['tables']) != 42:
+        if before['schema_version'] != docker_state.VERIFY_SCHEMA_VERSION or before['migration'] != docker_state.CURRENT_MIGRATION or len(before['tables']) != 42:
             raise ValueError('La huella nativa no contiene el estado completo 0.7.0.')
         source_compose = ['docker', 'compose', '--env-file', str(directory / 'test.env'), '-p', source,
             '-f', str(ROOT / 'compose.yml'), '-f', str(directory / 'compose.json')]
@@ -183,7 +189,7 @@ def native_cycle(context_path, evidence_path=None):
         after = docker_state._copy_snapshot(api['id'], evidence / 'restored-state.json')
         if after != before:
             raise ValueError('La segunda huella restaurada no coincide exactamente.')
-        result.update(status='PASS', revision=before['migration'], state_schema_version=6, tables=42,
+        result.update(status='PASS', revision=before['migration'], state_schema_version=before['schema_version'], tables=42,
             table_counts={name: len(rows) for name, rows in before['tables'].items()},
             verified_artifacts=before['verified_artifacts'], verified_source_secrets=before['verified_source_secrets'],
             verified_delivery_secrets=before['verified_delivery_secrets'],
@@ -369,11 +375,11 @@ with SessionLocal() as db:
         api_container = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api_container['id'], evidence / 'restored-state.json')
         normalized = docker_state._copy_snapshot(api_container['id'], evidence / 'legacy-state.json', command='snapshot-legacy-v5')
-        if normalized != before or after['schema_version'] != 6 or len(after['tables']) != 42:
+        if normalized != before or after['schema_version'] != docker_state.VERIFY_SCHEMA_VERSION or len(after['tables']) != 42:
             raise ValueError('La proyección restaurada no conserva exactamente la historia 0.6.1.')
         if any(after['tables'][name] for name in docker_state.ASYNC_STATE_TABLES):
             raise ValueError('La actualización produjo actividad nueva o notificaciones retroactivas.')
-        result.update(exact_historical_state='PASS', schema_upgrade='0012→0015', native_tables=42, historical_tables=31,
+        result.update(exact_historical_state='PASS', schema_upgrade='0012→0016', native_tables=42, historical_tables=31,
             source_state_sha256=docker_state.canonical_hash(before), restored_legacy_sha256=docker_state.canonical_hash(normalized),
             artifacts=after['verified_artifacts'], source_secrets=after['verified_source_secrets'], delivery_secrets=after['verified_delivery_secrets'],
             historical_notifications=len(after['tables']['notification_deliveries']), no_history_replay='PASS', restore=receipt['status'])

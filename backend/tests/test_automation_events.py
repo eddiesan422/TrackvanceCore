@@ -407,8 +407,9 @@ def test_expired_consumer_lease_recovers_and_attempts_stop_at_five(database, que
     assert not events.consume_once('CHAINING')
 
 
-def test_unverifiable_published_bytes_never_dispatch_a_delivery(database, automation_case):
+def test_unverifiable_published_bytes_fail_in_worker_before_remote_started(database, automation_case):
     from trackvance.artifactstore import storage_provider
+    from trackvance.delivery_service import execute_delivery_run
     from trackvance.models import Artifact
 
     with database() as db:
@@ -418,7 +419,12 @@ def test_unverifiable_published_bytes_never_dispatch_a_delivery(database, automa
         path = storage_provider.materialize(artifact)
         path.write_bytes(b'corrupt')
         occurrence = dispatch_occurrence(db, automation, revision_for(db, automation), 'corrupt-output', utcnow())
-        assert occurrence.reason_code == 'OUTPUT_INTEGRITY_FAILED' and occurrence.run_id is None
+        assert occurrence.status == 'ENQUEUED' and occurrence.reason_code is None
+        db.commit()
+        run = db.get(Run, occurrence.run_id)
+        execute_delivery_run(db, run)
+        assert run.status == 'FAILED_PRECONDITION' and run.started_at is None
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
         assert not automation_case['runtime'].calls
 
 

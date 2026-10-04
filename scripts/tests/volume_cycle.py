@@ -275,7 +275,7 @@ def phase(report, label, directory, context):
     try:
         with metrics:
             ACTIVE_MEASUREMENTS = metrics
-            yield
+            yield metrics
     finally:
         report.setdefault('phases', {})[label] = metrics.report()
         ACTIVE_MEASUREMENTS = None
@@ -443,20 +443,20 @@ def destination_fixture(api, directory, context, token):
     return destination, connection, schema, reader
 
 
-def chain(api, directory, context, fixture, dataset, source, destination, schema, report):
+def chain(api, directory, context, fixture, dataset, source, destination, schema, report, *, column_types=None):
     version_id = source['output_version_id']
     contract = api.post('/api/v1/intake/contracts', {'name':'Volume exact '+uuid4().hex[:8], 'dataset_id':dataset['id'],
         'config':{'required_columns':['record_id'], 'positive_columns':['amount'], 'max_error_rate':0}})
     draft = {'dataset_version_id':version_id,'destination_id':destination['id'],'destination_version_id':destination['destination_version_id'],
         'target':{'mode':'CREATE_TABLE','schema_name':schema,'table_name':'accepted_'+uuid4().hex[:8],'create_schema':False},
-        'columns':[{'source_name':column,'target_name':column,'target_type':'DECIMAL' if column=='amount' else 'STRING',
+        'columns':[{'source_name':column,'target_name':column,'target_type':(column_types or {}).get(column, 'DECIMAL' if column=='amount' else 'STRING'),
             'ordinal':index,'nullable':column=='observed', **({'precision':24,'scale':8} if column=='amount' else {})}
             for index,column in enumerate(COLUMNS)], 'write_strategy':'CREATE_AND_LOAD'}
     with phase(report,'delivery_complete_preflight',directory,context):
         validation = api.post('/api/v1/delivery/validations',draft,expected=(202,))
         OWNED_OPERATIONS.append('/delivery/validations/'+validation['id'])
         validated = wait(api,'/delivery/validations/'+validation['id'])
-        if validated['status']!='SUCCESS': raise RuntimeError('Preflight completo falló.')
+        if validated['status']!='SUCCESS' or (validated.get('result') or {}).get('status')!='PASS': raise RuntimeError('Preflight completo no aprobó el mapping.')
         config = api.post('/api/v1/delivery/configurations?validation_run_id='+validation['id'], {'name':'Volume chained '+uuid4().hex[:8], **draft})
     automation = api.post('/api/v1/delivery/automations', {'name':'Volume Intake→Delivery','configuration_id':config['id'],
         'settings':{'mode':'CHAINED','source_policy':'INTAKE_OUTPUT','intake_configuration_id':contract['id'],
@@ -483,7 +483,7 @@ def chain(api, directory, context, fixture, dataset, source, destination, schema
         target = target_hash(directory,context,schema,table)
         if target['rows']!=fixture['rows'] or target['canonical_rows_sha256']!=fixture['canonical_rows_sha256']:
             raise RuntimeError('El destino SQL no conserva toda la población y valores accepted.')
-        report['delivery']={'run_id':delivered['id'],'occurrence_id':occurrence['id'],'source_version_id':occurrence['dataset_version_id'],
+        report['delivery']={'run_id':delivered['id'],'configuration_id':config['id'],'occurrence_id':occurrence['id'],'source_version_id':occurrence['dataset_version_id'],
             'target_rows':target['rows'],'target':target,'receipt_artifact_id':receipt['metrics']['receipt_artifact_id']}
         if occurrence['dataset_version_id']!=accepted['output_version_id']:
             raise RuntimeError('El encadenado eligió una versión diferente a la salida del Intake disparador.')

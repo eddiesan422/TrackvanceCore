@@ -2,7 +2,7 @@
 
 El esquema ejecutable se genera desde la aplicación y mantiene la base `/api/v1`
 para compatibilidad. [openapi.json](openapi.json) se regenera y revisa como paso
-documental separado. El snapshot 0.7.0 contiene 117 paths y corresponde a las rutas
+documental separado. El snapshot corregido 0.7.0 contiene 119 paths y corresponde a las rutas
 instaladas. Regenerar con `uv run python ../scripts/export_contracts.py` desde
 backend; no conecta a la DB. El contrato documenta cookie, CSRF, MIME, DTOs y errores.
 
@@ -28,20 +28,49 @@ usa recepción 201 → inspección/opciones → adquisición 202.
 | POST `/datasets/{id}/acquisitions/refresh` | Nueva adquisición SQL sobre la revisión vigente congelada al registrar; conserva versiones anteriores. |
 | GET `/acquisitions?dataset_id=&status=&offset=&limit=` | Colección paginada del ámbito autorizado; estados QUEUED/RUNNING/SUCCESS/FAILED/CANCELLED. |
 | GET `/acquisitions/{id}` | `stage`, `processed_rows`, `processed_bytes`, totales nullable, fechas, attempts, cancel_requested, output_version_id y error sanitizado. |
+| GET `/acquisitions/limits?format=XLSX&route=ASYNC_ACQUISITION` | Descriptor autoritativo `{route,format,limits:{nombre:{max,unit}},physical_sheet_rows?,header_row_number,inspection_limited}`. `LEGACY_UPLOAD` describe carga rápida. Requiere datasets:read. |
 | POST `/acquisitions/{id}/cancel` | Cancela QUEUED o solicita cancelación cooperativa RUNNING; no publica una versión parcial. |
 
-CSV/TXT/TSV, JSONL/NDJSON y Parquet se leen por lotes. JSON no lineal y XLSX
-conservan límites efectivos de 10 MiB/100.000 filas. El cliente distingue
+CSV/TXT/TSV, JSONL/NDJSON, Parquet y XLSX asíncrono se leen por lotes. JSON no
+lineal conserva 10 MiB/100000 filas. XLSX aplica default de 1 M de filas de datos, 1 GiB ZIP,
+4 GiB expandido, 100 columnas, 64 KiB/celda, 1 MiB/registro y cotas de metadata,
+índice, disco, batches y tiempo. Excel tiene 1048576 filas físicas incluyendo
+encabezado; se ignoran dimensiones declaradas como total y se conserva
+PHYSICAL_SHEET_ROW. Los endpoints legacy no cambian sus cotas. El cliente distingue
 transferencia y procesamiento; no inventa porcentajes ni promete continuar una
 transferencia incompleta después de cerrar el navegador. Nginx transmite el stage
 binario sin buffering y la API mantiene autoridad sobre el límite efectivo.
+
+Stage/inspect incluyen `effective_limits` e `inspection_limited`. El tamaño
+conocido se compara antes de transferir cuando la variante es fiable, y el
+backend mantiene el guard de bytes anunciados/observados. Una extensión .json
+puede ser JSON Lines: su variante se determina por contenido acotado, sin
+aplicar a ciegas la cota tabular de 10 MiB ni rechazar NDJSON válido. HTTP sólo
+inspecciona metadata y hasta 100 registros bajo 4 MiB XML/5 s agregados; shared
+strings no resueltos bajo el presupuesto dejan total desconocido. Si no se
+conocen columnas, se permite encolar sin overrides; overrides no vacíos producen
+`ACQUISITION_INSPECTION_LIMITED`. La población se valida en el worker. Una cifra cero
+durante indexación no declara hoja vacía. Transferencia, materialización y
+publicación tienen contadores/estados distintos.
+
+La persistencia agrega `error_details` y `error_reference` nullable; el DTO los
+expone en `error.details` y `error.reference`, junto a código y mensaje. Errores
+nuevos conservan código estable, mensaje público, detalle seguro y referencia
+en API, persistencia y avisos. Mapeos legacy son explícitos; excepciones
+arbitrarias no se convierten en texto público. Se distinguen fila, ZIP/expansión,
+celda/registro/columna, hoja/estructura/formato, timeout/disco/memoria/permisos.
+0016 añade campos sin reescribir errores históricos. `route_limits` contiene el
+descriptor de los presupuestos congelados de la adquisición nueva. En XLSX
+histórico sin los nuevos parámetros es null: no atribuye retrospectivamente
+los defaults actuales a una ejecución anterior.
 
 ## Ejecución, conjuntos y resultado completo 0.7.0
 
 Los POST de Intake/Recon/Sentinel aceptan `requested_engine:'AUTO'|'POLARS'|'PYSPARK'`.
 Omitirlo conserva AUTO y la idempotencia legacy. El preview del plan y la ejecución
-incluyen origen, destino y referencias deduplicadas, con tamaño físico verificado
-de las partes. Run.execution_plan schema 3 conserva motor/versión/master,
+incluyen origen, destino y referencias deduplicadas. Enqueue transitivo usa
+conteos/tamaños registrados; ejecución verifica físicamente las partes.
+Run.execution_plan schema 3 conserva motor/versión/master,
 parámetros/presupuesto, reason/rejection y selección explícita; un fallo no cambia
 silenciosamente de motor. `/system/engines` informa Java/PySpark reales,
 modo/master/parameters/budget y heartbeats de tres lanes y tres procesos ligeros.
@@ -110,7 +139,12 @@ una repetición visible y explícita. Settings incluyen mode
 ONCE/INTERVAL/DAILY/WEEKLY/CHAINED, timezone, starts_at, source_policy
 FIXED_VERSION/LATEST_REGISTERED/INTAKE_OUTPUT, allow_empty y allow_warnings,
 además de campos específicos de horario, dataset e Intake. Las versiones fijan
-Configuration y el User responsable. La ocurrencia conserva revisión,
+Configuration y el User responsable. Vacía/parcial/inválida timezone se rechaza
+con 422; el draft UI conserva campos y bloquea guardar antes de convertir fechas.
+Editar sólo nombre/configuración/responsable preserva starts_at UTC y next_run_at.
+Una ancla nueva pasada se rechaza; una ancla existente puede conservarse aunque
+haya pasado. Cambiar el calendario calcula el siguiente slot futuro con la
+política DST vigente (gap omitido, fold=0), sin reactivar ONCE consumido. La ocurrencia conserva revisión,
 trigger_key/origin/planned/dispatched/sourceRun/datasetVersion/Run/status/reason
 y coalesced_intervals. La última versión debe estar ya registrada; no refresca SQL.
 
@@ -122,6 +156,15 @@ coordina entregas manuales y automatizadas por fingerprint reconocido, con lími
 para aliases/proxies/sinónimos; no identifica físicamente todos los targets.
 UNKNOWN bloquea nuevas entregas hasta una revisión concluyente y decisión operativa.
 
+Dispatch scheduled/CHAINED/manual y planificación transitiva consultan sólo
+metadata persistida y fijan fuente/configuración/destino exactos; no abren
+descriptores, partes, hashes, scans ni DataSink bajo locks de despacho. La falta
+de tamaño canónico multipart produce WORKLOAD_METADATA_UNAVAILABLE. El worker
+verifica fuente completa y spool fuera de transacciones prolongadas y revalida
+identidad, permisos, target y lease antes de STARTED. Corrupción o desaparición
+posterior a enqueue produce FAILED_PRECONDITION antes de DDL/DML, conserva hashes
+y no elige otra versión. StorageProvider conserva su verificación íntegra.
+
 POST `/delivery/runs/{id}/resume-target` recibe `{review_id,note}` y requiere
 `delivery:review_unknown`. Registra decisión, actor y auditoría; conserva el UNKNOWN
 histórico, no crea otra Run ni ejecuta DDL/DML. PENDING_REPAIR no autoriza reenvío.
@@ -130,9 +173,14 @@ histórico, no crea otra Run ni ejecuta DDL/DML. PENDING_REPAIR no autoriza reen
 
 GET `/notifications/inbox?module=&origin=&unread=&offset=&limit=` devuelve items
 con id/module/origin/status/decision/description, resource_type/resource_id,
-detail_url/created_at/read_at. GET `/notifications/unread-count` devuelve el conteo.
+detail_url/created_at/read_at y `error` nullable. Un aviso de adquisición nueva
+puede incluir `{code,message,details,reference}` público del mismo evento; los
+históricos sin diagnóstico conservan null y su descripción original. GET `/notifications/unread-count` devuelve el conteo.
 POST `/notifications/inbox/{id}/read` y POST `/notifications/inbox/read-all`
-persisten la lectura. Todas estas rutas exigen notifications:read y el permiso
+persisten la lectura. POST `/notifications/inbox/{id}/unread` fija read_at=null
+idempotentemente y devuelve el DTO confirmado; no crea Run, outbox, nueva
+entrega ni auditoría de ejecución. Los filtros/lista/contador se vuelven a
+consultar después del éxito. Recarga, logout/reinicio preservan el estado. Todas estas rutas exigen notifications:read y el permiso
 vigente del módulo; el ámbito usuario/organización también aplica al contador y
 la lectura. Administrator no consulta una bandeja ajena. Un proceso manual
 notifica al iniciador; scheduled/chain notifica al User responsable real.

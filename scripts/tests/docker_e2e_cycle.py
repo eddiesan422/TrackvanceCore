@@ -159,10 +159,8 @@ def main() -> int:
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],
             environment=environment,
         )
-        execute(
-            [*compose, "cp", "scripts/check_postgres_migrations.py", "api:/tmp/check_postgres_migrations.py"],
-            environment=environment,
-        )
+        for script in ("check_postgres_migrations.py", "verify_storage.py", "physical_schema_guard.py"):
+            execute([*compose, "cp", "scripts/" + script, "api:/tmp/" + script], environment=environment)
         migrations = execute(
             [*compose, "exec", "-T", "api", "python", "/tmp/check_postgres_migrations.py"],
             environment=environment,

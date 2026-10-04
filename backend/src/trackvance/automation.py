@@ -207,16 +207,22 @@ def save_automation(db: Session, actor: User, configuration_id: str, name: str,
     now = utcnow()
     if not name.strip():
         raise AutomationError(422, "NAME_REQUIRED", "Indica el nombre de la automatización.")
-    if aware(settings.starts_at) < now - timedelta(seconds=60):
+    previous = None
+    if automation is not None:
+        if automation.organization_id != actor.organization_id or automation.version != expected_version:
+            raise AutomationError(409, "VERSION_CONFLICT", "La automatización cambió; actualiza el formulario.")
+        previous = settings_for_revision(revision_for(db, automation))
+    same_anchor = previous is not None and aware(settings.starts_at) == aware(previous.starts_at)
+    if aware(settings.starts_at) < now - timedelta(seconds=60) and not same_anchor:
         raise AutomationError(422, "SCHEDULE_IN_PAST", "La primera ejecución debe ser actual o futura.")
+    calendar_fields = ("mode", "timezone", "starts_at", "interval_seconds", "local_time", "weekdays")
+    same_calendar = previous is not None and all(getattr(settings, key) == getattr(previous, key) for key in calendar_fields)
     if automation is None:
         automation = DeliveryAutomation(id=uid(), organization_id=actor.organization_id,
             name=name.strip(), version=1, enabled=enabled, responsible_user_id=responsible.id)
         db.add(automation)
         db.flush()
     else:
-        if automation.organization_id != actor.organization_id or automation.version != expected_version:
-            raise AutomationError(409, "VERSION_CONFLICT", "La automatización cambió; actualiza el formulario.")
         changed = db.execute(update(DeliveryAutomation).where(
             DeliveryAutomation.id == automation.id, DeliveryAutomation.version == expected_version
         ).values(version=expected_version + 1, name=name.strip(), enabled=enabled,
@@ -224,7 +230,14 @@ def save_automation(db: Session, actor: User, configuration_id: str, name: str,
         if cast(CursorResult, changed).rowcount != 1:
             raise AutomationError(409, "VERSION_CONFLICT", "La automatización cambió; actualiza el formulario.")
         db.refresh(automation)
-    automation.next_run_at = next_slot(settings, settings.starts_at, inclusive=True)
+    if not same_calendar:
+        # Editing business fields preserves the live cursor, including a
+        # consumed ONCE's null cursor. A changed calendar uses future slots;
+        # its retained historical anchor must not be dispatched again.
+        if previous is not None and aware(settings.starts_at) < now:
+            automation.next_run_at = next_slot(settings, now)
+        else:
+            automation.next_run_at = next_slot(settings, settings.starts_at, inclusive=True)
     revision = DeliveryAutomationVersion(id=uid(), organization_id=actor.organization_id,
         automation_id=automation.id, version=automation.version, configuration_id=config.id,
         responsible_user_id=responsible.id, enabled=enabled,
@@ -398,19 +411,19 @@ def _resolve_source(db, config, revision, settings, source_run):
             DatasetVersion.dataset_id == config.dataset_id,
             DatasetVersion.profile_status == "READY"
         ).order_by(DatasetVersion.version.desc()).limit(1))
-    if source is None or source.organization_id != config.organization_id or source.profile_status != "READY":
+    if (source is None or source.organization_id != config.organization_id
+            or source.profile_status != "READY"
+            or (settings.source_policy != "INTAKE_OUTPUT" and source.dataset_id != config.dataset_id)):
         return None, "NO_ELIGIBLE_VERSION"
     if not settings.allow_empty and source.row_count == 0:
         return source, "EMPTY_INPUT_BLOCKED"
     artifact = db.get(Artifact, source.canonical_artifact_id) if source.canonical_artifact_id else None
-    if artifact is None or artifact.organization_id != config.organization_id:
+    if (artifact is None or artifact.organization_id != config.organization_id
+            or artifact.kind not in {"CANONICAL_PARQUET", "INTAKE_ACCEPTED"}
+            or not artifact.sha256 or not source.sha256 or not source.schema_hash):
         return source, "OUTPUT_NOT_PUBLISHED"
-    from .artifactstore import ArtifactIntegrityError, storage_provider
-
-    try:
-        storage_provider.dataset_paths(artifact)
-    except (ArtifactIntegrityError, OSError, ValueError):
-        return source, "OUTPUT_INTEGRITY_FAILED"
+    # Eligibility is a metadata decision. Descriptor/part bytes remain an
+    # execution precondition, checked by the Delivery worker before STARTED.
     return source, None
 
 

@@ -1,12 +1,17 @@
 # Operación local y verificación de persistencia
 
-Trackvance Core 0.7.0 se ejecuta con nueve servicios de Docker Compose: PostgreSQL 16,
+Trackvance Core 0.7.0, ciclo correctivo C01–C06, se ejecuta con nueve servicios de Docker Compose: PostgreSQL 16,
 API FastAPI, pasarela web React/nginx, `worker`, `delivery-worker`,
 `acquisition-worker`, `scheduler`, `events-notifications` y `events-chaining`.
 Los tres workers consumen lanes `DEFAULT`, `DELIVERY` y `ACQUISITION`; los otros
 tres procesos gestionan calendario y eventos sin ejecutar conectores ni SQL remoto.
 La única puerta publicada es la web, ligada a `127.0.0.1`; PostgreSQL y la API no
 publican puertos al host.
+
+Este manual describe el contrato implementado. Las métricas fechadas de ciclos
+anteriores son antecedentes y no certifican automáticamente la corrección ni
+su instalación en el principal. Los resultados nuevos deben registrar revisión,
+alcance y estado real; los gates pendientes no se presentan como PASS.
 
 ## Arranque en Windows
 
@@ -71,7 +76,7 @@ el contenido de `.env` ni credenciales.
 
 Las sondas de scheduler y consumidores importan `component_health`, que sólo
 lee su archivo JSON y exige una antigüedad entre cero y menos de 30 segundos.
-No importa los motores analíticos ni abre conexiones. Una medición aislada con
+No importa los motores analíticos ni abre conexiones. Una medición histórica aislada con
 0,25 CPU y 256 MiB observó 0,292 s de importación; la sonda anterior importaba
 dispatcher y tardó 4,082 s, cerca del timeout de 5 segundos. Los límites y el
 timeout se mantienen. Un JSON inválido, fecha futura o archivo fuera del
@@ -90,6 +95,8 @@ verificación nuevos y conserva su evidencia. Comprueba autenticación/CSRF, Int
 categorías Recon, Sentinel, versiones históricas, excepciones, auditoría y XLSX.
 Para cada Excel verifica MIME, nombre descargable, cuatro hojas esperadas y ausencia
 de fórmulas en las celdas de negocio. No reinicia ni elimina datos.
+Durante la certificación C01–C06 se ejecuta exclusivamente en un proyecto
+desechable; no es una comprobación de sólo lectura sobre la instalación principal.
 
 ## Funcionamiento sin dependencias externas
 
@@ -133,16 +140,135 @@ docker compose -f compose.yml -f deploy/docker/compose.offline.yml up -d --wait 
 
 Docker Desktop no publica la puerta de una pasarela conectada únicamente a una red
 interna en el host probado. Por ello nginx tiene un segundo puente sin masquerade.
-API, worker `DEFAULT`, `delivery-worker` y PostgreSQL permanecen exclusivamente en
+API, los tres workers, scheduler, consumidores y PostgreSQL permanecen exclusivamente en
 la red interna, sin gateway.
 Este override **no garantiza bloqueo de Internet desde nginx**: en Docker Desktop
 29.1.3 se observó salida desde ese contenedor incluso sin masquerade. El aislamiento
 total del host depende de su firewall o desconexión externa; no se modifica la red
 del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa salida.
 
+## Adquisición XLSX y diagnóstico C01–C03
+
+La carga normal usa recepción/inspección acotada por HTTP y un AcquisitionRun
+durable en la lane `ACQUISITION`. El worker lee ZIP/OOXML incrementalmente con SAX;
+shared strings y fórmulas compartidas usan índices SQLite privados con caché
+limitada. No precarga la hoja completa ni confía en sus dimensiones declaradas.
+La primera fila no vacía es encabezado; filas sólo formateadas no cuentan como
+registros. La selección de hoja, espacios, Unicode, IDs, fórmulas como texto,
+fechas/epoch y numeración física se conservan. La inferencia y el perfil abarcan
+la población completa antes de publicar una DatasetVersion.
+
+Las trece variables específicas XLSX tienen estos defaults en backend y Compose.
+La configuración efectiva puede reducirlos; la UI consulta el descriptor del
+backend en lugar de mantener una copia de las constantes:
+
+| Variable `TRACKVANCE_ACQUISITION_XLSX_…` | Default | Alcance |
+| --- | --- | --- |
+| `MAX_ROWS` | 1.000.000 registros | Datos de la hoja elegida, sin encabezado |
+| `MAX_UPLOAD_BYTES` | 1.073.741.824 bytes (1 GiB) | Archivo comprimido |
+| `MAX_EXPANDED_BYTES` | 4.294.967.296 bytes (4 GiB) | Contenido expandido leído, incluido ZIP/XML |
+| `METADATA_BYTES` | 8.388.608 bytes (8 MiB) | Metadata del paquete |
+| `INSPECTION_BYTES` | 4.194.304 bytes (4 MiB) | XML observado durante la inspección HTTP |
+| `CACHE_BYTES` | 8.388.608 bytes (8 MiB) | Índices/cachés de shared strings y fórmulas |
+| `MAX_ENTRIES` | 4.096 miembros | Inventario ZIP |
+| `MAX_STYLES` | 65.536 estilos | Catálogo de estilos |
+| `MAX_CELLS` | 100.000.000 celdas | Población materializada |
+| `MAX_RECORD_BYTES` | 1.048.576 bytes (1 MiB) | Valores UTF-8 de un registro |
+| `TEMP_BYTES` | 8.589.934.592 bytes (8 GiB) | Índices, partes y spill temporales del intento |
+| `METADATA_SECONDS` | 10 segundos | Lectura de metadata |
+| `INSPECTION_SECONDS` | 5 segundos | Inspección HTTP |
+
+Se aplican además 100 columnas, 65.536 bytes UTF-8 por celda, lotes de hasta
+5.000 registros y 8 MiB, 2 GiB de valores observados, 256 MiB para perfil,
+512 MiB de reserva de disco y 1.800 segundos por intento. Presupuesto analítico
+y caché no equivalen a RSS máximo: cgroup y mediciones de proceso se registran
+por separado. Macro/DTD/entidades, rutas o paquetes inválidos fallan cerrado;
+la expansión real, tiempo, disco, cancelación y lease se comprueban durante
+lectura/indexación. Una cancelación o fallo no publica una versión parcial.
+
+Excel admite 1.048.576 filas físicas por hoja, incluido el encabezado. La cota
+efectiva de datos es el mínimo del presupuesto general de adquisición, el XLSX
+y las filas físicas restantes desde el encabezado. La ruta XLSX no hereda una
+promesa de cinco millones de registros. JSON no lineal conserva 10 MiB/100.000
+filas y la carga rápida conserva `MAX_UPLOAD_BYTES`/`TRACKVANCE_MAX_ROWS`
+(10 MiB/100.000 filas por defecto). Los límites de exportación Excel no cambian.
+
+Consultar `GET /api/v1/acquisitions/limits?format=XLSX&route=ASYNC_ACQUISITION`
+antes de registrar el trabajo; `route=LEGACY_UPLOAD` describe la carga rápida.
+La inspección puede marcar `inspection_limited` y un total desconocido cuando
+alcanza su presupuesto: no se cuenta toda la hoja en HTTP. Una referencia a
+shared strings fuera de la muestra no se resuelve con un escaneo ilimitado.
+La lectura completa y la validación definitiva corresponden al worker.
+
+Un error conocido conserva código, mensaje funcional, detalles de la cota y
+referencia diagnóstica en API, historial y notificación. Exceso de filas no debe
+presentarse como datos inválidos genéricos. La cota indicada corresponde al
+intento; superar N registros no prueba el total de una hoja que no terminó de
+leerse. Un contador cero durante indexación tampoco indica archivo vacío.
+Bytes transferidos, registros/bytes materializados y versión publicada son
+magnitudes distintas. Las causas desconocidas usan un fallback seguro con
+referencia, sin exponer excepciones arbitrarias, valores, rutas o secretos.
+Errores históricos conservan su texto y código; no se inventa un diagnóstico nuevo.
+
+La carga normal y la rápida comparten **Área de negocio**: opciones iniciales
+y áreas existentes de la organización, ordenadas y deduplicadas, con
+**Agregar nueva área** validada entre uno y 80 caracteres. Se persiste `domain`;
+agregar una versión conserva el área real del dataset y no cambia su etiqueta.
+
+## Calendario, dispatch y bandeja C04–C06
+
+La zona IANA se valida antes de cualquier formateo o conversión. Borrar el texto,
+escribir una zona parcial o pegar una inválida muestra un error y bloquea guardar
+sin borrar otros campos ni sustituir silenciosamente la zona. Una revisión con
+calendario igual conserva `starts_at` y `next_run_at`, incluso si el inicio ya
+pasó; editar un nombre no rearma ONCE consumido. Una creación o nueva ancla
+pasada se rechaza. Cambiar el calendario con el ancla conservada calcula un
+próximo slot futuro; se mantienen las horas inexistentes omitidas y ambiguas
+con `fold=0`.
+
+Scheduler, consumidor CHAINING, dispatch manual y planificación Sentinel usan
+metadata persistida al encolar: identidad, revisión, publicación, organización,
+permisos, conteos y hashes registrados. No hashean/escanean población ni abren
+un DataSink. Run y ocurrencia fijan fuente/configuración/destino exactos;
+CHAINING usa exactamente `Intake.output_version_id`. No repetición, solapamiento
+y UNKNOWN se resuelven con claims y guard del target. Sin tamaño persistido
+para multipart, el planner rechaza `WORKLOAD_METADATA_UNAVAILABLE`; no usa el
+tamaño del descriptor ni inventa cero bytes.
+
+El worker verifica descriptor, todas las partes, tamaños, hashes, esquema y
+conteos antes de `DeliveryAttempt.STARTED`, sella PreparedRows y vuelve a
+comprobar la fuente después del spool. Las lecturas costosas se realizan fuera
+de transacciones prolongadas de metadata; el fence final revalida identidad,
+permisos, lease, cancelación y target. Un archivo desaparecido/corrupto tras
+dispatch falla antes de DDL/DML, sin reemplazar hashes ni elegir otra versión.
+`StorageProvider.dataset_paths` conserva la verificación completa global.
+Durante una llamada de hash indivisible, cancelación se observa al retornar.
+UNKNOWN y PENDING_REPAIR mantienen su tratamiento y no autorizan replay.
+
+Distinguir horario previsto, dispatch/encolado, espera en cola, preparación,
+STARTED y commit. Un Job RUNNING con lease puede estar verificando sin intento
+remoto iniciado. La latencia de dispatch no incluye la espera por worker; si un
+queued Run se cancela antes de STARTED sólo existe espera observada, no una
+latencia completa de inicio. El helper `scripts/tests/corrections_dispatch.py`
+prepara cinco preflights reales fuera de medición y alterna dos versiones
+publicadas de datasets distintos, de al menos 1M cada una, entre cuatro targets;
+la reutilización de cada versión se declara. La prueba real PostgreSQL requiere un
+worker ocupado antes y después del tick y un caller que pause/reinicie sólo el
+scheduler desechable. Su preparación no implica un resultado ya certificado.
+
+En la bandeja personal, **Marcar como no leída** llama al setter idempotente
+`POST /api/v1/notifications/inbox/{id}/unread`, que fija `read_at=null`.
+Se mantienen marcar leída, leer todas y abrir detalle. Lista, filtros y contador
+se actualizan tras confirmar; recarga/logout/reinicio conservan la lectura.
+La operación exige destinatario, organización, `notifications:read` y permisos
+actuales del recurso. Un administrador tampoco puede modificar otra bandeja.
+No crea otra entrega, evento de ejecución ni auditoría ficticia de negocio.
+
 ## Migraciones y preservación
 
-La revisión actual 0.7.0 es `0015_sentinel_execution_identity`. Las revisiones
+La revisión actual del ciclo correctivo 0.7.0 es `0016_acquisition_diagnostics`.
+La publicación inicial 0.7.0 terminaba en `0015_sentinel_execution_identity`.
+Las revisiones
 históricas llegan hasta `0012_delivery_target_audit`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
@@ -152,7 +278,9 @@ históricas llegan hasta `0012_delivery_target_audit`, precedida por
 0.7.0 añade `0013_async_acquisition`, `0014_automation_outbox` y
 `0015_sentinel_execution_identity`: adquisición asíncrona, automatización,
 outbox, consumidores, bandeja personal y responsable verificable de Sentinel.
-0001..0012 permanecen byte por byte intactas. La API aplica las migraciones
+0016 añade sólo `error_details` JSON nullable y `error_reference` nullable en
+AcquisitionRun, sin reescribir errores, áreas, límites ni ninguna fila histórica.
+0001..0015 permanecen byte por byte intactas. La API aplica las migraciones
 pendientes al iniciar; las 42 tablas actuales se verifican sin ignorar tablas
 desconocidas.
 En bases SQLite previas sin tabla Alembic, el adaptador
@@ -179,11 +307,17 @@ mantienen las FK activas. PostgreSQL realiza sus migraciones transaccionales nor
 temporal de nombre aleatorio y comprueba upgrade desde v1 hasta head con datos
 históricos, actores, paridad con modelos y un ciclo downgrade/upgrade. El downgrade se realiza solamente
 en esa base temporal. La base de aplicación nunca se baja de versión ni se elimina.
-El usuario PostgreSQL debe tener permiso de creación de bases para esta prueba.
+Comprueba además el roundtrip 0015→0016 con adquisición histórica fallida,
+notificación leída, área, opciones, numeración y límites, preservando todas las
+columnas previas. El usuario PostgreSQL debe tener permiso de creación de bases.
+Durante el ciclo correctivo, ejecutarlo sólo dentro del UUID de pruebas aislado,
+nunca como benchmark o ensayo de migración en el principal:
 
 ```powershell
-docker compose cp scripts/check_postgres_migrations.py api:/tmp/check_postgres_migrations.py
-docker compose exec -T api python /tmp/check_postgres_migrations.py
+docker compose --env-file RUTA_ENV_PRIVADO -p PROYECTO_UUID_AISLADO cp scripts/physical_schema_guard.py api:/tmp/physical_schema_guard.py
+docker compose --env-file RUTA_ENV_PRIVADO -p PROYECTO_UUID_AISLADO cp scripts/verify_storage.py api:/tmp/verify_storage.py
+docker compose --env-file RUTA_ENV_PRIVADO -p PROYECTO_UUID_AISLADO cp scripts/check_postgres_migrations.py api:/tmp/check_postgres_migrations.py
+docker compose --env-file RUTA_ENV_PRIVADO -p PROYECTO_UUID_AISLADO exec -T api python /tmp/check_postgres_migrations.py
 ```
 
 `scripts/verify_storage.py snapshot` calcula hashes de los registros persistidos y
@@ -213,39 +347,66 @@ Si se recrea el contenedor, deben copiarse de nuevo ambos scripts antes de la
 segunda captura. No ejecutar login, exports, smoke ni pruebas durante el intervalo:
 son operaciones auditadas y agregan registros legítimos que cambiarían la huella.
 
-## Actualización y recuperación 0.7.0
+## Actualización 0.7.0 inicial → 0.7.0 corregida
 
 La actualización de una instalación existente requiere conservar su nombre Compose,
-puerto, configuración externa y los seis volúmenes. Antes de reconstruir, esperar
-los runs/jobs, pausar los schedules que podrían encolar trabajo y registrar su
-estado para reactivarlos después. El backup coordinado rechaza trabajo pendiente;
+puerto/origen, configuración externa y los seis volúmenes. La actualización del
+principal está autorizada al finalizar pruebas aisladas, documentación/PDF y CI
+del SHA definitivo. No se ejecuta como parte de los benchmarks. Antes de
+reconstruir, detener los procesos de despacho sin editar las programaciones,
+esperar los runs/jobs/adquisiciones del usuario y registrar su estado para
+reactivarlos después. No cancelarlos arbitrariamente. El backup rechaza trabajo pendiente;
 no cancela ni vuelve a ejecutar una entrega remota para desbloquear el respaldo.
 
-1. Inspeccionar el proyecto explícito y hacer backup con las herramientas compatibles
-   con su versión. Validar el backup y conservarlo en ubicación privada fuera de Git.
-2. Guardar por separado la configuración del despliegue, `.env` o `external.env`,
+1. Confirmar contexto y daemon reales, proyecto, URL/puerto, imágenes, montajes,
+   IDs de los seis volúmenes y `restart: "no"`. Fijar el SHA final aprobado y
+   guardar el inventario anterior. Detener web, scheduler y consumidores para
+   impedir nuevos trabajos; dejar terminar los ya registrados y comprobar cero
+   Runs/Jobs/AcquisitionRuns activos antes de detener workers.
+2. Hacer backup compatible con el runtime fuente 0015, todavía sin reconstruir
+   ni arrancar una imagen nueva. El snapshot reconoce state 6 y verifica las
+   42 tablas mediante los modelos y la guardia física del runtime anterior.
+   Validar manifest/dump, los cinco archivos de volúmenes, sus hashes y secretos;
+   conservar el conjunto privado fuera de Git.
+3. Guardar por separado la configuración del despliegue, `.env` o `external.env`,
    secretos OAuth, registros de aplicaciones y callbacks. Estos archivos no son
    componentes del backup. Las antiguas variables SMTP no tienen consumidor
    operativo desde 0.6.1; no son necesarias para crear usuarios. No imprimir valores
    privados ni anexarlos a evidencia de validación.
-3. Reconstruir los servicios desde la misma versión 0.7.0; conservar PostgreSQL y
-   los volúmenes. Arrancar primero sólo PostgreSQL y API, que migra hasta 0015.
+4. Revisar las trece variables XLSX y los límites generales efectivos sin alterar
+   SSO, origen, secretos ni los límites de carga rápida/JSON. Un `.env` existente
+   no se sustituye por el de demo. No dejar un override antiguo que mantenga la
+   ruta normal XLSX limitada a 100.000 registros o 10 MiB. Las cotas se justifican
+   con la certificación aislada; no se elevan indiscriminadamente otros recursos.
+5. Reconstruir los ocho servicios de aplicación desde el SHA final aprobado;
+   conservar PostgreSQL y todos los volúmenes. Mantener PostgreSQL disponible y
+   arrancar sólo API, que aplica exclusivamente 0016 sobre un origen 0015.
    Mantener detenidos workers, scheduler y consumidores durante la comparación.
    No ejecutar login, export, smoke ni fixtures antes de capturar la huella.
-4. Verificar readiness, migración, artifacts y la proyección histórica antes de
-   generar datos nuevos. Para una fuente 0.6.1/0.6.0 se exige igualdad exacta con
-   `snapshot-legacy-v5`; para 0.5.1 se usa `snapshot-legacy-v4`. La captura nativa
-   nueva es state 6. No comparar state 5 y 6 como si fueran schemas idénticos.
+6. Copiar y verificar tanto `physical_schema_guard.py` como `verify_storage.py`
+   al contenedor nuevo. Antes de login o cualquier trabajo, exigir
+   `snapshot-legacy-v6` igual al state 6 del backup y capturar el estado nativo 7.
+   La proyección conserva todas las 42 tablas y sólo excluye `error_details` y
+   `error_reference` cuando ambos son NULL. No requiere vaciar la adquisición,
+   bandeja, outbox o automatización históricas. Preserva los errores originales,
+   `read_at`, áreas, opciones, límites, numeración, artifacts y linaje completos.
+   Un valor nuevo no NULL o cualquier otro cambio aborta la comparación.
+   Para fuentes 0.6.1/0.6.0 se exige `snapshot-legacy-v5`; para 0.5.1, v4.
+   No comparar states diferentes como si fueran schemas idénticos.
    La proyección admite solamente las adiciones y defaults descritos en
    [ADR 0021](../adr/0021-v070-state-compatibility.md).
-5. Comprobar login de una cuenta local histórica y el rol asignado. Autenticación
+7. Sólo después de preservación exacta, reactivar los procesos previstos y
+   comprobar login de una cuenta histórica, su rol y la navegación de lectura.
+   No crear datos de prueba ni escribir en destinos del usuario. Autenticación
    debe mostrar login local habilitado y Microsoft/Google deshabilitados si el
    despliegue no los configuró. No habilitar SSO ni crear usuarios de prueba sólo
    para validar la instalación habitual. Antes de reactivar procesos, revisar
    destinos y schedules restaurados: un schedule sin usuario verificable queda
    pausado y requiere asignación explícita; UNKNOWN conserva su bloqueo y revisión.
-   Después arrancar los procesos autorizados y comprobar las tres lanes y tres
-   componentes con doctor. El smoke completo
+   Comprobar las tres lanes, scheduler, ambos consumidores, readiness, bundle
+   frontend/revisión servida, migración 0016, límites XLSX efectivos de API y
+   Acquisition, mounts, mismos seis volúmenes y política de reinicio con doctor.
+   Guardar resultados e inventario posterior sin valores privados. El smoke completo
    crea datasets/runs y se reserva para una copia aislada si se requiere preservar
    sin adiciones la instalación operativa.
 
@@ -254,9 +415,16 @@ expresamente. Los paths son ejemplos; no seleccionan automáticamente un proyect
 Ejecutar después de terminar trabajo pendiente y detener nuevas operaciones:
 
 ```powershell
-$project = 'trackvance-core'
+$project = 'trackvance-certification'
+$dockerContext = 'CONTEXTO_CONFIRMADO'
+$approvedSha = 'SHA_FINAL_CON_CI_Y_PDF_APROBADOS'
 $privateEnv = 'C:\Trackvance-private\deployment.env'
-$backup = 'C:\Trackvance-private\backups\pre-070'
+$privateDir = 'C:\Trackvance-private\corrections-070'
+$backup = "$privateDir\backup-state6"
+New-Item -ItemType Directory -Path $privateDir -Force | Out-Null
+if ((git rev-parse HEAD).Trim() -ne $approvedSha -or (git status --porcelain)) {
+  throw 'El checkout debe coincidir exactamente con la revisión final aprobada.'
+}
 $env:COMPOSE_PROJECT_NAME = $project
 Get-Content -LiteralPath $privateEnv | ForEach-Object {
   if ($_ -and -not $_.StartsWith('#')) {
@@ -264,21 +432,42 @@ Get-Content -LiteralPath $privateEnv | ForEach-Object {
     [Environment]::SetEnvironmentVariable($deploymentPair[0], $deploymentPair[1], 'Process')
   }
 }
-python scripts/docker_state.py inventory --project $project
-docker compose --env-file $privateEnv -p $project -f compose.yml stop web scheduler events-notifications events-chaining acquisition-worker delivery-worker worker
+$env:DOCKER_CONTEXT = $dockerContext
+if ((docker context show).Trim() -ne $dockerContext) { throw 'Contexto divergente.' }
+$daemonId = (docker info --format '{{.ID}}').Trim()
+if ($LASTEXITCODE -ne 0 -or -not $daemonId) { throw 'Daemon no disponible.' }
+python scripts/docker_state.py inventory --project $project | Set-Content -Encoding utf8 "$privateDir\inventory-before.json"
+docker compose --env-file $privateEnv -p $project -f compose.yml stop web scheduler events-notifications events-chaining
+# Esperar y comprobar cero trabajos/adquisiciones activos; no cancelar los del usuario.
+docker compose --env-file $privateEnv -p $project -f compose.yml stop acquisition-worker delivery-worker worker
 python scripts/docker_state.py backup --project $project --destination $backup
 python scripts/docker_state.py verify --source $backup
+if ($LASTEXITCODE -ne 0) { throw 'Backup no verificado; no reconstruir.' }
+docker compose --env-file $privateEnv -p $project -f compose.yml stop api
+# Configuración privada XLSX revisada; conservar puerto/origen, SSO y secretos.
 docker compose --env-file $privateEnv -p $project -f compose.yml build api worker delivery-worker acquisition-worker scheduler events-notifications events-chaining web
-docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps postgres
+if ($LASTEXITCODE -ne 0) { throw 'Build fallido; conservar respaldo y diagnóstico.' }
+if ((docker context show).Trim() -ne $dockerContext -or (docker info --format '{{.ID}}').Trim() -ne $daemonId) {
+  throw 'Cambió el contexto o daemon; no recrear servicios.'
+}
+# PostgreSQL existente continúa disponible y conserva su volumen.
 docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps api
 docker compose --env-file $privateEnv -p $project -f compose.yml cp scripts/physical_schema_guard.py api:/tmp/physical_schema_guard.py
 docker compose --env-file $privateEnv -p $project -f compose.yml cp scripts/verify_storage.py api:/tmp/verify_storage.py
-docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot-legacy-v5 | Set-Content -Encoding utf8 C:\Trackvance-private\after-legacy-v5.json
-python scripts/verify_storage.py compare "$backup/state.json" C:\Trackvance-private\after-legacy-v5.json
-docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot | Set-Content -Encoding utf8 C:\Trackvance-private\after-native-v6.json
+$guardSha = (Get-FileHash scripts/physical_schema_guard.py -Algorithm SHA256).Hash.ToLowerInvariant()
+$verifierSha = (Get-FileHash scripts/verify_storage.py -Algorithm SHA256).Hash.ToLowerInvariant()
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python -c "import hashlib,pathlib; assert hashlib.sha256(pathlib.Path('/tmp/physical_schema_guard.py').read_bytes()).hexdigest()=='$guardSha'; assert hashlib.sha256(pathlib.Path('/tmp/verify_storage.py').read_bytes()).hexdigest()=='$verifierSha'"
+if ($LASTEXITCODE -ne 0) { throw 'Scripts copiados divergentes; no continuar.' }
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot-legacy-v6 | Set-Content -Encoding utf8 "$privateDir\after-legacy-v6.json"
+python scripts/verify_storage.py compare "$backup/state.json" "$privateDir\after-legacy-v6.json"
+if ($LASTEXITCODE -ne 0) { throw 'Preservación fallida; no activar procesos.' }
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot | Set-Content -Encoding utf8 "$privateDir\after-native-v7.json"
 # Sólo tras revisar preservación, identidad ejecutora y destinos:
 docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps worker delivery-worker acquisition-worker scheduler events-notifications events-chaining web
-python scripts/doctor.py --base-url http://localhost:3000 --docker --project $project --recovery-ready
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python -c "import json; from trackvance.acquisition_config import AcquisitionLimits; print(json.dumps(AcquisitionLimits.configured().describe('XLSX'),sort_keys=True))"
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T acquisition-worker python -c "import json; from trackvance.acquisition_config import AcquisitionLimits; print(json.dumps(AcquisitionLimits.configured().describe('XLSX'),sort_keys=True))"
+python scripts/doctor.py --base-url http://localhost:3100 --docker --project $project --recovery-ready
+python scripts/docker_state.py inventory --project $project | Set-Content -Encoding utf8 "$privateDir\inventory-after.json"
 ```
 
 Si el despliegue usa un archivo separado, Compose debe recibirlo explícitamente
@@ -288,10 +477,18 @@ comandos Python de operación deben heredar las mismas variables necesarias para
 construir el destino. Restaurar PostgreSQL no recupera valores ausentes del entorno.
 Mantener SSO deshabilitado permite comprobar recuperación local sin esos secretos.
 No se necesita restaurar configuración SMTP para administrar usuarios 0.7.0.
+El ejemplo presupone el Compose base y puerto 3100 ya aprobados para ese proyecto;
+si el inventario usa otros overlays, puerto o contexto, deben conservarse
+explícitamente en todos los comandos. Los comandos de lectura de límites no
+ejecutan adquisiciones. Revisar API y Acquisition antes de afirmar que no quedan
+restricciones heredadas; la versión visible 0.7.0 por sí sola no distingue ambas
+revisiones. La evidencia del despliegue debe incluir SHA/image ID realmente
+servidos, 0016 y la configuración efectiva.
 
-La línea `snapshot-legacy-v5` corresponde a un origen state 5/0012. Usar la
-proyección correspondiente para fuentes anteriores; para un origen 0.7.0 se
-compara `snapshot` nativo state 6. El backup coordinado conserva el estado inicial
+La línea `snapshot-legacy-v6` corresponde al origen 0.7.0 inicial state 6/0015.
+Para 0.6.1/0.6.0 state 5/0012 usar `snapshot-legacy-v5`; las fuentes anteriores
+usan sus proyecciones explícitas. Un backup ya corregido state 7/0016 exige
+`snapshot` nativo exactamente igual. El backup coordinado conserva el estado inicial
 de los servicios: detenerlos antes del backup evita que se reactiven al terminar.
 No usar `restore --start` para revisar una copia con destinos operativos: restaurar
 con el valor por defecto, arrancar sólo API/web tras la verificación y mantener
@@ -306,26 +503,34 @@ COMMITTED; los cambios remotos no pertenecen al backup de Trackvance.
 
 ### Formatos de backup y proyección histórica
 
-El backup Docker actual conserva **manifest 2** y **state 6**,
-revisión `0015_sentinel_execution_identity`. Los números de manifest y state son
-contratos distintos. State 6 cubre 42 tablas: las 31 históricas de state 5 y las
+El backup Docker actual conserva **manifest 2** y **state 7**,
+revisión `0016_acquisition_diagnostics`. La publicación inicial 0.7.0 usaba
+state 6/0015; ambos formatos siguen reconocidos con su versión real. Los números
+de manifest y state son contratos distintos. State 7 cubre 42 tablas: las 31 históricas de state 5 y las
 11 de adquisición, automatización, outbox, consumidores, bandeja y decisiones de
 destino. Incluye todas sus columnas por hash, Job con Run o AcquisitionRun exclusivo,
 responsables y pausas de Sentinel. Verifica artifacts, descriptor y cada parte de
 datasets multipart, FK, linaje y ambas familias de secretos.
 
-| Fuente | Manifest / state / migración | Validación al restaurar con 0.7.0 |
+| Fuente | Manifest / state / migración | Validación al restaurar con 0.7.0 corregida |
 | --- | --- | --- |
-| 0.7.0 | 2 / 6 / 0015 | Igualdad exacta de las 42 tablas y artifacts antes de actividad nueva |
-| 0.6.1 | 2 / 5 / 0012 | Migración a 0015 y `snapshot-legacy-v5` exactamente igual; tablas nuevas vacías |
-| 0.6.0 | 2 / 5 / 0012 | Migración a 0015 y `snapshot-legacy-v5` exactamente igual; tablas nuevas vacías |
-| 0.5.1 | 2 / 4 / 0009 | Migración a 0015 y proyección `snapshot-legacy-v4` exactamente igual |
-| 0.5.0 | 2 / 3 / 0008 | Migración a 0015, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
-| 0.4.1 | 1 / 2 / 0007 | Migración a 0015, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
+| 0.7.0 corregida | 2 / 7 / 0016 | Igualdad nativa exacta de las 42 tablas y artifacts antes de actividad nueva |
+| 0.7.0 inicial | 2 / 6 / 0015 | Migración a 0016; `snapshot-legacy-v6` exactamente igual, sólo dos diagnósticos NULL proyectados |
+| 0.6.1 | 2 / 5 / 0012 | Migración a 0016 y `snapshot-legacy-v5` exactamente igual; tablas nuevas de 0.7.0 vacías |
+| 0.6.0 | 2 / 5 / 0012 | Migración a 0016 y `snapshot-legacy-v5` exactamente igual; tablas nuevas de 0.7.0 vacías |
+| 0.5.1 | 2 / 4 / 0009 | Migración a 0016 y proyección `snapshot-legacy-v4` exactamente igual |
+| 0.5.0 | 2 / 3 / 0008 | Migración a 0016, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
+| 0.4.1 | 1 / 2 / 0007 | Migración a 0016, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
 
 Las proyecciones excluyen únicamente adiciones de versiones posteriores para
 comparar los registros históricos; no sobrescriben backups ni normalizan sus datos
 en el origen. No se inventan hashes del catálogo para state 2, que no los almacenaba.
+State 6→7 no permite un filtro genérico de campos: sólo elimina los dos nuevos
+diagnósticos NULL y retiene todas las tablas/columnas anteriores, errores,
+actividad asíncrona y estados de lectura. Las proyecciones state 2–5 encadenan
+primero ese paso y luego las adiciones históricas expresamente permitidas.
+La guardia física exige tablas, columnas y FK reales conforme al ORM del runtime;
+una tabla/columna desconocida no se ignora para obtener una huella comparable.
 Las herramientas actuales pueden respaldar runtimes 0.5.0/0.5.1 conservando su
 huella nativa. Para crear un backup de 0.4.1 se usa su tooling histórico, pues su
 topología no contiene `delivery-worker` ni los dos volúmenes de secretos destino.
@@ -388,7 +593,9 @@ tablas nuevas vacías, credenciales SQL recuperadas utilizables y emisión local
 sin correo. El vínculo OIDC, notificación SMTP y policy sintéticos se identifican
 como fixtures de persistencia; no acreditan SMTP, SSO externo ni escritura remota.
 
-Los comandos siguientes conservan las rutas de regresión históricas 0.5/0.6:
+Los comandos siguientes conservan las rutas de regresión históricas 0.5/0.6.
+El tooling vigente restaura en state 7/0016; los resultados publicados de ciclos
+anteriores conservan su destino original y no se cambian retrospectivamente.
 
 ```powershell
 python scripts/tests/docker_backup_cycle.py
@@ -430,7 +637,7 @@ exclusivamente sus proyectos temporales. Sus carpetas privadas pueden contener
 backups y claves; publicar sólo `result.json` revisado y saneado. La comprobación web
 del drill nativo es HTTP/HTML; no atribuirle una prueba Playwright que no ejecuta.
 
-La ejecución 0.6.1 del 27 de septiembre de 2026 confirmó estos resultados locales:
+La ejecución histórica 0.6.1 del 27 de septiembre de 2026 confirmó estos resultados locales:
 
 La instalación real `trackvance-certification` se actualizó desde 0.6.0 con
 backup nuevo verificado en `backups/pre-061-20260927`. Se iniciaron sus
@@ -439,7 +646,7 @@ El upgrade y reinicio conservaron state 5 exactamente y los seis volúmenes:
 3 datasets, **2 usuarios existentes**, 1 conexión, 1 destino, 4 Runs, 9 artifacts,
 2 secretos SQL, 5 roles/94 grants y una notificación histórica 0.6.0.
 Los cinco servicios quedaron healthy, API y ambos workers en 0.6.1,
-Alembic0012, doctor PASS y restart=no. UI/footer muestran 0.6.1; Configuración
+Alembic 0012, doctor PASS y restart=no. En aquella revisión, UI/footer mostraban 0.6.1; Configuración
 conserva Usuarios locales, Roles y permisos y Autenticación, sin Notificaciones.
 Microsoft/Google permanecen deshabilitados y local habilitado. El acceso demo
 existente se comprobó en principal; login con contraseña y modal se probaron
@@ -580,7 +787,7 @@ refresca la fuente y ejecuta Intake. Conserva solo `result.json` como evidencia 
 python scripts/tests/docker_backup_cycle.py
 ```
 
-El drill certificado del 19 de septiembre terminó `PASS` con siete artifacts, un
+El drill histórico certificado del 19 de septiembre terminó `PASS` con siete artifacts, un
 secreto y 124 relaciones exactas. La aplicación fuente fue destruida antes de la
 restauración; después se reutilizó la credencial restaurada contra la PostgreSQL
 externa, se refrescó el datasource y se ejecutó un Intake nuevo. La comprobación web
@@ -615,7 +822,7 @@ glob, `down -v` ni `prune`, y escribe recibo fuera de los volúmenes. Se recomie
 un backup verificado antes de resetear, pero el comando no impone un backup ni una
 segunda excepción oculta.
 
-## Evidencia de esta ejecución — 13 de septiembre de 2026
+## Evidencia histórica — 13 de septiembre de 2026
 
 | Comprobación | Resultado observado |
 | --- | --- |
@@ -637,9 +844,10 @@ pasó. Los directorios de ese intento se conservaron para diagnóstico; el backu
 verificado es `.codex-local/operations-evidence/local-backup-20260913-v2` y su
 restauración `.codex-local/operations-evidence/local-restored-20260913-v2`.
 
-El workflow GitHub Actions está preparado para backend, frontend, PostgreSQL y E2E
+En esa ejecución histórica, el workflow GitHub Actions estaba preparado para backend, frontend, PostgreSQL y E2E
 Compose. Los resultados locales no implican que dicho workflow remoto ya se haya
-ejecutado; este ciclo no publica ni hace push al repositorio.
+ejecutado; ese ciclo no publicó ni hizo push al repositorio. La publicación y CI
+del ciclo correctivo tienen su propio registro por SHA.
 
 ## Instalación con arranque manual
 
@@ -671,7 +879,10 @@ contextos de build.
 Configura las fuentes con cuentas SELECT y TLS. Para un servidor en el PC usa un
 host accesible desde Docker, como `host.docker.internal`. La BD interna almacena
 solo metadata; el snapshot de la fuente se guarda como Parquet en ArtifactStore.
-La lectura inicial es síncrona y acotada; límites y opciones en ADR 0007.
+En la implementación histórica del 19 de septiembre, la lectura inicial era
+síncrona y acotada; límites y opciones en ADR 0007. Desde 0.7.0 la nueva
+adquisición registra un snapshot durable, congelando la revisión fuente y
+delegando la población completa al worker ACQUISITION.
 
 La certificación independiente se ejecuta con
 `python scripts/tests/connections_cycle.py --full-playwright`: crea PostgreSQL y
@@ -692,12 +903,15 @@ La certificación aislada se prepara con:
 python scripts/tests/delivery_cycle.py
 ```
 
-El runner exige un proyecto `trackvance-delivery-e2e-*` nuevo, levanta PostgreSQL y
+El runner conserva el prefijo histórico `trackvance-delivery-e2e-*` y exige un
+proyecto nuevo. El perfil de aislamiento fija env-file e imágenes privados,
+base/usuario `tv_v070_test` y recursos acotados; no reutiliza el entorno principal.
+Levanta PostgreSQL y
 SQL Server desechables, crea cuentas de escritura acotadas, prueba CREATE_AND_LOAD,
 APPEND, OVERWRITE y UPSERT, además de preflight inválido, permisos insuficientes,
 un intento remoto fallido, receipt, manifest, auditoría y ausencia de secretos.
 Puede ejecutar el flujo Playwright focal `tests-e2e/delivery.spec.ts`; al terminar
-elimina exclusivamente sus contenedores y volúmenes. La ejecución local publicada
+elimina exclusivamente sus contenedores y volúmenes. La ejecución histórica local publicada
 aprobó 92 comprobaciones y Playwright 1/1; GitHub Actions se informa por separado.
 
 PostgreSQL requiere `INSERT` para APPEND; `INSERT+DELETE` para OVERWRITE; y
@@ -775,7 +989,7 @@ python scripts/tests/delivery_benchmark_cycle.py --max-wall-seconds 1800
 El segundo comando usa 8 MiB/20.000 filas variadas; el primero, 1 MiB/1.000 filas.
 El runner crea un proyecto `trackvance-delivery-bench-*` fresco, descarta nombres
 ajenos/preexistentes y elimina sólo recursos propios. Cuenta cuatro estrategias
-en PostgreSQL16 y SQLServer reales. No eleva límites de upload/filas del producto.
+en PostgreSQL 16 y SQL Server reales. No eleva límites de upload/filas del producto.
 Guarda tiempos preflight/write/total, filas/s, MB/s, CPU, memoria, I/O y storage;
 NOT_RUN_RESOURCE_LIMIT o STOPPED_RESOURCE_LIMIT no son PASS ni certificación de
 capacidad productiva. Consulte delivery-benchmark-results-0.5.1.md.
@@ -801,7 +1015,7 @@ Para repetir todo el ciclo sin datos de prueba en la instalación habitual:
 python scripts/tests/docker_e2e_cycle.py
 ```
 
-El runner genera un nombre `trackvance-e2e-*` y puerto libre, rechaza recursos
+El runner vigente genera un nombre `trackvance-v070-test-e2e-<12hex>` y puerto libre, rechaza recursos
 preexistentes, construye los contenedores y ejecuta doctor, migraciones,
 smoke, Playwright y comparación de hashes tras restart. Al finalizar elimina
 solo ese proyecto y sus volúmenes. Guarda evidencia en `.codex-local/`.

@@ -95,7 +95,9 @@ def _before_flush(db: Session, _context, _instances):
                 aggregate_type="ACQUISITION", aggregate_id=record.id, module="acquisition",
                 payload={"recipient_user_id": record.initiated_by_id, "status": record.status,
                          "origin": "MANUAL", "dataset_id": record.dataset_id,
-                         "output_version_id": record.output_version_id})
+                         "output_version_id": record.output_version_id,
+                         "error_code": record.error_code, "error_message": record.error_message,
+                         "error_details": record.error_details, "error_reference": record.error_reference})
 
 
 def _clear_transaction_events(db: Session, transaction):
@@ -151,6 +153,8 @@ def functional_description(event: OutboxEvent):
         return "El monitor terminó y detectó alertas." if decision == "ALERT" else "El monitor terminó sin alertas."
     if event.module == "recon" and status == "SUCCESS":
         return "La conciliación terminó con hallazgos." if decision == "WITH_FINDINGS" else "La conciliación terminó conforme."
+    if event.module == "acquisition" and status == "FAILED" and payload.get("error_message"):
+        return payload["error_message"]
     label = {"acquisition": "La adquisición", "DELIVERY": "La entrega", "intake": "La validación",
              "recon": "La conciliación", "sentinel": "El monitor"}.get(event.module, "El proceso")
     return label + {"FAILED": " falló; revisa la referencia de diagnóstico.",

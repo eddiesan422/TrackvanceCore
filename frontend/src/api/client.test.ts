@@ -43,4 +43,14 @@ describe('Local API requests and downloads', () => {
     await expect(download('/runs/run/export.xlsx', 'report.xlsx')).rejects.toBeInstanceOf(ApiError)
     await expect(api('/datasets')).rejects.toMatchObject({ status: 0, message: expect.stringContaining('servicio local') })
   })
+
+  it('retains stable public codes and safe details from acquisition HTTP errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: {
+      message: 'La fuente supera el límite efectivo de registros.', code: 'ACQUISITION_ROW_LIMIT',
+      details: { limit: 'data_rows', maximum: 100000 }, request_id: 'request-safe',
+    } }), { status: 422 })))
+    await expect(api('/datasets/uploads/inspect', { method: 'POST' })).rejects.toMatchObject({
+      status: 422, code: 'ACQUISITION_ROW_LIMIT', requestId: 'request-safe', details: { limit: 'data_rows', maximum: 100000 },
+    })
+  })
 })

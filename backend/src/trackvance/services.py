@@ -611,14 +611,24 @@ def enqueue(
     if config.module == "recon" and (target is None or target.dataset_id != config.target_dataset_id):
         raise ProcessingError("La versión de destino no pertenece al dataset del control.")
     from .config_semantics import effective_config
-    from .planner import ExecutionPlanner, WorkloadInput
+    from .planner import ExecutionPlanner, WorkloadInput, WorkloadMetadataError
 
     identity, legacy = resolve_actor(db, actor, config.organization_id)
     effective = effective_config(config.module, config.config)
     references = rule_reference_versions(db, effective, config.organization_id)
-    plan = ExecutionPlanner().plan(config.module,
-        [WorkloadInput.from_version(db, v) for v in {v.id: v for v in [source, target, *references] if v}.values()], effective,
-        requested_engine=requested_engine)
+    try:
+        inputs = [WorkloadInput.from_metadata(db, v)
+                  for v in {v.id: v for v in [source, target, *references] if v}.values()]
+    except WorkloadMetadataError as error:
+        # Preserve a durable rejection without manufacturing a zero-byte input
+        # or reading a historical multipart descriptor under scheduler locks.
+        plan: dict[str, Any] = {"schema_version": 3, "requested_engine": requested_engine,
+                "engine": None, "allowed": False, "reason_code": str(error),
+                "rejection_code": str(error), "estimated_input_bytes": None,
+                "estimated_working_set_bytes": None, "budget_is_estimate": True}
+    else:
+        plan = ExecutionPlanner().plan(config.module, inputs, effective,
+                                       requested_engine=requested_engine)
     plan["config_hash"] = configuration_hash(effective)
     run = Run(id=uid(), organization_id=config.organization_id, module=config.module, name=config.name,
               config_id=config.id, dataset_version_id=source.id, target_version_id=target.id if target else None,

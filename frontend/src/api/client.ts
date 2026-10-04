@@ -8,7 +8,9 @@ export function setCsrfToken(token: string) { csrfToken = token }
 export class ApiError extends Error {
   status: number
   requestId?: string
-  constructor(message: string, status: number, requestId?: string) { super(message); this.status = status; this.requestId = requestId }
+  code?: string
+  details?: Record<string, unknown> | null
+  constructor(message: string, status: number, requestId?: string, code?: string, details?: Record<string, unknown> | null) { super(message); this.status = status; this.requestId = requestId; this.code = code; this.details = details }
 }
 export async function api<T = RecordData>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
@@ -21,7 +23,7 @@ export async function api<T = RecordData>(path: string, options: RequestInit = {
     const body = await response.json().catch(() => ({}))
     const detail = body.error || body.detail || {}
     if ((response.status === 401 || response.status === 403) && path !== '/me' && !path.startsWith('/auth/')) window.dispatchEvent(new Event('trackvance:session-refresh'))
-    throw new ApiError(typeof detail === 'string' ? detail : detail.message || 'No fue posible completar la operación.', response.status, detail.request_id)
+    throw new ApiError(typeof detail === 'string' ? detail : detail.message || 'No fue posible completar la operación.', response.status, detail.request_id, detail.code, detail.details)
   }
   return response.status === 204 ? undefined as T : response.json()
 }
@@ -38,11 +40,11 @@ export function uploadBinary<T>(path: string, file: File, progress: (bytes: numb
     const finish = () => signal?.removeEventListener('abort', abort)
     request.onload = () => {
       finish()
-      let body: { error?: { message?: string; request_id?: string }; detail?: string | { message?: string } } & T
+      let body: { error?: { message?: string; request_id?: string; code?: string; details?: Record<string, unknown> | null }; detail?: string | { message?: string } } & T
       try { body = JSON.parse(request.responseText) } catch { reject(new ApiError('El servidor devolvió una respuesta incompleta.', request.status)); return }
       if (request.status >= 200 && request.status < 300) { progress(file.size); resolve(body); return }
       if (request.status === 401 || request.status === 403) window.dispatchEvent(new Event('trackvance:session-refresh'))
-      reject(new ApiError(body.error?.message || (typeof body.detail === 'string' ? body.detail : body.detail?.message) || 'No se pudo recibir el archivo.', request.status, body.error?.request_id))
+      reject(new ApiError(body.error?.message || (typeof body.detail === 'string' ? body.detail : body.detail?.message) || 'No se pudo recibir el archivo.', request.status, body.error?.request_id, body.error?.code, body.error?.details))
     }
     request.onerror = () => { finish(); reject(new ApiError('No pudimos conectar para recibir el archivo.', 0)) }
     request.onabort = () => { finish(); reject(new ApiError('Transferencia cancelada antes de registrar la adquisición.', 0)) }

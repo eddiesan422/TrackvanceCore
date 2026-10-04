@@ -87,7 +87,7 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
 
 
 def assert_native_fingerprint(state: dict[str, Any]) -> None:
-    ensure(state.get('schema_version') == 6 and set(state.get('tables', {})) == docker_state.CURRENT_STATE_TABLES
+    ensure(state.get('schema_version') == docker_state.VERIFY_SCHEMA_VERSION and set(state.get('tables', {})) == docker_state.CURRENT_STATE_TABLES
            and state.get('migration') == docker_state.CURRENT_MIGRATION,
            'La captura no contiene las 42 tablas y la revisión nativa 0.7.0.')
 

@@ -3,15 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
 import { renderApp } from '../../test/render'
+import { acquisitionLimitsFixture } from '../../test/acquisitionLimits'
 import { DatasetsPage, UploadDialog } from './Datasets'
 
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn() }))
+
+function mockApi(value: Record<string, unknown> | ((path: string, options?: RequestInit) => Promise<Record<string, unknown>>)) {
+  vi.mocked(api).mockImplementation(async (path, options) => acquisitionLimitsFixture(path) || (typeof value === 'function' ? value(path, options) : value))
+}
+function mockApiFailure(error: Error) { mockApi(async () => { throw error }) }
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('Identifier override during upload', () => {
   it('sends selected identifier tags with the untouched CSV bytes and no manual-name field', async () => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
+    mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV', format_label: 'CSV delimitado', filename: 'customers.csv', columns: [{ name: 'document_id', logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }], row_count: 2,
     } : { id: 'version' })
     const user = userEvent.setup()
@@ -33,7 +39,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('uploads a duplicate dataset name as a new immutable version', async () => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
+    mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV', format_label: 'CSV delimitado', filename: 'trackvance_dataset_prueba.csv', columns: [{ name: 'order_id', logical_type: 'STRING' }],
     } : { id: 'version-2' })
     const user = userEvent.setup()
@@ -50,7 +56,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('sends corrected logical types and identifiers selected from the inspected schema', async () => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
+    mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV',
       format_label: 'CSV delimitado',
       filename: 'customers.csv',
@@ -87,7 +93,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('creates a dataset with a new business area entered in the upload flow', async () => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
+    mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV', format_label: 'CSV delimitado', filename: 'risk_events.csv', columns: [{ name: 'event_id', logical_type: 'STRING' }, { name: 'risk_score', logical_type: 'DECIMAL', numeric: true }],
     } : { id: 'version' })
     vi.mocked(post).mockResolvedValue({ id: 'risk-events' })
@@ -114,7 +120,7 @@ describe('Identifier override during upload', () => {
     ['events.json', 'application/json', 'JSON', 'JSON tabular'],
     ['warehouse.parquet', 'application/vnd.apache.parquet', 'PARQUET', 'Apache Parquet'],
   ])('detects and previews %s before upload', async (filename, mime, format, formatLabel) => {
-    vi.mocked(api).mockResolvedValue({
+    mockApi({
       format, format_label: formatLabel, filename, columns: [{ name: 'amount', logical_type: 'DECIMAL', native_type: 'Float64', numeric: true }], row_count: 25,
     })
     const user = userEvent.setup()
@@ -129,7 +135,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('selects an Excel sheet and sends it to inspection and upload', async () => {
-    vi.mocked(api).mockImplementation(async (path, options) => {
+    mockApi(async (path, options) => {
       if (path !== '/datasets/uploads/inspect') return { id: 'version-xlsx' }
       const readerOptions = JSON.parse(String((options?.body as FormData).get('reader_options')))
       const selected = readerOptions.sheet_name || 'Resumen'
@@ -154,7 +160,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('shows the detected TXT delimiter and permits an explicit override', async () => {
-    vi.mocked(api).mockImplementation(async path => path === '/datasets/uploads/inspect' ? {
+    mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'TXT', format_label: 'TXT delimitado', filename: 'movimientos.txt', detected_delimiter: ';', columns: [{ name: 'amount', logical_type: 'DECIMAL', numeric: true }],
     } : { id: 'version-txt' })
     const user = userEvent.setup()
@@ -173,7 +179,7 @@ describe('Identifier override during upload', () => {
   })
 
   it('keeps upload disabled and offers retry when inspection fails', async () => {
-    vi.mocked(api).mockRejectedValue(new Error('El archivo no contiene una estructura tabular válida.'))
+    mockApiFailure(new Error('El archivo no contiene una estructura tabular válida.'))
     const user = userEvent.setup()
     renderApp(<UploadDialog open onClose={vi.fn()} datasetId="source" datasetName="Fuente"/>)
 
@@ -182,6 +188,24 @@ describe('Identifier override during upload', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('El archivo no contiene una estructura tabular válida.')
     expect(screen.getByRole('button', { name: 'Cargar y analizar' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Volver a intentar' })).toBeInTheDocument()
+  })
+
+  it('uses the actual backend quick-upload limit before transfer and preserves its smaller row cap', async () => {
+    vi.mocked(api).mockImplementation(async path => {
+      const descriptor = acquisitionLimitsFixture(path)
+      if (descriptor) { descriptor.limits.compressed_bytes.max = 3; return descriptor }
+      return { format: 'CSV', columns: [] }
+    })
+    const user = userEvent.setup()
+    renderApp(<UploadDialog open onClose={vi.fn()} datasetId="source" datasetName="Fuente" datasetDomain="Finanzas"/>)
+    expect(await screen.findByText('3 bytes')).toBeInTheDocument()
+    expect(screen.getByText('100.000 registros')).toBeInTheDocument()
+    await user.upload(screen.getByLabelText('Seleccionar archivo de datos'), new File(['longer'], 'small.csv'))
+    expect(await screen.findByText(/El archivo supera el máximo configurado para carga rápida: 3 bytes/)).toBeInTheDocument()
+    expect(screen.getByText('UPLOAD_TOO_LARGE')).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/uploads/inspect')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Cargar y analizar' })).toBeDisabled()
+    expect(screen.getByLabelText('Área de negocio')).toHaveValue('Finanzas')
   })
 })
 
@@ -201,7 +225,7 @@ describe('Dataset list sorting', () => {
     ['Estado', ['Beta', 'Gamma', 'Alpha'], ['Alpha', 'Beta', 'Gamma']],
     ['Última actualización', ['Alpha', 'Gamma', 'Beta'], ['Beta', 'Gamma', 'Alpha']],
   ])('orders %s in both directions', async (column, ascending, descending) => {
-    vi.mocked(api).mockImplementation(async path => path.startsWith('/acquisitions') ? {
+    mockApi(async path => path.startsWith('/acquisitions') ? {
       items: [{ id: 'historical-acquisition', dataset_id: 'alpha', filename: 'unrelated.csv', status: 'SUCCESS', stage: 'COMPLETED', processed_rows: 99, processed_bytes: 1600, initiated_by: 'Operador 100', created_at: '2026-10-03T12:00:00Z', output_version_id: 'published-version' }], total: 1,
     } : { items: datasets, total: datasets.length })
     const user = userEvent.setup()
@@ -221,7 +245,7 @@ describe('Dataset list sorting', () => {
   })
 
   it('shows the dataset origin between the dataset and area columns', async () => {
-    vi.mocked(api).mockResolvedValue({
+    mockApi({
       items: [
         { id: 'manual', name: 'Carga mensual', domain: 'Finanzas', version_count: 1, origin_label: 'Manual', status: 'ACTIVE' },
         { id: 'intake', name: 'Aprobados', domain: 'Ventas', version_count: 1, source_type: 'INTAKE_OUTPUT', status: 'ACTIVE' },
@@ -238,5 +262,25 @@ describe('Dataset list sorting', () => {
     expect(screen.getByText('Manual')).toBeInTheDocument()
     expect(screen.getByText('Data Intake')).toBeInTheDocument()
     expect(screen.getByText('Sin versiones')).toBeInTheDocument()
+  })
+
+  it('offers areas beyond 100 datasets in both dialogs even when their datasets are hidden by the current filter', async () => {
+    const items = Array.from({ length: 151 }, (_, index) => ({ id: `dataset-${index}`, name: `Dataset ${String(index).padStart(3, '0')}`, domain: `Área ${String(index).padStart(3, '0')}`, status: 'ACTIVE' }))
+    mockApi(async path => path.startsWith('/acquisitions') ? { items: [], total: 0 } : { items, total: 151 })
+    const user = userEvent.setup()
+    renderApp(<DatasetsPage/>, { permissions: ['datasets:read', 'datasets:write'] })
+    await screen.findByText('Dataset 150')
+    await user.type(screen.getByPlaceholderText('Buscar por nombre, descripción o área…'), 'Dataset 000')
+    expect(screen.queryByText('Dataset 150')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cargar dataset' }))
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByRole('option', { name: 'Área 150' })).toBeInTheDocument()
+    await user.selectOptions(dialog.getByLabelText('Área de negocio'), 'Área 150')
+    expect(dialog.getByLabelText('Área de negocio')).toHaveValue('Área 150')
+    await user.click(dialog.getByRole('button', { name: 'Usar carga rápida limitada' }))
+    const legacy = within(screen.getByRole('dialog'))
+    expect(legacy.getByRole('option', { name: 'Área 150' })).toBeInTheDocument()
+    await user.selectOptions(legacy.getByLabelText('Área de negocio'), 'Área 150')
+    expect(legacy.getByLabelText('Área de negocio')).toHaveValue('Área 150')
   })
 })

@@ -2,6 +2,16 @@
 
 ## Ejecución de volumen y automatización 0.7.0
 
+El ciclo C01–C06 corrige la adquisición XLSX, diagnóstico de límites, selector de
+área, edición de zona horaria, despacho de automatizaciones y marca no leída.
+XLSX normal usa lectura incremental con default de 1 millón de filas de datos,
+1 GiB comprimido y 4 GiB expandido, sujeto al espacio físico de la hoja y demás
+[límites efectivos](docs/development/parameters-0.7.0.md). La UI consulta esos
+límites antes de registrar; JSON no lineal y carga rápida conservan sus cotas.
+Véase [ADR 0025](docs/adr/0025-corrections-c01-c06.md) para causas, semántica y
+verificaciones. La certificación independiente del ciclo requiere todos los
+gates sobre su SHA final; el verde de la publicación inicial no los sustituye.
+
 Trackvance conserva el monolito FastAPI/React, PostgreSQL 16 y datos/versiones
 inmutables. La revisión añade adquisición asíncrona, datasets multipartes,
 PySpark real para Intake/ReconOps/Sentinel, preflight persistido y preparación
@@ -12,8 +22,8 @@ se distinguen, y la release permanece abierta mientras falten gates obligatorios
 
 La UI normal recibe el archivo a staging, permite confirmar opciones, registra
 202 y muestra historial/etapa/filas/bytes/cancelación/enlace a versión. CSV,
-TXT/TSV, JSONL/NDJSON y Parquet usan lectura acotada. XLSX y JSON no lineal
-mantienen límites menores explícitos. Los endpoints legacy conservan su contrato
+TXT/TSV, JSONL/NDJSON, Parquet y XLSX usan lectura acotada. JSON no lineal
+mantiene límites menores explícitos. Los endpoints legacy conservan su contrato
 síncrono pequeño. Navegar después del registro durable no cancela el trabajo;
 una transferencia incompleta debe volver a iniciarse.
 
@@ -34,8 +44,10 @@ no vuelve a escribir. La bandeja entrega resúmenes al iniciador/responsable rea
 sin enviar correo ni credenciales y con permisos vigentes al consultar.
 
 Alembic añade `0013_async_acquisition`, `0014_automation_outbox` y
-`0015_sentinel_execution_identity`. Las migraciones `0001..0012` permanecen intactas.
-El modelo tiene 42 tablas/state 6; backup/restore verifica conjuntos multipartes
+`0015_sentinel_execution_identity`, más la adición `0016_acquisition_diagnostics`
+del ciclo C01–C06. Las migraciones `0001..0015` permanecen intactas.
+El modelo tiene 42 tablas/state 7, compatible con backups state 6 anteriores;
+backup/restore verifica conjuntos multipartes
 con metadata, secretos fuente/destino y claves separados. Sentinel legacy sin
 usuario verificable queda pausado hasta asignación explícita. Roles personalizados,
 actores y notification_deliveries históricos se conservan.
@@ -52,7 +64,7 @@ puerto/origen y SSO desactivado; nunca sirve como entorno de pruebas.
 - [Arquitectura](docs/architecture.md) y [especificación v1.1, implementación 0.7.0](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf).
 - [Contrato HTTP](backend/API_CONTRACT.md) y [permisos](docs/development/permission-matrix.md).
 - [Operación y recuperación](docs/development/operations.md).
-- [ADRs 0020–0024](docs/adr/0020-async-acquisition-multipart.md).
+- [ADRs 0020–0025](docs/adr/0020-async-acquisition-multipart.md).
 
 Los apartados históricos siguientes conservan contexto de 0.5.x/0.6.x y sus
 propias cifras; no sustituyen la certificación 0.7.0. Credenciales temporales de

@@ -7324,6 +7324,89 @@
         }
       }
     },
+    "/api/v1/acquisitions/limits": {
+      "get": {
+        "tags": [
+          "Adquisición"
+        ],
+        "summary": "Acquisition Limits",
+        "operationId": "acquisition_limits_api_v1_acquisitions_limits_get",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "CSV",
+                "TXT",
+                "JSON",
+                "JSON_LINES",
+                "PARQUET",
+                "XLSX",
+                "POSTGRESQL",
+                "SQLSERVER"
+              ],
+              "type": "string",
+              "default": "CSV",
+              "title": "Format"
+            }
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ASYNC_ACQUISITION",
+                "LEGACY_UPLOAD"
+              ],
+              "type": "string",
+              "default": "ASYNC_ACQUISITION",
+              "title": "Route"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      }
+    },
     "/api/v1/datasets/uploads/stage": {
       "post": {
         "tags": [
@@ -8790,6 +8873,74 @@
         "x-required-permission": "notifications:read"
       }
     },
+    "/api/v1/notifications/inbox/{notification_id}/unread": {
+      "post": {
+        "tags": [
+          "Internal notifications"
+        ],
+        "summary": "Unread Notification",
+        "operationId": "unread_notification_api_v1_notifications_inbox__notification_id__unread_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/trackvance__notifications_api__NotificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "notifications:read"
+      }
+    },
     "/api/v1/delivery/validations": {
       "get": {
         "tags": [
@@ -9264,6 +9415,60 @@
             },
             "type": "object",
             "title": "Effective Limits"
+          },
+          "route_limits": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Limits"
+          },
+          "received_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received Bytes"
+          },
+          "materialized_rows": {
+            "type": "integer",
+            "title": "Materialized Rows"
+          },
+          "materialized_bytes": {
+            "type": "integer",
+            "title": "Materialized Bytes"
+          },
+          "published_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Rows"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           }
         },
         "type": "object",
@@ -9293,7 +9498,13 @@
           "source_snapshot",
           "reader_options",
           "column_overrides",
-          "effective_limits"
+          "effective_limits",
+          "route_limits",
+          "received_bytes",
+          "materialized_rows",
+          "materialized_bytes",
+          "published_rows",
+          "error"
         ],
         "title": "AcquisitionResponse"
       },
@@ -12260,6 +12471,49 @@
         "type": "object",
         "title": "MonitorRunBody"
       },
+      "NotificationDiagnostic": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "details",
+          "reference"
+        ],
+        "title": "NotificationDiagnostic"
+      },
       "NotificationListResponse": {
         "properties": {
           "items": {
@@ -14220,6 +14474,16 @@
               }
             ],
             "title": "Read At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationDiagnostic"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

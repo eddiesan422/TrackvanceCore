@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowDown, ArrowUp, ArrowUpDown, ArrowUpRight, Check, Database, FileSpreadsheet, FileType2, Fingerprint, LoaderCircle, Plus, RefreshCw, Upload } from 'lucide-react'
-import { api, post } from '../../api/client'
+import { api, ApiError, post } from '../../api/client'
 import type { Collection, RecordData } from '../../api/client'
 import { Badge, date, Empty, ErrorState, Field, Loading, Modal, Notice, number, PageHeading, SearchBox, label } from '../../components/ui'
 
@@ -11,6 +11,8 @@ import { usePermission } from '../../app/session'
 import { ColumnMultiSelect } from '../runs/ColumnMultiSelect'
 import { SourceRefresh } from '../connections/SourceRefresh'
 import { AcquisitionDialog, AcquisitionHistory } from './Acquisitions'
+import { BusinessAreaField, businessAreaError } from './BusinessAreaField'
+import { AcquisitionLimits, getAcquisitionLimits, limitFormat, limitsKey, limitValue, useAcquisitionLimits } from './AcquisitionLimits'
 
 const normalizedDatasetName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es')
 
@@ -79,9 +81,6 @@ const logicalTypes: { value: LogicalType; label: string }[] = [
   { value: 'TIMESTAMP', label: 'Fecha y hora' },
   { value: 'BOOLEAN', label: 'Booleano' },
 ]
-
-const defaultDomains = ['Operaciones', 'Finanzas', 'Logística', 'Ventas']
-const newDomainOption = '__new_domain__'
 
 function candidateFileFormat(file: File): DatasetFileFormat | null {
   const extension = file.name.split('.').pop()?.toLowerCase() || ''
@@ -157,17 +156,17 @@ function datasetOriginLabel(dataset: RecordData) {
   return origin ? label(origin) : 'Manual'
 }
 
-export function UploadDialog({ open, onClose, datasetId, datasetName, existingDatasets = [] }: { open: boolean; onClose: () => void; datasetId?: string; datasetName?: string; existingDatasets?: RecordData[] }) {
+export function UploadDialog({ open, onClose, datasetId, datasetName, datasetDomain, existingDatasets = [] }: { open: boolean; onClose: () => void; datasetId?: string; datasetName?: string; datasetDomain?: string; existingDatasets?: RecordData[] }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
   const currentFile = useRef<File | null>(null)
   const inspectionSequence = useRef(0)
+  const inspectionController = useRef<AbortController | null>(null)
+  useEffect(() => () => { inspectionController.current?.abort(); currentFile.current = null; inspectionSequence.current += 1 }, [])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [domain, setDomain] = useState('Operaciones')
-  const [addingDomain, setAddingDomain] = useState(false)
-  const [customDomain, setCustomDomain] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [createdDataset, setCreatedDataset] = useState<string>()
   const [dragOver, setDragOver] = useState(false)
@@ -180,21 +179,27 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
   const matchingDataset = !datasetId && name.trim() ? existingDatasets.find(dataset => normalizedDatasetName(String(dataset.name || '')) === normalizedDatasetName(name)) : undefined
   const guessedFormat = file ? candidateFileFormat(file) : null
   const inspectedFormat = normalizedFileFormat(inspection?.format, guessedFormat)
+  const limitDescriptor = useAcquisitionLimits(inspection?.format || limitFormat(file?.name), 'LEGACY_UPLOAD', open)
   const inspectedColumns = inspection?.columns || []
   const identifierNames = new Set(selectedIdentifiers)
-  const selectedDomain = addingDomain ? customDomain.trim() : domain.trim()
-  const availableDomains = [...new Set([
-    ...defaultDomains,
-    ...existingDatasets.map(dataset => String(dataset.domain || '').trim()).filter(Boolean),
-  ])].sort(datasetCollator.compare)
+  const selectedDomain = domain.trim()
+  const fixedDomain = datasetId ? datasetDomain ?? '' : matchingDataset ? String(matchingDataset.domain || '') : undefined
 
   const inspect = useMutation({
     mutationFn: async (variables: { candidate: File; options: ReaderOptions; requestId: number }) => {
       const { candidate, options } = variables
+      inspectionController.current?.abort()
+      const controller = new AbortController()
+      inspectionController.current = controller
+      const format = limitFormat(candidate.name)
+      const limits = await queryClient.fetchQuery({ queryKey: limitsKey(format, 'LEGACY_UPLOAD'), queryFn: () => getAcquisitionLimits(format, 'LEGACY_UPLOAD') })
+      if (controller.signal.aborted || currentFile.current !== candidate || inspectionSequence.current !== variables.requestId) throw new ApiError('La selección del archivo cambió antes de iniciar la inspección.', 0)
+      const maximum = limits.limits.compressed_bytes || limits.limits.max_upload_bytes
+      if (maximum && candidate.size > maximum.max) throw new ApiError(`El archivo supera el máximo configurado para carga rápida: ${limitValue(maximum.max, maximum.unit)}. Usa adquisición en segundo plano para otra ruta.`, 422, undefined, 'UPLOAD_TOO_LARGE')
       const body = new FormData()
       body.append('file', candidate)
       body.append('reader_options', JSON.stringify(options))
-      return api<UploadInspection>('/datasets/uploads/inspect', { method: 'POST', body })
+      return api<UploadInspection>('/datasets/uploads/inspect', { method: 'POST', body, signal: controller.signal })
     },
     onSuccess: (result, variables) => {
       if (currentFile.current !== variables.candidate || inspectionSequence.current !== variables.requestId) return
@@ -219,15 +224,6 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
 
   function chooseFile(candidate?: File) {
     if (!candidate) return
-    if (candidate.size > 10 * 1024 * 1024) {
-      inspectionSequence.current += 1
-      currentFile.current = null
-      setFile(null)
-      setInspection(null)
-      inspect.reset()
-      setValidation('El prototipo admite archivos de hasta 10 MB.')
-      return
-    }
     setValidation('')
     setFile(candidate)
     currentFile.current = candidate
@@ -299,8 +295,8 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
   })
 
   const needsDatasetCreation = !datasetId && !createdDataset && !matchingDataset
-  const canSubmit = !!file && !!inspection && !inspect.isPending && !inspect.error && !upload.isPending
-    && (!!datasetId || !!name.trim()) && (!needsDatasetCreation || !!selectedDomain)
+  const canSubmit = !!file && !!inspection && !!limitDescriptor.data && !inspect.isPending && !inspect.error && !upload.isPending
+    && (!!datasetId || !!name.trim()) && (!needsDatasetCreation || !businessAreaError(selectedDomain))
 
   return <Modal
     wide
@@ -326,9 +322,11 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
           <Upload size={30}/>
           <strong>Arrastra tu archivo de datos aquí</strong>
           <span>o <button className="text-button" type="button" onClick={() => fileInput.current?.click()}>selecciona un archivo</button></span>
-          <small>CSV · Excel XLSX · JSON · Parquet · TXT delimitado · hasta 10 MB</small>
+          <small>CSV · Excel XLSX · JSON · Parquet · TXT delimitado · cotas de carga rápida indicadas abajo</small>
         </>}
       </div>
+
+      <AcquisitionLimits limits={limitDescriptor.data} loading={limitDescriptor.isPending} error={limitDescriptor.error} retry={() => { void limitDescriptor.refetch() }}/>
 
       {validation && <Notice>{validation}</Notice>}
       {file && inspect.isPending && <div className="file-inspection-loading" role="status"><LoaderCircle className="spin" size={18}/><span>Detectando formato, columnas y tipos…</span></div>}
@@ -396,33 +394,13 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, existingDa
       {!datasetId && <div className="form-stack dataset-metadata-fields">
         <Field label="Nombre del dataset"><input required maxLength={120} value={name} disabled={!!createdDataset} onChange={event => setName(event.target.value)} placeholder="Ej. Facturación septiembre"/></Field>
         <div className="form-grid">
-          <div className="area-field-stack">
-            <Field label="Área de negocio">
-              <select
-                value={addingDomain ? newDomainOption : domain}
-                disabled={!!createdDataset}
-                onChange={event => {
-                  if (event.target.value === newDomainOption) {
-                    setAddingDomain(true)
-                    setCustomDomain('')
-                  } else {
-                    setAddingDomain(false)
-                    setDomain(event.target.value)
-                  }
-                }}
-              >
-                {availableDomains.map(area => <option key={area} value={area}>{area}</option>)}
-                <option value={newDomainOption}>＋ Agregar nueva área</option>
-              </select>
-            </Field>
-            {addingDomain && <Field label="Nueva área de negocio" hint="Máximo 80 caracteres.">
-              <input required autoFocus maxLength={80} value={customDomain} disabled={!!createdDataset} onChange={event => setCustomDomain(event.target.value)} placeholder="Ej. Riesgos"/>
-            </Field>}
-          </div>
+          <BusinessAreaField value={domain} onChange={setDomain} datasets={existingDatasets} fixedValue={fixedDomain} disabled={!!createdDataset || upload.isPending}/>
           <Field label="Descripción (opcional)"><input value={description} disabled={!!createdDataset} onChange={event => setDescription(event.target.value)} placeholder="Contexto del archivo"/></Field>
         </div>
         {matchingDataset && <Notice>Ya existe “{matchingDataset.name}”. Este archivo se agregará como una nueva versión inmutable del dataset existente.</Notice>}
       </div>}
+
+      {datasetId && <BusinessAreaField value={domain} onChange={setDomain} fixedValue={fixedDomain} disabled/>}
 
       {upload.error && <ErrorState error={upload.error}/>}
       <div className="notice subtle"><Fingerprint size={17}/><span>El original se conserva con su huella SHA-256. El lector normaliza su estructura antes de aplicar reglas de calidad.</span></div>
@@ -456,5 +434,5 @@ export function DatasetDetail() {
   if (dataset.isPending) return <Loading/>
   if (dataset.error) return <ErrorState error={dataset.error} retry={() => dataset.refetch()}/>
   const data = dataset.data, version = profile.data, sample: RecordData[] = version?.sample || [], columns: RecordData[] = version?.profile?.columns || []
-  return <><PageHeading back="/datasets" eyebrow="DATASET" title={data.name} description={data.description || 'Versiones y perfil de tu activo de información.'} action={<button className="button primary" disabled={!canUpload} onClick={() => setUpload(true)}><Upload size={17}/> Nueva versión</button>}/><div className="detail-summary"><Badge value={data.status}/><span>{data.domain}</span><span>Responsable: <strong>{data.owner}</strong></span><span>Criticidad: <Badge value={data.criticality}/></span></div><>{data.source_binding?.connection_id && <SourceRefresh datasetId={data.id} connectionId={data.source_binding.connection_id} connectionState={data.source_binding.connection_state} onRefreshed={setVersionId}/>}</><section className="panel dataset-detail"><div className="panel-heading"><div><h2>Explorador del dataset</h2><p>Consulta un corte específico y su perfil.</p></div><select aria-label="Seleccionar versión" value={currentId || ''} onChange={e => setVersionId(e.target.value)}>{versions.map(v => <option key={v.id} value={v.id}>Versión {v.version} · {v.filename} · {date(v.created_at, false)}</option>)}</select></div>{!currentId ? <Empty title="Este dataset aún no tiene archivos" description="Carga una primera versión para obtener su perfil y ejecutar controles." action={<button className="button primary" onClick={() => setUpload(true)}>Cargar versión</button>}/> : profile.isPending ? <Loading/> : profile.error ? <ErrorState error={profile.error} retry={() => profile.refetch()}/> : <><div className="profile-stats"><div><span>Filas</span><strong>{number(version?.row_count)}</strong></div><div><span>Columnas</span><strong>{number(version?.column_count)}</strong></div><div><span>{['POSTGRESQL', 'SQLSERVER'].includes(version?.source_type) ? 'Tamaño snapshot' : version?.source_type === 'INTAKE_OUTPUT' ? 'Tamaño derivado' : 'Tamaño original'}</span><strong>{number((version?.size_bytes || 0) / 1024)} <small>KB</small></strong></div><div><span>Perfil</span><Badge value={version?.profile_status}/></div></div>{version?.sample_limited && <Notice>La muestra se limitó por el tamaño de las filas. El perfil incluye todos los registros.</Notice>}<div className="tabs">{[['profile', 'Perfil de columnas'], ['sample', 'Muestra de datos'], ['versions', 'Historial de versiones'], ['evidence', 'Fuente de la versión']].map(([key, text]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>)}</div>{tab === 'profile' && <><ProfilingPolicy profile={version?.profile || {}}/><div className="table-scroll"><table><thead><tr><th>Columna</th><th>Tipo detectado</th><th>Valores distintos</th><th>Valores nulos</th><th>Texto vacío</th><th>Completitud</th></tr></thead><tbody>{columns.map(c => <tr key={c.name}><td className="mono">{c.name}</td><td><span className="type-pill">{c.logical_type}</span>{c.semantic_tag === 'IDENTIFIER' && <small className="reason-code">Identificador · conserva ceros iniciales</small>}</td><td>{number(c.distinct_count)}</td><td>{number(c.null_count)}</td><td>{number(c.empty_string_count ?? c.empty_count)}</td><td><div className="inline-progress"><div><i style={{ width: `${Math.max(0, 100 - Number(c.null_rate || 0) * 100)}%` }}/></div><span>{number(100 - Number(c.null_rate || 0) * 100)}%</span></div></td></tr>)}</tbody></table></div></>}{tab === 'sample' && (sample.length ? <><div className="sample-note">Vista limitada a {number(sample.length)} registros de esta versión.</div><div className="table-scroll"><table><thead><tr>{Object.keys(sample[0]).map(k => <th key={k}>{k}</th>)}</tr></thead><tbody>{sample.map((row, i) => <tr key={i}>{Object.entries(row).map(([key, value]) => <td key={key}><SampleValue value={value}/></td>)}</tr>)}</tbody></table></div></> : <Empty title={version?.sample_limited ? "Muestra limitada por el tamaño de las filas" : "Sin registros de muestra"} description={version?.sample_limited ? "El perfil incluye todos los registros." : Number(version?.row_count) === 0 ? "El archivo no contiene filas para previsualizar." : "No hay una muestra disponible para esta versión."}/>)}{tab === 'versions' && <div className="table-scroll"><table><thead><tr><th>Versión</th><th>Archivo</th><th>Origen</th><th>Filas</th><th>Creada</th><th/></tr></thead><tbody>{versions.map(v => <tr key={v.id}><td><span className="version-pill">v{v.version}</span></td><td>{v.filename}</td><td>{label(v.source_type)}</td><td>{number(v.row_count)}</td><td>{date(v.created_at)}</td><td><button className="text-button" onClick={() => { setVersionId(v.id); setTab('profile') }}>Ver perfil</button></td></tr>)}</tbody></table></div>}{tab === 'evidence' && version && <VersionIdentity version={version} connectionState={data.source_binding?.connection_state}/>}</>}</section><AcquisitionHistory datasetId={id} onCompleted={setVersionId}/><AcquisitionDialog key={upload ? 'open' : 'closed'} open={upload} onLegacy={() => setLegacyUpload(true)} onClose={() => setUpload(false)} datasetId={id} datasetName={data.name}/><UploadDialog key={legacyUpload ? 'legacy-open' : 'legacy-closed'} open={legacyUpload} onClose={() => setLegacyUpload(false)} datasetId={id} datasetName={data.name}/></>
+  return <><PageHeading back="/datasets" eyebrow="DATASET" title={data.name} description={data.description || 'Versiones y perfil de tu activo de información.'} action={<button className="button primary" disabled={!canUpload} onClick={() => setUpload(true)}><Upload size={17}/> Nueva versión</button>}/><div className="detail-summary"><Badge value={data.status}/><span>{data.domain}</span><span>Responsable: <strong>{data.owner}</strong></span><span>Criticidad: <Badge value={data.criticality}/></span></div><>{data.source_binding?.connection_id && <SourceRefresh datasetId={data.id} connectionId={data.source_binding.connection_id} connectionState={data.source_binding.connection_state} onRefreshed={setVersionId}/>}</><section className="panel dataset-detail"><div className="panel-heading"><div><h2>Explorador del dataset</h2><p>Consulta un corte específico y su perfil.</p></div><select aria-label="Seleccionar versión" value={currentId || ''} onChange={e => setVersionId(e.target.value)}>{versions.map(v => <option key={v.id} value={v.id}>Versión {v.version} · {v.filename} · {date(v.created_at, false)}</option>)}</select></div>{!currentId ? <Empty title="Este dataset aún no tiene archivos" description="Carga una primera versión para obtener su perfil y ejecutar controles." action={<button className="button primary" onClick={() => setUpload(true)}>Cargar versión</button>}/> : profile.isPending ? <Loading/> : profile.error ? <ErrorState error={profile.error} retry={() => profile.refetch()}/> : <><div className="profile-stats"><div><span>Filas</span><strong>{number(version?.row_count)}</strong></div><div><span>Columnas</span><strong>{number(version?.column_count)}</strong></div><div><span>{['POSTGRESQL', 'SQLSERVER'].includes(version?.source_type) ? 'Tamaño snapshot' : version?.source_type === 'INTAKE_OUTPUT' ? 'Tamaño derivado' : 'Tamaño original'}</span><strong>{number((version?.size_bytes || 0) / 1024)} <small>KB</small></strong></div><div><span>Perfil</span><Badge value={version?.profile_status}/></div></div>{version?.sample_limited && <Notice>La muestra se limitó por el tamaño de las filas. El perfil incluye todos los registros.</Notice>}<div className="tabs">{[['profile', 'Perfil de columnas'], ['sample', 'Muestra de datos'], ['versions', 'Historial de versiones'], ['evidence', 'Fuente de la versión']].map(([key, text]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{text}</button>)}</div>{tab === 'profile' && <><ProfilingPolicy profile={version?.profile || {}}/><div className="table-scroll"><table><thead><tr><th>Columna</th><th>Tipo detectado</th><th>Valores distintos</th><th>Valores nulos</th><th>Texto vacío</th><th>Completitud</th></tr></thead><tbody>{columns.map(c => <tr key={c.name}><td className="mono">{c.name}</td><td><span className="type-pill">{c.logical_type}</span>{c.semantic_tag === 'IDENTIFIER' && <small className="reason-code">Identificador · conserva ceros iniciales</small>}</td><td>{number(c.distinct_count)}</td><td>{number(c.null_count)}</td><td>{number(c.empty_string_count ?? c.empty_count)}</td><td><div className="inline-progress"><div><i style={{ width: `${Math.max(0, 100 - Number(c.null_rate || 0) * 100)}%` }}/></div><span>{number(100 - Number(c.null_rate || 0) * 100)}%</span></div></td></tr>)}</tbody></table></div></>}{tab === 'sample' && (sample.length ? <><div className="sample-note">Vista limitada a {number(sample.length)} registros de esta versión.</div><div className="table-scroll"><table><thead><tr>{Object.keys(sample[0]).map(k => <th key={k}>{k}</th>)}</tr></thead><tbody>{sample.map((row, i) => <tr key={i}>{Object.entries(row).map(([key, value]) => <td key={key}><SampleValue value={value}/></td>)}</tr>)}</tbody></table></div></> : <Empty title={version?.sample_limited ? "Muestra limitada por el tamaño de las filas" : "Sin registros de muestra"} description={version?.sample_limited ? "El perfil incluye todos los registros." : Number(version?.row_count) === 0 ? "El archivo no contiene filas para previsualizar." : "No hay una muestra disponible para esta versión."}/>)}{tab === 'versions' && <div className="table-scroll"><table><thead><tr><th>Versión</th><th>Archivo</th><th>Origen</th><th>Filas</th><th>Creada</th><th/></tr></thead><tbody>{versions.map(v => <tr key={v.id}><td><span className="version-pill">v{v.version}</span></td><td>{v.filename}</td><td>{label(v.source_type)}</td><td>{number(v.row_count)}</td><td>{date(v.created_at)}</td><td><button className="text-button" onClick={() => { setVersionId(v.id); setTab('profile') }}>Ver perfil</button></td></tr>)}</tbody></table></div>}{tab === 'evidence' && version && <VersionIdentity version={version} connectionState={data.source_binding?.connection_state}/>}</>}</section><AcquisitionHistory datasetId={id} onCompleted={setVersionId}/><AcquisitionDialog key={upload ? 'open' : 'closed'} open={upload} onLegacy={() => setLegacyUpload(true)} onClose={() => setUpload(false)} datasetId={id} datasetName={data.name} datasetDomain={String(data.domain || '')}/><UploadDialog key={legacyUpload ? 'legacy-open' : 'legacy-closed'} open={legacyUpload} onClose={() => setLegacyUpload(false)} datasetId={id} datasetName={data.name} datasetDomain={String(data.domain || '')}/></>
 }

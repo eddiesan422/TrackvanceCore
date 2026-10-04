@@ -67,6 +67,8 @@ class AcquisitionRun(Record, Base):
     output_version_id: Mapped[str | None] = mapped_column(ForeignKey("dataset_versions.id"), nullable=True, unique=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

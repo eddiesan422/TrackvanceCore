@@ -377,7 +377,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -399,6 +399,80 @@ def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path,
     bootstrap = calls[-1][-2]
     assert docker_state.digest(docker_state.VERIFY_SCRIPT) in bootstrap
     assert docker_state.digest(docker_state.PHYSICAL_SCHEMA_GUARD) in bootstrap
+
+
+def write_pre_corrections_backup(root):
+    manifest, state = write_delivery_backup(root, current=True)
+    manifest["migration"] = state["migration"] = docker_state.PRE_CORRECTIONS_MIGRATION
+    state["schema_version"] = docker_state.PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION
+    for name in docker_state.CURRENT_STATE_TABLES:
+        state["tables"].setdefault(name, {})
+    state["tables"]["acquisition_runs"] = {"historical-failure": "e" * 64}
+    state["tables"]["internal_notifications"] = {"historical-read-notice": "f" * 64}
+    state["tables"]["outbox_events"] = {"historical-event": "a" * 64}
+    rewrite_legacy_state(root, manifest, state)
+    return manifest, state
+
+
+def test_backup_v6_0015_is_still_verified_with_all_six_persistent_volumes(tmp_path):
+    root = tmp_path / "backup"
+    manifest, expected = write_pre_corrections_backup(root)
+    assert docker_state.verify_backup(root) == manifest
+    docker_state.validate_delivery_state(expected)
+    assert expected["schema_version"] == 6 and len(expected["tables"]) == 42
+    assert len(docker_state.PRIMARY_VOLUMES) == 6
+    assert set(manifest["components"]) == {"state.json", "postgres.dump",
+        *(f"volumes/{name}.tar.gz" for name in docker_state.ARCHIVED_VOLUMES)}
+
+
+def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activity(monkeypatch, tmp_path):
+    root = tmp_path / "backup"
+    _manifest, expected = write_pre_corrections_backup(root)
+    restored = json.loads(json.dumps(expected))
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
+    state = modern_inventory()
+    state["project"] = "trackvance-restore-test"
+    commands, extracted = [], []
+    monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _: None)
+    monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _: None)
+    monkeypatch.setattr(docker_state, "compose_services", lambda *_: list(docker_state.PRIMARY_SERVICES))
+    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: "")
+    monkeypatch.setattr(docker_state, "inventory", lambda _: state)
+    monkeypatch.setattr(docker_state, "_extract_volume", lambda _root, archive, _volume, _image: extracted.append(archive))
+
+    def execute(arguments, **_kwargs):
+        if arguments[:2] == ["docker", "exec"] and arguments[-1] in {"snapshot", "snapshot-legacy-v6"}:
+            commands.append(arguments[-1])
+            return json.dumps(restored if arguments[-1] == "snapshot" else expected)
+        return ""
+
+    monkeypatch.setattr(docker_state, "execute", execute)
+    receipt = docker_state.restore(root, "trackvance-restore-test")
+    assert receipt["status"] == "STOPPED_VERIFIED"
+    assert commands == ["snapshot", "snapshot-legacy-v6"]
+    assert extracted == [f"volumes/{name}.tar.gz" for name in docker_state.ARCHIVED_VOLUMES]
+    assert restored["tables"]["internal_notifications"] == expected["tables"]["internal_notifications"]
+
+
+@pytest.mark.parametrize("damage", ["normalized_hash", "read_at_hash", "omitted_activity", "wrong_migration", "missing_projection"])
+def test_restore_v6_refuses_changed_or_missing_historical_projection(tmp_path, damage):
+    manifest, expected = write_pre_corrections_backup(tmp_path / "backup")
+    restored = json.loads(json.dumps(expected))
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    projected = json.loads(json.dumps(expected))
+    if damage == "normalized_hash":
+        projected["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64
+    elif damage == "read_at_hash":
+        projected["tables"]["internal_notifications"]["historical-read-notice"] = "b" * 64
+    elif damage == "omitted_activity":
+        projected["tables"]["outbox_events"] = {}
+    elif damage == "wrong_migration":
+        restored["migration"] = docker_state.PRE_CORRECTIONS_MIGRATION
+    else:
+        projected = None
+    with pytest.raises(docker_state.OperationError, match="normalizada|inventario"):
+        docker_state.validate_restored_state(manifest, expected, restored, projected)
 
 
 @pytest.mark.parametrize("tampered", [None, "verify_storage.py", "physical_schema_guard.py"])

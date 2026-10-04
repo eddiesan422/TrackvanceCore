@@ -1,8 +1,10 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.7.0, adquisición asíncrona, ejecución Spark,
-automatizaciones, eventos y bandeja personal, 3 de octubre de 2026. La certificación integrada se registra por separado;
-los resultados históricos no certifican automáticamente esta revisión.
+Revisión de implementación: ciclo correctivo C01–C06 de 0.7.0, adquisición
+asíncrona, ejecución Spark, automatizaciones, eventos y bandeja personal,
+4 de octubre de 2026. La certificación integrada se registra por separado;
+los resultados históricos no certifican automáticamente esta revisión ni
+demuestran que la instalación principal ya haya sido actualizada.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y
 tres workers, un scheduler y dos consumidores de eventos que comparten los modelos y servicios del backend. Docker Compose con
@@ -88,8 +90,14 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 | Notificaciones históricas | Conservar metadata de entregas 0.6.0 | Lectura histórica, sin envíos ni adaptador SMTP; eventos nuevos en bandeja personal independiente | Otros canales con adaptadores explícitos |
 | Automatización y eventos | Despachar ocurrencias, encadenar Intake→Delivery y publicar avisos personales | Scheduler, outbox transaccional, consumidores y bandeja interna | Otros canales con adaptadores explícitos |
 
-`ExecutionPlanner` acepta `AUTO`, `POLARS` o `PYSPARK`, incluye origen, destino y
-versiones de referencia, y usa el tamaño real de las partes canónicas. AUTO elige
+`ExecutionPlanner` acepta `AUTO`, `POLARS` o `PYSPARK` e incluye origen, destino y
+versiones de referencia. Al encolar usa conteos y tamaños persistidos: el tamaño
+del artifact para un archivo único y `canonical_size_bytes` para una población
+multipart. El tamaño del descriptor no representa el tamaño de sus partes.
+Si falta metadata suficiente, el plan rechaza la ejecución con
+`WORKLOAD_METADATA_UNAVAILABLE`; no inventa cero bytes ni abre el descriptor
+para completar el dato durante el despacho. La lectura y verificación física
+corresponden a la ejecución. AUTO elige
 Polars dentro del presupuesto de población materializada y Spark para cargas
 mayores. Una elección explícita conserva el motor solicitado. Runtime ausente,
 presupuestos insuficientes o disco insuficiente generan `FAILED_PRECONDITION`
@@ -171,7 +179,7 @@ completamente independientes.
 | Almacenamiento y entrada | `artifactstore.py`, `dataset_readers.py` | Puertos, adaptadores locales, integridad y lectura multiformato |
 | Ejecución asíncrona | `execution.py`, `jobqueue.py`, `worker.py`, `planner.py` | Entrega de jobs, leases, heartbeat, presupuesto y procesamiento |
 | Spark | `spark_engine.py`, `spark_execution.py` | RDD globales, kernels acotados, materialización multipart y control de autoridad |
-| Adquisición | `acquisition.py`, `batch_readers.py`, `dataset_scans.py` | Upload/snapshot asíncrono, límites, partes canónicas y perfil global exacto |
+| Adquisición | `acquisition.py`, `acquisition_config.py`, `acquisition_errors.py`, `batch_readers.py`, `xlsx_streaming.py`, `dataset_scans.py` | Upload/snapshot asíncrono, límites efectivos, diagnóstico público, XLSX incremental, partes canónicas y perfil global exacto |
 | Automatización y bandeja | `automation.py`, `dispatcher.py`, `events.py`, `notifications_api.py` | Ocurrencias IANA, encadenamiento, outbox, consumidores y avisos personales |
 | Sentinel programado | `scheduler.py`, `sentinel_api.py` | Programaciones, revisiones, ocurrencias, despacho transaccional e histórico de series |
 | Gestión de casos | `exceptions_api.py` | Responsable, prioridad, SLA, comentarios, adjuntos y filtros; validación compartida en servicios |
@@ -181,8 +189,10 @@ completamente independientes.
 
 El código de aplicación solicita publicación/materialización de artifacts al
 proveedor; no construye rutas desde `STORAGE_DIR`. Los paths físicos, staging y
-verificación de límites permanecen en el adaptador local. Planner, heartbeat e
-inicialización SQLite pueden consultar el filesystem como infraestructura local.
+verificación de límites permanecen en el adaptador local. Las comprobaciones de
+capacidad y disponibilidad del runtime, los heartbeats y la inicialización
+SQLite pueden consultar infraestructura local; el despacho no usa esa frontera
+para abrir, hashear o escanear bytes de la población.
 
 ## Módulos funcionales y trazabilidad
 
@@ -224,6 +234,13 @@ seleccionada para reducir entradas libres sin cambiar los contratos del motor.
 Al cargar o versionar un dataset, los identificadores se eligen desde las
 columnas inspeccionadas, con selección individual o **Todos**; se eliminó la
 entrada adicional de nombres que duplicaba esa decisión.
+
+La adquisición asíncrona y la carga rápida comparten el selector de área de
+negocio. Combina Operaciones, Finanzas, Logística y Ventas con los valores
+existentes de la organización, ordenados y deduplicados para elegirlos sin
+reescribir etiquetas históricas. **Agregar nueva área** valida entre uno y
+80 caracteres y persiste el mismo `Dataset.domain`. Una nueva versión muestra
+y conserva el área del dataset existente, sin sustituirla por un default.
 
 Data Intake, ReconOps y Sentinel construyen el catálogo de **Responsable** a
 partir de valores ya conocidos en datasets y configuraciones del módulo. Al
@@ -277,10 +294,35 @@ Las automatizaciones Delivery incorporan revisiones inmutables, zona IANA,
 ocurrencias idempotentes y reglas activables Intake→Delivery. Outbox y consumidores
 persisten cada decisión y publican avisos internos sin SMTP.
 
+El despacho horario, manual y encadenado resuelve exclusivamente metadata
+persistida: organización, permisos actuales, publicación, aceptación Intake,
+conteos, hashes registrados y revisiones. No abre un `DataSink` ni verifica
+bytes canónicos. La ocurrencia y el Run congelan DatasetVersion, configuración
+y destino exactos; una cadena fija `output_version_id` del Intake que la originó.
+Los claims y el guard del target resuelven no repetición, solapamiento y UNKNOWN
+sin un scan. Sentinel también planifica al encolar desde metadata persistida.
+
+La UI valida el texto de zona antes de formatear o convertir; una zona vacía,
+parcial o inválida muestra un error y bloquea guardar, sin fallback UTC ni zona
+del navegador. Las revisiones conservan el `starts_at` histórico y `next_run_at`
+si no cambia el calendario; editar un nombre no rearma un ONCE consumido.
+Una creación o cambio deliberado a un nuevo inicio pasado sigue rechazado.
+Si cambia el calendario con el ancla existente, se busca un próximo instante
+válido futuro. Se conserva la política DST: una hora inexistente se omite y una
+ambigua usa `fold=0`.
+
+El tiempo de despacho termina al persistir Run y Job. El tiempo en cola comienza
+ahí y termina al iniciar la ejecución; `DeliveryAttempt.STARTED` es la frontera
+durable previa a la transacción remota. Un Job con lease RUNNING puede estar
+verificando o preparando y todavía no tener un intento STARTED. Se informan
+estas magnitudes por separado; un Run aún en cola tiene espera observada,
+no una latencia de inicio concluida. Un scheduler independiente puede encolar
+mientras Delivery está ocupado sin eliminar la espera por capacidad de workers.
+
 ### Data Delivery y confirmación remota
 
 Data Delivery fija una DatasetVersion, una revisión inmutable de destino, target,
-mapping y estrategia. Preview materializa una muestra sin escribir; preflight
+mapping y estrategia. Preview presenta una muestra acotada sin escribir; preflight
 comprueba hash/artifact, schema, tipos, restricciones, permisos y claves, primero
 al publicar y nuevamente al ejecutar. `CREATE_AND_LOAD`, `APPEND`, `OVERWRITE` y
 `UPSERT` operan dentro de una transacción del motor remoto. No existe una
@@ -297,7 +339,20 @@ DestinationVersion, intento y artifacts sin incluir secretos o filas completas.
 
 El mapping conserva el tipo lógico de la DatasetVersion; no convierte STRING en
 número, fecha, timestamp o booleano. Toda materialización técnica compatible se
-congela como `PreparedDelivery` antes de `STARTED`. El claim condicional del job ocurre antes de reconciliar y respeta el
+congela como `PreparedDelivery` y un `PreparedRows` sellado antes de `STARTED`.
+El worker compara las identidades congeladas, verifica descriptor, todas las
+partes, tamaños, hashes, esquema y conteos, y verifica de nuevo la fuente después
+de preparar el spool. `StorageProvider.dataset_paths` mantiene su contrato
+completo para todos los consumidores; no hay bypass global ni caché que permita
+reutilizar una verificación anterior de bytes modificables.
+
+Las lecturas y scans costosos ocurren fuera de transacciones de metadata largas;
+los heartbeats conservan una sesión independiente. Antes de STARTED se revalidan
+identidad, autorización vigente, lease, cancelación y exclusión por target bajo
+el fence final. Un artifact desaparecido o corrupto tras encolar produce
+`FAILED_PRECONDITION` antes de DDL/DML: no se sustituye su SHA esperado ni se
+elige otra versión. La cancelación durante una llamada indivisible de hash se
+observa al retornar esa llamada. El claim condicional del job ocurre antes de reconciliar y respeta el
 orden Run→Job, compartido con cancelación. Un estado remoto conocido prevalece
 sobre una cancelación posterior; un lease perdido sin prueba no autoriza replay.
 Las tablas existentes se bloquean aun con cero filas. PostgreSQL revalida bajo
@@ -394,6 +449,14 @@ envío al administrar usuarios. 0.7.0 añade avisos operativos en una bandeja
 personal mediante outbox; la credencial temporal sigue visible una sola vez y
 no se envía por ese canal. Ver [identidad](development/identity-060.md).
 
+La bandeja admite filtros Todas, Leídas y Sin leer. Los setters individuales
+`POST /notifications/inbox/{id}/read` y `/unread` fijan un estado explícito;
+`unread` establece `read_at=null` idempotentemente. Exigen el destinatario,
+organización, `notifications:read` y los permisos actuales del recurso enlazado,
+también para administradores. La UI actualiza lista, filtros y contador al
+confirmar; recarga y reinicio conservan el estado. Cambiar lectura no crea otro
+Run, evento outbox, entrega ni auditoría ficticia de negocio.
+
 ### Carga diferida de la interfaz
 
 El shell autenticado conserva navegación, sesión, cabecera y pie mientras
@@ -403,7 +466,7 @@ recarga explícita; navegar a otra ruta reinicia el boundary. El detalle Deliver
 se importa aparte desde el detalle genérico de Run, sin arrastrar su builder.
 La autorización permanece en componentes y backend; diferir un módulo no otorga
 permisos. Vite genera chunks y CSS asociados sin dependencias nuevas ni un umbral
-de warning artificialmente aumentado. El entry JS medido baja de 611.407 a
+de warning artificialmente aumentado. En la medición histórica 0.5.1, el entry JS baja de 611.407 a
 364.966 bytes; esto no mide latencia ni el total de cada ruta. Ver
 [resultados y pruebas](development/code-splitting-results-0.5.1.md).
 
@@ -440,16 +503,49 @@ revisión local, se controla con `DEMO_ACCESS_ENABLED` y requiere sustitución a
 de una exposición de producto. `DEMO_SEED_ENABLED` es independiente: sólo decide
 si se crean datos sintéticos durante el arranque.
 
-La adquisición asíncrona admite por defecto 1 GiB de archivo, 5.000.000 de filas,
+La adquisición asíncrona incremental admite por defecto 1 GiB de archivo, 5.000.000 de filas,
 100 columnas y 2 GiB observados; los lotes se limitan a 5.000 filas/8 MiB y
 el perfil usa 256 MiB con spill. CSV, TXT, JSON Lines, Parquet y snapshots SQL
-se consumen incrementalmente. XLSX y JSON array usan un adaptador acotado a
-10 MiB/100.000 filas, con rechazo explícito al superar ese dominio. La ruta
-síncrona histórica conserva 10 MiB/100.000 filas. La inspección
+se consumen incrementalmente. XLSX usa un lector ZIP/OOXML incremental:
+1.000.000 de registros de datos, 1 GiB comprimido y 4 GiB expandidos por defecto,
+sin precargar hoja ni shared strings completos. SAX procesa chunks de 64 KiB;
+shared strings y fórmulas compartidas usan índices SQLite privados y cachés
+acotadas. El parser rechaza macros, DTD/entidades y miembros/rutas inválidos;
+comprueba expansión real, disco, tiempo, cancelación y lease durante la lectura.
+JSON no lineal conserva 10 MiB/100.000 filas y la ruta síncrona histórica conserva
+sus mismos límites. La inspección
 previa usa hasta 100 registros cuando corresponde, o metadata embebida Parquet;
 no exige un escaneo completo sólo para ofrecer las columnas. El upload/snapshot
 nuevo pasa a ACQUISITION y el perfil se publica tras verificar la población
 completa. Las ejecuciones de calidad pasan a DEFAULT.
+
+La inspección XLSX aplica presupuestos independientes de metadata/muestra y
+puede devolver `inspection_limited` y un total desconocido. No escanea la hoja
+completa en HTTP para contar registros. La primera fila no vacía es encabezado;
+filas sólo formateadas no son datos y dimensiones declaradas no son un censo.
+Se preservan hoja, encabezado físico, espacios, Unicode, identificadores,
+fórmulas como texto, fechas/epoch y numeración original. Inferencia y perfil
+abarcan toda la población y la publicación conserva el fence transaccional;
+un fallo no publica una muestra ni una versión parcial.
+
+Excel admite 1.048.576 filas físicas por hoja incluyendo encabezado. La cota
+efectiva es el mínimo del presupuesto general, el XLSX y el espacio restante
+desde el encabezado. No se anuncian cinco millones de filas XLSX ni se amplían
+los límites de exportación Excel. Los trece parámetros XLSX y las cotas de
+columnas/celdas/lotes/recursos se describen en
+[operación](development/operations.md) y se consultan con
+`GET /api/v1/acquisitions/limits?format=XLSX&route=ASYNC_ACQUISITION`.
+El descriptor del backend evita duplicar constantes en la UI.
+
+Los fallos nuevos conservan código, mensaje público, detalles del límite y
+referencia diagnóstica. Se distinguen filas, archivo comprimido, expansión,
+celda/registro, columnas, hoja, estructura, formato, tiempo, disco, memoria y
+permisos. Sólo excepciones legacy reconocidas tienen un mapeo seguro; el fallback
+no expone valores, paths privados, trazas ni credenciales. API, historial y
+notificaciones derivan la misma causa pública. Un contador cero durante
+indexación no significa fuente vacía; bytes recibidos, valores materializados
+y versión publicada son contadores distintos. Los errores históricos no se
+reescriben ni reciben una causa retrospectiva inventada.
 
 Data Delivery trabaja con la DatasetVersion canónica registrada y conserva los
 límites de columnas del prototipo. El preflight diagnostica incompatibilidades;
@@ -496,10 +592,24 @@ El framework de volumen registra recursos y resultados medidos. Los límites por
 defecto no aumentan porque exista un runner: sólo una medición completa puede
 justificar cambiarlos en ExecutionPlanner. Un volumen rechazado por preflight o
 no ejecutado por recursos no se presenta como máximo certificado. La medición
-0.7.0 ejercita PySpark Local y Standalone con un millón de filas en Intake,
-ReconOps y Sentinel; documenta recursos y límites por separado. El estado nativo
-0.7.0 llega a 0015/state 6 con 42 tablas y verifica también multipart y outbox,
-según [ADR 0021](adr/0021-v070-state-compatibility.md).
+histórica de la publicación inicial 0.7.0 ejercitó PySpark Local y Standalone con
+un millón de filas en Intake, ReconOps y Sentinel; documentó recursos y límites
+por separado. Llegó a 0015/state 6 con 42 tablas, multipart y outbox. No certifica
+automáticamente el ciclo C01–C06. La corrección añade únicamente
+`0016_acquisition_diagnostics` y usa state 7: conserva las mismas 42 tablas y
+agrega dos columnas nullable de diagnóstico a AcquisitionRun, sin reescribir
+errores ni otras filas.
+
+La recuperación de un origen 0015/state 6 exige `snapshot-legacy-v6` exactamente
+igual: sólo se proyectan fuera `error_details` y `error_reference` cuando son
+NULL. Se preservan todas las filas históricas, incluida actividad asíncrona,
+errores anteriores, áreas, opciones, numeración, límites, `read_at`, artifacts
+y linaje. Un valor no NULL, tabla/columna desconocida, FK divergente o cambio
+en otro campo impide la prueba. Los orígenes state 2–5 siguen sus proyecciones
+explícitas, encadenadas tras esta comprobación; para state 5 las tablas agregadas
+en 0.7.0 deben seguir vacías. Ver
+[ADR 0021](adr/0021-v070-state-compatibility.md) y
+[ADR 0025](adr/0025-corrections-c01-c06.md).
 
 La medición histórica 0.4.0 usó payload variado determinista: 106.194.531 bytes de
 archivo, 50.000 filas, cuatro columnas y 79.145.600 bytes de Parquet canónico.

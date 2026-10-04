@@ -1,9 +1,11 @@
 """Additive async HTTP contract; historical synchronous responses remain intact."""
 
+import hashlib
 import json
 import os
 import shutil
 from datetime import UTC, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from .acquisition import (
     AcquisitionOperationError,
@@ -25,13 +28,16 @@ from .acquisition import (
     upload_dto,
 )
 from .acquisition_config import AcquisitionLimits
+from .acquisition_errors import AcquisitionReadError, processing_diagnostic
 from .acquisition_models import AcquisitionRun, AcquisitionUpload
-from .artifactstore import artifact_store, file_hash, storage_provider
+from .artifactstore import artifact_store, storage_provider
 from .batch_readers import inspect_file
 from .connections_service import owned_connection, saved_source
+from .dataset_readers import dataset_reader_registry
 from .db import get_db, utcnow
 from .models import Dataset, DatasetSourceBinding, User, uid
 from .permissions import effective_permissions
+from .processing import ProcessingError
 from .services import dataset_dto
 
 router = APIRouter(prefix="/api/v1", tags=["Adquisición"])
@@ -92,6 +98,12 @@ class AcquisitionResponse(BaseModel):
     reader_options: dict
     column_overrides: dict
     effective_limits: dict[str, int]
+    route_limits: dict | None
+    received_bytes: int | None
+    materialized_rows: int
+    materialized_bytes: int
+    published_rows: int | None
+    error: dict | None
 
 
 class AcquisitionListResponse(BaseModel):
@@ -116,6 +128,59 @@ def _upload(db: Session, user: User, identifier: str) -> AcquisitionUpload:
     return upload
 
 
+@router.get("/acquisitions/limits")
+def acquisition_limits(source_format: Literal["CSV", "TXT", "JSON", "JSON_LINES", "PARQUET", "XLSX", "POSTGRESQL", "SQLSERVER"] = Query("CSV", alias="format"),
+                       route: Literal["ASYNC_ACQUISITION", "LEGACY_UPLOAD"] = "ASYNC_ACQUISITION"):
+    return AcquisitionLimits.configured().describe(source_format, route=route)
+
+
+def _reception_format(filename: str, prefix: bytes = b"", *, complete: bool = False) -> str:
+    """Classify only a bounded prefix; .json alone also admits NDJSON.
+
+    An array or a complete non-NDJSON line identifies nonlinear JSON. An
+    incomplete object remains unknown until inspection rather than imposing
+    its smaller limit on a valid streaming source.
+    """
+    extension = Path(filename).suffix.lower()
+    if prefix.startswith(b"PK"):
+        return "XLSX"
+    if prefix.startswith(b"PAR1"):
+        return "PARQUET"
+    # The bounded prefix may end inside a UTF-8 code point. Replacement is
+    # used only for classification, never for materialized source values.
+    sample = prefix.decode("utf-8-sig", errors="replace").lstrip()
+    if sample.startswith("["):
+        return "JSON"
+    if extension in {".jsonl", ".ndjson"}:
+        return "JSON_LINES"
+    if sample.startswith("{"):
+        found = 0
+        for line in sample.splitlines(keepends=True)[:10]:
+            if not line.strip():
+                continue
+            if not line.endswith(("\n", "\r")) and not complete:
+                break
+            try:
+                value = json.loads(line, parse_int=Decimal, parse_float=Decimal)
+            except ValueError:
+                return "JSON"
+            if not isinstance(value, dict):
+                return "JSON"
+            found += 1
+            if found == 2:
+                return "JSON_LINES"
+        return "JSON" if complete else "UNKNOWN"
+    return next((item["format"] for item in dataset_reader_registry.formats
+                 if extension in item["extensions"] and item["format"] != "JSON"), "UNKNOWN")
+
+
+def _receive_bound(limits: AcquisitionLimits, source_format: str, observed: int) -> None:
+    maximum = limits.describe(source_format)["limits"]["compressed_bytes"]["max"]
+    if observed > maximum:
+        raise AcquisitionOperationError(413, "UPLOAD_TOO_LARGE", f"El archivo supera el límite efectivo de {maximum:,} bytes de adquisición.",
+            {"limit": "compressed_bytes", "maximum": maximum, "observed": observed})
+
+
 @router.post("/datasets/uploads/stage", status_code=201)
 async def stage_file(request: Request, filename: str = Query(min_length=1, max_length=240),
                      db: Session = Depends(get_db), user: User = Depends(current_user)):
@@ -126,38 +191,58 @@ async def stage_file(request: Request, filename: str = Query(min_length=1, max_l
     Navigating after this response and Acquisition registration keeps the job.
     """
     limits = AcquisitionLimits.configured()
+    safe_name = Path(filename.replace("\\", "/")).name
+    if not safe_name or any(ord(character) < 32 for character in safe_name):
+        raise AcquisitionOperationError(422, "INVALID_FILENAME", "El nombre del archivo no es válido.")
     content_length = request.headers.get("content-length")
+    announced = None
     if content_length is not None:
         try:
             announced = int(content_length)
         except ValueError:
             raise AcquisitionOperationError(422, "INVALID_UPLOAD_LENGTH", "El tamaño de la transferencia no es válido.") from None
-        if announced < 0 or announced > limits.max_upload_bytes:
-            raise AcquisitionOperationError(413, "UPLOAD_TOO_LARGE", "El archivo supera el límite efectivo de adquisición.")
-    safe_name = Path(filename.replace("\\", "/")).name
-    if not safe_name or any(ord(character) < 32 for character in safe_name):
-        raise AcquisitionOperationError(422, "INVALID_FILENAME", "El nombre del archivo no es válido.")
+        if announced < 0:
+            raise AcquisitionOperationError(422, "INVALID_UPLOAD_LENGTH", "El tamaño de la transferencia no es válido.")
+        _receive_bound(limits, _reception_format(safe_name), announced)
+    stream = request.stream()
+    first_chunk = await anext(stream)
+    prefix = first_chunk[:4096]
+    source_format = _reception_format(safe_name, prefix, complete=announced == len(first_chunk) and len(first_chunk) <= 4096)
+    _receive_bound(limits, source_format, max(len(first_chunk), announced or 0))
     suffix = Path(safe_name).suffix.lower()
     if not 1 <= len(suffix) <= 11 or not suffix[1:].isalnum():
         suffix = ".bin"
     path, complete = storage_provider.temporary_path(suffix), False
     try:
         total = 0
+        digest = hashlib.sha256()
         with path.open("xb") as target:
-            async for chunk in request.stream():
+            async def chunks():
+                yield first_chunk
+                async for subsequent in stream:
+                    yield subsequent
+            first = True
+            async for chunk in chunks():
                 total += len(chunk)
-                if total > limits.max_upload_bytes:
-                    raise AcquisitionOperationError(413, "UPLOAD_TOO_LARGE", "El archivo supera el límite efectivo de adquisición.")
+                if not first and len(prefix) < 4096:
+                    prefix += chunk[:4096 - len(prefix)]
+                first = False
+                detected = _reception_format(safe_name, prefix)
+                if detected != "UNKNOWN":
+                    source_format = detected
+                _receive_bound(limits, source_format, max(total, announced or 0))
                 if shutil.disk_usage(path.parent).free - len(chunk) < limits.min_free_bytes:
                     raise AcquisitionOperationError(409, "RESOURCE_DISK_INSUFFICIENT", "No queda la reserva de disco necesaria para recibir el archivo.")
                 target.write(chunk)
+                digest.update(chunk)
             target.flush()
             os.fsync(target.fileno())
         if total == 0:
             raise AcquisitionOperationError(422, "UPLOAD_EMPTY", "El archivo recibido está vacío.")
-        inspection = inspect_file(path, safe_name, limits=limits)
+        _receive_bound(limits, _reception_format(safe_name, prefix, complete=total <= 4096), total)
+        inspection = await run_in_threadpool(inspect_file, path, safe_name, limits=limits)
         upload = AcquisitionUpload(id=uid(), organization_id=user.organization_id, user_id=user.id,
-            filename=safe_name, path=str(path), sha256=file_hash(path), size_bytes=total,
+            filename=safe_name, path=str(path), sha256=digest.hexdigest(), size_bytes=total,
             source_format=inspection["format"], status="RECEIVED",
             expires_at=utcnow() + timedelta(seconds=limits.upload_ttl_seconds))
         db.add(upload)
@@ -185,7 +270,11 @@ def inspect_staged(upload_id: str, reader_options: str = "{}", db: Session = Dep
 @router.post("/datasets/{dataset_id}/acquisitions", status_code=202, response_model=AcquisitionResponse)
 def acquire_file(dataset_id: str, body: AcquisitionBody, idempotency_key: str | None = Header(default=None),
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
-    run = register_upload(db, user, _dataset(db, user, dataset_id), **body.model_dump(), idempotency_key=idempotency_key)
+    try:
+        run = register_upload(db, user, _dataset(db, user, dataset_id), **body.model_dump(), idempotency_key=idempotency_key)
+    except ProcessingError as exc:
+        diagnostic = processing_diagnostic(exc)
+        raise AcquisitionReadError(diagnostic.code, diagnostic.message, diagnostic.details) from None
     db.commit()
     return acquisition_dto(run)
 

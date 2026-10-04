@@ -437,6 +437,7 @@ def test_legacy_projections_reject_reviews_and_current_state_includes_them():
     ("0007_monitor_scheduling", 2), ("0008_data_delivery", 3), ("0009_delivery_reviews", 4),
     ("0012_delivery_target_audit", 5),
     ("0015_sentinel_execution_identity", 6),
+    ("0016_acquisition_diagnostics", 7),
 ])
 def test_snapshot_labels_exact_running_revision_not_current_cli_version(monkeypatch, migration, schema):
     rows = {name: [] for name in verify_storage.FINGERPRINT_TABLES[migration]}
@@ -549,3 +550,122 @@ def test_job_requires_exactly_one_execution_identity(identities):
     rows = {'jobs': [{'id': 'job', 'lane': 'ACQUISITION', 'run_id': identities[0], 'acquisition_id': identities[1]}]}
     with pytest.raises(ValueError, match='exactamente un Run'):
         verify_storage.validate_relationships(rows, [])
+
+
+def corrections_upgrade_rows():
+    previous = {name: [] for name in verify_storage.FINGERPRINT_TABLES[verify_storage.PRE_CORRECTIONS_MIGRATION]}
+    previous["users"] = [{"id": "owner", "organization_id": "org", "name": "Historical user", "password_hash": "unaltered"}]
+    previous["datasets"] = [{"id": "dataset", "organization_id": "org", "domain": "Área histórica"}]
+    previous["artifacts"] = [{"id": "original", "organization_id": "org", "sha256": "a" * 64,
+                              "path": "artifacts/historical.csv", "size_bytes": 12345}]
+    previous["acquisition_runs"] = [{"id": "acquisition", "organization_id": "org", "dataset_id": "dataset",
+        "initiated_by_id": "owner", "status": "FAILED", "stage": "READING", "output_version_id": None,
+        "error_code": "HISTORICAL_ERROR", "error_message": "Mensaje anterior exacto",
+        "source_snapshot": {"row_numbering": "WORKSHEET_ROW", "sheet_name": "Histórico"},
+        "reader_options": {"header_row": 2}, "effective_limits": {"batch_bytes": 8388608},
+        "processed_rows": 17, "processed_bytes": 12345}]
+    previous["jobs"] = [{"id": "job", "organization_id": "org", "run_id": None,
+                         "acquisition_id": "acquisition", "lane": "ACQUISITION", "status": "FAILED"}]
+    previous["outbox_events"] = [{"id": "event", "organization_id": "org", "payload": {"status": "FAILED", "error_code": "HISTORICAL_ERROR"}}]
+    previous["internal_notifications"] = [{"id": "notice", "organization_id": "org", "event_id": "event",
+        "recipient_user_id": "owner", "description": "Descripción anterior exacta", "read_at": "2026-09-11T12:34:56Z"}]
+    upgraded = deepcopy(previous)
+    upgraded["acquisition_runs"][0].update(error_details=None, error_reference=None)
+    fks = [("acquisition_runs", "dataset_id", "datasets", "id"),
+           ("acquisition_runs", "initiated_by_id", "users", "id"),
+           ("jobs", "acquisition_id", "acquisition_runs", "id"),
+           ("internal_notifications", "event_id", "outbox_events", "id"),
+           ("internal_notifications", "recipient_user_id", "users", "id")]
+    return previous, upgraded, fks
+
+
+def corrections_report(rows, fks, migration=verify_storage.CURRENT_MIGRATION):
+    return verify_storage.legacy_v6_report(rows, fks, current_migration=migration,
+        verified_artifacts=1, verified_source_secrets=0, verified_delivery_secrets=0)
+
+
+def test_v6_projection_retains_every_historical_row_value_and_aggregate():
+    previous, upgraded, fks = corrections_upgrade_rows()
+    original = deepcopy(upgraded)
+    report = corrections_report(upgraded, fks)
+    assert report["schema_version"] == 6 and report["migration"] == verify_storage.PRE_CORRECTIONS_MIGRATION
+    assert len(report["tables"]) == 42
+    assert report["tables"] == verify_storage._table_hashes(previous)
+    assert report["validated_relationships"] == verify_storage.validate_relationships(previous, fks)
+    assert report["verified_artifacts"] == 1 and report["verified_secrets"] == 0
+    assert upgraded == original
+
+
+@pytest.mark.parametrize("damage", ["details", "empty_details", "reference", "empty_reference",
+                                   "missing_column", "unknown_table", "missing_table", "wrong_revision"])
+def test_v6_projection_rejects_any_nonnull_new_diagnostic_or_incomplete_schema(damage):
+    _, upgraded, fks = corrections_upgrade_rows()
+    migration = verify_storage.CURRENT_MIGRATION
+    if damage == "details":
+        upgraded["acquisition_runs"][0]["error_details"] = {"observed": 400000}
+    elif damage == "empty_details":
+        upgraded["acquisition_runs"][0]["error_details"] = {}
+    elif damage == "reference":
+        upgraded["acquisition_runs"][0]["error_reference"] = "correlation"
+    elif damage == "empty_reference":
+        upgraded["acquisition_runs"][0]["error_reference"] = ""
+    elif damage == "missing_column":
+        del upgraded["acquisition_runs"][0]["error_details"]
+    elif damage == "unknown_table":
+        upgraded["plugin_history"] = []
+    elif damage == "missing_table":
+        del upgraded["outbox_events"]
+    else:
+        migration = verify_storage.PRE_CORRECTIONS_MIGRATION
+    with pytest.raises(ValueError, match="NULL|inventario completo|0016"):
+        corrections_report(upgraded, fks, migration)
+
+
+@pytest.mark.parametrize("damage", ["old_error", "read_at", "description", "area", "options", "numbering",
+                                   "limits", "artifact_hash", "unknown_column", "extra_row"])
+def test_v6_projection_never_hides_changes_to_historical_data(damage):
+    _, upgraded, fks = corrections_upgrade_rows()
+    expected = corrections_report(upgraded, fks)
+    if damage == "old_error":
+        upgraded["acquisition_runs"][0]["error_message"] = "Reinterpreted historical message"
+    elif damage in {"read_at", "description"}:
+        upgraded["internal_notifications"][0][damage] = None if damage == "read_at" else "Rewritten"
+    elif damage == "area":
+        upgraded["datasets"][0]["domain"] = "Changed"
+    elif damage == "options":
+        upgraded["acquisition_runs"][0]["reader_options"]["header_row"] = 1
+    elif damage == "numbering":
+        upgraded["acquisition_runs"][0]["source_snapshot"]["row_numbering"] = "RECORD_NUMBER"
+    elif damage == "limits":
+        upgraded["acquisition_runs"][0]["effective_limits"]["batch_bytes"] = 1
+    elif damage == "artifact_hash":
+        upgraded["artifacts"][0]["sha256"] = "b" * 64
+    elif damage == "unknown_column":
+        upgraded["acquisition_runs"][0]["future_column"] = None
+    else:
+        upgraded["outbox_events"].append({"id": "new-event", "organization_id": "org", "payload": {}})
+    with pytest.raises(ValueError, match="persistencia cambió"):
+        verify_storage.compare(expected, corrections_report(upgraded, fks))
+
+
+@pytest.mark.parametrize("schema", [2, 3, 4, 5])
+@pytest.mark.parametrize("migration", [verify_storage.PRE_CORRECTIONS_MIGRATION, verify_storage.CURRENT_MIGRATION])
+def test_older_projections_remain_strict_across_both_async_heads(schema, migration):
+    _, upgraded = asynchronous_upgrade_rows()
+    kwargs = {"current_migration": migration, "verified_artifacts": 0, "verified_source_secrets": 0}
+    if schema > 2:
+        kwargs["verified_delivery_secrets"] = 0
+    report = getattr(verify_storage, f"legacy_v{schema}_report")(upgraded, [], **kwargs)
+    assert report["schema_version"] == schema
+    assert len(report["tables"]) == {2: 21, 3: 24, 4: 25, 5: 31}[schema]
+
+
+def test_cli_v6_projection_uses_checked_snapshot_inputs(monkeypatch, capsys):
+    _, upgraded, fks = corrections_upgrade_rows()
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
+        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+    monkeypatch.setattr(verify_storage.sys, "argv", ["verify_storage", "snapshot-legacy-v6"])
+    assert verify_storage.main() == 0
+    import json
+
+    assert json.loads(capsys.readouterr().out) == corrections_report(upgraded, fks)
