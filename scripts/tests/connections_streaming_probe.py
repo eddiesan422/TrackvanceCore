@@ -128,6 +128,7 @@ def require_fixture_scope(host):
 def certify_sqlserver_streaming(host, admin_password, reader_password):
     project = require_fixture_scope(host)
     import pymssql
+
     from trackvance.acquisition_config import AcquisitionLimits
     from trackvance.dataset_sources import ConnectionSettings, SQLServerDatasetSource
 
