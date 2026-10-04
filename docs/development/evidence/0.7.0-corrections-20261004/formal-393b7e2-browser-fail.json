@@ -1,0 +1,4168 @@
+{
+  "schema_version": 1,
+  "version": "0.7.0",
+  "cycle": "C01-C06",
+  "project": "trackvance-v070-test-corrections-5cef00778fdf",
+  "status": "FAIL",
+  "tiers": [
+    {
+      "rows": 100000,
+      "strings": "inline",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-100000-inline-diverse.xlsx",
+        "rows": 100000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 100004,
+        "declared_dimension_trusted": false,
+        "strings": "inline",
+        "shared_string_count": 0,
+        "actual_bytes": 12712418,
+        "expanded_bytes": 57545861,
+        "file_sha256": "88ab860d63edda47e7911f5d560dddddc01b22139b5530886883f19de29f9aeb",
+        "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+        "observed_utf8_bytes": 17211041,
+        "expected_observed_nulls": 1000,
+        "expected_observed_empty": 1000,
+        "expected_cardinality": {
+          "record_id": 100000,
+          "payload": 100000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.2209093369895013,
+        "generation_seconds": 1.665,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-100000-inline-diverse.xlsx",
+            "actual_bytes": 12712418,
+            "sha256": "88ab860d63edda47e7911f5d560dddddc01b22139b5530886883f19de29f9aeb"
+          }
+        },
+        "oracle": {
+          "rows": 100000,
+          "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+          "null_count": 1000,
+          "empty_count": 1000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 2.283,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "7806e97a-c762-4346-8356-2d33d5d54e44",
+        "dataset_id": "96b0b3c4-4f98-49c6-ba96-dcbd72c06943",
+        "output_version_id": "7b2d631d-1cfa-4d1c-af72-8060c7d803f8",
+        "duration_seconds": 14.701146,
+        "transfer_seconds": 0.14,
+        "inspection_seconds": 0.03,
+        "metadata_registration_seconds": 0.064,
+        "transferred_bytes": 12712418,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 100000,
+        "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+        "observed_null_count": 1000,
+        "observed_empty_string_count": 1000,
+        "physical_numbering": {
+          "rows": 100000,
+          "first": 5,
+          "last": 100004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 100000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 98001,
+            "null_count": 1000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "INT64",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "0",
+            "max": "996",
+            "sum": null,
+            "max_length": null
+          }
+        ],
+        "observed_record_bytes_upper_bound": 984
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 19.656,
+          "samples": 6,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 230481920,
+              "cgroup_sample_peak_bytes": 136642560,
+              "cgroup_lifetime_peak_bytes": 178692096,
+              "temporary_peak_bytes": 20683059,
+              "cpu_seconds": 14.492407,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 465072128,
+              "cgroup_sample_peak_bytes": 268926976,
+              "cgroup_lifetime_peak_bytes": 269213696,
+              "temporary_peak_bytes": 20683059,
+              "cpu_seconds": 1.714834,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 206647296,
+              "cgroup_sample_peak_bytes": 130371584,
+              "cgroup_lifetime_peak_bytes": 153694208,
+              "temporary_peak_bytes": 20683059,
+              "cpu_seconds": 1.228922,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 235892736,
+              "cgroup_sample_peak_bytes": 150020096,
+              "cgroup_lifetime_peak_bytes": 153497600,
+              "temporary_peak_bytes": 20683059,
+              "cpu_seconds": 1.185662,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 582889472,
+          "minimum_host_disk_free_bytes": 1325964038144,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140290.0838258,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140291.1055064,
+            "observed_seconds": 1.022,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 161947648,
+            "cgroup_sample_peak_bytes": 94490624,
+            "temporary_sample_peak_bytes": 12712418,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140291.1055064,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140304.3189144,
+            "observed_seconds": 13.213,
+            "resource_samples": 4,
+            "rss_sample_peak_bytes": 210145280,
+            "cgroup_sample_peak_bytes": 130461696,
+            "temporary_sample_peak_bytes": 20683059,
+            "cpu_between_first_and_last_resource_samples_seconds": 10.629807
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140304.3189144,
+            "processed_rows_at_first_observation": 100000,
+            "until_epoch_seconds": 1791140305.326534,
+            "observed_seconds": 1.008,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:PUBLISHING",
+            "from_epoch_seconds": 1791140305.326534,
+            "processed_rows_at_first_observation": 100000,
+            "until_epoch_seconds": 1791140306.3339245,
+            "observed_seconds": 1.007,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140306.3339245,
+            "processed_rows_at_first_observation": 100000,
+            "until_epoch_seconds": 1791140306.3339245,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 19.656
+    },
+    {
+      "rows": 100000,
+      "strings": "shared",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-100000-shared-diverse.xlsx",
+        "rows": 100000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 100004,
+        "declared_dimension_trusted": false,
+        "strings": "shared",
+        "shared_string_count": 298029,
+        "actual_bytes": 12458465,
+        "expanded_bytes": 54985067,
+        "file_sha256": "c21a3953645f8e55754af88e59bf1cfaa0e46f7e8d42b0f05a1fcc8f11c33736",
+        "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+        "observed_utf8_bytes": 17211041,
+        "expected_observed_nulls": 1000,
+        "expected_observed_empty": 1000,
+        "expected_cardinality": {
+          "record_id": 100000,
+          "payload": 100000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.22657906373015788,
+        "generation_seconds": 2.958,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-100000-shared-diverse.xlsx",
+            "actual_bytes": 12458465,
+            "sha256": "c21a3953645f8e55754af88e59bf1cfaa0e46f7e8d42b0f05a1fcc8f11c33736"
+          }
+        },
+        "oracle": {
+          "rows": 100000,
+          "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+          "null_count": 1000,
+          "empty_count": 1000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 13.846,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "899b0084-562f-4735-9115-b93044d679bf",
+        "dataset_id": "0cfbc0e8-ea84-4a0a-bb70-7b70998ff60d",
+        "output_version_id": "582ca48e-6901-4a9f-9dad-88c0cfcb708e",
+        "duration_seconds": 16.131037,
+        "transfer_seconds": 0.079,
+        "inspection_seconds": 0.033,
+        "metadata_registration_seconds": 0.049,
+        "transferred_bytes": 12458465,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 100000,
+        "canonical_rows_sha256": "44da4292e24b32a15b004b8bf26523f49e4d1930e51fe5ff2501cf346408375f",
+        "observed_null_count": 1000,
+        "observed_empty_string_count": 1000,
+        "physical_numbering": {
+          "rows": 100000,
+          "first": 5,
+          "last": 100004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 100000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 98001,
+            "null_count": 1000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 100000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "INT64",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "0",
+            "max": "996",
+            "sum": null,
+            "max_length": null
+          }
+        ],
+        "observed_record_bytes_upper_bound": 984
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 19.695,
+          "samples": 6,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 264609792,
+              "cgroup_sample_peak_bytes": 177692672,
+              "cgroup_lifetime_peak_bytes": 227328000,
+              "temporary_peak_bytes": 36627962,
+              "cpu_seconds": 17.435906,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 475385856,
+              "cgroup_sample_peak_bytes": 270811136,
+              "cgroup_lifetime_peak_bytes": 270835712,
+              "temporary_peak_bytes": 36627962,
+              "cpu_seconds": 1.7244,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 273543168,
+              "cgroup_sample_peak_bytes": 158134272,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 34635858,
+              "cpu_seconds": 1.284758,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 148951040,
+              "cgroup_sample_peak_bytes": 89047040,
+              "cgroup_lifetime_peak_bytes": 153862144,
+              "temporary_peak_bytes": 34635858,
+              "cpu_seconds": 1.268658,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 609841152,
+          "minimum_host_disk_free_bytes": 1325955588096,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140309.653085,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140310.6759677,
+            "observed_seconds": 1.023,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 264609792,
+            "cgroup_sample_peak_bytes": 157822976,
+            "temporary_sample_peak_bytes": 12474849,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140310.6759677,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140324.908107,
+            "observed_seconds": 14.232,
+            "resource_samples": 4,
+            "rss_sample_peak_bytes": 247799808,
+            "cgroup_sample_peak_bytes": 177692672,
+            "temporary_sample_peak_bytes": 36627962,
+            "cpu_between_first_and_last_resource_samples_seconds": 10.2996
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140324.908107,
+            "processed_rows_at_first_observation": 100000,
+            "until_epoch_seconds": 1791140325.9182544,
+            "observed_seconds": 1.01,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140325.9182544,
+            "processed_rows_at_first_observation": 100000,
+            "until_epoch_seconds": 1791140325.9182544,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 19.695
+    },
+    {
+      "rows": 100001,
+      "strings": "inline",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-100001-inline-diverse.xlsx",
+        "rows": 100001,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 100005,
+        "declared_dimension_trusted": false,
+        "strings": "inline",
+        "shared_string_count": 0,
+        "actual_bytes": 12712556,
+        "expanded_bytes": 57546478,
+        "file_sha256": "9521ab3e7e5b79bf3d2909d8a4f3bc80f6a1294f48a19414eba28e0ec0bd0530",
+        "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+        "observed_utf8_bytes": 17211200,
+        "expected_observed_nulls": 1000,
+        "expected_observed_empty": 1001,
+        "expected_cardinality": {
+          "record_id": 100001,
+          "payload": 100001,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.22090936651240412,
+        "generation_seconds": 1.723,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-100001-inline-diverse.xlsx",
+            "actual_bytes": 12712556,
+            "sha256": "9521ab3e7e5b79bf3d2909d8a4f3bc80f6a1294f48a19414eba28e0ec0bd0530"
+          }
+        },
+        "oracle": {
+          "rows": 100001,
+          "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+          "null_count": 1000,
+          "empty_count": 1001,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 2.322,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "a09ddb30-66bc-42cb-9603-cb6e42000849",
+        "dataset_id": "1d89711b-779d-4285-bc94-90863fab3006",
+        "output_version_id": "c69b04f1-b697-4bce-b6d8-8269fad5584e",
+        "duration_seconds": 14.307072,
+        "transfer_seconds": 0.078,
+        "inspection_seconds": 0.025,
+        "metadata_registration_seconds": 0.033,
+        "transferred_bytes": 12712556,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 100001,
+        "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+        "observed_null_count": 1000,
+        "observed_empty_string_count": 1001,
+        "physical_numbering": {
+          "rows": 100001,
+          "first": 5,
+          "last": 100005,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 100001,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 98001,
+            "null_count": 1000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 998,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 16
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1036
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 18.581,
+          "samples": 6,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 247951360,
+              "cgroup_sample_peak_bytes": 183291904,
+              "cgroup_lifetime_peak_bytes": 252833792,
+              "temporary_peak_bytes": 20687164,
+              "cpu_seconds": 15.596749,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 299855872,
+              "cgroup_sample_peak_bytes": 174985216,
+              "cgroup_lifetime_peak_bytes": 271073280,
+              "temporary_peak_bytes": 20687164,
+              "cpu_seconds": 2.359204,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 148951040,
+              "cgroup_sample_peak_bytes": 89026560,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 20687164,
+              "cpu_seconds": 1.571148,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 148951040,
+              "cgroup_sample_peak_bytes": 88813568,
+              "cgroup_lifetime_peak_bytes": 153862144,
+              "temporary_peak_bytes": 20694166,
+              "cpu_seconds": 1.549591,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 532942848,
+          "minimum_host_disk_free_bytes": 1325945978880,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140329.3305516,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140330.339326,
+            "observed_seconds": 1.009,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 234934272,
+            "cgroup_sample_peak_bytes": 161546240,
+            "temporary_sample_peak_bytes": 12712556,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140330.339326,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140342.5318863,
+            "observed_seconds": 12.193,
+            "resource_samples": 3,
+            "rss_sample_peak_bytes": 242642944,
+            "cgroup_sample_peak_bytes": 173793280,
+            "temporary_sample_peak_bytes": 19106161,
+            "cpu_between_first_and_last_resource_samples_seconds": 6.880216
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140342.5318863,
+            "processed_rows_at_first_observation": 100001,
+            "until_epoch_seconds": 1791140344.5476902,
+            "observed_seconds": 2.016,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 247951360,
+            "cgroup_sample_peak_bytes": 183291904,
+            "temporary_sample_peak_bytes": 20687164,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140344.5476902,
+            "processed_rows_at_first_observation": 100001,
+            "until_epoch_seconds": 1791140344.5476902,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 18.581
+    },
+    {
+      "rows": 100001,
+      "strings": "shared",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-100001-shared-diverse.xlsx",
+        "rows": 100001,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 100005,
+        "declared_dimension_trusted": false,
+        "strings": "shared",
+        "shared_string_count": 298032,
+        "actual_bytes": 12458607,
+        "expanded_bytes": 54985623,
+        "file_sha256": "4ce104bb57fa31ac1daf3c706ee76c472ded40fdb9da83ffed017f62b2ac1edd",
+        "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+        "observed_utf8_bytes": 17211200,
+        "expected_observed_nulls": 1000,
+        "expected_observed_empty": 1001,
+        "expected_cardinality": {
+          "record_id": 100001,
+          "payload": 100001,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.22657935511615462,
+        "generation_seconds": 2.96,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-100001-shared-diverse.xlsx",
+            "actual_bytes": 12458607,
+            "sha256": "4ce104bb57fa31ac1daf3c706ee76c472ded40fdb9da83ffed017f62b2ac1edd"
+          }
+        },
+        "oracle": {
+          "rows": 100001,
+          "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+          "null_count": 1000,
+          "empty_count": 1001,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 14.354,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "2636f581-b05b-4c00-b0f0-66fdb26517f9",
+        "dataset_id": "e242e040-097e-4bf5-9145-40de5d812d47",
+        "output_version_id": "93c99847-711f-4aea-8d96-5714088e0b7e",
+        "duration_seconds": 15.62489,
+        "transfer_seconds": 0.077,
+        "inspection_seconds": 0.049,
+        "metadata_registration_seconds": 0.042,
+        "transferred_bytes": 12458607,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 100001,
+        "canonical_rows_sha256": "4c92fab81c3aed9140aae7c4aeb2d98da9d776df0ae8143bf5c69e0243d12d25",
+        "observed_null_count": 1000,
+        "observed_empty_string_count": 1001,
+        "physical_numbering": {
+          "rows": 100001,
+          "first": 5,
+          "last": 100005,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 100001,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 98001,
+            "null_count": 1000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 100001,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 998,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 16
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1036
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 19.457,
+          "samples": 6,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 284098560,
+              "cgroup_sample_peak_bytes": 242176000,
+              "cgroup_lifetime_peak_bytes": 281911296,
+              "temporary_peak_bytes": 36628104,
+              "cpu_seconds": 16.565479,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 476856320,
+              "cgroup_sample_peak_bytes": 271908864,
+              "cgroup_lifetime_peak_bytes": 272195584,
+              "temporary_peak_bytes": 34636000,
+              "cpu_seconds": 1.683846,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 148938752,
+              "cgroup_sample_peak_bytes": 88580096,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 34636000,
+              "cpu_seconds": 1.241716,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 148942848,
+              "cgroup_sample_peak_bytes": 88813568,
+              "cgroup_lifetime_peak_bytes": 153862144,
+              "temporary_peak_bytes": 35034680,
+              "cpu_seconds": 1.262325,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 651657216,
+          "minimum_host_disk_free_bytes": 1325950312448,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140347.9929411,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140349.0105734,
+            "observed_seconds": 1.018,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 235675648,
+            "cgroup_sample_peak_bytes": 183648256,
+            "temporary_sample_peak_bytes": 12474991,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140349.0105734,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140362.2343562,
+            "observed_seconds": 13.224,
+            "resource_samples": 4,
+            "rss_sample_peak_bytes": 284098560,
+            "cgroup_sample_peak_bytes": 242176000,
+            "temporary_sample_peak_bytes": 36628104,
+            "cpu_between_first_and_last_resource_samples_seconds": 11.209752
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140362.2343562,
+            "processed_rows_at_first_observation": 100001,
+            "until_epoch_seconds": 1791140364.2605305,
+            "observed_seconds": 2.026,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140364.2605305,
+            "processed_rows_at_first_observation": 100001,
+            "until_epoch_seconds": 1791140364.2605305,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 19.457
+    },
+    {
+      "rows": 400000,
+      "strings": "inline",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-400000-inline-diverse.xlsx",
+        "rows": 400000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 400004,
+        "declared_dimension_trusted": false,
+        "strings": "inline",
+        "shared_string_count": 0,
+        "actual_bytes": 51594508,
+        "expanded_bytes": 250635773,
+        "file_sha256": "af73d59950f5209e759353027dde9788b384678f0b0eae6fd4980a2fa9ffac84",
+        "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+        "observed_utf8_bytes": 73110953,
+        "expected_observed_nulls": 4000,
+        "expected_observed_empty": 4000,
+        "expected_cardinality": {
+          "record_id": 400000,
+          "payload": 400000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.20585452500429777,
+        "generation_seconds": 6.675,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-400000-inline-diverse.xlsx",
+            "actual_bytes": 51594508,
+            "sha256": "af73d59950f5209e759353027dde9788b384678f0b0eae6fd4980a2fa9ffac84"
+          }
+        },
+        "oracle": {
+          "rows": 400000,
+          "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+          "null_count": 4000,
+          "empty_count": 4000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 10.345,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "84ed1ca7-582c-413a-b510-200ad077a5f7",
+        "dataset_id": "1977e4cf-6ae0-424e-bb84-5936965d851c",
+        "output_version_id": "2dffb436-5c89-4218-9b3d-78508e74af80",
+        "duration_seconds": 54.969027,
+        "transfer_seconds": 0.244,
+        "inspection_seconds": 0.063,
+        "metadata_registration_seconds": 0.056,
+        "transferred_bytes": 51594508,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 400000,
+        "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+        "observed_null_count": 4000,
+        "observed_empty_string_count": 4000,
+        "physical_numbering": {
+          "rows": 400000,
+          "first": 5,
+          "last": 400004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 400000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 392001,
+            "null_count": 4000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 300997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 16
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1036
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 60.902,
+          "samples": 18,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 294883328,
+              "cgroup_sample_peak_bytes": 292012032,
+              "cgroup_lifetime_peak_bytes": 391573504,
+              "temporary_peak_bytes": 83315896,
+              "cpu_seconds": 58.43059,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 594395136,
+              "cgroup_sample_peak_bytes": 389394432,
+              "cgroup_lifetime_peak_bytes": 390414336,
+              "temporary_peak_bytes": 83315896,
+              "cpu_seconds": 4.645983,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 148955136,
+              "cgroup_sample_peak_bytes": 89083904,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 83315896,
+              "cpu_seconds": 4.588632,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 166576128,
+              "cgroup_sample_peak_bytes": 100306944,
+              "cgroup_lifetime_peak_bytes": 153931776,
+              "temporary_peak_bytes": 83315896,
+              "cpu_seconds": 4.572336,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 858394624,
+          "minimum_host_disk_free_bytes": 1325714628608,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140367.664269,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140368.6840882,
+            "observed_seconds": 1.02,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140368.6840882,
+            "processed_rows_at_first_observation": 5000,
+            "until_epoch_seconds": 1791140399.245455,
+            "observed_seconds": 30.561,
+            "resource_samples": 9,
+            "rss_sample_peak_bytes": 294883328,
+            "cgroup_sample_peak_bytes": 251940864,
+            "temporary_sample_peak_bytes": 71852716,
+            "cpu_between_first_and_last_resource_samples_seconds": 28.831596
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140399.245455,
+            "processed_rows_at_first_observation": 260000,
+            "until_epoch_seconds": 1791140400.2536645,
+            "observed_seconds": 1.008,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140400.2536645,
+            "processed_rows_at_first_observation": 270000,
+            "until_epoch_seconds": 1791140416.5175507,
+            "observed_seconds": 16.264,
+            "resource_samples": 5,
+            "rss_sample_peak_bytes": 244772864,
+            "cgroup_sample_peak_bytes": 244363264,
+            "temporary_sample_peak_bytes": 82541022,
+            "cpu_between_first_and_last_resource_samples_seconds": 14.755517
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140416.5175507,
+            "processed_rows_at_first_observation": 400000,
+            "until_epoch_seconds": 1791140422.638076,
+            "observed_seconds": 6.121,
+            "resource_samples": 2,
+            "rss_sample_peak_bytes": 275701760,
+            "cgroup_sample_peak_bytes": 276111360,
+            "temporary_sample_peak_bytes": 83315896,
+            "cpu_between_first_and_last_resource_samples_seconds": 3.724723
+          },
+          {
+            "stage": "RUNNING:PUBLISHING",
+            "from_epoch_seconds": 1791140422.638076,
+            "processed_rows_at_first_observation": 400000,
+            "until_epoch_seconds": 1791140423.669084,
+            "observed_seconds": 1.031,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140423.669084,
+            "processed_rows_at_first_observation": 400000,
+            "until_epoch_seconds": 1791140423.669084,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 60.902
+    },
+    {
+      "rows": 400000,
+      "strings": "shared",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-400000-shared-diverse.xlsx",
+        "rows": 400000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 400004,
+        "declared_dimension_trusted": false,
+        "strings": "shared",
+        "shared_string_count": 1492029,
+        "actual_bytes": 50450321,
+        "expanded_bytes": 242714008,
+        "file_sha256": "42bd20bd6c5770000e9e14aaba47fa84f56f7022e4ac1321eedb57d2b76898e5",
+        "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+        "observed_utf8_bytes": 73110953,
+        "expected_observed_nulls": 4000,
+        "expected_observed_empty": 4000,
+        "expected_cardinality": {
+          "record_id": 400000,
+          "payload": 400000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.20785912364810852,
+        "generation_seconds": 14.977,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-400000-shared-diverse.xlsx",
+            "actual_bytes": 50450321,
+            "sha256": "42bd20bd6c5770000e9e14aaba47fa84f56f7022e4ac1321eedb57d2b76898e5"
+          }
+        },
+        "oracle": {
+          "rows": 400000,
+          "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+          "null_count": 4000,
+          "empty_count": 4000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 69.197,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "623b8b07-9b7a-421e-8537-6c6539f74b94",
+        "dataset_id": "d2c3f930-0646-43e2-9aa2-8db44c872f5b",
+        "output_version_id": "c0178193-05e8-4489-9a37-484b6e8ac35f",
+        "duration_seconds": 66.823773,
+        "transfer_seconds": 0.243,
+        "inspection_seconds": 0.068,
+        "metadata_registration_seconds": 0.08,
+        "transferred_bytes": 50450321,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 400000,
+        "canonical_rows_sha256": "3f567e98d43211eb24c53c3790f319c1fdac21507b777ee1b7858c430d1e080f",
+        "observed_null_count": 4000,
+        "observed_empty_string_count": 4000,
+        "physical_numbering": {
+          "rows": 400000,
+          "first": 5,
+          "last": 400004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 400000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 392001,
+            "null_count": 4000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 400000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 10
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 300997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 16
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1036
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 72.801,
+          "samples": 22,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 335245312,
+              "cgroup_sample_peak_bytes": 469495808,
+              "cgroup_lifetime_peak_bytes": 473640960,
+              "temporary_peak_bytes": 153813987,
+              "cpu_seconds": 70.773533,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 428568576,
+              "cgroup_sample_peak_bytes": 227274752,
+              "cgroup_lifetime_peak_bytes": 390414336,
+              "temporary_peak_bytes": 153813987,
+              "cpu_seconds": 6.704671,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 180719616,
+              "cgroup_sample_peak_bytes": 107986944,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 154209886,
+              "cpu_seconds": 4.916818,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 208355328,
+              "cgroup_sample_peak_bytes": 131223552,
+              "cgroup_lifetime_peak_bytes": 153931776,
+              "temporary_peak_bytes": 154209886,
+              "cpu_seconds": 5.008784,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 840536064,
+          "minimum_host_disk_free_bytes": 1325479485440,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140428.6264193,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140429.6477513,
+            "observed_seconds": 1.021,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140429.6477513,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140465.3354576,
+            "observed_seconds": 35.688,
+            "resource_samples": 10,
+            "rss_sample_peak_bytes": 249397248,
+            "cgroup_sample_peak_bytes": 392527872,
+            "temporary_sample_peak_bytes": 138375136,
+            "cpu_between_first_and_last_resource_samples_seconds": 32.566163
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140465.3354576,
+            "processed_rows_at_first_observation": 200000,
+            "until_epoch_seconds": 1791140466.3642402,
+            "observed_seconds": 1.029,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 245858304,
+            "cgroup_sample_peak_bytes": 394108928,
+            "temporary_sample_peak_bytes": 140750246,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140466.3642402,
+            "processed_rows_at_first_observation": 210000,
+            "until_epoch_seconds": 1791140489.7556741,
+            "observed_seconds": 23.391,
+            "resource_samples": 7,
+            "rss_sample_peak_bytes": 330661888,
+            "cgroup_sample_peak_bytes": 469495808,
+            "temporary_sample_peak_bytes": 153813987,
+            "cpu_between_first_and_last_resource_samples_seconds": 22.283423
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140489.7556741,
+            "processed_rows_at_first_observation": 400000,
+            "until_epoch_seconds": 1791140495.8563194,
+            "observed_seconds": 6.101,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 335245312,
+            "cgroup_sample_peak_bytes": 423972864,
+            "temporary_sample_peak_bytes": 82171709,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140495.8563194,
+            "processed_rows_at_first_observation": 400000,
+            "until_epoch_seconds": 1791140495.8563194,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 72.801
+    },
+    {
+      "rows": 1000000,
+      "strings": "inline",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-1000000-inline-diverse.xlsx",
+        "rows": 1000000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 1000004,
+        "declared_dimension_trusted": false,
+        "strings": "inline",
+        "shared_string_count": 0,
+        "actual_bytes": 129356448,
+        "expanded_bytes": 636815736,
+        "file_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7",
+        "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+        "observed_utf8_bytes": 184910872,
+        "expected_observed_nulls": 10000,
+        "expected_observed_empty": 10000,
+        "expected_cardinality": {
+          "record_id": 1000000,
+          "payload": 1000000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.20313010606886134,
+        "generation_seconds": 16.652,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-1000000-inline-diverse.xlsx",
+            "actual_bytes": 129356448,
+            "sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+          }
+        },
+        "oracle": {
+          "rows": 1000000,
+          "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+          "null_count": 10000,
+          "empty_count": 10000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 25.902,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "ef3c41a8-4a30-418d-8f01-3814454ef9aa",
+        "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+        "output_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "duration_seconds": 140.353548,
+        "transfer_seconds": 0.54,
+        "inspection_seconds": 0.077,
+        "metadata_registration_seconds": 0.094,
+        "transferred_bytes": 129356448,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 1000000,
+        "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+        "observed_null_count": 10000,
+        "observed_empty_string_count": 10000,
+        "physical_numbering": {
+          "rows": 1000000,
+          "first": 5,
+          "last": 1000004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 1000000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 980001,
+            "null_count": 10000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 11
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 900997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 17
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1044
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 151.185,
+          "samples": 45,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 440172544,
+              "cgroup_sample_peak_bytes": 608940032,
+              "cgroup_lifetime_peak_bytes": 671928320,
+              "temporary_peak_bytes": 208574115,
+              "cpu_seconds": 149.731553,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 717770752,
+              "cgroup_sample_peak_bytes": 552484864,
+              "cgroup_lifetime_peak_bytes": 760385536,
+              "temporary_peak_bytes": 208574115,
+              "cpu_seconds": 13.510031,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 195944448,
+              "cgroup_sample_peak_bytes": 123387904,
+              "cgroup_lifetime_peak_bytes": 162951168,
+              "temporary_peak_bytes": 208574115,
+              "cpu_seconds": 11.892829,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 275075072,
+              "cgroup_sample_peak_bytes": 160751616,
+              "cgroup_lifetime_peak_bytes": 161013760,
+              "temporary_peak_bytes": 208574115,
+              "cpu_seconds": 11.717774,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 1326751744,
+          "minimum_host_disk_free_bytes": 1325008601088,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        },
+        "delivery_complete_preflight": {
+          "elapsed_seconds": 29.048,
+          "samples": 9,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 369479680,
+              "cgroup_sample_peak_bytes": 672325632,
+              "cgroup_lifetime_peak_bytes": 672620544,
+              "temporary_peak_bytes": 403210240,
+              "cpu_seconds": 2.228842,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 256389120,
+              "cgroup_sample_peak_bytes": 145276928,
+              "cgroup_lifetime_peak_bytes": 760385536,
+              "temporary_peak_bytes": 329106944,
+              "cpu_seconds": 1.262555,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 245882880,
+              "cgroup_sample_peak_bytes": 486961152,
+              "cgroup_lifetime_peak_bytes": 600494080,
+              "temporary_peak_bytes": 336832000,
+              "cpu_seconds": 28.740113,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 148942848,
+              "cgroup_sample_peak_bytes": 89088000,
+              "cgroup_lifetime_peak_bytes": 161013760,
+              "temporary_peak_bytes": 344147456,
+              "cpu_seconds": 2.205206,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 1318670336,
+          "minimum_host_disk_free_bytes": 1325008080896,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        },
+        "intake_pyspark": {
+          "elapsed_seconds": 54.581,
+          "samples": 16,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 240721920,
+              "cgroup_sample_peak_bytes": 598044672,
+              "cgroup_lifetime_peak_bytes": 672620544,
+              "temporary_peak_bytes": 430180989,
+              "cpu_seconds": 3.723692,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 789676032,
+              "cgroup_sample_peak_bytes": 712556544,
+              "cgroup_lifetime_peak_bytes": 760385536,
+              "temporary_peak_bytes": 435028320,
+              "cpu_seconds": 6.579045,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 276176896,
+              "cgroup_sample_peak_bytes": 159596544,
+              "cgroup_lifetime_peak_bytes": 600494080,
+              "temporary_peak_bytes": 440681886,
+              "cpu_seconds": 7.66192,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 1185189888,
+              "cgroup_sample_peak_bytes": 1510727680,
+              "cgroup_lifetime_peak_bytes": 1559539712,
+              "temporary_peak_bytes": 449026092,
+              "cpu_seconds": 69.222877,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 2427621376,
+          "minimum_host_disk_free_bytes": 1324539719680,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        },
+        "chained_delivery": {
+          "elapsed_seconds": 69.841,
+          "samples": 21,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 262574080,
+              "cgroup_sample_peak_bytes": 613040128,
+              "cgroup_lifetime_peak_bytes": 672620544,
+              "temporary_peak_bytes": 406908928,
+              "cpu_seconds": 4.602921,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 257310720,
+              "cgroup_sample_peak_bytes": 145969152,
+              "cgroup_lifetime_peak_bytes": 760385536,
+              "temporary_peak_bytes": 406908928,
+              "cpu_seconds": 3.226872,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 361754624,
+              "cgroup_sample_peak_bytes": 621666304,
+              "cgroup_lifetime_peak_bytes": 622374912,
+              "temporary_peak_bytes": 406908928,
+              "cpu_seconds": 56.029468,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 881393664,
+              "cgroup_sample_peak_bytes": 1013993472,
+              "cgroup_lifetime_peak_bytes": 1559539712,
+              "temporary_peak_bytes": 406908928,
+              "cpu_seconds": 4.543641,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 2394198016,
+          "minimum_host_disk_free_bytes": 1323598483456,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        },
+        "personal_inbox": {
+          "elapsed_seconds": 1.402,
+          "samples": 1,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 364265472,
+              "cgroup_sample_peak_bytes": 666992640,
+              "cgroup_lifetime_peak_bytes": 672620544,
+              "temporary_peak_bytes": 0,
+              "cpu_seconds": 0.0,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {},
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 257093632,
+              "cgroup_sample_peak_bytes": 145342464,
+              "cgroup_lifetime_peak_bytes": 760385536,
+              "temporary_peak_bytes": 0,
+              "cpu_seconds": 0.0,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {},
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 234717184,
+              "cgroup_sample_peak_bytes": 129630208,
+              "cgroup_lifetime_peak_bytes": 622374912,
+              "temporary_peak_bytes": 0,
+              "cpu_seconds": 0.0,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {},
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 833380352,
+              "cgroup_sample_peak_bytes": 978223104,
+              "cgroup_lifetime_peak_bytes": 1559539712,
+              "temporary_peak_bytes": 0,
+              "cpu_seconds": 0.0,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {},
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 1920188416,
+          "minimum_host_disk_free_bytes": 1323598483456,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140501.784315,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140502.8150516,
+            "observed_seconds": 1.031,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140502.8150516,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140598.6171918,
+            "observed_seconds": 95.802,
+            "resource_samples": 28,
+            "rss_sample_peak_bytes": 369266688,
+            "cgroup_sample_peak_bytes": 471826432,
+            "temporary_sample_peak_bytes": 189589791,
+            "cpu_between_first_and_last_resource_samples_seconds": 96.864801
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140598.6171918,
+            "processed_rows_at_first_observation": 770000,
+            "until_epoch_seconds": 1791140599.6436136,
+            "observed_seconds": 1.026,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140599.6436136,
+            "processed_rows_at_first_observation": 780000,
+            "until_epoch_seconds": 1791140608.8608906,
+            "observed_seconds": 9.217,
+            "resource_samples": 3,
+            "rss_sample_peak_bytes": 248303616,
+            "cgroup_sample_peak_bytes": 454713344,
+            "temporary_sample_peak_bytes": 195526452,
+            "cpu_between_first_and_last_resource_samples_seconds": 6.743099
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140608.8608906,
+            "processed_rows_at_first_observation": 850000,
+            "until_epoch_seconds": 1791140609.8844407,
+            "observed_seconds": 1.024,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140609.8844407,
+            "processed_rows_at_first_observation": 860000,
+            "until_epoch_seconds": 1791140611.924535,
+            "observed_seconds": 2.04,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 247386112,
+            "cgroup_sample_peak_bytes": 459317248,
+            "temporary_sample_peak_bytes": 197900503,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140611.924535,
+            "processed_rows_at_first_observation": 875000,
+            "until_epoch_seconds": 1791140612.9516444,
+            "observed_seconds": 1.027,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140612.9516444,
+            "processed_rows_at_first_observation": 885000,
+            "until_epoch_seconds": 1791140627.2319384,
+            "observed_seconds": 14.28,
+            "resource_samples": 5,
+            "rss_sample_peak_bytes": 318353408,
+            "cgroup_sample_peak_bytes": 541552640,
+            "temporary_sample_peak_bytes": 208574115,
+            "cpu_between_first_and_last_resource_samples_seconds": 14.632166
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140627.2319384,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140641.522009,
+            "observed_seconds": 14.29,
+            "resource_samples": 4,
+            "rss_sample_peak_bytes": 440172544,
+            "cgroup_sample_peak_bytes": 608940032,
+            "temporary_sample_peak_bytes": 208574115,
+            "cpu_between_first_and_last_resource_samples_seconds": 10.545907
+          },
+          {
+            "stage": "RUNNING:PUBLISHING",
+            "from_epoch_seconds": 1791140641.522009,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140643.5539503,
+            "observed_seconds": 2.032,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140643.5539503,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140643.5539503,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 151.185,
+      "intake": {
+        "run_id": "b991e912-d2c3-465e-9968-aaa8669ba732",
+        "output_version_id": "94816755-9bbd-46f3-8f8b-db85da44bc1e",
+        "metrics": {
+          "total_rows": 1000000,
+          "valid_rows": 1000000,
+          "error_rows": 0,
+          "warning_rows": 0,
+          "error_count": 0,
+          "acceptance_rate": 100.0,
+          "rules": [
+            {
+              "code": "REQUIRED",
+              "column": "record_id",
+              "columns": [
+                "record_id"
+              ],
+              "severity": "ERROR",
+              "evaluated_count": 1000000,
+              "skipped_count": 0,
+              "failed_count": 0,
+              "status": "PASS",
+              "rule_id": null
+            },
+            {
+              "code": "POSITIVE",
+              "column": "amount",
+              "columns": [
+                "amount"
+              ],
+              "severity": "ERROR",
+              "evaluated_count": 1000000,
+              "skipped_count": 0,
+              "failed_count": 0,
+              "status": "PASS",
+              "rule_id": null
+            }
+          ],
+          "decision": "APPROVED",
+          "normalization_policy": "DECLARED_ONLY",
+          "source_row_numbering": "PHYSICAL_SHEET_ROW"
+        },
+        "accepted": {
+          "rows": 1000000,
+          "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+          "observed_null_count": 10000,
+          "observed_empty_string_count": 10000
+        }
+      },
+      "delivery": {
+        "run_id": "ca7fcc32-fc73-4090-8760-ecdece8b41ab",
+        "configuration_id": "864b6dae-c4e8-452c-b8e5-76322e1694db",
+        "occurrence_id": "a909eb6b-a698-4307-8da0-d35d3a2a6e74",
+        "source_version_id": "94816755-9bbd-46f3-8f8b-db85da44bc1e",
+        "target_rows": 1000000,
+        "target": {
+          "rows": 1000000,
+          "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+          "max_buffer_rows": 1
+        },
+        "receipt_artifact_id": "1456be02-681a-52a4-af48-af1f199388d0"
+      },
+      "inbox": {
+        "resource_ids": [
+          "b991e912-d2c3-465e-9968-aaa8669ba732",
+          "ca7fcc32-fc73-4090-8760-ecdece8b41ab",
+          "ef3c41a8-4a30-418d-8f01-3814454ef9aa"
+        ],
+        "notifications": [
+          "6713f5f7-ee80-43ab-a329-6441abcab633",
+          "453a04d6-e53b-452b-8222-0dfc74cd911b",
+          "084699ba-d214-4e08-b69b-6464ea4ef294"
+        ]
+      },
+      "unread": {
+        "notification_id": "084699ba-d214-4e08-b69b-6464ea4ef294",
+        "read_unread_unread_read": "PASS",
+        "counter_delta": 1
+      },
+      "upload_to_confirmed_delivery_and_inbox_elapsed_seconds": 306.389
+    },
+    {
+      "rows": 1000000,
+      "strings": "shared",
+      "fixture": {
+        "schema_version": 1,
+        "generator": "OOXML_DIVERSE_V1",
+        "path": "xlsx-1000000-shared-diverse.xlsx",
+        "rows": 1000000,
+        "columns": [
+          "record_id",
+          "amount",
+          "region",
+          "observed",
+          "payload",
+          "date",
+          "formula",
+          "late_type"
+        ],
+        "sheet": "Datos",
+        "header_physical_row": 4,
+        "first_record_physical_row": 5,
+        "last_record_physical_row": 1000004,
+        "declared_dimension_trusted": false,
+        "strings": "shared",
+        "shared_string_count": 3880029,
+        "actual_bytes": 126421197,
+        "expanded_bytes": 619575971,
+        "file_sha256": "2061496701ac32cc7dc517c15438f5f0410897a3bd698e5329eeb94cbde722c2",
+        "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+        "observed_utf8_bytes": 184910872,
+        "expected_observed_nulls": 10000,
+        "expected_observed_empty": 10000,
+        "expected_cardinality": {
+          "record_id": 1000000,
+          "payload": 1000000,
+          "region": 20
+        },
+        "seed_sha256": "684c75ee96b4fff4fb1ff18515d0d724b130fa55aba775a5884ef547773fb93d",
+        "payload_width_bytes": 96,
+        "compressed_expanded_ratio": 0.2040447062463628,
+        "generation_seconds": 40.098,
+        "max_buffer_rows": 1,
+        "formats": {
+          "XLSX": {
+            "path": "xlsx-1000000-shared-diverse.xlsx",
+            "actual_bytes": 126421197,
+            "sha256": "2061496701ac32cc7dc517c15438f5f0410897a3bd698e5329eeb94cbde722c2"
+          }
+        },
+        "oracle": {
+          "rows": 1000000,
+          "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+          "null_count": 10000,
+          "empty_count": 10000,
+          "status": "PASS",
+          "max_buffer_rows": 1,
+          "elapsed_seconds": 179.215,
+          "reader": "STDLIB_XML_SQLITE_INDEPENDENT"
+        }
+      },
+      "status": "PASS",
+      "acquisition": {
+        "id": "b8fe9097-a805-4091-834e-a8d6732670a3",
+        "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+        "output_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+        "duration_seconds": 170.344284,
+        "transfer_seconds": 0.535,
+        "inspection_seconds": 0.087,
+        "metadata_registration_seconds": 0.131,
+        "transferred_bytes": 126421197,
+        "inspection_sampled_rows": 100,
+        "inspection_total_rows": null,
+        "inspection_limited": false
+      },
+      "integrity": {
+        "rows": 1000000,
+        "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+        "observed_null_count": 10000,
+        "observed_empty_string_count": 10000,
+        "physical_numbering": {
+          "rows": 1000000,
+          "first": 5,
+          "last": 1000004,
+          "numbering_mismatches": 0
+        }
+      },
+      "profile": {
+        "row_count": 1000000,
+        "columns": [
+          {
+            "name": "record_id",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 12
+          },
+          {
+            "name": "amount",
+            "logical_type": "DECIMAL",
+            "distinct_count": 997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "1.00000001",
+            "max": "997.00000001",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "region",
+            "logical_type": "STRING",
+            "distinct_count": 20,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 3
+          },
+          {
+            "name": "observed",
+            "logical_type": "STRING",
+            "distinct_count": 980001,
+            "null_count": 10000,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 36
+          },
+          {
+            "name": "payload",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 96
+          },
+          {
+            "name": "date",
+            "logical_type": "DATE",
+            "distinct_count": 365,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": "2023-01-01",
+            "max": "2023-12-31",
+            "sum": null,
+            "max_length": null
+          },
+          {
+            "name": "formula",
+            "logical_type": "STRING",
+            "distinct_count": 1000000,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 11
+          },
+          {
+            "name": "late_type",
+            "logical_type": "STRING",
+            "distinct_count": 900997,
+            "null_count": 0,
+            "empty_string_count": null,
+            "min": null,
+            "max": null,
+            "sum": null,
+            "max_length": 17
+          }
+        ],
+        "observed_record_bytes_upper_bound": 1044
+      },
+      "phases": {
+        "xlsx_acquisition_whole": {
+          "elapsed_seconds": 179.697,
+          "samples": 53,
+          "services": {
+            "acquisition-worker": {
+              "rss_peak_bytes": 445390848,
+              "cgroup_sample_peak_bytes": 886947840,
+              "cgroup_lifetime_peak_bytes": 942010368,
+              "temporary_peak_bytes": 393774203,
+              "cpu_seconds": 180.021885,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "api": {
+              "rss_peak_bytes": 853536768,
+              "cgroup_sample_peak_bytes": 780001280,
+              "cgroup_lifetime_peak_bytes": 787808256,
+              "temporary_peak_bytes": 394169940,
+              "cpu_seconds": 13.397679,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "delivery-worker": {
+              "rss_peak_bytes": 360927232,
+              "cgroup_sample_peak_bytes": 202436608,
+              "cgroup_lifetime_peak_bytes": 622374912,
+              "temporary_peak_bytes": 394169940,
+              "cpu_seconds": 12.839992,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            },
+            "worker": {
+              "rss_peak_bytes": 891461632,
+              "cgroup_sample_peak_bytes": 1020235776,
+              "cgroup_lifetime_peak_bytes": 1559539712,
+              "temporary_peak_bytes": 394565830,
+              "cpu_seconds": 12.507243,
+              "cpu_counter_resets": 0,
+              "memory_events_delta": {
+                "oom_group_kill": 0,
+                "max": 0,
+                "low": 0,
+                "oom": 0,
+                "high": 0,
+                "oom_kill": 0
+              },
+              "cpu_measurement_complete": true,
+              "memory_events_measurement_complete": true
+            }
+          },
+          "combined_cgroup_sample_peak_bytes": 2774106112,
+          "minimum_host_disk_free_bytes": 1323129765888,
+          "measurement_errors": [],
+          "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+          "resource_guard": null,
+          "backend_cgroup_budget_bytes": 6442450944,
+          "host_disk_reserve_bytes": 5368709120,
+          "cgroup_lifetime_peak_is_not_phase_peak": true
+        }
+      },
+      "observed_worker_stages": {
+        "poll_interval_seconds": 1,
+        "resource_interval_seconds": 2,
+        "scope": "Observed API stages; reading includes XML/SST processing. Boundaries and resource samples are approximate; missing stages/samples are not inferred.",
+        "stages": [
+          {
+            "stage": "QUEUED:QUEUED",
+            "from_epoch_seconds": 1791140808.3182552,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140809.3425684,
+            "observed_seconds": 1.024,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140809.3425684,
+            "processed_rows_at_first_observation": 0,
+            "until_epoch_seconds": 1791140883.614249,
+            "observed_seconds": 74.272,
+            "resource_samples": 22,
+            "rss_sample_peak_bytes": 281268224,
+            "cgroup_sample_peak_bytes": 830275584,
+            "temporary_sample_peak_bytes": 344298390,
+            "cpu_between_first_and_last_resource_samples_seconds": 75.27417
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140883.614249,
+            "processed_rows_at_first_observation": 360000,
+            "until_epoch_seconds": 1791140884.6219456,
+            "observed_seconds": 1.008,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140884.6219456,
+            "processed_rows_at_first_observation": 370000,
+            "until_epoch_seconds": 1791140912.0892394,
+            "observed_seconds": 27.467,
+            "resource_samples": 8,
+            "rss_sample_peak_bytes": 251699200,
+            "cgroup_sample_peak_bytes": 846819328,
+            "temporary_sample_peak_bytes": 361712568,
+            "cpu_between_first_and_last_resource_samples_seconds": 24.753767
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140912.0892394,
+            "processed_rows_at_first_observation": 590000,
+            "until_epoch_seconds": 1791140913.116756,
+            "observed_seconds": 1.028,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140913.116756,
+            "processed_rows_at_first_observation": 600000,
+            "until_epoch_seconds": 1791140915.1419387,
+            "observed_seconds": 2.025,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 252583936,
+            "cgroup_sample_peak_bytes": 854605824,
+            "temporary_sample_peak_bytes": 364087672,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140915.1419387,
+            "processed_rows_at_first_observation": 615000,
+            "until_epoch_seconds": 1791140916.1499155,
+            "observed_seconds": 1.008,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140916.1499155,
+            "processed_rows_at_first_observation": 625000,
+            "until_epoch_seconds": 1791140936.4649794,
+            "observed_seconds": 20.315,
+            "resource_samples": 6,
+            "rss_sample_peak_bytes": 250855424,
+            "cgroup_sample_peak_bytes": 866435072,
+            "temporary_sample_peak_bytes": 376752277,
+            "cpu_between_first_and_last_resource_samples_seconds": 18.533709
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140936.4649794,
+            "processed_rows_at_first_observation": 785000,
+            "until_epoch_seconds": 1791140937.4922016,
+            "observed_seconds": 1.027,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 251064320,
+            "cgroup_sample_peak_bytes": 869072896,
+            "temporary_sample_peak_bytes": 379127006,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140937.4922016,
+            "processed_rows_at_first_observation": 795000,
+            "until_epoch_seconds": 1791140941.5938456,
+            "observed_seconds": 4.102,
+            "resource_samples": 1,
+            "rss_sample_peak_bytes": 248602624,
+            "cgroup_sample_peak_bytes": 869011456,
+            "temporary_sample_peak_bytes": 381106041,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:MATERIALIZING",
+            "from_epoch_seconds": 1791140941.5938456,
+            "processed_rows_at_first_observation": 825000,
+            "until_epoch_seconds": 1791140942.617673,
+            "observed_seconds": 1.024,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "RUNNING:READING",
+            "from_epoch_seconds": 1791140942.617673,
+            "processed_rows_at_first_observation": 830000,
+            "until_epoch_seconds": 1791140963.99419,
+            "observed_seconds": 21.377,
+            "resource_samples": 6,
+            "rss_sample_peak_bytes": 251043840,
+            "cgroup_sample_peak_bytes": 881979392,
+            "temporary_sample_peak_bytes": 393774203,
+            "cpu_between_first_and_last_resource_samples_seconds": 18.016885
+          },
+          {
+            "stage": "RUNNING:PROFILING",
+            "from_epoch_seconds": 1791140963.99419,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140978.258227,
+            "observed_seconds": 14.264,
+            "resource_samples": 5,
+            "rss_sample_peak_bytes": 445390848,
+            "cgroup_sample_peak_bytes": 885403648,
+            "temporary_sample_peak_bytes": 205638864,
+            "cpu_between_first_and_last_resource_samples_seconds": 14.246585
+          },
+          {
+            "stage": "RUNNING:PUBLISHING",
+            "from_epoch_seconds": 1791140978.258227,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140979.2655635,
+            "observed_seconds": 1.007,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          },
+          {
+            "stage": "SUCCESS:COMPLETED",
+            "from_epoch_seconds": 1791140979.2655635,
+            "processed_rows_at_first_observation": 1000000,
+            "until_epoch_seconds": 1791140979.2655635,
+            "observed_seconds": 0.0,
+            "resource_samples": 0,
+            "rss_sample_peak_bytes": null,
+            "cgroup_sample_peak_bytes": null,
+            "temporary_sample_peak_bytes": null,
+            "cpu_between_first_and_last_resource_samples_seconds": null
+          }
+        ]
+      },
+      "acquisition_and_full_verification_elapsed_seconds": 179.697
+    }
+  ],
+  "source_sha": "393b7e25e413bf641d5483c25c53951642611f51",
+  "source_tree_dirty": false,
+  "effective_limits": {
+    "max_upload_bytes": 1073741824,
+    "max_rows": 5000000,
+    "max_observed_bytes": 2147483648,
+    "batch_rows": 5000,
+    "batch_bytes": 8388608,
+    "bounded_format_bytes": 10485760,
+    "bounded_format_rows": 100000,
+    "memory_bytes": 268435456,
+    "min_free_bytes": 536870912,
+    "timeout_seconds": 1800,
+    "upload_ttl_seconds": 86400,
+    "xlsx_max_rows": 1000000,
+    "xlsx_max_upload_bytes": 1073741824,
+    "xlsx_max_expanded_bytes": 4294967296,
+    "xlsx_metadata_bytes": 8388608,
+    "xlsx_inspection_bytes": 4194304,
+    "xlsx_cache_bytes": 8388608,
+    "xlsx_max_entries": 4096,
+    "xlsx_max_styles": 65536,
+    "xlsx_max_cells": 100000000,
+    "xlsx_max_record_bytes": 1048576,
+    "xlsx_temp_bytes": 8589934592,
+    "xlsx_metadata_seconds": 10,
+    "xlsx_inspection_seconds": 5
+  },
+  "resource_profile": {
+    "docker_memory_bytes": 16326524928,
+    "bounded_backend_budget_bytes": 6442450944,
+    "xlsx_test_limit_overrides": false,
+    "host_disk_reserve_bytes": 21474836480
+  },
+  "playwright": {
+    "destination_id": "9f9e81e7-372d-4b65-a150-86d30cad2d1a",
+    "schema": "volume_17b7cfd6"
+  },
+  "dispatch": {
+    "automation_configurations": {
+      "2364609a-5b22-4640-9d41-71af7388a399": "27efa0f6-ca81-416f-98a7-a384b52a895e",
+      "6169a3e0-c321-43a4-af89-0fc3256487df": "8c919b35-40cd-447e-9245-7fb7268e6e5e",
+      "7bb1b732-764e-44a3-9041-0ca871508fb4": "4fd57945-4f21-45e4-b9b8-780445fe06a7",
+      "803117c0-74dc-40ae-9ee9-b3209de99830": "75b35711-4f6b-4c5e-9cad-b3c45160b58f"
+    },
+    "busy": {
+      "after_dispatch": {
+        "attempt_status": null,
+        "job_id": "27e3dd04-c284-4a87-9b87-5cba473d492d",
+        "job_status": "RUNNING",
+        "live_worker_lease": true,
+        "observed_at": "2026-10-04T19:12:13.768611Z",
+        "progress_stage": "En cola",
+        "rows": 1000000,
+        "run_id": "a1b9c736-0d0a-4178-b56e-c3e513d0551a",
+        "run_status": "QUEUED",
+        "source_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "started_at": null
+      },
+      "before_dispatch": {
+        "attempt_status": null,
+        "job_id": "27e3dd04-c284-4a87-9b87-5cba473d492d",
+        "job_status": "RUNNING",
+        "live_worker_lease": true,
+        "observed_at": "2026-10-04T19:12:13.542648Z",
+        "progress_stage": "En cola",
+        "rows": 1000000,
+        "run_id": "a1b9c736-0d0a-4178-b56e-c3e513d0551a",
+        "run_status": "QUEUED",
+        "source_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "started_at": null
+      },
+      "owned": true,
+      "run_id": "a1b9c736-0d0a-4178-b56e-c3e513d0551a",
+      "terminal": {
+        "decision": "COMMITTED",
+        "rows_written": 1000000,
+        "status": "SUCCESS"
+      }
+    },
+    "cleanup": {
+      "cancel_failures": [],
+      "cancelled_run_ids": [
+        "ce8d983f-129f-48ba-b4d8-e6fb380051fc",
+        "84e294ba-a020-4c77-9fb5-9ec36326718a",
+        "f71313c6-5e4c-4c5c-80bd-1115351e9acd",
+        "b9d88b43-1d94-4e69-8f67-0cd08cdaa327"
+      ],
+      "cancelled_via_normal_api": true,
+      "own_remote_attempts": 0,
+      "pause_failures": [],
+      "paused_automations": 4,
+      "validation_cancel_failures": [],
+      "validation_terminal": [
+        {
+          "run_id": "8b498201-7157-4377-8637-6ee577b4f644",
+          "status": "SUCCESS"
+        },
+        {
+          "run_id": "70616c8c-6333-41a7-bfcb-504c27723a3a",
+          "status": "SUCCESS"
+        },
+        {
+          "run_id": "416edcb1-5fa3-47c0-9783-851bb40f1c97",
+          "status": "SUCCESS"
+        },
+        {
+          "run_id": "c6d5fc3c-4800-475f-a4d4-ba60080b4b68",
+          "status": "SUCCESS"
+        },
+        {
+          "run_id": "3b3ea48f-fe2a-4ecc-a49d-07947f858c41",
+          "status": "SUCCESS"
+        }
+      ]
+    },
+    "configuration_inputs": {
+      "27efa0f6-ca81-416f-98a7-a384b52a895e": {
+        "config_hash": "9d96b910feeffb4c94d32d3fafff365192739f8722563b1bd4e6c6acb6b18ffe",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "source": {
+          "canonical_artifact_id": "f8705ac3-dd29-46fc-b2b4-acdd8ba6d214",
+          "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+          "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+          "canonical_size_bytes": 51861,
+          "column_count": 8,
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "row_count": 1000000,
+          "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+          "source_run_id": null,
+          "source_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+        }
+      },
+      "4fd57945-4f21-45e4-b9b8-780445fe06a7": {
+        "config_hash": "b9268ecbac35ab42da61cbde4b34e24a40d34cafaa3de19aebca2a90199f400e",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "source": {
+          "canonical_artifact_id": "5b95395c-b678-4463-99d4-d4d96af458e4",
+          "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+          "canonical_sha256": "52bb05294a8667a4a9b2763cfbe2e2ad76d05b1f152389b85764264588bdbf90",
+          "canonical_size_bytes": 51891,
+          "column_count": 8,
+          "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+          "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+          "row_count": 1000000,
+          "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+          "source_run_id": null,
+          "source_sha256": "2061496701ac32cc7dc517c15438f5f0410897a3bd698e5329eeb94cbde722c2"
+        }
+      },
+      "75b35711-4f6b-4c5e-9cad-b3c45160b58f": {
+        "config_hash": "4894363aaed9984a85eb7b3020846da9ac16589216fa68f32f8a9f212785288d",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "source": {
+          "canonical_artifact_id": "5b95395c-b678-4463-99d4-d4d96af458e4",
+          "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+          "canonical_sha256": "52bb05294a8667a4a9b2763cfbe2e2ad76d05b1f152389b85764264588bdbf90",
+          "canonical_size_bytes": 51891,
+          "column_count": 8,
+          "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+          "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+          "row_count": 1000000,
+          "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+          "source_run_id": null,
+          "source_sha256": "2061496701ac32cc7dc517c15438f5f0410897a3bd698e5329eeb94cbde722c2"
+        }
+      },
+      "8c919b35-40cd-447e-9245-7fb7268e6e5e": {
+        "config_hash": "16ed2819df3ffe87be8477021c43ba21ebdd2efb6165d1f652a6eadf4754f56d",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "source": {
+          "canonical_artifact_id": "f8705ac3-dd29-46fc-b2b4-acdd8ba6d214",
+          "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+          "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+          "canonical_size_bytes": 51861,
+          "column_count": 8,
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "row_count": 1000000,
+          "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+          "source_run_id": null,
+          "source_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+        }
+      },
+      "cb28ef27-e25e-410e-91ed-6f1b2407f94f": {
+        "config_hash": "325bf3bfd700410bedfba20ea5d795e156ce3f15dbbc47f94d73663e9114e8a9",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "source": {
+          "canonical_artifact_id": "f8705ac3-dd29-46fc-b2b4-acdd8ba6d214",
+          "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+          "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+          "canonical_size_bytes": 51861,
+          "column_count": 8,
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "row_count": 1000000,
+          "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+          "source_run_id": null,
+          "source_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+        }
+      }
+    },
+    "data_values_in_evidence": false,
+    "database_backend": "POSTGRESQL",
+    "dispatch": {
+      "count": 4,
+      "distinct_datasets": 2,
+      "distinct_source_versions": 2,
+      "includes_commit": true,
+      "includes_queue_wait": false,
+      "includes_setup": false,
+      "metadata_io_calls": {
+        "artifact.hash": 0,
+        "dataset.footer": 0,
+        "dataset.rows": 0,
+        "dataset.scan": 0,
+        "polars.read_parquet": 0,
+        "polars.read_parquet_schema": 0,
+        "polars.scan_parquet": 0,
+        "preparation.hash": 0,
+        "preparation.spool": 0,
+        "sink.open": 0,
+        "storage.dataset_descriptor": 0,
+        "storage.dataset_paths": 0,
+        "storage.materialize": 0,
+        "storage.materialize_reference": 0,
+        "storage.open_read": 0
+      },
+      "seconds": 0.204167
+    },
+    "occurrences": [
+      {
+        "automation_id": "6169a3e0-c321-43a4-af89-0fc3256487df",
+        "automation_version_id": "9e86fb04-5973-44c0-b167-56ed2ffa49e2",
+        "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+        "config_hash": "16ed2819df3ffe87be8477021c43ba21ebdd2efb6165d1f652a6eadf4754f56d",
+        "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+        "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "dispatched_at": "2026-10-04T19:12:13.663735Z",
+        "effective_configuration_id": "d5179c46-6f01-4d6f-9ad3-d1e309735164",
+        "job_id": "7577f48a-880b-45d4-b9fa-0771f31fd01d",
+        "observed_queue_age_seconds": 0.070864,
+        "occurrence_id": "9869d86d-7880-40f2-8123-c1853ca6769f",
+        "planned_at": "2026-10-04T19:12:13.499176Z",
+        "published_configuration_id": "8c919b35-40cd-447e-9245-7fb7268e6e5e",
+        "queue_to_started_seconds": null,
+        "queued_at": "2026-10-04T19:12:13.687208Z",
+        "row_count": 1000000,
+        "run_id": "ce8d983f-129f-48ba-b4d8-e6fb380051fc",
+        "started_at": null,
+        "status": "ENQUEUED",
+        "wait_censored": true
+      },
+      {
+        "automation_id": "803117c0-74dc-40ae-9ee9-b3209de99830",
+        "automation_version_id": "a1e0da17-b878-4e32-8738-a1deb5d59c75",
+        "canonical_sha256": "52bb05294a8667a4a9b2763cfbe2e2ad76d05b1f152389b85764264588bdbf90",
+        "config_hash": "4894363aaed9984a85eb7b3020846da9ac16589216fa68f32f8a9f212785288d",
+        "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+        "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "dispatched_at": "2026-10-04T19:12:13.699216Z",
+        "effective_configuration_id": "e07e35b0-f8b7-4da1-821e-c3ad42967570",
+        "job_id": "8d3355fc-3529-4f77-8668-2044f10b43b9",
+        "observed_queue_age_seconds": 0.053274,
+        "occurrence_id": "1571675b-ac9d-4660-8e84-3e7d9de1af81",
+        "planned_at": "2026-10-04T19:12:13.499176Z",
+        "published_configuration_id": "75b35711-4f6b-4c5e-9cad-b3c45160b58f",
+        "queue_to_started_seconds": null,
+        "queued_at": "2026-10-04T19:12:13.707673Z",
+        "row_count": 1000000,
+        "run_id": "84e294ba-a020-4c77-9fb5-9ec36326718a",
+        "started_at": null,
+        "status": "ENQUEUED",
+        "wait_censored": true
+      },
+      {
+        "automation_id": "2364609a-5b22-4640-9d41-71af7388a399",
+        "automation_version_id": "43d2acc9-79de-4c91-a067-32eabd299e0a",
+        "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+        "config_hash": "9d96b910feeffb4c94d32d3fafff365192739f8722563b1bd4e6c6acb6b18ffe",
+        "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+        "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "dispatched_at": "2026-10-04T19:12:13.715538Z",
+        "effective_configuration_id": "be1aadb6-5ea4-472a-8883-f5f6ed5d92f2",
+        "job_id": "cc4e3a75-ee79-4204-adab-ad769b51bf4e",
+        "observed_queue_age_seconds": 0.040055,
+        "occurrence_id": "4d1e22ee-2e0b-4418-b701-694e65c0cc8d",
+        "planned_at": "2026-10-04T19:12:13.499176Z",
+        "published_configuration_id": "27efa0f6-ca81-416f-98a7-a384b52a895e",
+        "queue_to_started_seconds": null,
+        "queued_at": "2026-10-04T19:12:13.723606Z",
+        "row_count": 1000000,
+        "run_id": "f71313c6-5e4c-4c5c-80bd-1115351e9acd",
+        "started_at": null,
+        "status": "ENQUEUED",
+        "wait_censored": true
+      },
+      {
+        "automation_id": "7bb1b732-764e-44a3-9041-0ca871508fb4",
+        "automation_version_id": "1a4650a1-080d-4ca3-95c2-d64c35a68dd5",
+        "canonical_sha256": "52bb05294a8667a4a9b2763cfbe2e2ad76d05b1f152389b85764264588bdbf90",
+        "config_hash": "b9268ecbac35ab42da61cbde4b34e24a40d34cafaa3de19aebca2a90199f400e",
+        "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+        "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+        "destination_version_id": "52035125-e541-4052-9f3c-5a552d38c2f4",
+        "dispatched_at": "2026-10-04T19:12:13.731398Z",
+        "effective_configuration_id": "2531aa14-b56f-4d14-9f33-e4a6b98d5535",
+        "job_id": "69f6337f-e27a-43d1-8b9e-241da372caf1",
+        "observed_queue_age_seconds": 0.027079,
+        "occurrence_id": "9b066d52-69b8-4069-969d-962346d5df90",
+        "planned_at": "2026-10-04T19:12:13.499176Z",
+        "published_configuration_id": "4fd57945-4f21-45e4-b9b8-780445fe06a7",
+        "queue_to_started_seconds": null,
+        "queued_at": "2026-10-04T19:12:13.739235Z",
+        "row_count": 1000000,
+        "run_id": "b9d88b43-1d94-4e69-8f67-0cd08cdaa327",
+        "started_at": null,
+        "status": "ENQUEUED",
+        "wait_censored": true
+      }
+    ],
+    "owned_validation_run_ids": [
+      "8b498201-7157-4377-8637-6ee577b4f644",
+      "70616c8c-6333-41a7-bfcb-504c27723a3a",
+      "416edcb1-5fa3-47c0-9783-851bb40f1c97",
+      "c6d5fc3c-4800-475f-a4d4-ba60080b4b68",
+      "3b3ea48f-fe2a-4ecc-a49d-07947f858c41"
+    ],
+    "population_scope": "Schedules alternate two independently published populations from distinct datasets, each of at least 1M rows; each version is reused explicitly.",
+    "project": "trackvance-v070-test-corrections-5cef00778fdf",
+    "requested_schedules": 4,
+    "scheduler_scope": "caller-paused-only-this-UUID-scheduler; caller-restarts-in-finally",
+    "schema_version": 1,
+    "script_sha256": "43451fd66b85c8e7cc8b2d89c079ce4cca1a3810692d3021018442dcb5a91aa6",
+    "setup": {
+      "complete_api_preflights": [
+        {
+          "configuration_id": "8c919b35-40cd-447e-9245-7fb7268e6e5e",
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "population_rows": 1000000,
+          "seconds": 27.857907,
+          "status": "SUCCESS",
+          "validation_run_id": "8b498201-7157-4377-8637-6ee577b4f644"
+        },
+        {
+          "configuration_id": "75b35711-4f6b-4c5e-9cad-b3c45160b58f",
+          "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+          "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+          "population_rows": 1000000,
+          "seconds": 27.981108,
+          "status": "SUCCESS",
+          "validation_run_id": "70616c8c-6333-41a7-bfcb-504c27723a3a"
+        },
+        {
+          "configuration_id": "27efa0f6-ca81-416f-98a7-a384b52a895e",
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "population_rows": 1000000,
+          "seconds": 28.754374,
+          "status": "SUCCESS",
+          "validation_run_id": "416edcb1-5fa3-47c0-9783-851bb40f1c97"
+        },
+        {
+          "configuration_id": "4fd57945-4f21-45e4-b9b8-780445fe06a7",
+          "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+          "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+          "population_rows": 1000000,
+          "seconds": 28.066041,
+          "status": "SUCCESS",
+          "validation_run_id": "c6d5fc3c-4800-475f-a4d4-ba60080b4b68"
+        },
+        {
+          "configuration_id": "cb28ef27-e25e-410e-91ed-6f1b2407f94f",
+          "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+          "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+          "population_rows": 1000000,
+          "seconds": 28.668394,
+          "status": "SUCCESS",
+          "validation_run_id": "3b3ea48f-fe2a-4ecc-a49d-07947f858c41"
+        }
+      ],
+      "distinct_datasets": 2,
+      "measured_in_dispatch": false,
+      "synthetic_targets": 5,
+      "version_reuse_declared": true
+    },
+    "source": {
+      "canonical_artifact_id": "f8705ac3-dd29-46fc-b2b4-acdd8ba6d214",
+      "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+      "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+      "canonical_size_bytes": 51861,
+      "column_count": 8,
+      "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+      "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+      "row_count": 1000000,
+      "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+      "source_run_id": null,
+      "source_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+    },
+    "sources": [
+      {
+        "canonical_artifact_id": "f8705ac3-dd29-46fc-b2b4-acdd8ba6d214",
+        "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+        "canonical_sha256": "e1a65ef8fa3fbb27c75e95f9ed1b6a4aac6d81842c93221a78de1353d2a6066a",
+        "canonical_size_bytes": 51861,
+        "column_count": 8,
+        "dataset_id": "d0bfa61f-e7f1-4c6c-bd40-899bb4e32258",
+        "dataset_version_id": "802e3094-cf22-42f4-8533-2ca641af2da4",
+        "row_count": 1000000,
+        "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+        "source_run_id": null,
+        "source_sha256": "f8227511b5b458ace9a5b19e2355d3f13718e77a9db903cb7624cafbb25a8fb7"
+      },
+      {
+        "canonical_artifact_id": "5b95395c-b678-4463-99d4-d4d96af458e4",
+        "canonical_media_type": "application/vnd.trackvance.parquet-set+json",
+        "canonical_sha256": "52bb05294a8667a4a9b2763cfbe2e2ad76d05b1f152389b85764264588bdbf90",
+        "canonical_size_bytes": 51891,
+        "column_count": 8,
+        "dataset_id": "3d505fb2-5e21-410f-b204-da45ae0fd5f4",
+        "dataset_version_id": "20cb4a4c-2a42-4496-b52c-8630f78d0acc",
+        "row_count": 1000000,
+        "schema_hash": "20b56185399a58e06b7dfd530572b8c35284c688786e86a1aa26937318337776",
+        "source_run_id": null,
+        "source_sha256": "2061496701ac32cc7dc517c15438f5f0410897a3bd698e5329eeb94cbde722c2"
+      }
+    ],
+    "status": "PASS",
+    "total_seconds": 201.709458
+  },
+  "phases": {
+    "dispatch_with_real_busy_worker": {
+      "elapsed_seconds": 205.516,
+      "samples": 61,
+      "services": {
+        "acquisition-worker": {
+          "rss_peak_bytes": 365166592,
+          "cgroup_sample_peak_bytes": 881090560,
+          "cgroup_lifetime_peak_bytes": 942010368,
+          "temporary_peak_bytes": 403224064,
+          "cpu_seconds": 14.960954,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "api": {
+          "rss_peak_bytes": 449908736,
+          "cgroup_sample_peak_bytes": 247365632,
+          "cgroup_lifetime_peak_bytes": 787808256,
+          "temporary_peak_bytes": 403210240,
+          "cpu_seconds": 21.369753,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "delivery-worker": {
+          "rss_peak_bytes": 378851328,
+          "cgroup_sample_peak_bytes": 552742912,
+          "cgroup_lifetime_peak_bytes": 622374912,
+          "temporary_peak_bytes": 403210240,
+          "cpu_seconds": 207.600601,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "worker": {
+          "rss_peak_bytes": 960438272,
+          "cgroup_sample_peak_bytes": 1050988544,
+          "cgroup_lifetime_peak_bytes": 1559539712,
+          "temporary_peak_bytes": 403224064,
+          "cpu_seconds": 14.610472,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        }
+      },
+      "combined_cgroup_sample_peak_bytes": 2649366528,
+      "minimum_host_disk_free_bytes": 1320780546048,
+      "measurement_errors": [],
+      "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+      "resource_guard": null,
+      "backend_cgroup_budget_bytes": 6442450944,
+      "host_disk_reserve_bytes": 5368709120,
+      "cgroup_lifetime_peak_is_not_phase_peak": true
+    },
+    "cancel_during_reading": {
+      "elapsed_seconds": 35.544,
+      "samples": 11,
+      "services": {
+        "acquisition-worker": {
+          "rss_peak_bytes": 283234304,
+          "cgroup_sample_peak_bytes": 998920192,
+          "cgroup_lifetime_peak_bytes": 1036533760,
+          "temporary_peak_bytes": 306661581,
+          "cpu_seconds": 34.129778,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "api": {
+          "rss_peak_bytes": 286461952,
+          "cgroup_sample_peak_bytes": 293429248,
+          "cgroup_lifetime_peak_bytes": 787808256,
+          "temporary_peak_bytes": 308316365,
+          "cpu_seconds": 1.60494,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "delivery-worker": {
+          "rss_peak_bytes": 233058304,
+          "cgroup_sample_peak_bytes": 127778816,
+          "cgroup_lifetime_peak_bytes": 622374912,
+          "temporary_peak_bytes": 309926093,
+          "cpu_seconds": 2.283736,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "worker": {
+          "rss_peak_bytes": 833384448,
+          "cgroup_sample_peak_bytes": 978378752,
+          "cgroup_lifetime_peak_bytes": 1559539712,
+          "temporary_peak_bytes": 311568589,
+          "cpu_seconds": 2.279506,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        }
+      },
+      "combined_cgroup_sample_peak_bytes": 2384859136,
+      "minimum_host_disk_free_bytes": 1320535863296,
+      "measurement_errors": [],
+      "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+      "resource_guard": null,
+      "backend_cgroup_budget_bytes": 6442450944,
+      "host_disk_reserve_bytes": 5368709120,
+      "cgroup_lifetime_peak_is_not_phase_peak": true
+    },
+    "xlsx_crash_lease_recovery": {
+      "elapsed_seconds": 297.38,
+      "samples": 88,
+      "services": {
+        "acquisition-worker": {
+          "rss_peak_bytes": 366395392,
+          "cgroup_sample_peak_bytes": 1002463232,
+          "cgroup_lifetime_peak_bytes": 1036533760,
+          "temporary_peak_bytes": 711907945,
+          "cpu_seconds": 217.853356,
+          "cpu_counter_resets": 1,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": false,
+          "memory_events_measurement_complete": false
+        },
+        "api": {
+          "rss_peak_bytes": 825143296,
+          "cgroup_sample_peak_bytes": 780828672,
+          "cgroup_lifetime_peak_bytes": 805306368,
+          "temporary_peak_bytes": 711907945,
+          "cpu_seconds": 20.591615,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 952,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "delivery-worker": {
+          "rss_peak_bytes": 360226816,
+          "cgroup_sample_peak_bytes": 199942144,
+          "cgroup_lifetime_peak_bytes": 622374912,
+          "temporary_peak_bytes": 711907945,
+          "cpu_seconds": 20.721284,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "worker": {
+          "rss_peak_bytes": 934236160,
+          "cgroup_sample_peak_bytes": 1044033536,
+          "cgroup_lifetime_peak_bytes": 1559539712,
+          "temporary_peak_bytes": 712303835,
+          "cpu_seconds": 20.912386,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        }
+      },
+      "combined_cgroup_sample_peak_bytes": 2517389312,
+      "minimum_host_disk_free_bytes": 1319397019648,
+      "measurement_errors": [],
+      "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+      "resource_guard": null,
+      "backend_cgroup_budget_bytes": 6442450944,
+      "host_disk_reserve_bytes": 5368709120,
+      "cgroup_lifetime_peak_is_not_phase_peak": true
+    },
+    "xlsx_row_limit_failure_preserves_previous_version": {
+      "elapsed_seconds": 137.674,
+      "samples": 41,
+      "services": {
+        "acquisition-worker": {
+          "rss_peak_bytes": 371613696,
+          "cgroup_sample_peak_bytes": 456830976,
+          "cgroup_lifetime_peak_bytes": 480964608,
+          "temporary_peak_bytes": 565092152,
+          "cpu_seconds": 133.210433,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "api": {
+          "rss_peak_bytes": 766943232,
+          "cgroup_sample_peak_bytes": 805269504,
+          "cgroup_lifetime_peak_bytes": 805310464,
+          "temporary_peak_bytes": 565092152,
+          "cpu_seconds": 13.752731,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 778,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "delivery-worker": {
+          "rss_peak_bytes": 258531328,
+          "cgroup_sample_peak_bytes": 143724544,
+          "cgroup_lifetime_peak_bytes": 622374912,
+          "temporary_peak_bytes": 565092152,
+          "cpu_seconds": 9.112361,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        },
+        "worker": {
+          "rss_peak_bytes": 858726400,
+          "cgroup_sample_peak_bytes": 993144832,
+          "cgroup_lifetime_peak_bytes": 1559539712,
+          "temporary_peak_bytes": 565092152,
+          "cpu_seconds": 9.394781,
+          "cpu_counter_resets": 0,
+          "memory_events_delta": {
+            "oom_group_kill": 0,
+            "max": 0,
+            "low": 0,
+            "oom": 0,
+            "high": 0,
+            "oom_kill": 0
+          },
+          "cpu_measurement_complete": true,
+          "memory_events_measurement_complete": true
+        }
+      },
+      "combined_cgroup_sample_peak_bytes": 2243293184,
+      "minimum_host_disk_free_bytes": 1318986805248,
+      "measurement_errors": [],
+      "method": "CONTAINER_PROC_RSS_SUM_CGROUP_V2_CPU_STAT_DISK_2S",
+      "resource_guard": null,
+      "backend_cgroup_budget_bytes": 6442450944,
+      "host_disk_reserve_bytes": 5368709120,
+      "cgroup_lifetime_peak_is_not_phase_peak": true
+    }
+  },
+  "cancel": {
+    "status": "CANCELLED",
+    "observed_records_before_cancel": 10000,
+    "versions": 0
+  },
+  "recovery": {
+    "attempts": 2,
+    "versions": 1,
+    "full_integrity": {
+      "rows": 1000000,
+      "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+      "observed_null_count": 10000,
+      "observed_empty_string_count": 10000,
+      "physical_numbering": {
+        "rows": 1000000,
+        "first": 5,
+        "last": 1000004,
+        "numbering_mismatches": 0
+      }
+    }
+  },
+  "row_limit_failure": {
+    "status": "PASS",
+    "acquisition_id": "6815561a-2c1c-4fd6-931d-eb4bc8ff15b1",
+    "attempt_status": "FAILED",
+    "rows_in_fixture": 1000001,
+    "configured_maximum": 1000000,
+    "diagnostic": {
+      "code": "ACQUISITION_ROW_LIMIT",
+      "message": "La fuente supera el límite efectivo de 1,000,000 registros de datos. No se publicó una versión parcial.",
+      "details": {
+        "limit": "data_rows",
+        "maximum": 1000000,
+        "observed": 1000001
+      },
+      "reference": "6815561a-2c1c-4fd6-931d-eb4bc8ff15b1"
+    },
+    "notification_id": "7dd45c1f-5c2b-4254-9ed3-3f439583da8d",
+    "transfer": {
+      "transfer_seconds": 0.625,
+      "inspection_seconds": 0.078,
+      "metadata_registration_seconds": 0.153,
+      "transferred_bytes": 129356579,
+      "inspection_sampled_rows": 100,
+      "inspection_total_rows": null,
+      "inspection_limited": false
+    },
+    "no_partial_version": true,
+    "previous_version_ids": [
+      "802e3094-cf22-42f4-8533-2ca641af2da4"
+    ],
+    "retained_full_integrity": {
+      "rows": 1000000,
+      "canonical_rows_sha256": "90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2",
+      "observed_null_count": 10000,
+      "observed_empty_string_count": 10000,
+      "physical_numbering": {
+        "rows": 1000000,
+        "first": 5,
+        "last": 1000004,
+        "numbering_mismatches": 0
+      }
+    },
+    "new_diagnostic_kept_for_native_backup": true
+  },
+  "public_export": {
+    "source_report_sha256": "e908476ec15682de63457a2e41879d84cc3523ec59766be6c1fd57f22598546d",
+    "source_report_filename": "corrections-evidence.json",
+    "source_status_preserved": "FAIL",
+    "sanitized_local_path_fields": [
+      ".tiers[0].fixture.path",
+      ".tiers[0].fixture.formats.XLSX.path",
+      ".tiers[1].fixture.path",
+      ".tiers[1].fixture.formats.XLSX.path",
+      ".tiers[2].fixture.path",
+      ".tiers[2].fixture.formats.XLSX.path",
+      ".tiers[3].fixture.path",
+      ".tiers[3].fixture.formats.XLSX.path",
+      ".tiers[4].fixture.path",
+      ".tiers[4].fixture.formats.XLSX.path",
+      ".tiers[5].fixture.path",
+      ".tiers[5].fixture.formats.XLSX.path",
+      ".tiers[6].fixture.path",
+      ".tiers[6].fixture.formats.XLSX.path",
+      ".tiers[7].fixture.path",
+      ".tiers[7].fixture.formats.XLSX.path"
+    ],
+    "credential_bearing_keys_found": 0,
+    "fixture_scope": "SYNTHETIC_INDEPENDENT_ORACLE; original user workbooks unavailable",
+    "failure_stage_root_reported": "FIRST_400000_ROW_BROWSER; all eight acquisition tiers and prior API/SQL checks passed",
+    "native_backup_gate": "NOT_RUN_AFTER_BROWSER_FAILURE",
+    "final_ci_and_main_upgrade": "PENDING",
+    "failure_cause_root_confirmed": "HARNESS_LOGIN_NAVIGATION_BEFORE_AUTH_COMPLETED"
+  }
+}

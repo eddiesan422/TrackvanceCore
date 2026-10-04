@@ -274,6 +274,8 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   await expect(page.getByRole('link', { name: 'Ver notificaciones, 1 sin leer', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).click()
   await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
+  // A hard navigation must wait for the async login to establish its session.
+  await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
   await page.goto('/notifications')
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
   await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')

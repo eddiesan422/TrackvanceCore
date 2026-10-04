@@ -1,3 +1,5 @@
+import ast
+import base64
 import hashlib
 import importlib.util
 import io
@@ -738,7 +740,18 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
         if args[:2] == ['docker', 'compose'] and 'up' in args and target in args:
             assert ('restore', target) in calls
         if args[-3:] == ["api", "python", "-"]:
-            assert "seed_delivery_baseline" in kwargs["input_text"]
+            assignments = {node.targets[0].id: ast.literal_eval(node.value)
+                           for node in ast.parse(kwargs["input_text"]).body
+                           if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                           and node.targets[0].id in {"sources", "checks"}}
+            required = {"check_postgres_migrations.py", "verify_storage.py", "physical_schema_guard.py"}
+            assert set(assignments["sources"]) == set(assignments["checks"]) == required
+            decoded = {name: base64.b64decode(encoded, validate=True)
+                       for name, encoded in assignments["sources"].items()}
+            for name, data in decoded.items():
+                assert data == (runner.ROOT / "scripts" / name).read_bytes()
+                assert hashlib.sha256(data).hexdigest() == assignments["checks"][name]
+            assert b"seed_delivery_baseline" in decoded["check_postgres_migrations.py"]
             return json.dumps({"status": "PASS"})
         if "backup" in args:
             (evidence / "backup").mkdir()

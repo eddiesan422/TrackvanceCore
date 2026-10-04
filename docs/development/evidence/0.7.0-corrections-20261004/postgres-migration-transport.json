@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "scope": "Real PostgreSQL temporary UUID database; application and main databases unchanged",
+  "project": "trackvance-v070-test-corrections-5cef00778fdf",
+  "implementation_sha": "393b7e25e413bf641d5483c25c53951642611f51",
+  "uncommitted_transport_fix": true,
+  "source_sha256": {
+    "check_postgres_migrations.py": "0561bc0afd2eb8cb53e24ddbfadfb6819b9eb1f82e76e9a34d7f587bb226a828",
+    "verify_storage.py": "bf8720c5c35ad4e8a4c61b74f52b3b9eb62593e6f231c4df7b91f50291430d94",
+    "physical_schema_guard.py": "7b5951608045f831087b5cf59a0b3cb8faea66b8554fe18e0f2b602ec7ff7cb2"
+  },
+  "result": {
+    "status": "PASS",
+    "historical_tables_preserved": 6,
+    "actor_backfill": "PASS",
+    "model_parity": "PASS",
+    "roundtrip": "PASS",
+    "0008_0016_roundtrip": "PASS",
+    "0012_0016_preservation": "PASS",
+    "sentinel_verified_executor": "PASS",
+    "sentinel_legacy_safety_pause": "PASS",
+    "0012_tables_preserved": 31,
+    "0008_tables_preserved": 24,
+    "0008_delivery_attempts_preserved": {
+      "COMMITTED": 1,
+      "UNKNOWN": 1
+    },
+    "0008_delivery_lineage_edges_preserved": 8,
+    "0015_0016_preservation": {
+      "status": "PASS",
+      "tables": 42,
+      "rows": 117,
+      "relationships": 115,
+      "physical_schema": {
+        "tables": 42,
+        "columns": 511,
+        "foreign_keys": 75
+      },
+      "failed_acquisition_preserved": true,
+      "historical_notification_read_at_preserved": true,
+      "domain_options_numbering_limits_preserved": true
+    }
+  },
+  "main_inventory": "UNCHANGED"
+}

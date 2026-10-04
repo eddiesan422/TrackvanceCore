@@ -219,7 +219,9 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   await expect(dialog.getByLabel('Otros identificadores por nombre')).toHaveCount(0)
   await dialog.getByLabel('Tipo de transaction_date').selectOption('STRING')
   await dialog.getByRole('checkbox', { name: 'Identificador document_number', exact: true }).check()
-  await dialog.getByLabel('Área de negocio', { exact: true }).fill(area)
+  await dialog.getByLabel('Área de negocio', { exact: true }).selectOption('__new_domain__')
+  await expect(dialog.getByRole('button', { name: 'Registrar adquisición', exact: true })).toBeDisabled()
+  await dialog.getByLabel('Nueva área de negocio', { exact: true }).fill(area)
   await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
   await page.waitForURL(/\/datasets\/[^/?]+$/)
   const datasetId = page.url().split('/datasets/')[1]
@@ -237,6 +239,8 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
 
   await page.getByRole('button', { name: 'Nueva versión', exact: true }).click()
   dialog = page.getByRole('dialog')
+  await expect(dialog.getByLabel('Área de negocio', { exact: true })).toHaveValue(area)
+  await expect(dialog.getByLabel('Área de negocio', { exact: true })).toBeDisabled()
   await dialog.locator('input[type=file]').setInputFiles({ name: 'editable-v2.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
   await expect(dialog.getByLabel('Tipo de active')).toContainText('muestra STRING')
   await dialog.getByLabel('Tipo de active').selectOption('BOOLEAN')

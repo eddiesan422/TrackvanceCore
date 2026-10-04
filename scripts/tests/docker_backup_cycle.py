@@ -43,6 +43,7 @@ from isolation_profile import (
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import docker_state
+from migration_transport import migration_stdin_source
 
 PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-(?:src|dst)-[a-z0-9-]+|trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12})")
 DATABASE_PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-db-[a-z0-9-]+|trackvance-v070-test-recovery-db-[a-f0-9]{12})")
@@ -1213,7 +1214,7 @@ def main() -> int:
         stage = "postgres_migration"
         result["postgres_migration"] = json.loads(execute(
             [*compose, "exec", "-T", "api", "python", "-"], environment,
-            input_text=(ROOT / "scripts" / "check_postgres_migrations.py").read_text(encoding="utf-8"),
+            input_text=migration_stdin_source(),
             credentials=credentials,
         ))
         ensure(result["postgres_migration"].get("status") == "PASS",

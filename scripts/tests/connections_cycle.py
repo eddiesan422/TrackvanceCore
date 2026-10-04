@@ -32,6 +32,9 @@ from isolation_profile import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from migration_transport import migration_stdin_source
+
 PREFIX = "trackvance-connections-e2e-"
 FIXTURES = Path(__file__).with_name("fixtures")
 
@@ -542,7 +545,7 @@ def main() -> int:
         run(up)
         run(["exec", "-T", "api", "alembic", "check"])
         migration_result = run(["exec", "-T", "api", "python", "-"],
-                               input_text=(ROOT / "scripts/check_postgres_migrations.py").read_text(encoding="utf-8"),
+                               input_text=migration_stdin_source(),
                                capture=True)
         checks.verify(json.loads(migration_result)["roundtrip"] == "PASS",
                       "Migraciones PostgreSQL: ida/vuelta, historial y paridad de modelos")

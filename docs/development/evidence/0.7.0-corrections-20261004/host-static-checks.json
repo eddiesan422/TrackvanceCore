@@ -1,0 +1,54 @@
+{
+  "implementation_sha": "393b7e25e413bf641d5483c25c53951642611f51",
+  "scope": "LOCAL_UNIT_AND_STATIC_GATES_NOT_COMPLETE_CERTIFICATION",
+  "backend": {
+    "passed": 1708,
+    "skipped": 17,
+    "failed": 0,
+    "elapsed_seconds": 287.59,
+    "log": ".codex-local/v070-corrections/20261004/backend-frozen-suite.log",
+    "skip_scope": "16 opt-in JVM scenarios require dedicated real Linux Spark gates; 1 Windows symlink scenario requires the Linux backend gate.",
+    "log_sha256": "636a73351697ecaa0991d3799ebb7aff7f3102bd5b51523283e495ed9ac4a8e6"
+  },
+  "frontend": {
+    "passed": 223,
+    "files": 27,
+    "elapsed_seconds": 15.38,
+    "lint": "PASS",
+    "typecheck": "PASS",
+    "production_build": "PASS"
+  },
+  "python_static": {
+    "ruff": "PASS",
+    "mypy": "PASS",
+    "source_files": 63
+  },
+  "contracts": {
+    "status": "PASS",
+    "paths": 119,
+    "tables": 42,
+    "model_columns": 511,
+    "permissions": 42
+  },
+  "closure_status": "OPEN",
+  "scripts_after_transport_fix": {
+    "passed": 523,
+    "failed": 0,
+    "skipped": 0,
+    "elapsed_seconds": 8.35,
+    "source_sha": "393b7e25e413bf641d5483c25c53951642611f51",
+    "transport_fix_uncommitted_at_execution": true,
+    "log_sha256": "59dfb2bc0adf45ef333d051d2073adb097a484ea25a64d077d988c06b861e431",
+    "not_additive_to_backend_total": true
+  },
+  "browser_business_area_focal": {
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0,
+    "elapsed_seconds": 46.890341,
+    "scope": "Real isolated browser/API/workers, existing/new area and persisted domain on new version.",
+    "test": "frontend/tests-e2e/corrections.spec.ts: corrige esquema e identificadores",
+    "test_selector_fix_uncommitted_at_execution": true
+  }
+}

@@ -133,7 +133,7 @@ class Diagram(Flowable):
             self.height = 464
         elif kind == "delivery-lanes":
             self.height = 234
-        elif kind in {"local", "acquisition", "automation", "spark", "delivery-preparation"}:
+        elif kind in {"local", "acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
             self.height = 310
 
     def box(self, x, y, w, h, title, detail=""):
@@ -192,7 +192,7 @@ class Diagram(Flowable):
             self.box(0, 5, w, 52, "StorageProvider / volumen de artefactos", "Snapshots + partes + descriptor + perfiles + resultados + manifiestos")
             # The lightweight processes are independent peers coordinated by
             # PostgreSQL, rather than the next stage of an individual worker.
-        elif self.kind in {"acquisition", "automation", "spark", "delivery-preparation"}:
+        elif self.kind in {"acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
             flows = {
                 "acquisition": [
                     ("Recibir / explorar", "Staging privado; opciones y dueño"),
@@ -202,12 +202,20 @@ class Diagram(Flowable):
                     ("Publicar con lease", "Partes + descriptor + versión"),
                     ("Outbox / Notificación", "Transacción de transición"),
                 ],
+                "xlsx-streaming": [
+                    ("HTTP: recibir e inspeccionar", "ZIP privado; muestra 100 / 4 MiB / 5 s"),
+                    ("Job y snapshot congelados", "202; intento, owner y lease propios"),
+                    ("ZIP / XML incremental", "Miembros, estilos, expansión y tokens acotados"),
+                    ("Índices SQLite privados", "Shared strings y fórmulas; cachés limitadas"),
+                    ("Lotes y tipos globales", "Filas físicas; 5.000 filas / 8 MiB por lote"),
+                    ("Perfil y publicación íntegra", "Toda la población; fence, partes y versión"),
+                ],
                 "automation": [
                     ("Tick o evento Intake", "Scheduler / CHAINING separados"),
-                    ("Resolver autorización", "Usuario real y permisos vigentes"),
+                    ("Resolver autorización", "Sólo metadata; usuario y permisos vigentes"),
                     ("Congelar ocurrencia", "Revisión + DatasetVersion exacta"),
                     ("No repetición / target", "Claims, overlap, UNKNOWN"),
-                    ("Job DELIVERY", "SYSTEM + responsable capturado"),
+                    ("Job DELIVERY / worker", "Integridad completa fuera del lock; antes de STARTED"),
                     ("Resultado y aviso", "Commit remoto; bandeja personal"),
                 ],
                 "spark": [
@@ -222,7 +230,7 @@ class Diagram(Flowable):
                     ("Preflight persistido", "DELIVERY_PREFLIGHT; sin intento"),
                     ("Validación completa", "Tipos, claves, destino, permisos"),
                     ("PreparedRows sellado", "SQLite: hashes + binding exacto"),
-                    ("Revalidar / STARTED", "Autorización y target guard"),
+                    ("Revalidar / STARTED", "Integridad actual, autorización y target guard"),
                     ("Una transacción SQL", "Lotes; cuatro estrategias"),
                     ("COMMITTED / FAILED / UNKNOWN", "Evidencia; nunca replay ciego"),
                 ],
@@ -491,7 +499,7 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Paragraph("Especificación técnica v1.1", ParagraphStyle("subtitle", fontName="Arial", fontSize=21, leading=28, textColor=NAVY)))
     story.append(Spacer(1, 25))
     cover_status = "Borrador: certificación consolidada en curso" if draft else "Estado funcional y evidencia de validación"
-    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · EVOLUCIÓN FUNCIONAL LOCAL"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
+    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · CORRECCIONES C01–C06"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
     story.append(Spacer(1, 18))
     story.append(paragraph("Arquitectura local y evolución a producto", "h2"))
     story.append(paragraph("Monolito modular · Persistencia local · Reglas portables · Evidencia verificable"))
