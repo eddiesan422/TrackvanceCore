@@ -14,7 +14,8 @@ beforeEach(() => vi.resetAllMocks())
 
 it('uses a completed validation only for its exact immutable draft', async () => {
   const result = { status: 'PASS' as const, checks: [] }, onUse = vi.fn()
-  vi.mocked(api).mockResolvedValue({ items: [{ id: 'validation', status: 'SUCCESS', dataset_version_id: 'version', created_at: '2026-10-03T12:00:00Z', result, draft }], total: 1 })
+  const serverDraft = { ...draft, columns: draft.columns.map(column => ({ ...column, precision: null, scale: null, length: null })) }
+  vi.mocked(api).mockResolvedValue({ items: [{ id: 'validation', status: 'SUCCESS', dataset_version_id: 'version', created_at: '2026-10-03T12:00:00Z', result, draft: serverDraft }], total: 1 })
   const user = userEvent.setup()
   function ChangingDraft() {
     const [value, setValue] = useState(draft)
@@ -26,6 +27,18 @@ it('uses a completed validation only for its exact immutable draft', async () =>
   expect(onUse).toHaveBeenCalledWith(result, 'validation')
   await user.click(screen.getByRole('button', { name: 'Cambiar borrador' }))
   expect(screen.getByRole('button', { name: 'Ver y usar resultado' })).toBeDisabled()
+})
+
+it.each(['precision', 'audit', 'source-version'] as const)('rejects a real %s change despite optional server null defaults', async change => {
+  const decimalDraft: DeliveryDraft = { ...draft, columns: [{ ...draft.columns[0], target_type: 'DECIMAL', precision: 24, scale: 8 }] }
+  const saved = { ...decimalDraft, columns: decimalDraft.columns.map(column => ({ ...column, length: null })) }
+  const changed = change === 'precision'
+    ? { ...decimalDraft, columns: [{ ...decimalDraft.columns[0], precision: 25 }] }
+    : change === 'audit' ? { ...decimalDraft, audit_columns_enabled: true }
+      : { ...decimalDraft, dataset_version_id: 'another-version' }
+  vi.mocked(api).mockResolvedValue({ items: [{ id: 'validation', status: 'SUCCESS', dataset_version_id: changed.dataset_version_id, created_at: '2026-10-03T12:00:00Z', result: { status: 'PASS', checks: [] }, draft: saved }], total: 1 })
+  renderApp(<DeliveryValidation draft={changed} ready onUse={vi.fn()}/>)
+  expect(await screen.findByRole('button', { name: 'Ver y usar resultado' })).toBeDisabled()
 })
 
 it('registers and cancels persistent work independently of the preview', async () => {

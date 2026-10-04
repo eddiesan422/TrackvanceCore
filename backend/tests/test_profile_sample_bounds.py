@@ -73,3 +73,40 @@ def test_parquet_sample_rejects_oversized_first_record_without_accumulating_rows
     pl.DataFrame({'text': ['界' * 30] * 30}).write_parquet(path)
     sample, size, limited = bounded_profile_sample(sample_paths([path], ['text'], byte_limit=100), byte_limit=100)
     assert sample == [] and size == 2 and limited
+
+
+def test_profile_endpoint_verifies_multipart_and_preserves_global_profile_without_analytical_connection(
+        authenticated, database, tmp_path, monkeypatch):
+    import duckdb
+    import polars as pl
+
+    from trackvance.artifactstore import storage_provider
+    from trackvance.dataset_scans import publish_materialized_version
+    from trackvance.models import Artifact, Dataset, User
+
+    paths = [tmp_path / 'first.parquet', tmp_path / 'second.parquet']
+    for path in paths:
+        pl.DataFrame({'id': ['A', 'B'], 'text': [None, '界😀é']}).write_parquet(path)
+    with database() as db:
+        dataset = Dataset(name='Verified presentation', organization_id=db.get(User, 'test-user').organization_id)
+        db.add(dataset)
+        db.flush()
+        version = publish_materialized_version(db, dataset, paths, filename='sample.parquet')
+        identifier, global_profile = version.id, version.profile
+        physical_paths = storage_provider.dataset_paths(db.get(Artifact, version.canonical_artifact_id))
+        db.commit()
+
+    def analytical_connection_forbidden(*args, **kwargs):
+        raise AssertionError('A presentation sample must not open an analytical connection')
+
+    monkeypatch.setattr(duckdb, 'connect', analytical_connection_forbidden)
+    response = authenticated.get(f'/api/v1/dataset-versions/{identifier}/profile')
+    assert response.status_code == 200
+    body = response.json()
+    assert body['profile'] == global_profile and body['profile']['row_count'] == 4
+    assert body['sampled_rows'] == 4 and body['sample'][1]['text'] == '界😀é'
+    assert not body['sample_limited']
+
+    # Verification covers all parts, including those outside a requested sample.
+    physical_paths[-1].write_bytes(b'tampered')
+    assert authenticated.get(f'/api/v1/dataset-versions/{identifier}/profile').status_code == 409

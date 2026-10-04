@@ -224,7 +224,7 @@ jobs:
       - name: Build isolated recovery target images
         run: |
           docker build -t trackvance-v070-isolated:backend -f backend/Dockerfile .
-          docker build -t trackvance-v070-isolated:web -f frontend/Dockerfile .
+          docker build -t trackvance-v070-isolated:web -f deploy/docker/frontend.Dockerfile .
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
       - name: Restore an authentic 0.5.1 backup into 0.7.0

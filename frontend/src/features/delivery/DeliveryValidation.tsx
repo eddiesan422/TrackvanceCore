@@ -15,6 +15,15 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function draftIdentity(draft: DeliveryDraft): string {
+  // The server snapshot includes null for omitted optional type parameters.
+  // Keep every other field, including exact versions and explicit audit policy.
+  return canonical({ ...draft, columns: draft.columns.map(column => ({
+    ...column, precision: column.precision ?? null, scale: column.scale ?? null,
+    length: column.length ?? null,
+  })) })
+}
+
 export function DeliveryValidation({ draft, ready, onUse }: {
   draft: DeliveryDraft; ready: boolean; onUse: (result: DeliveryPreflight, id: string) => void
 }) {
@@ -32,7 +41,7 @@ export function DeliveryValidation({ draft, ready, onUse }: {
     {create.error && <ErrorState error={create.error}/>} {cancel.error && <ErrorState error={cancel.error}/>} {history.error && <ErrorState error={history.error} retry={() => history.refetch()}/>}
     {!!items.length && <div className="table-scroll"><table><thead><tr><th>Validación</th><th>Estado / etapa</th><th>Resultado</th><th>Acción</th></tr></thead><tbody>{items.map(item => {
       const active = ['QUEUED', 'RUNNING'].includes(item.status)
-      const matches = item.draft && canonical(item.draft) === canonical(draft)
+      const matches = item.draft && draftIdentity(item.draft) === draftIdentity(draft)
       return <tr key={item.id}><td><code>{item.id}</code><small className="table-subtitle">{date(item.created_at)}</small></td><td><Badge value={item.status}/><small className="table-subtitle">{item.stage}</small>{item.error && <small>{item.error}</small>}</td><td>{item.result ? <Badge value={item.result.status}/> : 'Pendiente'}</td><td>{active ? <button type="button" className="text-button" disabled={cancel.isPending} onClick={() => cancel.mutate(item.id)}>Cancelar validación</button> : item.result && <button type="button" className="button secondary small" disabled={!matches} title={!matches ? 'El borrador cambió desde esta validación.' : undefined} onClick={() => onUse(item.result!, item.id)}>Ver y usar resultado</button>}</td></tr>
     })}</tbody></table></div>}
   </section>

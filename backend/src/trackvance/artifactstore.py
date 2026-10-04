@@ -201,6 +201,8 @@ class FileArtifactStore:
                 if schema != expected_schema or count != part["row_count"]:
                     raise ArtifactIntegrityError("DATASET_PART_INVALID: El esquema o conteo de una parte no coincide.")
                 paths.append(path)
+        except ArtifactIntegrityError:
+            raise
         except (pl.exceptions.PolarsError, OSError, ValueError):
             raise ArtifactIntegrityError("DATASET_PART_INVALID: No fue posible verificar una parte Parquet.") from None
         return paths
@@ -256,6 +258,8 @@ class FileArtifactStore:
                 link_artifact(db, organization_id, "DATASET_PART", "ARTIFACT", result.id,
                               "ARTIFACT", part["artifact_id"])
             return result
+        except ArtifactIntegrityError:
+            raise
         except (pl.exceptions.PolarsError, OSError, ValueError):
             raise ArtifactIntegrityError("DATASET_PART_INVALID: No fue posible publicar el conjunto Parquet.") from None
 
