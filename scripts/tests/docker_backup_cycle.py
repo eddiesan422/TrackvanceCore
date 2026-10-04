@@ -27,7 +27,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
-from typing import Any, ClassVar
+from typing import Any, BinaryIO, ClassVar
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,6 +64,18 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
            "Se detectó una credencial en la salida; el contenido fue suprimido.")
 
 
+def assert_stream_no_secrets(stream: BinaryIO, credentials: tuple[str, ...]) -> None:
+    """Inspect large artifacts with bounded memory, including block boundaries."""
+    needles = tuple(value.encode("utf-8") for value in credentials if value)
+    overlap = max((len(value) for value in needles), default=1) - 1
+    tail = b""
+    while chunk := stream.read(1024 * 1024):
+        contents = tail + chunk
+        ensure(not any(value in contents for value in needles),
+               "Se detectó una credencial en la salida; el contenido fue suprimido.")
+        tail = contents[-overlap:] if overlap else b""
+
+
 def scan_backup_plaintext(backup: Path, application: list[str], environment: dict[str, str],
                           credentials: tuple[str, ...]) -> dict[str, Any]:
     """Inspect decompressed backup bytes in memory without publishing database contents."""
@@ -78,7 +90,8 @@ def scan_backup_plaintext(backup: Path, application: list[str], environment: dic
     for path in backup.rglob("*"):
         if not path.is_file():
             continue
-        assert_no_secrets(path.read_bytes(), credentials)
+        with path.open("rb") as raw:
+            assert_stream_no_secrets(raw, credentials)
         if path.name.endswith(".tar.gz"):
             with tarfile.open(path, "r:gz") as archive:
                 for entry in archive:
@@ -86,7 +99,7 @@ def scan_backup_plaintext(backup: Path, application: list[str], environment: dic
                         member = archive.extractfile(entry)
                         ensure(member is not None, "Entrada de backup no legible.")
                         with member:
-                            assert_no_secrets(member.read(), credentials)
+                            assert_stream_no_secrets(member, credentials)
                         files += 1
     return {"status": "PASS", "postgres_dump_decompressed": "PASS",
             "archive_files_scanned": files, "known_credentials_scanned": len(credentials),

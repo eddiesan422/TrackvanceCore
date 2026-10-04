@@ -181,7 +181,8 @@ def test_invalid_monitor_does_not_block_other_schedules_or_leave_partial_jobs(da
         assert db.scalar(select(Run)).config_id == healthy.id
 
 
-def test_planner_rejection_has_explicit_occurrence_status(database, tmp_path):
+def test_planner_rejection_has_explicit_occurrence_status(database, tmp_path, monkeypatch):
+    monkeypatch.setattr("trackvance.spark_engine.runtime_status", lambda: {"available": False})
     now = utcnow()
     with database() as db:
         user, config, version = make_monitor(db, tmp_path)

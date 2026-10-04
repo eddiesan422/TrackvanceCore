@@ -69,6 +69,26 @@ def test_volume_metrics_do_not_subtract_counters_across_worker_restarts(tmp_path
     assert record['memory_events_delta']['oom_kill'] == 1
 
 
+def test_volume_phase_checks_reserves_after_work_without_polling(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parents[2] / 'scripts' / 'tests' / 'volume_cycle.py'
+    spec = importlib.util.spec_from_file_location('volume_reserve_certification', script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def enter(measured):
+        measured.started = time.monotonic()
+        return measured
+
+    monkeypatch.setattr(module.Measurements, '__enter__', enter)
+    monkeypatch.setattr(module.Measurements, '__exit__', lambda *_: None)
+    report = {}
+    with pytest.raises(RuntimeError, match='RESOURCE_MEMORY_RESERVE'), module.phase(report, 'full_hash', tmp_path, {}):
+        module.ACTIVE_MEASUREMENTS.violation = 'RESOURCE_MEMORY_RESERVE'
+    assert report['phases']['full_hash']['resource_guard'] == 'RESOURCE_MEMORY_RESERVE'
+    assert module.ACTIVE_MEASUREMENTS is None
+
+
 def register_file(database, content=b'id,value\n001,10.00\n2,20.00\n3,10.00\n', *, overrides=None):
     path = storage_provider.temporary_path('.csv')
     path.write_bytes(content)

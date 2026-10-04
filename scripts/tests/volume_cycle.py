@@ -271,13 +271,17 @@ class Measurements:
 def phase(report, label, directory, context):
     global ACTIVE_MEASUREMENTS
     print('Fase: ' + label, flush=True)
-    with Measurements(directory, context) as metrics:
-        ACTIVE_MEASUREMENTS = metrics
-        try:
+    metrics = Measurements(directory, context)
+    try:
+        with metrics:
+            ACTIVE_MEASUREMENTS = metrics
             yield
-        finally:
-            report.setdefault('phases', {})[label] = metrics.report()
-            ACTIVE_MEASUREMENTS = None
+    finally:
+        report.setdefault('phases', {})[label] = metrics.report()
+        ACTIVE_MEASUREMENTS = None
+    # Hash verification and SQL COPY can finish without another polling call.
+    # A reserve violated there still fails this phase instead of being ignored.
+    metrics.check()
 
 
 def psql(directory, context, sql, *, input_path=None):
@@ -325,7 +329,7 @@ from trackvance.models import DatasetVersion
 from trackvance.dataset_scans import version_paths,bounded_scan
 identifier=__VERSION__
 columns=__COLUMNS__
-digest=hashlib.sha256(); count=0
+digest=hashlib.sha256(); count=0; nulls=0; empty=0
 with SessionLocal() as db:
  version=db.get(DatasetVersion,identifier)
  with bounded_scan(version_paths(db,version)) as connection:
@@ -333,7 +337,8 @@ with SessionLocal() as db:
   while rows:=cursor.fetchmany(128):
    for row in rows:
     digest.update((json.dumps(dict(zip(columns,row)),sort_keys=True,ensure_ascii=False,separators=(',',':'))+'\\n').encode()); count+=1
-print(json.dumps({'rows':count,'canonical_rows_sha256':digest.hexdigest()}))
+    nulls+=row[3] is None; empty+=row[3]==''
+print(json.dumps({'rows':count,'canonical_rows_sha256':digest.hexdigest(),'observed_null_count':nulls,'observed_empty_string_count':empty}))
 """.replace('__VERSION__', repr(version_id)).replace('__COLUMNS__', repr(list(COLUMNS)))
     return json.loads(certification.compose(directory, context, ['exec','-T','api','python','-c',script]))
 
@@ -407,6 +412,23 @@ def acquire(api, path, name):
     if completed['status'] != 'SUCCESS':
         raise RuntimeError('Adquisición fallida: ' + str(completed.get('error_code')))
     return dataset, completed
+
+
+def validate_profile(profile, fixture):
+    """Compare persisted full-population profile counters with fixture truth."""
+    persisted = profile['profile']
+    columns = {column['name']: column for column in persisted['columns']}
+    if persisted['row_count'] != fixture['rows']:
+        raise RuntimeError('El perfil global contiene una población diferente.')
+    for name, expected in fixture['expected_cardinality'].items():
+        if columns[name]['distinct_count'] != expected:
+            raise RuntimeError('La cardinalidad global no coincide con el fixture completo.')
+    if columns['observed']['null_count'] != fixture['expected_observed_nulls']:
+        raise RuntimeError('El perfil confundió texto vacío y valores nulos.')
+    return {'row_count': persisted['row_count'],
+            'columns': [{key: column.get(key) for key in ('name', 'logical_type', 'distinct_count', 'null_count', 'empty_string_count', 'min', 'max', 'sum', 'max_length')}
+                        for column in persisted['columns']],
+            'observed_record_bytes_upper_bound': persisted.get('observed_record_bytes_upper_bound')}
 
 
 def destination_fixture(api, directory, context, token):
@@ -620,10 +642,9 @@ def main():
                     if verified['rows']!=args.rows or verified['canonical_rows_sha256']!=fixture['canonical_rows_sha256']:
                         raise RuntimeError('El formato no conservó toda la población y sus valores.')
                     profile=api.get('/api/v1/dataset-versions/'+run['output_version_id']+'/profile')
-                    columns={item['name']:item for item in profile['profile']['columns']}
-                    if columns['record_id']['distinct_count']!=args.rows or columns['observed']['null_count']!=fixture['expected_observed_nulls']:
-                        raise RuntimeError('El perfil global no coincide con los conteos esperados.')
-                    tier['formats'][kind]={'dataset_id':dataset['id'],'acquisition_id':run['id'],'version_id':run['output_version_id'],**verified}
+                    profile_summary = validate_profile(profile, fixture)
+                    tier['formats'][kind]={'dataset_id':dataset['id'],'acquisition_id':run['id'],'version_id':run['output_version_id'],
+                                           'profile':profile_summary,**verified}
                 if kind=='CSV':
                     chain(api,directory,context,fixture,dataset,run,destination,schema,tier)
             if size==args.sizes[0]:
@@ -641,10 +662,11 @@ def main():
                 current=api.get('/api/v1'+path)
                 if current.get('status') in {'QUEUED','RUNNING'}:
                     api.post('/api/v1'+path+'/cancel',{},expected=(200,202))
-            except Exception:
+            except (RuntimeError, OSError, ValueError) as cleanup_error:
                 # Preserve the initial error; report an unavailable owned-job
                 # cleanup without exporting HTTP bodies or credentials.
-                report.setdefault('cleanup_errors', []).append({'path':path,'status':'UNAVAILABLE'})
+                report.setdefault('cleanup_errors', []).append({'path':path,'status':'UNAVAILABLE',
+                                                                'error_type':type(cleanup_error).__name__})
         raise
     finally:
         (directory/'volume-evidence.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')

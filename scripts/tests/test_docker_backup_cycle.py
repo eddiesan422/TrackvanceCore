@@ -17,6 +17,29 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+@pytest.mark.parametrize("leak", [False, True])
+def test_backup_privacy_stream_is_bounded_and_detects_cross_block_credentials(capsys, leak):
+    secret = "private-boundary-credential"
+    block = 1024 * 1024
+    payload = b"a" * (block - 5) + (secret.encode() if leak else b"clean") + b"b" * block
+
+    class BoundedStream(io.BytesIO):
+        def read(self, size=-1):
+            assert 0 < size <= block
+            return super().read(size)
+
+    stream = BoundedStream(payload)
+    if leak:
+        with pytest.raises(RuntimeError) as caught:
+            runner.assert_stream_no_secrets(stream, (secret,))
+        assert secret not in str(caught.value)
+    else:
+        runner.assert_stream_no_secrets(stream, (secret,))
+        assert stream.tell() == len(payload)
+    output = capsys.readouterr()
+    assert secret not in output.out + output.err
+
+
 @pytest.mark.parametrize(
     "project",
     ["trackvance-core", "trackvance-recovery", "trackvance-recovery-src", "other"],

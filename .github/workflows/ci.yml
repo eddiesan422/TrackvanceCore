@@ -234,7 +234,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: recovery-results
-          path: .codex-local/recovery/**/result.json
+          path: |
+            .codex-local/recovery/**/result.json
+            .codex-local/v070/**/result.json
           include-hidden-files: true
           if-no-files-found: ignore
   benchmark-smoke:

@@ -2,7 +2,7 @@ from trackvance.planner import ExecutionPlanner, ResourceBudget, WorkloadInput
 
 
 def test_resource_preflight_and_unavailable_engine(tmp_path):
-    planner = ExecutionPlanner(ResourceBudget(memory_soft_bytes=10_000, temp_min_free_bytes=100), tmp_path)
+    planner = ExecutionPlanner(ResourceBudget(memory_soft_bytes=10_000, temp_min_free_bytes=100), tmp_path, spark_available=False)
     allowed = planner.plan("intake", [WorkloadInput(1, 3, 100)], {}, free_bytes=500)
     assert allowed["allowed"] and allowed["engine"] == "POLARS"
     disk = planner.plan("intake", [WorkloadInput(1, 3, 100)], {}, free_bytes=399)

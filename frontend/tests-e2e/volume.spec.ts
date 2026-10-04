@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 
-test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(5_400_000)
 test.skip(process.env.TV_VOLUME_E2E !== 'true', 'Requires guarded volume_cycle.py fixtures')
 
@@ -38,6 +38,7 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
   await page.goto('/datasets?upload=1')
   const upload = page.getByRole('dialog')
   await upload.getByLabel('Nombre del dataset', { exact: true }).fill(datasetName)
@@ -45,10 +46,10 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
   await upload.getByLabel('Archivo', { exact: true }).setInputFiles(fixturePath)
   const received = await receivedResponse
   expect(received.status()).toBe(201)
-  const stage = await received.json()
-  expect(stage.upload.size_bytes).toBe(fixture.formats.CSV.actual_bytes)
-  expect(stage.inspection.sampled_rows).toBe(100)
+  // Chromium can evict inspector response bodies for a large raw request.
+  // Assert the application's parsed inspection and persisted exact byte count.
   await expect(upload.getByText(/Transferencia completa/)).toBeVisible()
+  await expect(upload.getByText(/muestra de 100 registros/)).toBeVisible()
   await expect(upload.getByLabel('Delimitador', { exact: true })).toHaveValue(',')
   await expect(upload.getByLabel('Identificador record_id', { exact: true })).toBeChecked()
   const registeredResponse = page.waitForResponse(response => /\/datasets\/[^/]+\/acquisitions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST')
@@ -57,12 +58,13 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
   expect(registered.status()).toBe(202)
   const acquisition = await registered.json()
   expect(acquisition.status).toBe('QUEUED')
+  expect(acquisition.total_bytes).toBe(fixture.formats.CSV.actual_bytes)
   expect(acquisition.output_version_id).toBeNull()
   await page.waitForURL(`**/datasets/${acquisition.dataset_id}`)
   // The browser can leave and reload while the persisted worker continues.
   await page.goto('/')
   await page.goto(`/datasets/${acquisition.dataset_id}`)
-  await expect(page.getByRole('heading', { name: 'Adquisiciones', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Historial de adquisiciones', exact: true })).toBeVisible()
   const acquired = await terminal(page, `/acquisitions/${acquisition.id}`)
   expect(acquired.processed_rows).toBe(fixture.rows)
   expect(acquired.processed_bytes).toBe(fixture.observed_utf8_bytes)
@@ -100,7 +102,7 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
   await page.getByRole('button', { name: 'Continuar', exact: true }).click()
   await page.getByLabel('Destino de publicación', { exact: true }).selectOption(destinationId)
   await page.getByRole('button', { name: 'Continuar', exact: true }).click()
-  await page.getByRole('button', { name: 'Crear tabla nueva', exact: true }).click()
+  await page.getByRole('button', { name: /^Crear tabla nueva/ }).click()
   await page.getByLabel('Schema', { exact: true }).selectOption(schema)
   await page.getByLabel('Nueva tabla', { exact: true }).fill(tableName)
   await page.getByRole('button', { name: 'Continuar', exact: true }).click()

@@ -97,11 +97,18 @@ def assert_population(evidence: Path, rows: int, deployment_mode: str) -> dict:
     outcomes = measured.get("outcomes", {})
     if set(outcomes) != {"intake", "recon", "sentinel"}:
         raise RuntimeError("Full-population proof must include all three modules")
-    for outcome in outcomes.values():
+    expected = measured.get("expected_logical_fingerprints", {})
+    if measured.get("complete_value_verification") != "PASS" or set(expected) != {"intake", "recon", "sentinel", "intake_accepted"}:
+        raise RuntimeError("Full-population proof must verify every value and original position")
+    for module, outcome in outcomes.items():
         if outcome.get("status") != "PASS" or outcome.get("runtime", {}).get("deployment_mode") != deployment_mode:
             raise RuntimeError("Module proof did not pass in the requested deployment mode")
         if deployment_mode == "STANDALONE_CLIENT" and outcome["runtime"].get("executor_memory_status_entries", 0) < 3:
             raise RuntimeError("Standalone proof must include two real executors and the driver")
+        if outcome.get("results", {}).get("logical_fingerprint") != expected[module]:
+            raise RuntimeError("Complete result values differ from the fixture oracle")
+    if outcomes["intake"].get("accepted", {}).get("logical_fingerprint") != expected["intake_accepted"]:
+        raise RuntimeError("Complete accepted values and physical positions differ from the input snapshot")
     return measured
 
 

@@ -94,7 +94,7 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
     summary["artifact_credentials_scan"] = "PASS"
     summary["raw_artifacts_published"] = False
     (evidence / "browser-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print("Playwright: " + json.dumps(summary, ensure_ascii=False), flush=True)
+    print("Playwright: " + json.dumps(summary, ensure_ascii=True), flush=True)
     if completed.returncode:
         raise RuntimeError("Playwright falló; consultar únicamente las ubicaciones saneadas del resumen.")
     if privacy_failed:

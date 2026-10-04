@@ -46,6 +46,7 @@ from .models import (
     User,
     uid,
 )
+from .operations_common import OperationError
 from .processing import (
     ProcessingError,
     csv_record_lines,
@@ -1139,8 +1140,15 @@ def result_rows(
         parameters = [classification] if classification else []
         total = connection.execute("SELECT COUNT(*) FROM population" + where, parameters).fetchone()[0]
         order = " ORDER BY \"__tv_sort_key\"" if "__tv_sort_key" in pl.read_parquet_schema(paths[0]) else ""
-        values = connection.execute("SELECT payload FROM population" + where + order + " LIMIT ? OFFSET ?",
-                                    [*parameters, limit, offset]).fetchall()
+        page_query = "SELECT payload FROM population" + where + order + " LIMIT ? OFFSET ?"
+        page_parameters = [*parameters, limit, offset]
+        page_bytes = connection.execute(
+            "SELECT coalesce(sum(octet_length(encode(payload))), 0) FROM (" + page_query + ") AS page",
+            page_parameters,
+        ).fetchone()[0]
+        if page_bytes > 16 * 1024 * 1024:
+            raise OperationError(422, "RESULT_PAGE_BYTE_LIMIT", "La página supera 16 MiB. Reduce el número de filas o descarga el CSV completo.")
+        values = connection.execute(page_query, page_parameters).fetchall()
     return {"items": [json.loads(value[0]) for value in values], "total": total}
 
 

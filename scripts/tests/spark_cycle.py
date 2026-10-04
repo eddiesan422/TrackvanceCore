@@ -21,8 +21,8 @@ from pathlib import Path
 
 import polars as pl
 import pyarrow.parquet as pq
-
 from trackvance.dataset_scans import profile_paths
+from trackvance.processing import reconcile, sentinel
 from trackvance.spark_engine import (
     RECORD_NUMBER_COLUMN,
     PySparkProcessingEngine,
@@ -33,6 +33,111 @@ from trackvance.spark_engine import (
 
 NOW = datetime(2026, 10, 3, 12, tzinfo=UTC)
 GENERATE_BATCH_ROWS = 8192
+
+
+class LogicalMultiset:
+    """Constant-state fingerprint of complete typed rows, independent of order.
+
+    Count, sum and XOR of SHA256 row hashes retain duplicate multiplicity.
+    The final SHA256 binds all three accumulators. This is cryptographic
+    evidence, not a mathematical proof that hash collisions cannot exist.
+    """
+
+    def __init__(self):
+        self.rows, self.total, self.xor = 0, 0, 0
+
+    def update(self, record):
+        logical = dict(record)
+        if {"classification", "payload", "__tv_sort_key"} <= logical.keys() and isinstance(logical["payload"], str):
+            logical["payload"] = json.loads(logical["payload"])
+        encoded = json.dumps(logical, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        value = int.from_bytes(hashlib.sha256(encoded).digest(), "big")
+        self.rows += 1
+        self.total = (self.total + value) % (1 << 256)
+        self.xor ^= value
+
+    def evidence(self):
+        encoded = self.rows.to_bytes(8, "big") + self.total.to_bytes(32, "big") + self.xor.to_bytes(32, "big")
+        return {"method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1", "rows": self.rows,
+                "sum_sha256": f"{self.total:064x}", "xor_sha256": f"{self.xor:064x}",
+                "sha256": hashlib.sha256(encoded).hexdigest()}
+
+
+def fixture_record(index, side="source"):
+    return {"id": f"{index - 1 if index and index % 50000 == 0 else index:012d}",
+            "region": f"R{index % 20:02d}",
+            "amount": "invalid" if index % 10000 == 0 else
+                      "1.00000000000000000000000000000000000001" if side == "target" and index % 12345 == 0 else
+                      "1.00000000000000000000000000000000000000",
+            "label": None if index % 20000 == 0 else f"e\u0301-{index:012d}-😀",
+            RECORD_NUMBER_COLUMN: index + 2}
+
+
+def duplicate_index(index, rows):
+    return bool(index and index % 50000 == 0 or index % 50000 == 49999 and index + 1 < rows)
+
+
+def logical_result(record, module, ordinal=0):
+    if module == "intake":
+        order = f"{record['original_row_number']:020d}\0{record['rule_code']}\0{record['column']}\0{ordinal:06d}"
+    elif module == "recon":
+        order = (f"{record['key']}\0{record['classification']}\0"
+                 f"{record.get('source_row') or 0:020d}\0{record.get('target_row') or 0:020d}")
+    else:
+        order = f"{ordinal:06d}"
+    return {"classification": record.get("classification", ""), "payload": record, "__tv_sort_key": order}
+
+
+def expected_intake_errors(rows):
+    result = LogicalMultiset()
+    cases = [(index, "NUMERIC", "amount", "invalid", "ERROR", 2) for index in range(0, rows, 10000)]
+    cases += [(index, "NOT_NULL", "label", None, "ERROR", 3) for index in range(0, rows, 20000)]
+    cases += [(index + offset, "UNIQUE", "id", f"{index - 1:012d}", "WARNING", 1)
+              for index in range(50000, rows, 50000) for offset in (-1, 0)]
+    for index, code, column, value, severity, ordinal in cases:
+        record = {"original_row_number": index + 2, "rule_code": code, "column": column,
+                  "columns": [column], "rule_id": None, "received_value": value, "severity": severity,
+                  "message": f"{column}: incumple la regla {code}", "parameters": {},
+                  "condition": None, "classification": severity}
+        result.update(logical_result(record, "intake", ordinal))
+    return result.evidence()
+
+
+def expected_recon_results(rows):
+    config = {"key_columns": ["id"], "comparison_rules": [{"type": "numeric_tolerance",
+              "source_column": "amount", "target_column": "amount",
+              "parameters": {"abs": "0", "percent": "0", "null_policy": "INVALID"}}]}
+    templates = {}
+    for index, classification in ((1, "MATCH"), (12345, "VALUE_MISMATCH"), (0, "INVALID")):
+        source = {k: v for k, v in fixture_record(index).items() if k != RECORD_NUMBER_COLUMN}
+        target = {k: v for k, v in fixture_record(index, "target").items() if k != RECORD_NUMBER_COLUMN}
+        records, _ = reconcile(pl.DataFrame([source]), pl.DataFrame([target]), config)
+        assert len(records) == 1 and records[0]["classification"] == classification
+        templates[classification] = records[0]
+    source = pl.DataFrame({"id": ["duplicate", "duplicate"], "amount": ["1", "invalid"]})
+    records, _ = reconcile(source, source, config)
+    for record in records:
+        templates.setdefault(record["classification"], record)
+    digest = LogicalMultiset()
+    for index in range(rows):
+        source, target = fixture_record(index), fixture_record(index, "target")
+        number = index + 2
+        if duplicate_index(index, rows):
+            for side in ("SOURCE", "TARGET"):
+                record = {**templates["DUPLICATE_" + side], "key": source["id"]}
+                record.update(source_row=number if side == "SOURCE" else None,
+                              target_row=number if side == "TARGET" else None,
+                              source_rows=[number] if side == "SOURCE" else [],
+                              target_rows=[number] if side == "TARGET" else [],
+                              source_value=source["amount"] if side == "SOURCE" else None,
+                              target_value=target["amount"] if side == "TARGET" else None)
+                digest.update(logical_result(record, "recon"))
+        else:
+            classification = "INVALID" if index % 10000 == 0 else "VALUE_MISMATCH" if index % 12345 == 0 else "MATCH"
+            record = {**templates[classification], "key": source["id"], "source_row": number,
+                      "target_row": number, "source_rows": [number], "target_rows": [number]}
+            digest.update(logical_result(record, "recon"))
+    return digest.evidence()
 
 
 def process_tree_rss() -> int:
@@ -87,6 +192,7 @@ class MemorySampler:
 
 def generate(root: Path, rows: int):
     paths = {side: [] for side in ("source", "target")}
+    expected_accepted = LogicalMultiset()
     for start in range(0, rows, GENERATE_BATCH_ROWS):
         indices = range(start, min(rows, start + GENERATE_BATCH_ROWS))
         numbers = list(indices)
@@ -100,17 +206,22 @@ def generate(root: Path, rows: int):
                 "label": [None if i % 20000 == 0 else f"e\u0301-{i:012d}-😀" for i in numbers],
                 RECORD_NUMBER_COLUMN: [i + 2 for i in numbers],
             })
+            if side == "source":
+                for index, record in zip(numbers, frame.to_dicts(), strict=True):
+                    if index % 10000 != 0:
+                        expected_accepted.update(record)
             path = root / f"{side}-{start:012d}.parquet"
             frame.write_parquet(path)
             parts.append(str(path))
     columns = ("id", "region", "amount", "label")
     return {side: SparkDataset(tuple(parts), columns, rows, "PHYSICAL_LINE", RECORD_NUMBER_COLUMN,
                               observed_record_bound=512)
-            for side, parts in paths.items()}
+            for side, parts in paths.items()}, expected_accepted.evidence()
 
 
 def summarize(paths):
     counts, digest, rows, size = Counter(), hashlib.sha256(), 0, 0
+    logical = LogicalMultiset()
     for path in paths:
         size += path.stat().st_size
         for batch in pq.ParquetFile(path).iter_batches(batch_size=2048):
@@ -120,13 +231,16 @@ def summarize(paths):
                     counts[record["classification"]] += 1
                 digest.update(json.dumps(record, sort_keys=True, ensure_ascii=False).encode("utf-8"))
                 digest.update(b"\n")
+                logical.update(record)
     return {"rows": rows, "classification_counts": dict(counts), "size_bytes": size,
-            "parts": len(paths), "materialization_sha256": digest.hexdigest()}
+            "parts": len(paths), "materialization_sha256": digest.hexdigest(),
+            "logical_fingerprint": logical.evidence()}
 
 
 def cycle(root: Path, rows: int):
     root.mkdir(parents=True, exist_ok=False)
-    inputs = generate(root, rows)
+    inputs, accepted_fingerprint = generate(root, rows)
+    expected_results = {"intake": expected_intake_errors(rows), "recon": expected_recon_results(rows)}
     bad = len(range(0, rows, 10000))
     nulls = len(range(0, rows, 20000))
     duplicates = len(range(50000, rows, 50000))
@@ -160,6 +274,7 @@ def cycle(root: Path, rows: int):
                 assert metrics["error_count"] == bad + nulls
                 accepted_evidence = summarize(accepted)
                 assert accepted_evidence["rows"] == rows - bad
+                assert accepted_evidence["logical_fingerprint"] == accepted_fingerprint
             elif module == "recon":
                 result, _, metrics, decision = engine.recon(inputs["source"], inputs["target"],
                     {"key_columns": ["id"], "comparison_rules": [{"type": "numeric_tolerance",
@@ -184,7 +299,15 @@ def cycle(root: Path, rows: int):
                 assert actual["UNIQUE"] == duplicate_rows and actual["NUMERIC"] == bad
                 assert actual["NOT_NULL"] == nulls
                 accepted_evidence = None
+                checks, _ = sentinel(profile, schema, config, NOW, None, observed_at=NOW,
+                    column_rule_counts={index: {"evaluated_count": rows, "skipped_count": 0, "failed_count": count}
+                                        for index, count in enumerate((duplicate_rows, bad, nulls))})
+                expected = LogicalMultiset()
+                for index, check in enumerate(checks):
+                    expected.update(logical_result(check, "sentinel", index))
+                expected_results[module] = expected.evidence()
             evidence = summarize(result)
+            assert evidence["logical_fingerprint"] == expected_results[module], "Every result value/position must match the fixture oracle"
             if module == "recon":
                 assert evidence["classification_counts"] == {key: value for key, value in metrics["counts"].items() if value}
             if module == "intake":
@@ -201,7 +324,9 @@ def cycle(root: Path, rows: int):
         print(json.dumps({"module": module, "status": "PASS", "rows": rows,
                           "elapsed_seconds": outcomes[module]["elapsed_seconds"]}), flush=True)
     return {"status": "PASS", "certifying_million_rows": rows >= 1000000,
-            "input_population_rows": rows, "global_profile": profile_evidence, "outcomes": outcomes}
+            "input_population_rows": rows, "global_profile": profile_evidence, "outcomes": outcomes,
+            "expected_logical_fingerprints": {**expected_results, "intake_accepted": accepted_fingerprint},
+            "complete_value_verification": "PASS"}
 
 
 def main():

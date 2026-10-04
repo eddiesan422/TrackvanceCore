@@ -75,12 +75,22 @@ def test_dedicated_suite_rejects_skips_and_failures(tmp_path, failing_tag):
 
 def test_population_proof_requires_all_modules_and_real_executors(tmp_path):
     report = tmp_path / "evidence.json"
-    evidence = {"status": "PASS", "input_population_rows": 1000000, "outcomes": {
+    fingerprint = {"method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1", "rows": 1000000,
+                   "sum_sha256": "1" * 64, "xor_sha256": "2" * 64, "sha256": "3" * 64}
+    evidence = {"status": "PASS", "input_population_rows": 1000000, "complete_value_verification": "PASS",
+                "expected_logical_fingerprints": {name: fingerprint for name in ("intake", "recon", "sentinel", "intake_accepted")},
+                "outcomes": {
         module: {"status": "PASS", "runtime": {"deployment_mode": "STANDALONE_CLIENT",
-                 "executor_memory_status_entries": 3}} for module in ("intake", "recon", "sentinel")}}
+                 "executor_memory_status_entries": 3}, "results": {"logical_fingerprint": fingerprint},
+                 "accepted": {"logical_fingerprint": fingerprint}} for module in ("intake", "recon", "sentinel")}}
     report.write_text(json.dumps(evidence), encoding="utf-8")
     assert guards.assert_population(report, 1000000, "STANDALONE_CLIENT") == evidence
     evidence["outcomes"]["intake"]["runtime"]["executor_memory_status_entries"] = 2
     report.write_text(json.dumps(evidence), encoding="utf-8")
     with pytest.raises(RuntimeError):
+        guards.assert_population(report, 1000000, "STANDALONE_CLIENT")
+    evidence["outcomes"]["intake"]["runtime"]["executor_memory_status_entries"] = 3
+    evidence["outcomes"]["recon"]["results"]["logical_fingerprint"] = {**fingerprint, "sha256": "4" * 64}
+    report.write_text(json.dumps(evidence), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="values differ"):
         guards.assert_population(report, 1000000, "STANDALONE_CLIENT")

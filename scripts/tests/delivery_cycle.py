@@ -1044,14 +1044,28 @@ def main() -> int:
     evidence = args.evidence_dir or ROOT / ".codex-local" / "delivery-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
     compose = isolate_compose(compose, environment, evidence, project)
+    # This focal suite submits only Delivery jobs. Keep the other real processes
+    # available to doctor/heartbeat checks without reserving a Spark-sized JVM.
+    private_profile = evidence / "private-compose.json"
+    profile = json.loads(private_profile.read_text(encoding="utf-8"))
+    limits = {"postgres": "512m", "api": "768m", "worker": "256m", "acquisition-worker": "256m",
+              "delivery-worker": "768m", "scheduler": "128m", "events-chaining": "128m",
+              "events-notifications": "128m", "web": "128m", "mock-oidc": "256m"}
+    for name, memory in limits.items():
+        if name in profile["services"]:
+            profile["services"][name]["mem_limit"] = memory
+    private_profile.write_text(json.dumps(profile, indent=2), encoding="utf-8")
 
     def command(arguments, **kwargs):
         return execute(arguments, environment=environment, credentials=credentials, **kwargs)
 
     def run(arguments, **kwargs):
+        if command(["docker", "context", "show"], capture=True).strip() != docker_context:
+            raise RuntimeError("El contexto Docker cambió; se rechaza operar o limpiar el proyecto.")
         return command([*compose, *arguments], **kwargs)
 
     inventory_reader = lambda arguments: command(arguments, capture=True)
+    docker_context = command(["docker", "context", "show"], capture=True).strip()
     main_before = main_inventory(inventory_reader)
 
     started = False

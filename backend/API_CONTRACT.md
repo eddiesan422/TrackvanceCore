@@ -78,6 +78,12 @@ FileResponse completo. Excel conserva límites de 100.000 filas, 500.000 celdas 
 incorpora `complete_download` con el CSV completo, sin truncar. Los resultados y
 el manifest tienen identidades propias.
 
+La página de resultados tiene además una cota de 16 MiB de payload UTF-8 antes
+de decodificar JSON. Si la página solicitada la excede, responde 422
+RESULT_PAGE_BYTE_LIMIT; no devuelve una página cortada ni añade parámetros.
+El CSV completo mantiene su recorrido por lotes. `/system/engines` publica las
+cotas de página (16 MiB) y muestra de perfil (8 MiB) entre sus límites efectivos.
+
 ## Preflight durable y publicación 0.7.0
 
 POST `/delivery/validations` recibe DeliveryDraft y devuelve 202 con una Run

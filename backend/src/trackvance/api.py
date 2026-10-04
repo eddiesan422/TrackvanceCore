@@ -1400,7 +1400,7 @@ def engines():
     delivery = DeliveryLimits.configured()
     spark = runtime_status()
     components = {name: {"status": component_status(name)} for name in ("scheduler", "events-notifications", "events-chaining")}
-    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local y conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark / PySpark", "status": "ACTIVE" if spark["available"] else "UNAVAILABLE", "description": "Ejecución local[K] o Standalone client con agregaciones globales y partes inmutables.", **spark}], "worker": workers["DEFAULT"], "workers": workers, "components": components, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS, "acquisition": acquisition.as_dict(), "delivery": delivery.__dict__}, "mode": "local-prototype"}
+    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local y conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark / PySpark", "status": "ACTIVE" if spark["available"] else "UNAVAILABLE", "description": "Ejecución local[K] o Standalone client con agregaciones globales y partes inmutables.", **spark}], "worker": workers["DEFAULT"], "workers": workers, "components": components, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS, "result_page_bytes": 16 * 1024 * 1024, "profile_sample_bytes": 8 * 1024 * 1024, "acquisition": acquisition.as_dict(), "delivery": delivery.__dict__}, "mode": "local-prototype"}
 
 
 @router.get("/dashboard")

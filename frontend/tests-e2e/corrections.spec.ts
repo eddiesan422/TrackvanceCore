@@ -59,8 +59,15 @@ test('upload → Intake fecha no futura → Recon diferencia → excepción → 
   await page.goto('/datasets?upload=1')
   const upload = page.getByRole('dialog')
   await upload.getByLabel('Nombre del dataset', { exact: true }).fill(name)
+  const staged = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/datasets/uploads/stage' && response.request().method() === 'POST')
   await upload.locator('input[type=file]').setInputFiles({ name: 'cierre.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
-  await upload.getByRole('button', { name: /Cargar/ }).click()
+  expect((await staged).status()).toBe(201)
+  const registered = page.waitForResponse(response => /\/datasets\/[^/]+\/acquisitions$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST')
+  await upload.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
+  const queued = await registered
+  expect(queued.status()).toBe(202)
+  const acquisition = await queued.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/acquisitions/${acquisition.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   await page.waitForURL(/\/datasets\//)
   const datasetId = page.url().split('/datasets/')[1]
   const dataset = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
