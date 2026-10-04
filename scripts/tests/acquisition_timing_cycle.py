@@ -143,9 +143,11 @@ def resources_in_stable_window(samples, start, end):
     return resource_summary(selected)
 
 
-def observe_acquisition(api, run, clock, metrics, registration):
+def observe_acquisition(api, run, clock, metrics, registration, journal=None):
     observations = [{**registration, "stage": run["stage"], "status": run["status"],
         "processed_rows": run["processed_rows"], "processed_bytes": run["processed_bytes"]}]
+    if journal is not None:
+        journal["observations"] = observations
     started = time.monotonic()
     last_group = None
     while time.monotonic() - started < 1800:
@@ -276,7 +278,7 @@ print(json.dumps(result))""")
                 volume.OWNED_OPERATIONS.append("/acquisitions/" + run["id"])
                 tier["http_create_register_seconds"] = round(time.monotonic() - before, 6)
                 completed, observations, windows = observe_acquisition(api, run, clock, metrics, {
-                    "request_started_seconds": register_started - clock, "response_finished_seconds": register_finished - clock})
+                    "request_started_seconds": register_started - clock, "response_finished_seconds": register_finished - clock}, journal=tier)
                 tier["durable_acquisition_wait_wall_seconds"] = round(time.monotonic() - register_finished, 6)
                 tier["acquisition_success_seconds_from_receive_start"] = round(time.monotonic() - clock, 6)
                 tier.update(dataset_id=dataset["id"], acquisition_id=run["id"], version_id=completed["output_version_id"],
@@ -320,6 +322,17 @@ print(json.dumps(result))""")
         report.update(status="PASS", main_inventory="UNCHANGED")
     except Exception as error:
         report.update(status="FAIL", error_type=type(error).__name__)
+        if (report["tiers"] and report["tiers"][-1]["status"] == "RUNNING"
+                and "metrics" in locals() and "clock" in locals()):
+            failed = report["tiers"][-1]
+            failed.update(status="FAIL", error_type=type(error).__name__)
+            failed["partial_integral_wall_seconds_until_failure"] = round(time.monotonic() - clock, 6)
+            failed["partial_integral_resources"] = resource_summary(metrics.samples)
+            failed["partial_integral_resources"]["measurement_errors"] = metrics.errors
+            failed["stage_windows"] = stage_windows(failed.get("observations", []))
+            for window in failed["stage_windows"]:
+                lower, upper = window["stable_observed_window_seconds"]
+                window["resources_stable_observed_window"] = resources_in_stable_window(metrics.samples, wallclock + lower, wallclock + upper)
         # Cancel only subjects registered by this invocation, never historical jobs.
         for owned in volume.OWNED_OPERATIONS:
             try:

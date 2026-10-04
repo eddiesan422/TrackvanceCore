@@ -120,3 +120,19 @@ def test_counter_reset_does_not_become_negative_or_invented_phase_cpu():
         "services": {"worker": {"container_id": "new", "cpu": {"usage_usec": 1_000_000}}}}])
     assert report["services"]["worker"]["cpu_seconds"] is None
     assert report["lifetime_memory_peak_used"] is False
+
+
+def test_failed_acquisition_preserves_observations_in_attempt_journal():
+    class Api:
+        def get(self, _path):
+            return {"stage": "FAILED", "status": "FAILED", "processed_rows": 12,
+                "processed_bytes": 24, "error_code": "SOURCE_SIZE_LIMIT"}
+
+    journal = {}
+    run = {"id": str(uuid4()), "stage": "QUEUED", "status": "QUEUED",
+        "processed_rows": 0, "processed_bytes": 0}
+    with pytest.raises(RuntimeError, match="SOURCE_SIZE_LIMIT"):
+        runner.observe_acquisition(Api(), run, runner.time.monotonic(), SimpleNamespace(check=lambda: None),
+            {"request_started_seconds": 0, "response_finished_seconds": 0.1}, journal=journal)
+    assert [row["stage"] for row in journal["observations"]] == ["QUEUED", "FAILED"]
+    assert journal["observations"][-1]["processed_rows"] == 12

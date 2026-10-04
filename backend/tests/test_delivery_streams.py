@@ -1,10 +1,12 @@
 """Integrity, exact global equality and memory bounds of disk delivery preparation."""
 
 import tracemalloc
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal
 
 import polars as pl
+import pyarrow as pa
 import pytest
 
 from trackvance.delivery_streams import DatasetRecords, PreparedRows, batches, unique_keys
@@ -78,3 +80,61 @@ def test_records_scan_all_parts_and_only_sample_can_materialize(tmp_path):
 def test_batch_caps_observed_bytes_before_row_limit():
     values = [("x" * (3 * 1024**2),)] * 5
     assert [len(chunk) for chunk in batches(iter(values), size=100)] == [2, 2, 1]
+
+
+def test_metadata_and_concurrent_previews_never_initialize_native_sql(tmp_path, monkeypatch):
+    paths = []
+    for number in range(3):
+        path = tmp_path / f"part-{number}.parquet"
+        pl.DataFrame({"id": [f"{number}-A", f"{number}-B"], "note": [None, "001 🧪"]}).write_parquet(path)
+        paths.append(path)
+
+    def no_native_sql(_self):
+        pytest.fail("API metadata and bounded preview must not create a DuckDB connection")
+
+    monkeypatch.setattr(DatasetRecords, "_connection", no_native_sql)
+
+    def preview(_index):
+        records = DatasetRecords(paths, ["id", "note"])
+        assert records.height == 6
+        return records.head(3).to_dicts()
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(preview, range(40)))
+    assert all(result == [
+        {"id": "0-A", "note": None}, {"id": "0-B", "note": "001 🧪"},
+        {"id": "1-A", "note": None},
+    ] for result in results)
+
+
+def test_metadata_checks_every_footer_and_rejects_missing_columns(tmp_path):
+    first, second = tmp_path / "first.parquet", tmp_path / "second.parquet"
+    pl.DataFrame({"id": ["A"]}).write_parquet(first)
+    pl.DataFrame({"other": ["B"]}).write_parquet(second)
+    with pytest.raises(ValueError, match="columnas de la versión"):
+        DatasetRecords([first, second], ["id"])
+
+
+def test_arrow_preview_preserves_decimal_null_empty_and_zero_limit(tmp_path, monkeypatch):
+    path = tmp_path / "exact.parquet"
+    value = Decimal("12345678901234567890.12345678")
+    pl.DataFrame({"amount": pl.Series([value, None], dtype=pl.Decimal(28, 8)),
+                  "note": ["", "001 e\u0301 🧪"]}).write_parquet(path)
+    monkeypatch.setattr(DatasetRecords, "_connection", lambda _self: pytest.fail("preview uses Arrow"))
+    records = DatasetRecords([path], ["amount", "note"])
+    assert records.head(2).to_dicts() == [
+        {"amount": value, "note": ""}, {"amount": None, "note": "001 e\u0301 🧪"},
+    ]
+    assert records.head(0).to_dicts() == []
+
+
+def test_corrupt_footer_rejected_before_a_preview(tmp_path):
+    path = tmp_path / "corrupt.parquet"
+    path.write_bytes(b"PAR1invalid footerPAR1")
+    with pytest.raises(pa.ArrowInvalid, match="Parquet|magic|footer|size"):
+        DatasetRecords([path], ["id"])
+
+
+def test_records_require_at_least_one_physical_part():
+    with pytest.raises(ValueError, match="al menos una parte"):
+        DatasetRecords([], ["id"])

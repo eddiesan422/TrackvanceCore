@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, overload
 
 import duckdb
+import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
 from .artifactstore import file_hash, storage_provider
 
@@ -72,12 +73,18 @@ def batches[T](values: Iterable[T], size: int | None = None) -> Iterator[list[T]
 
 class DatasetRecords(Sequence[dict[str, Any]]):
     def __init__(self, paths: list[Path], columns: list[str], *, limit: int | None = None, control: Callable[[], None] | None = None):
+        if not paths:
+            raise ValueError("Se requiere al menos una parte Parquet.")
         self.paths, self.columns, self.limit, self.control = paths, columns, limit, control
-        with self._connection() as db:
-            self.height = int(db.execute("SELECT count(*) FROM read_parquet(?)", [list(map(str, paths))]).fetchone()[0])
-            physical = [row[0] for row in db.execute("DESCRIBE SELECT * FROM read_parquet(?)", [list(map(str, paths))]).fetchall()]
-        if not set(columns) <= set(physical):
-            raise ValueError("La estructura física no contiene las columnas de la versión.")
+        # API publication only needs verified metadata, not a native SQL scan.
+        # Read one footer at a time without DuckDB's Python parameter import cache;
+        # concurrent request threads must not initialize that native cache here.
+        self.height = 0
+        for path in paths:
+            with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
+                if not set(columns) <= set(parquet.schema_arrow.names):
+                    raise ValueError("La estructura física no contiene las columnas de la versión.")
+                self.height += parquet.metadata.num_rows
         self.width = len(columns)
 
     def _connection(self):
@@ -90,10 +97,25 @@ class DatasetRecords(Sequence[dict[str, Any]]):
         return min(self.height, self.limit) if self.limit is not None else self.height
 
     def __iter__(self):
+        if self.limit is not None:
+            # Preview is bounded to at most 100 rows by head(). Avoid native SQL
+            # parameter initialization in the API thread pool. One physical row
+            # per Arrow batch also bounds allocation for unusually wide records.
+            count = 0
+            for path in self.paths:
+                if count >= self.limit:
+                    return
+                with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
+                    for batch in parquet.iter_batches(batch_size=1, columns=self.columns, use_threads=False):
+                        if self.control:
+                            self.control()
+                        yield batch.to_pylist()[0]
+                        count += 1
+                        if count >= self.limit:
+                            return
+            return
         names = ",".join('"' + name.replace('"', '""') + '"' for name in self.columns)
         query = f"SELECT {names} FROM read_parquet(?)"
-        if self.limit is not None:
-            query += f" LIMIT {int(self.limit)}"
         with self._connection() as db:
             cursor = db.execute(query, [list(map(str, self.paths))])
             count = 0

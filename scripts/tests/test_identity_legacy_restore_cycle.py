@@ -70,7 +70,7 @@ def test_post_restore_issuance_preserves_historical_notifications_and_never_repo
 
 
 def test_060_notification_uses_authentic_api_and_labels_only_other_metadata_synthetic():
-    calls, scripts = [], []
+    calls, scripts, payloads = [], [], []
 
     def request(method, path, *args, **kwargs):
         calls.append((method, path))
@@ -78,6 +78,8 @@ def test_060_notification_uses_authentic_api_and_labels_only_other_metadata_synt
             return {"items": [{"id": "role", "name": "Data Analyst"}]}
         if path == "/users":
             return {"id": "user", "credential_delivery": {"status": "FAILED"}}
+        if path == '/delivery/destinations':
+            payloads.append(args[0])
         return {"id": "destination"}
 
     runner.seed_060_history(SimpleNamespace(json=request),
@@ -86,6 +88,8 @@ def test_060_notification_uses_authentic_api_and_labels_only_other_metadata_synt
     assert "NotificationDeliveryRecord" not in scripts[0]
     assert "ExternalIdentity" in scripts[0] and "DeliveryTargetPolicy" in scripts[0]
     assert "private-sql-secret" not in scripts[0]
+    assert payloads[0]['database'] == payloads[0]['username'] == 'tv_v070_test'
+    assert '"database": "tv_v070_test"' in scripts[0] and '"database": "trackvance"' not in scripts[0]
 
 
 def test_restore_compares_immutable_state_before_enabling_disposable_demo_access(monkeypatch, tmp_path):

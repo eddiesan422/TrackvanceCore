@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from docker_backup_cycle import (
     RecoveryApi,
+    RecoveryCheckError,
     assert_no_secrets,
     available_port,
     notification_count,
@@ -51,8 +52,8 @@ def seed_060_history(api: RecoveryApi, run, compose: list[str], password: str) -
         raise ValueError("La fuente 0.6.0 no produjo la entrega histórica esperada.")
     destination = api.json("POST", "/delivery/destinations", {
         "name": "Legacy recovery policy fixture", "sink_type": "POSTGRESQL",
-        "host": "postgres", "port": 5432, "database": "trackvance",
-        "username": "trackvance", "password": password,
+        "host": "postgres", "port": 5432, "database": "tv_v070_test",
+        "username": "tv_v070_test", "password": password,
         "options": {"sslmode": "disable", "connect_timeout": 3, "query_timeout": 15},
     }, expected=201)
     # Explicit synthetic persistence fixtures, not provider authentication or SQL materialization.
@@ -74,7 +75,7 @@ with SessionLocal() as db:
         browser_hash=hashlib.sha256(b"legacy-browser-binding").hexdigest(), provider="GOOGLE",
         nonce="", code_verifier="", expires_at=now + timedelta(minutes=10), consumed_at=now))
     fingerprint, locator = target_identity(user.organization_id, "POSTGRESQL",
-        {"host": "postgres", "port": 5432, "database": "trackvance"},
+        {"host": "postgres", "port": 5432, "database": "tv_v070_test"},
         {"schema_name": "legacy_fixture", "table_name": "not_materialized"})
     db.add(DeliveryTargetPolicy(organization_id=user.organization_id,
         destination_id=identity["destination_id"], target_fingerprint=fingerprint,
@@ -179,6 +180,7 @@ def main() -> int:
               "source_project": source, "target_project": target}
     stage = "freshness"
     main_before = None
+    source_api = None
 
     def run(arguments, *, cwd=ROOT, input_text=None):
         assert_no_secrets(" ".join(arguments), credentials)
@@ -209,7 +211,8 @@ def main() -> int:
         run([sys.executable, str(baseline / "scripts/smoke_test.py"), "--base-url",
              f"http://127.0.0.1:{port}"], cwd=baseline)
         if options.source_version == "0.6.0":
-            seed_060_history(RecoveryApi(port, credentials), run, compose, environment["POSTGRES_PASSWORD"])
+            source_api = RecoveryApi(port, credentials)
+            seed_060_history(source_api, run, compose, environment["POSTGRES_PASSWORD"])
             result["notification_fixture"] = "AUTHENTIC_060_CREATE_USER_API_FAILED_NO_PROVIDER_NO_SMTP"
             result["identity_policy_fixture"] = "SYNTHETIC_EXTERNAL_LINK_CONSUMED_OIDC_AND_UNMATERIALIZED_POLICY"
         stage = "source_backup"
@@ -273,6 +276,10 @@ def main() -> int:
                       automatic_processes_started=False)
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
         result.update(failed_stage=stage, error_type=type(error).__name__)
+        if isinstance(error, RecoveryCheckError):
+            result['error_code'] = error.code
+        if source_api is not None and hasattr(source_api, 'last_request'):
+            result['source_last_request'] = source_api.last_request
     finally:
         docker_state.compose = old_compose
         cleanup_failed = False
