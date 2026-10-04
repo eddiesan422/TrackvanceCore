@@ -44,6 +44,7 @@ from .delivery_metrics import delivery_metric_semantics
 from .delivery_schemas import DeliveryDraft, DeliveryReviewBody
 from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
+from .preflight_messages import preflight_message
 from .models import (
     Artifact,
     ArtifactLink,
@@ -489,7 +490,17 @@ def preview_delivery(
 def _check(
     checks: list[dict[str, Any]], code: str, passed: bool, message: str
 ) -> None:
-    checks.append({"code": code, "status": "PASS" if passed else "FAIL", "message": message})
+    # Existing callers and predicates stay unchanged. Their old presentation text
+    # is not an authority for the outcome and cannot leak into a failed check.
+    context = {}
+    if ": " in message and code in {
+        "TARGET_COLUMN_WRITABLE", "TYPE_COMPATIBLE", "LENGTH_COMPATIBLE",
+        "STRING_STORAGE_COMPATIBLE", "DECIMAL_COMPATIBLE", "TIMESTAMP_COMPATIBLE",
+        "INTEGER_RANGE_COMPATIBLE", "NULLABILITY_COMPATIBLE",
+    }:
+        context["column"] = message.split(": ", 1)[0]
+    checks.append({"code": code, "status": "PASS" if passed else "FAIL",
+                   "message": preflight_message(code, passed, context)})
 
 
 def _source_type_mismatches(

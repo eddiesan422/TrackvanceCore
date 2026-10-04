@@ -1,0 +1,37 @@
+{
+  "status": "OBSERVED",
+  "baseline_sha": "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd",
+  "branch": "feat/local-prototype",
+  "remote_matches": true,
+  "initial_working_tree": "CLEAN",
+  "version": "0.6.1",
+  "migration": "0012_delivery_target_audit",
+  "tables": 31,
+  "host_logical_cpus": 16,
+  "host_physical_memory_bytes": 33462558720,
+  "host_free_memory_kib": 20934820,
+  "host_disk_free_bytes": 1430604324864,
+  "docker_context": "desktop-linux",
+  "docker_memory_bytes": 16326520832,
+  "docker_cpus": 16,
+  "installation_project": "trackvance-certification",
+  "installation_port": 3100,
+  "installation_services": ["postgres", "api", "worker", "delivery-worker", "web"],
+  "installation_initial_state": "ALL_FIVE_STOPPED",
+  "baseline_checks": {
+    "python": {"passed": 1197, "failed": 0, "warnings": 2, "seconds": 106.83},
+    "frontend": {"passed": 174, "files": 20, "failed": 0, "seconds": 29.95},
+    "ruff": "PASS",
+    "mypy": "PASS_42_FILES",
+    "frontend_lint": "PASS",
+    "frontend_types": "PASS",
+    "frontend_build": "PASS"
+  },
+  "limits": {"synchronous_upload_bytes": 10485760, "synchronous_rows": 100000},
+  "notes": [
+    "Docker Desktop was started to inventory the daemon. Installation containers remained stopped.",
+    "Prior release evidence is historical and does not certify 0.7.0.",
+    "No applicable AGENTS.md files were found in the repository or ancestor directories.",
+    "The complete editable specification and the actual 82-page PDF were reviewed across the implementation team."
+  ]
+}

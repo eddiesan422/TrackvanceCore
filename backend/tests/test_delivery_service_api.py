@@ -357,6 +357,65 @@ def check_by_code(result: dict[str, Any], code: str) -> list[dict[str, Any]]:
     return [check for check in result["checks"] if check["code"] == code]
 
 
+@pytest.mark.parametrize("failure", [
+    None, "permission", "missing_table", "generated", "length", "decimal",
+    "nullability", "missing_column", "missing_required", "upsert_constraint",
+])
+def test_preflight_message_change_preserves_every_decision(
+    database, delivery_case, monkeypatch, failure,
+):
+    state = delivery_case.runtime
+    payload = deepcopy(delivery_case.draft)
+    if failure == "permission":
+        state.permissions["allowed"] = False
+    elif failure == "missing_table":
+        state.tables_by_schema["sales"] = []
+    elif failure == "generated":
+        state.metadata["columns"][0]["generated"] = True
+    elif failure == "length":
+        state.metadata["columns"][0]["length"] = 1
+    elif failure == "decimal":
+        state.metadata["columns"][2].update(precision=4, scale=3)
+    elif failure == "nullability":
+        state.metadata["columns"][3]["nullable"] = False
+    elif failure == "missing_column":
+        state.metadata["columns"] = state.metadata["columns"][1:]
+    elif failure == "missing_required":
+        state.metadata["columns"].append({
+            "name": "unmapped", "nullable": False, "has_default": False,
+            "identity": False, "generated": False,
+        })
+    elif failure == "upsert_constraint":
+        payload["write_strategy"] = "UPSERT"
+        payload["upsert_keys"] = ["tenant_id", "external_id"]
+        state.metadata["constraints"] = []
+    draft = DeliveryDraft.model_validate(payload)
+    original = delivery_service._check
+
+    def historical_check(checks, code, passed, message):
+        checks.append({"code": code, "status": "PASS" if passed else "FAIL", "message": message})
+
+    with database() as db:
+        monkeypatch.setattr(delivery_service, "_check", historical_check)
+        before = delivery_service.preflight_delivery(
+            db, delivery_case.source["organization_id"], draft, raise_on_failure=False,
+        )
+        monkeypatch.setattr(delivery_service, "_check", original)
+        after = delivery_service.preflight_delivery(
+            db, delivery_case.source["organization_id"], draft, raise_on_failure=False,
+        )
+    assert before["status"] == after["status"]
+    assert [(c["code"], c["status"]) for c in before["checks"]] == [
+        (c["code"], c["status"]) for c in after["checks"]
+    ]
+    assert before["source"] == after["source"]
+    assert before["target"] == after["target"]
+    if failure == "permission":
+        check = check_by_code(after, "PERMISSIONS")[0]
+        assert check["status"] == "FAIL"
+        assert check["message"].startswith("No se verificaron")
+
+
 def test_delivery_schema_sorts_snapshot_and_rejects_ambiguous_plans(delivery_case):
     payload = deepcopy(delivery_case.draft)
     payload["columns"] = list(reversed(payload["columns"]))
