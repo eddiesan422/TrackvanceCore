@@ -72,7 +72,7 @@ test('CSV, XLSX, JSON, Parquet y TXT convergen al mismo contrato de Intake', asy
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Nombre del dataset', { exact: true }).fill(name)
     const inspected = page.waitForResponse(response =>
-      new URL(response.url()).pathname === '/api/v1/datasets/uploads/inspect'
+      new URL(response.url()).pathname === '/api/v1/datasets/uploads/stage'
         && response.request().method() === 'POST',
     )
     await dialog.locator('input[type=file]').setInputFiles({
@@ -80,35 +80,36 @@ test('CSV, XLSX, JSON, Parquet y TXT convergen al mismo contrato de Intake', asy
       mimeType: source.mimeType,
       buffer: source.buffer,
     })
-    expect((await inspected).status()).toBe(200)
-    await expect(dialog.getByRole('region', { name: 'Inspección del archivo' })).toContainText(source.format)
+    expect((await inspected).status()).toBe(201)
+    await expect(dialog).toContainText(source.format)
 
     if (source.format === 'XLSX') {
-      await expect(dialog.getByLabel('Hoja de Excel', { exact: true })).toBeVisible()
+      await expect(dialog.getByLabel('Hoja', { exact: true })).toBeVisible()
       const rescanned = page.waitForResponse(response =>
-        new URL(response.url()).pathname === '/api/v1/datasets/uploads/inspect'
-          && response.request().method() === 'POST',
+        new URL(response.url()).pathname.match(/\/datasets\/uploads\/[^/]+\/inspect$/)
+          && response.request().method() === 'GET',
       )
-      await dialog.getByLabel('Hoja de Excel', { exact: true }).selectOption('Detalle')
+      await dialog.getByLabel('Hoja', { exact: true }).selectOption('Detalle')
       expect((await rescanned).status()).toBe(200)
       await expect(dialog.getByLabel('Tipo de record_key', { exact: true })).toBeVisible()
       await expect(dialog.getByLabel('Tipo de amount', { exact: true })).toBeVisible()
     }
     if (source.format === 'TXT') {
-      await expect(dialog.getByLabel('Delimitador del TXT', { exact: true })).toContainText('Barra vertical')
+      await expect(dialog.getByLabel('Delimitador', { exact: true })).toContainText('Barra vertical')
       const rescanned = page.waitForResponse(response =>
-        new URL(response.url()).pathname === '/api/v1/datasets/uploads/inspect'
-          && response.request().method() === 'POST',
+        new URL(response.url()).pathname.match(/\/datasets\/uploads\/[^/]+\/inspect$/)
+          && response.request().method() === 'GET',
       )
-      await dialog.getByLabel('Delimitador del TXT', { exact: true }).selectOption('|')
+      await dialog.getByLabel('Delimitador', { exact: true }).selectOption('|')
       expect((await rescanned).status()).toBe(200)
     }
 
     await expect(dialog.getByText('record_key', { exact: true })).toBeVisible()
     await expect(dialog.getByText('amount', { exact: true })).toBeVisible()
-    await dialog.getByRole('button', { name: 'Cargar y analizar', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
     await page.waitForURL(/\/datasets\/[^/?]+$/)
     const datasetId = page.url().split('/datasets/')[1]
+    await expect.poll(async () => (await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()).version_count, { timeout: 90_000 }).toBe(1)
     const dataset = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json() as RecordData
     const version = dataset.versions[0] as RecordData
     const profile = await (await page.request.get(`/api/v1/dataset-versions/${version.id}/profile`)).json() as RecordData

@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from browser_evidence import run_browser
+from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-delivery-e2e-"
@@ -762,6 +763,31 @@ def certify_audit_columns(api, checks, engine, version_id, destination, password
     checks.verify(unknown["status"] == "UNKNOWN" and count("audit_unknown") == 3
                   and unknown_policy["audit_columns_required"] and unknown_policy["materialized_at"] is None,
                   engine + ": commit real + pérdida simulada de confirmación conserva UNKNOWN y required sin materialized")
+    attempts = api.get(f"/api/v1/delivery/runs/{unknown['id']}/attempts")['items']
+    review = api.post(f"/api/v1/delivery/runs/{unknown['id']}/reviews", {
+        "delivery_attempt_id": attempts[0]["id"], "outcome": "REMOTE_COMMIT_OBSERVED",
+        "note": "Fixture aislada: SELECT verificó tres filas tras el commit remoto y antes de una nueva operación deliberada.",
+    })
+    blocked_config = api.post("/api/v1/delivery/configurations", {
+        "name": engine + " UNKNOWN fence", **draft("audit_unknown", "OVERWRITE"),
+    })
+    blocked = post_idempotent(api, "/api/v1/delivery/runs", {
+        "configuration_id": blocked_config["id"], "dataset_version_id": version_id,
+    }, "unknown-fence-" + uuid.uuid4().hex)
+    blocked = wait_for_run(api, blocked["id"])
+    diagnostic = [item for item in api.get("/api/v1/audit-events")["items"]
+                  if item["run_id"] == blocked["id"] and item["event_type"] == "DELIVERY_FAILED"]
+    checks.verify(blocked["status"] == "FAILED_PRECONDITION"
+                  and any(item["metadata"].get("error_code") == "TARGET_UNKNOWN_BLOCKED" for item in diagnostic)
+                  and not api.get(f"/api/v1/delivery/runs/{blocked['id']}/attempts")['items']
+                  and count("audit_unknown") == 3,
+                  engine + ": la revisión sola no permite escribir ni crea otro intento remoto")
+    decision = api.post(f"/api/v1/delivery/runs/{unknown['id']}/resume-target", {
+        "review_id": review["id"],
+        "note": "Verificación SQL concluida; autorizar únicamente una nueva operación OVERWRITE explícita de la fixture.",
+    }, expected=(200,))
+    checks.verify(decision["status"] == "RESUMED" and decision["historical_status"] == "UNKNOWN",
+                  engine + ": decisión explícita reanuda el target sin cambiar la incertidumbre histórica")
     resumed = publish_and_run(api, checks, draft("audit_unknown", "OVERWRITE"), engine + " AUDIT after UNKNOWN", credentials)
     checks.verify(api.get("/api/v1/runs/" + unknown["id"])["status"] == "UNKNOWN"
                   and policy("audit_unknown")["materialized_at"] is not None,
@@ -1017,12 +1043,16 @@ def main() -> int:
     ]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "delivery-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
+    compose = isolate_compose(compose, environment, evidence, project)
 
     def command(arguments, **kwargs):
         return execute(arguments, environment=environment, credentials=credentials, **kwargs)
 
     def run(arguments, **kwargs):
         return command([*compose, *arguments], **kwargs)
+
+    inventory_reader = lambda arguments: command(arguments, capture=True)
+    main_before = main_inventory(inventory_reader)
 
     started = False
     checks = smoke.Checks()
@@ -1122,7 +1152,7 @@ def main() -> int:
         )
         logs = run(["logs", "--no-color", "api", "worker", "delivery-worker"], capture=True)
         database_dump = run(
-            ["exec", "-T", "postgres", "pg_dump", "-U", "trackvance", "-d", "trackvance",
+            ["exec", "-T", "postgres", "pg_dump", "-U", environment["POSTGRES_USER"], "-d", environment["POSTGRES_DB"],
              "--data-only"],
             capture=True,
         )
@@ -1188,6 +1218,7 @@ def main() -> int:
     finally:
         if started:
             run(["down", "-v", "--remove-orphans"])
+        assert_main_unchanged(main_before, inventory_reader)
 
 
 if __name__ == "__main__":

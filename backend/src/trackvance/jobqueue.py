@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable
 
 from sqlalchemy.orm import Session
 
+from .acquisition_models import AcquisitionRun
 from .models import Job, Run
 
 
@@ -29,11 +30,19 @@ class JobQueue(Protocol):
         lane: str = "DEFAULT",
     ) -> Job: ...
 
+    def submit_acquisition(self, db: Session, acquisition: AcquisitionRun) -> Job: ...
+
 
 class DatabaseJobQueue:
     """Transactional PostgreSQL/SQLite queue used by the local worker."""
 
     key = "DATABASE"
+
+    def submit_acquisition(self, db: Session, acquisition: AcquisitionRun) -> Job:
+        job = Job(organization_id=acquisition.organization_id, acquisition_id=acquisition.id,
+                  run_id=None, lane="ACQUISITION", status="QUEUED")
+        db.add(job)
+        return job
 
     def submit(
         self,

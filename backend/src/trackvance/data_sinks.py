@@ -12,7 +12,7 @@ import re
 import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar, Protocol, runtime_checkable
@@ -20,6 +20,8 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 import psycopg
 import pymssql
 from psycopg import sql
+
+from .delivery_streams import PreparedRows, batches
 
 SUPPORTED_SINKS = frozenset({"POSTGRESQL", "SQLSERVER"})
 LOGICAL_TYPES = frozenset({"STRING", "INT64", "DECIMAL", "DATE", "TIMESTAMP", "BOOLEAN"})
@@ -126,7 +128,7 @@ class PreparedDelivery:
     schema_name: str
     table_name: str
     columns: list[dict[str, Any]]
-    rows: tuple[tuple[Any, ...], ...]
+    rows: Sequence[tuple[Any, ...]]
     target: dict[str, Any]
     strategy: str
     upsert_keys: list[str]
@@ -522,6 +524,15 @@ def _reported_rowcount(cursor: Any) -> int | None:
     return count if type(count) is int and count >= 0 else None
 
 
+def _execute_batches(cursor: Any, query: Any, rows) -> int | None:
+    count: int | None = 0
+    for chunk in batches(rows):
+        cursor.executemany(query, chunk)
+        observed = _reported_rowcount(cursor)
+        count = None if count is None or observed is None else count + observed
+    return count
+
+
 def _safe_driver_error(exc: Exception, *, ambiguous: bool = False) -> DeliveryError:
     state = getattr(exc, "sqlstate", None)
     number = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
@@ -708,6 +719,31 @@ class DatabaseDataSink:
         return self.deliver_prepared(
             self.prepare(records, columns, target, strategy, upsert_keys)
         )
+
+    def prepare_batched(
+        self, records: Sequence[dict[str, Any]], columns: list[dict[str, Any]],
+        target: dict[str, Any], strategy: str, upsert_keys: list[str], *, binding: dict,
+    ) -> PreparedDelivery:
+        template = self.prepare([], columns, target, strategy, upsert_keys)
+        byte_count = 0
+
+        def converted_rows():
+            nonlocal byte_count
+            for chunk in batches(records):
+                payload = self.prepare(chunk, columns, target, strategy, upsert_keys)
+                if payload.columns != template.columns or payload.target != template.target:
+                    raise DeliveryError("PREPARED_BINDING_MISMATCH", "La preparación cambió su configuración efectiva.")
+                byte_count += payload.bytes_sent
+                yield from payload.rows
+
+        try:
+            rows = PreparedRows.write(converted_rows(), {
+                **binding, "sink_type": self.sink_type, "columns": template.columns,
+                "target": template.target, "strategy": strategy, "upsert_keys": upsert_keys,
+            })
+        except (ValueError, OSError):
+            raise DeliveryError("LOCAL_PREPARATION_FAILED", "No se pudo completar o verificar la preparación local de la entrega.") from None
+        return replace(template, rows=rows, bytes_sent=byte_count)
 
     def deliver_prepared(self, payload: PreparedDelivery) -> DeliveryResult:
         raise NotImplementedError
@@ -930,10 +966,10 @@ class PostgreSQLDataSink(DatabaseDataSink):
             sql.SQL(", ").join(sql.Identifier(column["target_name"]) for column in columns),
             sql.SQL(", ").join(sql.Placeholder() for _ in columns),
         )
-        cursor.executemany(query, rows)
+        affected = _execute_batches(cursor, query, rows)
         # psycopg sums command-tag counts for executemany without RETURNING.
         # BEFORE triggers may suppress a row; len(rows) would fabricate inserts.
-        return _reported_rowcount(cursor)
+        return affected
 
     @staticmethod
     def _reject_active_row_security(
@@ -999,10 +1035,10 @@ class PostgreSQLDataSink(DatabaseDataSink):
             positions = {
                 column["target_name"]: index for index, column in enumerate(columns)
             }
-            key_rows = [
+            key_rows = (
                 tuple(row[positions[name]] for name in upsert_keys) for row in rows
-            ]
-            cursor.executemany(
+            )
+            _execute_batches(cursor,
                 sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
                     temporary,
                     key_columns,
@@ -1063,10 +1099,9 @@ class PostgreSQLDataSink(DatabaseDataSink):
         if not rows:
             return 0, 0
         if not updates:
-            cursor.executemany(query, rows)
-            return _reported_rowcount(cursor), 0
+            return _execute_batches(cursor, query, rows), 0
         if server_version < 180000:
-            cursor.executemany(query, rows)
+            _execute_batches(cursor, query, rows)
             # PostgreSQL <=17's command tag merges INSERT and UPDATE. Do not
             # infer an action from xmax or from a racy pre-write lookup.
             return None, None
@@ -1077,16 +1112,17 @@ class PostgreSQLDataSink(DatabaseDataSink):
             " RETURNING WITH (OLD AS trackvance_old) "
             "trackvance_old IS NOT DISTINCT FROM NULL"
         )
-        cursor.executemany(query, rows, returning=True)
         inserted = updated = 0
-        while True:
-            for (was_inserted,) in cursor.fetchall():
-                if was_inserted:
-                    inserted += 1
-                else:
-                    updated += 1
-            if not cursor.nextset():
-                break
+        for chunk in batches(rows):
+            cursor.executemany(query, chunk, returning=True)
+            while True:
+                for (was_inserted,) in cursor.fetchall():
+                    if was_inserted:
+                        inserted += 1
+                    else:
+                        updated += 1
+                if not cursor.nextset():
+                    break
         return inserted, updated
 
     def _materialize_audit(self, cursor: Any, payload: PreparedDelivery) -> bool:
@@ -1562,14 +1598,14 @@ class SQLServerDataSink(DatabaseDataSink):
             return 0
         names = ", ".join(quote_sqlserver_identifier(column["target_name"]) for column in columns)
         placeholders = ", ".join("%s" for _ in columns)
-        cursor.executemany(
+        affected = _execute_batches(cursor,
             f"INSERT INTO {self._qualified(schema_name, table_name)} ({names}) "
             f"VALUES ({placeholders})",
             rows,
         )
         # pymssql reports -1 when it cannot aggregate affected-row counts (for
         # example larger executemany batches). Unknown must remain null.
-        return _reported_rowcount(cursor)
+        return affected
 
     def _upsert(
         self,
@@ -1613,10 +1649,10 @@ class SQLServerDataSink(DatabaseDataSink):
                 "CREATE UNIQUE INDEX [UX_trackvance_upsert_keys] "
                 f"ON #trackvance_upsert_keys ({key_names})"
             )
-            key_rows = [
+            key_rows = (
                 tuple(row[positions[name]] for name in upsert_keys) for row in rows
-            ]
-            cursor.executemany(
+            )
+            _execute_batches(cursor,
                 f"INSERT INTO #trackvance_upsert_keys ({key_names}) "
                 f"VALUES ({', '.join('%s' for _ in upsert_keys)})",
                 key_rows,

@@ -10,18 +10,18 @@ from typing import cast
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import OperationalError
 
 from .artifactstore import artifact_store
 from .db import SessionLocal, iso, require_record, utcnow
 from .execution import ExecutionEngine, execution_engine
 from .models import DeliveryAttempt, Job, Run, uid
-from .scheduler import ScheduleError, tick
-from .services import audit
+from .processing import ProcessingError
+from .services import _verify_lease, audit
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 90
-WORKER_LANES = frozenset({"DEFAULT", "DELIVERY"})
+WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION"})
 DELIVERY_TERMINAL_STATUSES = frozenset(
     {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}
 )
@@ -31,7 +31,7 @@ def configured_lane(raw: str | None = None) -> str:
     configured = raw if raw is not None else (os.getenv("TRACKVANCE_WORKER_LANE") or "DEFAULT")
     lane = configured.strip().upper()
     if lane not in WORKER_LANES:
-        raise RuntimeError("TRACKVANCE_WORKER_LANE debe ser DEFAULT o DELIVERY.")
+        raise RuntimeError("TRACKVANCE_WORKER_LANE debe ser DEFAULT, DELIVERY o ACQUISITION.")
     return lane
 
 
@@ -75,7 +75,7 @@ def heartbeat(owner, stop, active, lane="DEFAULT"):
                     db.execute(update(Job).where(Job.id == active["job_id"], Job.lease_owner == owner, Job.status == "RUNNING").values(lease_until=utcnow() + timedelta(seconds=LEASE_SECONDS)))
                     db.commit()
         except (OSError, OperationalError):
-            logger.warning("No se pudo actualizar el heartbeat del worker", exc_info=True)
+            logger.warning("No se pudo actualizar el heartbeat del worker")
         stop.wait(10)
 
 
@@ -157,6 +157,8 @@ def process_once(
     """Process at most one job; callable by integration tests without a daemon."""
     owner, active = owner or uid(), active if active is not None else {}
     lane = configured_lane(lane)
+    if lane == "ACQUISITION":
+        raise RuntimeError("La lane ACQUISITION utiliza trackvance.acquisition_worker.")
     selected_engine = engine or execution_engine
     eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()))
     with SessionLocal() as db:
@@ -208,14 +210,20 @@ def process_once(
         with SessionLocal() as db:
             run = require_record(db, Run, run_id)
             selected_engine.execute(db, run, lease_owner=owner)
-            job = require_record(db, Job, job_id)
-            job.status, job.lease_until = run.status, None
+            db.execute(update(Job).where(Job.id == job_id, Job.lease_owner == owner,
+                Job.status == "RUNNING", Job.lease_until > utcnow())
+                .values(status=run.status, lease_until=None))
             db.commit()
         logger.info("Ejecución %s completada", run_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - persist a sanitized terminal projection at the worker boundary.
         with SessionLocal() as db:
             job, run = require_record(db, Job, job_id), require_record(db, Run, run_id)
             if job.lease_owner == owner:
+                try:
+                    _verify_lease(db, run, owner)
+                except ProcessingError:
+                    db.rollback()
+                    return True
                 if job.lane == "DELIVERY" and _reconcile_durable_delivery_state(
                     db, job, run
                 ):
@@ -223,8 +231,10 @@ def process_once(
                         "La entrega %s se reconcilió desde su estado durable", run_id
                     )
                 else:
-                    logger.exception("Falló ejecución %s", run_id)
-                    message = str(exc)[:1000] or type(exc).__name__
+                    logger.error("Falló ejecución %s (%s)", run_id, type(exc).__name__)
+                    message = ("La integridad del artefacto no coincide con su SHA-256."
+                               if str(exc).startswith("ARTIFACT_HASH_MISMATCH:")
+                               else "La ejecución falló; consulta su identificador en el diagnóstico técnico.")
                     job.status, job.last_error, job.lease_until = "FAILED", message, None
                     run.status, run.error = "FAILED", message
                     run.finished_at, run.progress_stage = utcnow(), "Falló"
@@ -247,12 +257,6 @@ def main():
     logger.info("Worker local listo. Esperando trabajos persistidos en lane=%s.", lane)
     while not stop.is_set():
         try:
-            if lane == "DEFAULT":
-                try:
-                    tick()
-                except (ScheduleError, ValueError, IntegrityError):
-                    # Scheduler metadata errors must not prevent execution of independent jobs.
-                    logger.error("No se pudo despachar Sentinel; revisa la integridad de las programaciones.")
             if not process_once(owner, active, lane=lane):
                 stop.wait(1)
         except OperationalError:

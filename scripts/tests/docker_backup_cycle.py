@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import docker_state
 
-PROJECT_PATTERN = re.compile(r"trackvance-recovery-(?:src|dst)-[a-z0-9-]+")
+PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-(?:src|dst)-[a-z0-9-]+|trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12})")
 DATABASE_PROJECT_PATTERN = re.compile(r"trackvance-recovery-db-[a-z0-9-]+")
 DATABASE_SERVICE = "recovery-postgres"
 
@@ -988,6 +988,14 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
 
 
 def main() -> int:
+    if '--v070-context' in sys.argv:
+        parser = argparse.ArgumentParser(description='Native isolated 0.7.0 recovery without starting automatic processes')
+        parser.add_argument('--v070-context', type=Path, required=True)
+        parser.add_argument('--evidence-dir', type=Path)
+        options = parser.parse_args()
+        from v070_recovery import native_cycle
+
+        return native_cycle(options.v070_context, options.evidence_dir)
     parser = argparse.ArgumentParser(description=__doc__)
     suffix = f"{os.getpid()}-{uuid4().hex[:6]}"
     parser.add_argument("--source-project", default=f"trackvance-recovery-src-{suffix}")

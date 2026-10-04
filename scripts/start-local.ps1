@@ -87,6 +87,8 @@ try {
     }
     if (-not $ready) { throw 'La API no inicio. Consulta .local/api.err.log.' }
     $env:TRACKVANCE_WORKER_LANE = 'DEFAULT'
+    $env:TRACKVANCE_SECRETS_DIR = $isolatedSourceSecretsDir
+    $env:TRACKVANCE_SECRET_KEY_FILE = $isolatedSourceSecretKeyFile
     $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $isolatedDestinationSecretsDir
     $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $isolatedDestinationSecretKeyFile
     Start-TrackvanceProcess 'worker' $pythonExe @('-m','trackvance.worker') $backendRoot
@@ -96,11 +98,20 @@ try {
     $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $destinationSecretsDir
     $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $destinationSecretKeyFile
     Start-TrackvanceProcess 'delivery-worker' $pythonExe @('-m','trackvance.worker') $backendRoot
-    $env:TRACKVANCE_WORKER_LANE = 'DEFAULT'
+    $env:TRACKVANCE_WORKER_LANE = 'ACQUISITION'
     $env:TRACKVANCE_SECRETS_DIR = $sourceSecretsDir
     $env:TRACKVANCE_SECRET_KEY_FILE = $sourceSecretKeyFile
     $env:TRACKVANCE_DESTINATION_SECRETS_DIR = $isolatedDestinationSecretsDir
     $env:TRACKVANCE_DESTINATION_SECRET_KEY_FILE = $isolatedDestinationSecretKeyFile
+    Start-TrackvanceProcess 'acquisition-worker' $pythonExe @('-m','trackvance.acquisition_worker') $backendRoot
+    $env:TRACKVANCE_SECRETS_DIR = $isolatedSourceSecretsDir
+    $env:TRACKVANCE_SECRET_KEY_FILE = $isolatedSourceSecretKeyFile
+    Start-TrackvanceProcess 'scheduler' $pythonExe @('-m','trackvance.dispatcher') $backendRoot
+    $env:TRACKVANCE_EVENT_CONSUMER = 'NOTIFICATIONS'
+    Start-TrackvanceProcess 'events-notifications' $pythonExe @('-m','trackvance.events') $backendRoot
+    $env:TRACKVANCE_EVENT_CONSUMER = 'CHAINING'
+    Start-TrackvanceProcess 'events-chaining' $pythonExe @('-m','trackvance.events') $backendRoot
+    Remove-Item Env:TRACKVANCE_EVENT_CONSUMER
     $nodeExe = (Get-Command node -ErrorAction Stop).Source
     Start-TrackvanceProcess 'web' $nodeExe @('node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','3000','--strictPort') $frontendRoot
     $webReady = $false

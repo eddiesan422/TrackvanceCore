@@ -1,25 +1,156 @@
-# Contrato Trackvance Core local 0.6.1
+# Contrato Trackvance Core local 0.7.0
 
-El esquema ejecutable se genera desde la aplicación y mantiene base `/api/v1`
-para compatibilidad. El archivo [openapi.json](openapi.json) se regenera y revisa
-como paso documental separado. El snapshot 0.6.1 contiene 96 paths, incluidos
-17 paths bajo Data Delivery, y corresponde a las rutas efectivamente instaladas.
-El runtime documenta sesión cookie, CSRF, MIME, DTOs y errores desde ese contrato.
+El esquema ejecutable se genera desde la aplicación y mantiene la base `/api/v1`
+para compatibilidad. [openapi.json](openapi.json) se regenera y revisa como paso
+documental separado. El snapshot 0.7.0 contiene 117 paths y corresponde a las rutas
+instaladas. Regenerar con `uv run python ../scripts/export_contracts.py` desde
+backend; no conecta a la DB. El contrato documenta cookie, CSRF, MIME, DTOs y errores.
 
-Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string opacos. Fechas ISO UTC. Los endpoints públicos son health/ready, auth/demo|login, auth/providers y los start/callback Microsoft/Google. Los demás requieren cookie de sesión; primer acceso limita la sesión a /me, logout y change-password. Los aliases absolutos `/health` y `/health/ready`, sin el prefijo `/api/v1`, también son públicos para diagnóstico y Compose. Todas las mutaciones autenticadas requieren `X-CSRF-Token` devuelto al iniciar sesión. El proxy Vite preserva cookie; usar `credentials: 'include'`.
+Base `/api/v1`. Las listas usan `{items: [...], total: number}`, IDs string opacos
+y fechas ISO UTC. Health/ready, auth/demo|login, auth/providers y los start/callback
+Microsoft/Google son públicos. Los demás requieren cookie de sesión. El primer
+acceso limita la sesión a /me, logout y change-password. Los aliases absolutos
+`/health` y `/health/ready` también son públicos para diagnóstico y Compose. Las
+mutaciones autenticadas exigen `X-CSRF-Token` devuelto al iniciar sesión. El proxy
+Vite preserva la cookie; usar `credentials: 'include'`.
+
+## Adquisición asíncrona 0.7.0
+
+Las rutas legacy conservan sus respuestas 201 y límites pequeños. La UI normal
+usa recepción 201 → inspección/opciones → adquisición 202.
+
+| Método/ruta | Entrada y resultado |
+| --- | --- |
+| POST `/datasets/uploads/stage?filename=` | Cuerpo `application/octet-stream`; 201 con upload propio e id/filename/source_format/size_bytes/sha256/expires_at. Staging privado, bytes observados y hash; todavía no existe DatasetVersion. |
+| GET `/datasets/uploads/{id}/inspect` | Opciones de lectura e inspección limitada con columnas/opciones/formato; no es el perfil completo. |
+| POST `/datasets/{id}/acquisitions` | `{upload_id,reader_options,column_overrides}`; 202 con AcquisitionRun durable. `Idempotency-Key` es opcional: el mismo cuerpo devuelve la misma identidad y un cuerpo distinto produce 409. |
+| POST `/connections/{id}/acquisitions` | `{name,schema_name,object_name,column_overrides}`; 202, con conexión/revisión/selección congeladas. |
+| POST `/datasets/{id}/acquisitions/refresh` | Nueva adquisición SQL sobre la revisión vigente congelada al registrar; conserva versiones anteriores. |
+| GET `/acquisitions?dataset_id=&status=&offset=&limit=` | Colección paginada del ámbito autorizado; estados QUEUED/RUNNING/SUCCESS/FAILED/CANCELLED. |
+| GET `/acquisitions/{id}` | `stage`, `processed_rows`, `processed_bytes`, totales nullable, fechas, attempts, cancel_requested, output_version_id y error sanitizado. |
+| POST `/acquisitions/{id}/cancel` | Cancela QUEUED o solicita cancelación cooperativa RUNNING; no publica una versión parcial. |
+
+CSV/TXT/TSV, JSONL/NDJSON y Parquet se leen por lotes. JSON no lineal y XLSX
+conservan límites efectivos de 10 MiB/100.000 filas. El cliente distingue
+transferencia y procesamiento; no inventa porcentajes ni promete continuar una
+transferencia incompleta después de cerrar el navegador. Nginx transmite el stage
+binario sin buffering y la API mantiene autoridad sobre el límite efectivo.
+
+## Ejecución, conjuntos y resultado completo 0.7.0
+
+Los POST de Intake/Recon/Sentinel aceptan `requested_engine:'AUTO'|'POLARS'|'PYSPARK'`.
+Omitirlo conserva AUTO y la idempotencia legacy. El preview del plan y la ejecución
+incluyen origen, destino y referencias deduplicadas, con tamaño físico verificado
+de las partes. Run.execution_plan schema 3 conserva motor/versión/master,
+parámetros/presupuesto, reason/rejection y selección explícita; un fallo no cambia
+silenciosamente de motor. `/system/engines` informa Java/PySpark reales,
+modo/master/parameters/budget y heartbeats de tres lanes y tres procesos ligeros.
+Un runtime instalado no certifica que el master Standalone remoto sea alcanzable;
+la creación de una aplicación Spark comprueba esa conectividad.
+
+estimated_working_set_bytes incluye los inputs y estimated_polars_evidence_bytes:
+una estimación conservadora de filas × reglas habilitadas en Intake y detalles
+por comparación en Recon, incluidos valores, parámetros y condiciones. No se
+estima ese fanout usando la muestra. AUTO puede elegir Spark aunque el archivo
+comprimido sea pequeño; POLARS explícito por encima del presupuesto queda en
+FAILED_PRECONDITION. budget_is_estimate sigue distinguiendo la estimación de
+los límites de memoria realmente impuestos al proceso.
+
+El lote portable Recon Spark también reserva evidencia según cardinalidad real
+del grupo y número de comparaciones. Una clave indivisible cuya evidencia
+prevista excede la cota por grupo produce RESOURCE_RECON_GROUP_LIMIT antes del
+kernel, sin cortar resultados; una agregación conserva su lineage completo.
+
+`application/vnd.trackvance.parquet-set+json` representa un descriptor schema 1
+PARQUET_DATASET, con esquema físico y partes ordenadas identificadas por ordinal,
+artifact_id, path, sha256, size_bytes y row_count, además de totales. Cuando existe
+un original conservado, DatasetVersion.sha256/size_bytes identifican ese original;
+de lo contrario identifican el artefacto canónico, incluido su descriptor.
+La metadata de ingestión conserva bytes canónicos/observados de la población para
+planner/UI. Descargar el conjunto entrega un ZIP_STORED completo con el descriptor
+exacto y las partes verificadas. Los archivos únicos legacy conservan sus bytes,
+hashes y descarga anteriores.
+
+GET `/runs/{id}/results` es paginado. GET `/runs/{id}/export.csv` recorre todas las
+filas en disco, protege fórmulas, registra EXPORT_CSV/hash/EXPORT_OF y entrega un
+FileResponse completo. Excel conserva límites de 100.000 filas, 500.000 celdas y
+16 MiB de valores, además de las cotas del generador. Un 422 EXPORT_LIMIT_EXCEEDED
+incorpora `complete_download` con el CSV completo, sin truncar. Los resultados y
+el manifest tienen identidades propias.
+
+## Preflight durable y publicación 0.7.0
+
+POST `/delivery/validations` recibe DeliveryDraft y devuelve 202 con una Run
+DELIVERY_PREFLIGHT. GET lista/detalle exige delivery:read y propiedad personal,
+también para Administrator; POST cancel exige delivery:configure. El DTO expone
+id/status/stage/dataset_id/source_version_id, fechas, error, cancel_requested,
+draft_hash/draft/result. Configuration VALIDATION_PRIVATE no aparece entre las
+configuraciones publicadas. El preflight no crea DeliveryAttempt ni ejecuta DDL/DML;
+un SUCCESS técnico puede contener un resultado FAIL.
+
+POST configuración/revisión admite `?validation_run_id=<id>`. Para cargas mayores
+que SYNCHRONOUS_ROWS exige un resultado personal SUCCESS+PASS, con draft, hash y
+origen exactos. Cambiar el draft invalida su reutilización. POST `/delivery/preflight`
+conserva el recorrido legacy pequeño y devuelve 412 PREFLIGHT_ASYNC_REQUIRED para
+cargas grandes. La ejecución repite permisos y drift y verifica la preparación
+sellada, vinculada a fuente/configuración/destino/esquema/conteo, antes de STARTED.
+
+## Automatización, ocurrencias y target 0.7.0
+
+GET `/delivery/automations`, GET `/{id}` y GET `/{id}/occurrences` exigen
+delivery:read. POST create y POST `/{id}/versions` exigen delivery:schedule con
+dependencias transitivas. POST `/{id}/dispatch` exige delivery:execute y permite
+una repetición visible y explícita. Settings incluyen mode
+ONCE/INTERVAL/DAILY/WEEKLY/CHAINED, timezone, starts_at, source_policy
+FIXED_VERSION/LATEST_REGISTERED/INTAKE_OUTPUT, allow_empty y allow_warnings,
+además de campos específicos de horario, dataset e Intake. Las versiones fijan
+Configuration y el User responsable. La ocurrencia conserva revisión,
+trigger_key/origin/planned/dispatched/sourceRun/datasetVersion/Run/status/reason
+y coalesced_intervals. La última versión debe estar ya registrada; no refresca SQL.
+
+CHAINED usa output_version_id del Intake concreto con SUCCESS+APPROVED por defecto.
+Los warnings requieren habilitación explícita; REJECTED y la salida vacía no
+disparan una entrega por defecto. UNIQUE automation+trigger, idempotencia de la
+solicitud y no repetición de entrada son garantías independientes. TargetGuard
+coordina entregas manuales y automatizadas por fingerprint reconocido, con límites
+para aliases/proxies/sinónimos; no identifica físicamente todos los targets.
+UNKNOWN bloquea nuevas entregas hasta una revisión concluyente y decisión operativa.
+
+POST `/delivery/runs/{id}/resume-target` recibe `{review_id,note}` y requiere
+`delivery:review_unknown`. Registra decisión, actor y auditoría; conserva el UNKNOWN
+histórico, no crea otra Run ni ejecuta DDL/DML. PENDING_REPAIR no autoriza reenvío.
+
+## Bandeja personal y contratos históricos 0.7.0
+
+GET `/notifications/inbox?module=&origin=&unread=&offset=&limit=` devuelve items
+con id/module/origin/status/decision/description, resource_type/resource_id,
+detail_url/created_at/read_at. GET `/notifications/unread-count` devuelve el conteo.
+POST `/notifications/inbox/{id}/read` y POST `/notifications/inbox/read-all`
+persisten la lectura. Todas estas rutas exigen notifications:read y el permiso
+vigente del módulo; el ámbito usuario/organización también aplica al contador y
+la lectura. Administrator no consulta una bandeja ajena. Un proceso manual
+notifica al iniciador; scheduled/chain notifica al User responsable real.
+SYSTEM no es destinatario. Los reintentos deduplican por evento y destinatario.
+
+DELIVERY_PREFLIGHT enlaza `/delivery/validation/{id}` y muestra PASS/FAIL.
+Intake SUCCESS+REJECTED se describe como rechazado. Delivery COMMITTED+PENDING_REPAIR
+se diferencia de UNKNOWN. Los avisos no incluyen filas, valores de negocio,
+secretos ni errores crudos del driver. Los endpoints deprecated `status`/`deliveries`
+conservan HISTORICAL_ONLY para notification_deliveries de 0.6.0. No hay SMTP/Mailpit
+ni envío de credenciales.
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.6.1',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.7.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `AuthenticationResponse={user:UserResponse,organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
 - `POST /auth/login` `{username,password}` o `{email,password}` → AuthenticationResponse. El campo username acepta usuario o correo; se envía exactamente un identificador. `demo_mode` es true sólo para la cuenta demo.
 - `GET /me` → AuthenticationResponse con UserResponse y permisos vigentes.
 - `POST /auth/logout` → `{ok:true}`.
 - `GET /dashboard?period=7d|30d|90d|all&dataset_id=&module=intake|recon|sentinel|DELIVERY&status=ATTENTION|HEALTHY|IN_PROGRESS|TECHNICAL_FAILURE&criticality=CRITICAL|HIGH|MEDIUM|LOW` → cockpit operativo limitado a la organización autenticada. `period` vale `30d` por defecto; todos los demás filtros son opcionales. Devuelve `{applied_filters,filter_options,period,stats:{datasets,total_rows,runs,open_exceptions,health_score,controls_failed,affected_datasets},variations,attention,attention_total,health_history,datasets_attention,recent_runs,module_status,activity,volume_history,organization_name,prototype:true}`. `attention` prioriza excepciones, hallazgos y ejecuciones por severidad/criticidad e incluye la ruta de acción. `recent_runs` puede incluir Delivery y sus métricas; `SUCCESS` conserva su significado técnico y `operational_status` expresa por separado si el resultado está sano o requiere atención. Las variaciones son `{previous,delta}` frente al período anterior o `null` cuando no existe una comparación válida.
-- `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen,lane},workers:{DEFAULT:{...},DELIVERY:{...}},limits:{max_upload_mb,max_rows},mode:'local-prototype'}`. `worker` conserva el heartbeat DEFAULT por compatibilidad.
+- `GET /system/engines` → `{items:[{id,name,version,available,status,description}],worker:{status,last_seen,lane},workers:{DEFAULT:{...},DELIVERY:{...},ACQUISITION:{...}},components:{scheduler:{status},'events-chaining':{status},'events-notifications':{status}},limits:{max_upload_mb,max_rows,acquisition:{...},delivery:{...}},mode:'local-prototype'}`. `worker` conserva el heartbeat DEFAULT por compatibilidad.
 
-## Datasets
+## Datasets y rutas síncronas legacy
 
 `Dataset = {id,name,description,domain,owner,criticality,status,created_at,version_count,row_count,column_count,latest_version_id,origin,origin_label,origin_source_type,updated_at}`. El origen se deriva de la última versión inmutable: `UPLOAD` se presenta como `MANUAL` / “Manual”, `INTAKE_OUTPUT` como `DATA_INTAKE` / “Data Intake” y los datasets sin versiones como `UNKNOWN` / “Sin versiones”. Tipos futuros de conectores conservan un código y una etiqueta legible.
 
@@ -46,7 +177,7 @@ Base `/api/v1`. Todas las listas son `{items: [...], total: number}`. IDs string
   `DECIMAL`, `INT64`, `DATE`, `TIMESTAMP` o `BOOLEAN`) y, opcionalmente,
   `semantic_tag: "IDENTIFIER"`. El override se valida contra el archivo y se
   persiste en el esquema inmutable de esa versión.
-- `GET /dataset-versions/{id}/profile` → Version más `{sample:row[]}`.
+- `GET /dataset-versions/{id}/profile` → Version más `{sample:row[],sampled_rows,sample_bytes,sample_limited,sample_byte_limit,delivery_preflight_synchronous_rows}`. La muestra tiene como máximo 20 filas y 8 MiB de JSON UTF-8 observado; `sample_limited` indica que una fila excedería el límite de bytes. El perfil persistido sigue describiendo la población completa, aunque la muestra sea menor o vacía.
 
 ## Conexiones externas (solo lectura)
 
@@ -294,7 +425,7 @@ TRACKVANCE_WORKER_LANE=DELIVERY uv run python -m trackvance.worker
 
 Variables: `DATABASE_URL` (SQLite por defecto o PostgreSQL psycopg),
 `TRACKVANCE_STORAGE_DIR` (alias `TRACKVANCE_STORAGE_ROOT` admitido),
-`TRACKVANCE_WORKER_LANE=DEFAULT|DELIVERY`,
+`TRACKVANCE_WORKER_LANE=DEFAULT|DELIVERY|ACQUISITION`,
 `TRACKVANCE_DESTINATION_SECRETS_DIR`,
 `TRACKVANCE_DESTINATION_SECRET_KEY_FILE`, `DEMO_ACCESS_ENABLED=true`,
 `DEMO_SEED_ENABLED=true`, `TRACKVANCE_WEB_ORIGIN=http://localhost:3000`,
@@ -305,12 +436,13 @@ de artifacts. `DEMO_ACCESS_ENABLED` controla exclusivamente la sesión demo;
 `DEMO_SEED_ENABLED`, el seed idempotente. Deshabilitar el seed no elimina datos
 persistidos. Los workers esperan el schema inicializado.
 
-Compose ejecuta dos procesos del mismo módulo: `worker` en lane `DEFAULT` y
-`delivery-worker` en lane `DELIVERY`. El primero no monta secretos; el segundo
+Compose ejecuta `worker` DEFAULT, `delivery-worker` DELIVERY y
+`acquisition-worker` ACQUISITION, además de dispatcher y dos consumidores. El primero no monta secretos; el segundo
 monta artifacts y secretos de destino, pero no secretos de conexiones de origen.
 La API monta ambos tipos para administrar y explorar conexiones/destinos. Los
-heartbeats se guardan por lane y el scheduler Sentinel sólo se despacha desde
-`DEFAULT`.
+heartbeats se guardan por lane; Sentinel/Delivery se despachan en `scheduler`,
+independiente de `DEFAULT`. Adquisición sólo monta secretos fuente; los consumidores
+y scheduler no montan secretos de negocio.
 
 ## Adiciones y semántica 0.5.0
 

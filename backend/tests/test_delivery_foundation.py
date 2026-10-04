@@ -450,8 +450,10 @@ def test_delivery_worker_preserves_concurrent_cancellation(database, tmp_path):
 def test_lane_configuration_and_heartbeats_are_separate():
     assert configured_lane(" default ") == "DEFAULT"
     assert configured_lane("delivery") == "DELIVERY"
+    assert configured_lane("acquisition") == "ACQUISITION"
     assert heartbeat_path("DEFAULT") != heartbeat_path("DELIVERY")
-    with pytest.raises(RuntimeError, match="DEFAULT o DELIVERY"):
+    assert heartbeat_path("ACQUISITION") not in {heartbeat_path("DEFAULT"), heartbeat_path("DELIVERY")}
+    with pytest.raises(RuntimeError, match="DEFAULT, DELIVERY o ACQUISITION"):
         configured_lane("priority")
 
 

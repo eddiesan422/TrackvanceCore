@@ -41,11 +41,20 @@ def inspect_health(base_url: str) -> dict[str, bool]:
     return results
 
 
-def _compose_prefix(project: str | None) -> list[str]:
+def _compose_prefix(project: str | None, context: Path | None = None) -> list[str]:
     prefix = ["docker", "compose"]
+    if context:
+        import certification_v070
+
+        directory, resolved = certification_v070.load_context(context)
+        if project != resolved["project"]:
+            raise ValueError("El diagnóstico debe usar el proyecto exacto del contexto desechable.")
+        prefix.extend(["--env-file", str(directory / "test.env")])
     if project:
         prefix.extend(["-p", project])
     prefix.extend(["-f", str(ROOT / "compose.yml")])
+    if context:
+        prefix.extend(["-f", str(directory / "compose.json")])
     return prefix
 
 
@@ -82,6 +91,8 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         api = services["api"]
         worker = services["worker"]
         delivery_worker = services["delivery-worker"]
+        acquisition_worker = services["acquisition-worker"]
+        metadata_components = [services[name] for name in ("scheduler", "events-notifications", "events-chaining")]
         source_mounts = {
             "/var/lib/trackvance": volumes["trackvance_data"],
             "/var/lib/trackvance-credentials": volumes["connection_credentials"],
@@ -94,6 +105,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         api_mounts = _inspect_mounts(api["id"])
         worker_mounts = _inspect_mounts(worker["id"])
         delivery_worker_mounts = _inspect_mounts(delivery_worker["id"])
+        acquisition_worker_mounts = _inspect_mounts(acquisition_worker["id"])
         mounts_ok = all(
             api_mounts.get(path) == volume
             for path, volume in {**source_mounts, **delivery_mounts}.items()
@@ -118,7 +130,13 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
                 if path != "/var/lib/trackvance"
             )
         )
-    except (ImportError, KeyError, ValueError):
+        acquisition_worker_ok = (all(acquisition_worker_mounts.get(path) == volume for path, volume in source_mounts.items())
+            and set(acquisition_worker_mounts.values()) <= set(source_mounts.values()))
+        metadata_ok = all(_inspect_mounts(item["id"]) == {"/var/lib/trackvance": volumes["trackvance_data"]}
+                          for item in metadata_components)
+        worker_ok = worker_ok and set(worker_mounts.values()) <= {volumes["trackvance_data"]}
+        delivery_worker_ok = delivery_worker_ok and set(delivery_worker_mounts.values()) <= {volumes["trackvance_data"], *delivery_mounts.values()}
+    except (ImportError, KeyError, ValueError, RuntimeError):
         return {
             "Montajes de recuperación": False,
             "Huella/linaje/SecretStore": False,
@@ -126,7 +144,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         }
 
     checks = {
-        "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok
+        "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok and acquisition_worker_ok and metadata_ok
     }
     verify = ROOT / "scripts" / "verify_storage.py"
     copied = command_check(
@@ -157,7 +175,7 @@ def local_storage_checks(root: Path) -> dict[str, bool]:
         checks["Disco local (al menos 64 MiB libres)"] = (
             shutil.disk_usage(resolved).free >= 64 * 1024 * 1024
         )
-        for lane in ("default", "delivery"):
+        for lane in ("default", "delivery", "acquisition"):
             heartbeat = json.loads(
                 (resolved / f"worker-heartbeat-{lane}.json").read_text(encoding="utf-8")
             )
@@ -167,6 +185,10 @@ def local_storage_checks(root: Path) -> dict[str, bool]:
             checks[f"Worker local {lane.upper()} (heartbeat reciente)"] = (
                 heartbeat.get("lane") == lane.upper() and 0 <= age < 30
             )
+        for component in ("scheduler", "events-notifications", "events-chaining"):
+            heartbeat = json.loads((resolved / f"{component}-heartbeat.json").read_text(encoding="utf-8"))
+            age = (datetime.now(UTC) - datetime.fromisoformat(heartbeat["updated_at"])).total_seconds()
+            checks[f"Componente local {component} (heartbeat reciente)"] = 0 <= age < 30
     except (OSError, ValueError, KeyError):
         checks["Directorio/worker local"] = False
     return checks
@@ -177,6 +199,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:3000")
     parser.add_argument("--docker", action="store_true", help="Comprueba Docker y Compose.")
     parser.add_argument("--project", help="Proyecto Compose explícito para diagnóstico.")
+    parser.add_argument("--certification-context", type=Path, help="Contexto desechable explícito con env-file y override privados.")
     parser.add_argument("--storage-dir", type=Path, help="Artifacts/heartbeat del modo local.")
     parser.add_argument(
         "--recovery-ready",
@@ -198,7 +221,11 @@ def main() -> int:
         return 2
     checks = inspect_health(options.base_url)
     if options.docker:
-        prefix = _compose_prefix(options.project)
+        try:
+            prefix = _compose_prefix(options.project, options.certification_context)
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"ERROR: contexto de diagnóstico inválido ({type(error).__name__}).", file=sys.stderr)
+            return 2
         checks["Docker Linux disponible"] = command_check(
             ["docker", "info", "--format", "{{.OSType}}"]
         )[0]
@@ -231,6 +258,11 @@ def main() -> int:
                 ),
             ]
         )[0]
+        checks["Worker Compose ACQUISITION"] = command_check([*prefix, "exec", "-T", "acquisition-worker", "python", "-c",
+            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])[0]
+        for component in ("scheduler", "events-notifications", "events-chaining"):
+            checks[f"Componente Compose {component}"] = command_check([*prefix, "exec", "-T", component, "python", "-c",
+                f"from trackvance.dispatcher import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])[0]
     if options.storage_dir:
         checks.update(local_storage_checks(options.storage_dir))
     if options.recovery_ready:

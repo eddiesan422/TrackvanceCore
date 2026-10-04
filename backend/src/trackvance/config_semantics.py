@@ -523,12 +523,14 @@ def _comparison(rule: dict) -> dict:
                 value = decimal_parameter(p[key])
                 if value < 0:
                     raise ConfigurationError("La tolerancia no puede ser negativa.")
-                p[key] = str(value)
+                # Persist fixed decimal text so a normalized declaration remains
+                # valid when compiled again (Decimal may otherwise emit 1E-20).
+                p[key] = format(value, "f")
     if kind == "date_tolerance":
         if "hours" in p and "days" in p:
             raise ConfigurationError("Declare hours o days, no ambos.")
         unit = "hours" if "hours" in p else "days"
-        p[unit] = str(decimal_parameter(p.get(unit, "0")))
+        p[unit] = format(decimal_parameter(p.get(unit, "0")), "f")
         if Decimal(p[unit]) < 0:
             raise ConfigurationError("La tolerancia de fecha no puede ser negativa.")
         p.setdefault("timezone", "UTC")

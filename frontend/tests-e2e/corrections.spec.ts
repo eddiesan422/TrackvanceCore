@@ -178,9 +178,12 @@ test('un nombre de dataset existente se carga como una versión nueva', async ({
   const fileName = `${name.replaceAll(' ', '_')}.csv`
   await dialog.locator('input[type=file]').setInputFiles({ name: fileName, mimeType: 'text/csv', buffer: Buffer.from(csv) })
   await expect(dialog.getByText(`Ya existe “${name}”. Este archivo se agregará como una nueva versión inmutable del dataset existente.`)).toBeVisible()
-  const versionResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/datasets/${dataset.id}/versions/upload` && response.request().method() === 'POST')
-  await dialog.getByRole('button', { name: 'Cargar como nueva versión', exact: true }).click()
-  expect((await versionResponse).status()).toBe(201)
+  const versionResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/datasets/${dataset.id}/acquisitions` && response.request().method() === 'POST')
+  await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
+  const registered = await versionResponse
+  expect(registered.status()).toBe(202)
+  const acquisition = await registered.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/acquisitions/${acquisition.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   await page.waitForURL(new RegExp(`/datasets/${dataset.id}$`))
 
   const detail = await (await page.request.get(`/api/v1/datasets/${dataset.id}`)).json()
@@ -205,18 +208,15 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   let dialog = page.getByRole('dialog')
   await dialog.getByLabel('Nombre del dataset', { exact: true }).fill(name)
   await dialog.locator('input[type=file]').setInputFiles({ name: 'editable.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
-  await expect(dialog.getByLabel('Tipo de transaction_date')).toHaveValue('DATE')
+  await expect(dialog.getByLabel('Tipo de transaction_date')).toContainText('muestra DATE')
   await expect(dialog.getByLabel('Otros identificadores por nombre')).toHaveCount(0)
   await dialog.getByLabel('Tipo de transaction_date').selectOption('STRING')
-  await dialog.getByRole('button', { name: 'Columnas identificadoras (opcional): abrir selector', exact: true }).click()
-  const identifierOptions = dialog.getByRole('group', { name: 'Opciones de Columnas identificadoras (opcional)', exact: true })
-  await identifierOptions.getByRole('checkbox', { name: /^document_number \(/ }).check()
-  await dialog.getByRole('button', { name: 'Columnas identificadoras (opcional): cerrar selector', exact: true }).click()
-  await dialog.getByLabel('Área de negocio', { exact: true }).selectOption('__new_domain__')
-  await dialog.getByLabel('Nueva área de negocio', { exact: true }).fill(area)
-  await dialog.getByRole('button', { name: 'Cargar y analizar', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'Identificador document_number', exact: true }).check()
+  await dialog.getByLabel('Área de negocio', { exact: true }).fill(area)
+  await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
   await page.waitForURL(/\/datasets\/[^/?]+$/)
   const datasetId = page.url().split('/datasets/')[1]
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()).version_count, { timeout: 90_000 }).toBe(1)
 
   let detail = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
   expect(detail.domain).toBe(area)
@@ -231,19 +231,19 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   await page.getByRole('button', { name: 'Nueva versión', exact: true }).click()
   dialog = page.getByRole('dialog')
   await dialog.locator('input[type=file]').setInputFiles({ name: 'editable-v2.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
-  await expect(dialog.getByLabel('Tipo de active')).toHaveValue('STRING')
+  await expect(dialog.getByLabel('Tipo de active')).toContainText('muestra STRING')
   await dialog.getByLabel('Tipo de active').selectOption('BOOLEAN')
   await dialog.getByLabel('Tipo de transaction_date').selectOption('STRING')
-  await dialog.getByRole('button', { name: 'Columnas identificadoras (opcional): abrir selector', exact: true }).click()
-  await dialog.getByRole('group', { name: 'Opciones de Columnas identificadoras (opcional)', exact: true })
-    .getByRole('checkbox', { name: /^document_number \(/ }).check()
-  await dialog.getByRole('button', { name: 'Columnas identificadoras (opcional): cerrar selector', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'Identificador document_number', exact: true }).check()
   const versionUpload = page.waitForResponse(response =>
-    new URL(response.url()).pathname === `/api/v1/datasets/${datasetId}/versions/upload`
+    new URL(response.url()).pathname === `/api/v1/datasets/${datasetId}/acquisitions`
       && response.request().method() === 'POST',
   )
-  await dialog.getByRole('button', { name: 'Cargar y analizar', exact: true }).click()
-  expect((await versionUpload).status()).toBe(201)
+  await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
+  const registeredV2 = await versionUpload
+  expect(registeredV2.status()).toBe(202)
+  const acquisitionV2 = await registeredV2.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/acquisitions/${acquisitionV2.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   await expect(dialog).not.toBeVisible()
 
   detail = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
@@ -293,7 +293,7 @@ test('la carga JSON detecta formato, aplana columnas y conserva metadata', async
   await page.goto('/datasets?upload=1')
   const dialog = page.getByRole('dialog')
   const inspectionResponse = page.waitForResponse(response =>
-    new URL(response.url()).pathname === '/api/v1/datasets/uploads/inspect'
+    new URL(response.url()).pathname === '/api/v1/datasets/uploads/stage'
       && response.request().method() === 'POST',
   )
   await dialog.locator('input[type=file]').setInputFiles({
@@ -302,15 +302,16 @@ test('la carga JSON detecta formato, aplana columnas y conserva metadata', async
     buffer: Buffer.from(payload),
   })
 
-  expect((await inspectionResponse).status()).toBe(200)
-  await expect(dialog.getByText('JSON tabular', { exact: true })).toBeVisible()
+  expect((await inspectionResponse).status()).toBe(201)
+  await expect(dialog.getByText(/JSON tabular/)).toBeVisible()
   await expect(dialog.getByText('customer.name', { exact: true })).toBeVisible()
-  await expect(dialog.getByText(/columnas · 2 filas/)).toBeVisible()
+  await expect(dialog.getByText(/muestra de 2 registros/)).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('json-upload-inspection.png'), fullPage: true })
 
-  await dialog.getByRole('button', { name: 'Cargar y analizar', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
   await page.waitForURL(/\/datasets\/[^/?]+$/)
   const datasetId = page.url().split('/datasets/')[1]
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()).version_count, { timeout: 90_000 }).toBe(1)
   const detail = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
   const version = detail.versions[0]
   expect(version.ingestion_metadata.source_format).toBe('JSON')

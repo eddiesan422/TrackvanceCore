@@ -396,7 +396,7 @@ def test_review_relationships_reject_inconsistent_review(mutation):
 
 def v3_report(rows):
     return verify_storage.legacy_v3_report(
-        rows, [], current_migration=verify_storage.CURRENT_MIGRATION,
+        rows, [], current_migration=verify_storage.IDENTITY_MIGRATION,
         verified_artifacts=2, verified_source_secrets=1, verified_delivery_secrets=1,
     )
 
@@ -436,6 +436,7 @@ def test_legacy_projections_reject_reviews_and_current_state_includes_them():
 @pytest.mark.parametrize(("migration", "schema"), [
     ("0007_monitor_scheduling", 2), ("0008_data_delivery", 3), ("0009_delivery_reviews", 4),
     ("0012_delivery_target_audit", 5),
+    ("0015_sentinel_execution_identity", 6),
 ])
 def test_snapshot_labels_exact_running_revision_not_current_cli_version(monkeypatch, migration, schema):
     rows = {name: [] for name in verify_storage.FINGERPRINT_TABLES[migration]}
@@ -478,7 +479,7 @@ def test_identity_projection_preserves_051_history_and_refuses_new_activity():
         attempt["system_audit"] = {}
     report = verify_storage.legacy_v4_report(
         rows, [("users", "role_id", "roles", "id")],
-        current_migration=verify_storage.CURRENT_MIGRATION,
+        current_migration=verify_storage.IDENTITY_MIGRATION,
         verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0,
     )
     assert report["tables"] == verify_storage._table_hashes(original)
@@ -498,3 +499,53 @@ def test_identity_projection_rejects_changed_user_or_audited_attempt():
     rows["delivery_attempts"][0]["system_audit"] = {"enabled": True}
     with pytest.raises(ValueError, match="auditoría de entrega nueva"):
         verify_storage.project_identity_upgrade(rows, [])
+
+
+def asynchronous_upgrade_rows():
+    previous = {name: [] for name in verify_storage.FINGERPRINT_TABLES[verify_storage.IDENTITY_MIGRATION]}
+    previous['users'] = [{'id': 'owner', 'organization_id': 'org'}]
+    previous['monitor_schedules'] = [{'id': 'legacy', 'organization_id': 'org', 'enabled': True, 'version': 1},
+        {'id': 'verified', 'organization_id': 'org', 'enabled': True, 'version': 1}]
+    previous['monitor_schedule_versions'] = [
+        {'id': 'old-revision', 'schedule_id': 'legacy', 'version': 1, 'organization_id': 'org', 'actor_id': 'SYSTEM'},
+        {'id': 'verified-revision', 'schedule_id': 'verified', 'version': 1, 'organization_id': 'org', 'actor_id': 'owner'}]
+    upgraded = deepcopy(previous)
+    upgraded.update({name: [] for name in verify_storage.ASYNC_TABLES})
+    upgraded['monitor_schedules'][0].update(enabled=False, legacy_enabled_before_identity=True)
+    upgraded['monitor_schedules'][1]['legacy_enabled_before_identity'] = None
+    upgraded['monitor_schedule_versions'][0]['responsible_user_id'] = None
+    upgraded['monitor_schedule_versions'][1]['responsible_user_id'] = 'owner'
+    return previous, upgraded
+
+
+def test_v5_projection_preserves_all_historical_hashes_and_only_reverses_explicit_pause():
+    previous, upgraded = asynchronous_upgrade_rows()
+    report = verify_storage.legacy_v5_report(upgraded, [], current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0)
+    assert report['tables'] == verify_storage._table_hashes(previous)
+    assert report['schema_version'] == 5 and report['migration'] == verify_storage.IDENTITY_MIGRATION
+    assert upgraded['monitor_schedules'][0]['enabled'] is False
+
+
+@pytest.mark.parametrize('damage', ['new_notification', 'unknown_table', 'assigned_owner', 'missing_pause', 'enabled_legacy'])
+def test_v5_projection_never_discards_new_activity_or_non_deterministic_defaults(damage):
+    _, upgraded = asynchronous_upgrade_rows()
+    if damage == 'new_notification':
+        upgraded['internal_notifications'] = [{'id': 'personal-event'}]
+    elif damage == 'unknown_table':
+        upgraded['plugin_history'] = []
+    elif damage == 'assigned_owner':
+        upgraded['monitor_schedule_versions'][0]['responsible_user_id'] = 'owner'
+    elif damage == 'missing_pause':
+        upgraded['monitor_schedules'][0]['legacy_enabled_before_identity'] = None
+    else:
+        upgraded['monitor_schedules'][0]['enabled'] = True
+    with pytest.raises(ValueError, match='actividad nueva|inventario completo|asignación nueva|pausa'):
+        verify_storage.project_async_upgrade(upgraded, [])
+
+
+@pytest.mark.parametrize('identities', [(None, None), ('run', 'acquisition')])
+def test_job_requires_exactly_one_execution_identity(identities):
+    rows = {'jobs': [{'id': 'job', 'lane': 'ACQUISITION', 'run_id': identities[0], 'acquisition_id': identities[1]}]}
+    with pytest.raises(ValueError, match='exactamente un Run'):
+        verify_storage.validate_relationships(rows, [])

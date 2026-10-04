@@ -219,7 +219,8 @@ describe('Connections management', () => {
 describe('Source discovery and snapshots', () => {
   it('discovers a view, previews native types and observed values, then registers a dataset', async () => {
     mockSource()
-    vi.mocked(post).mockResolvedValue({ dataset: { id: 'sales-dataset', name: 'ventas_vista' }, version: { id: 'snapshot-v1' } })
+    const sourceMock = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation((path, options) => path === '/connections/source-db/acquisitions' ? Promise.resolve({ dataset: { id: 'sales-dataset', name: 'ventas_vista' }, acquisition: { id: 'acq-one' } }) : path === '/acquisitions/acq-one' ? Promise.resolve({ id: 'acq-one', dataset_id: 'sales-dataset', status: 'QUEUED', stage: 'QUEUED', processed_rows: 0, processed_bytes: 0 }) : sourceMock(path, options))
     const user = userEvent.setup()
     renderDetail()
     await screen.findByRole('option', { name: 'comercial' })
@@ -233,10 +234,10 @@ describe('Source discovery and snapshots', () => {
     expect(within(preview).getByText('001234567')).toBeInTheDocument()
     expect(within(preview).getByText('null')).toBeInTheDocument()
     expect(api).toHaveBeenCalledWith('/connections/source-db/preview?schema_name=comercial&object_name=ventas_vista&limit=20')
-    await user.click(screen.getByRole('button', { name: 'Crear dataset' }))
+    await user.click(screen.getByRole('button', { name: 'Crear dataset y adquirir fuente' }))
     expect(await screen.findByRole('link', { name: 'Ver dataset' })).toHaveAttribute('href', '/datasets/sales-dataset')
     expect(screen.getByRole('link', { name: /Ir a Data Intake/ })).toHaveAttribute('href', '/intake')
-    expect(post).toHaveBeenCalledWith('/connections/source-db/datasets', { name: 'ventas_vista', domain: 'Operaciones', description: '', schema_name: 'comercial', object_name: 'ventas_vista' })
+    expect(api).toHaveBeenCalledWith('/connections/source-db/acquisitions', { method: 'POST', headers: { 'Idempotency-Key': expect.any(String) }, body: JSON.stringify({ name: 'ventas_vista', domain: 'Operaciones', description: '', schema_name: 'comercial', object_name: 'ventas_vista' }) })
   })
 
   it('does not explore without source permission and disables actions for a disabled connection', async () => {
@@ -264,20 +265,24 @@ describe('Source discovery and snapshots', () => {
     await user.selectOptions(screen.getByLabelText('Tabla o vista'), 'ventas_vista')
     expect(await screen.findByRole('alert')).toHaveTextContent('Permisos insuficientes')
     expect(screen.getByRole('button', { name: 'Volver a intentar' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: 'Crear dataset' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Crear dataset y adquirir fuente' })).not.toBeInTheDocument()
   })
 
   it('creates another immutable version on source refresh and exposes failure/retry', async () => {
-    vi.mocked(post).mockRejectedValueOnce(new Error('La fuente no está disponible.')).mockResolvedValueOnce({ id: 'snapshot-v2', version: 2 })
+    let registrations = 0
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === '/datasets/sales/acquisitions/refresh') { registrations += 1; if (registrations === 1) throw new Error('La fuente no está disponible.'); return { id: 'acq-refresh', dataset_id: 'sales', status: 'QUEUED' } }
+      return { id: 'acq-refresh', dataset_id: 'sales', status: 'SUCCESS', stage: 'COMPLETED', output_version_id: 'snapshot-v2', processed_rows: 3, processed_bytes: 32 }
+    })
     const onRefreshed = vi.fn(), user = userEvent.setup()
     renderApp(<SourceRefresh datasetId="sales" connectionId="source-db" onRefreshed={onRefreshed}/>, { permissions })
     await user.click(screen.getByRole('button', { name: 'Nueva versión desde la fuente' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('La fuente no está disponible')
     expect(onRefreshed).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Nueva versión desde la fuente' }))
-    expect(await screen.findByText(/Versión 2 creada desde la fuente/)).toBeInTheDocument()
+    expect(await screen.findByText(/Versión publicada después de leer y perfilar/)).toBeInTheDocument()
     expect(onRefreshed).toHaveBeenCalledWith('snapshot-v2')
-    expect(post).toHaveBeenCalledWith('/datasets/sales/refresh-source')
+    expect(api).toHaveBeenCalledWith('/datasets/sales/acquisitions/refresh', { method: 'POST', headers: { 'Idempotency-Key': expect.any(String) } })
     expect(screen.getByRole('link', { name: 'Ver conexión de origen' })).toHaveAttribute('href', '/connections/source-db')
   })
 

@@ -46,6 +46,7 @@ class ScheduleBody(BaseModel):
     enabled: bool = True
     starts_at: datetime | None = None
     expected_version: int | None = Field(default=None, ge=1, strict=True)
+    responsible_user_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("starts_at")
     @classmethod
@@ -68,6 +69,8 @@ class ScheduleResponse(BaseModel):
     source_policy: str
     misfire_policy: str
     overlap_policy: str
+    responsible_user_id: str | None
+    requires_executor_assignment: bool
 
 
 class OccurrenceResponse(BaseModel):

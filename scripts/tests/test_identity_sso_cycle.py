@@ -2,10 +2,22 @@
 import json
 
 import identity_sso_cycle
+import pytest
+
+
+@pytest.mark.parametrize('project', ['trackvance-certification', 'trackvance-core', 'trackvance-v070-test-identity-nohex'])
+def test_identity_runner_rejects_main_or_incomplete_disposable_names(project):
+    with pytest.raises(ValueError, match='aislado'):
+        identity_sso_cycle.validated_project(project)
+
+
+def test_identity_runner_accepts_only_current_full_disposable_identity():
+    project = 'trackvance-v070-test-identity-0123456789ab'
+    assert identity_sso_cycle.validated_project(project) == project
 
 
 def test_storage_verifier_survives_an_api_container_recreation():
-    snapshots = {"migration": "0012_delivery_target_audit", "tables": {"users": {"user": "digest"}}}
+    snapshots = {"migration": "0015_sentinel_execution_identity", "tables": {"users": {"user": "digest"}}}
     filesystem = set()
     submissions = []
 
@@ -20,7 +32,7 @@ def test_storage_verifier_survives_an_api_container_recreation():
         submissions.append(input_text)
         return json.dumps(snapshots)
 
-    compose = ["docker", "compose", "-p", "trackvance-identity-e2e-test"]
+    compose = ["docker", "compose", "-p", "trackvance-v070-test-identity-0123456789ab"]
     before = identity_sso_cycle.storage_snapshot(run, compose)
     after = identity_sso_cycle.storage_snapshot(run, compose)
     assert before == after == snapshots

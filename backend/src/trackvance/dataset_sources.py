@@ -12,7 +12,7 @@ import ipaddress
 import os
 import re
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
@@ -170,6 +170,10 @@ class DatabaseDatasetSource:
                 columns: list[dict[str, Any]], limit: int) -> Any:
         raise NotImplementedError
 
+    def _select_volume(self, connection: Any, schema_name: str, object_name: str,
+                       columns: list[dict[str, Any]], limit: int) -> tuple[Any, bool]:
+        return self._select(connection, schema_name, object_name, columns, limit), False
+
     def test(self) -> None:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -243,6 +247,80 @@ class DatabaseDatasetSource:
                       "ordering": "DATABASE_UNSPECIFIED", "binary_encoding": "BASE64"},
         )
 
+    def read_batches(self, *, limits=None, check: Callable[[], None] | None = None) -> Iterator[DatasetReadResult]:
+        """One extraction transaction; only a bounded driver/application batch.
+
+        PostgreSQL uses a named ServerCursor in REPEATABLE READ/read-only.
+        pymssql fetchmany(size) calls FreeTDS dbnextrow for at most size rows;
+        SERIALIZABLE retains read/range locks until this connection closes.
+        An interrupted retry always starts a completely new extraction attempt.
+        """
+        from .acquisition_config import AcquisitionLimits
+
+        effective, checkpoint = limits or AcquisitionLimits.configured(), check or (lambda: None)
+        if not self.schema_name or not self.object_name:
+            raise SourceError("SOURCE_SELECTION_REQUIRED", "Selecciona un esquema y una tabla o vista.")
+        with self._connection() as connection:
+            if self.source_kind == "POSTGRESQL":
+                connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            else:
+                with connection.cursor() as setup:
+                    setup.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            columns = self._checked_columns(connection, self.schema_name, self.object_name)
+            cursor, guarded = self._select_volume(connection, self.schema_name, self.object_name, columns, effective.max_rows + 1)
+            names = [column["name"] for column in columns]
+            native = {column["name"]: _logical(column["native_type"])[1] for column in columns}
+            metadata = {"source_native_schema": columns, "schema_name": self.schema_name,
+                        "object_name": self.object_name, "snapshot_policy":
+                        "REPEATABLE_READ_READ_ONLY_V2" if self.source_kind == "POSTGRESQL" else "SERIALIZABLE_READ_LOCKS_V2",
+                        "ordering": "DATABASE_UNSPECIFIED", "binary_encoding": "BASE64",
+                        "driver_buffering": "SERVER_CURSOR" if self.source_kind == "POSTGRESQL" else "FREETDS_DBNEXTROW"}
+            # Even 100 maximal 64KiB cells cannot make the fetched driver block
+            # grow beyond the configured byte batch (one oversized row rejects).
+            fetch_rows = min(effective.batch_rows, max(1, effective.batch_bytes // (len(names) * MAX_CELL_TEXT_BYTES * 4)))
+            rows: list[list[str | None]] = []
+            batch_bytes = total_rows = total_bytes = 0
+            def result(batch):
+                return DatasetReadResult(pl.DataFrame(batch, schema={name: pl.String for name in names}, orient="row"),
+                    self.source_kind, self.format_label, "application/vnd.apache.parquet", "SNAPSHOT_ROW",
+                    native_schema=native, metadata=metadata)
+            try:
+                while True:
+                    checkpoint()
+                    fetched = cursor.fetchmany(fetch_rows)
+                    if not fetched:
+                        break
+                    for row in fetched:
+                        if guarded:
+                            if row[-1]:
+                                raise SourceError("SOURCE_SIZE_LIMIT", "Una celda fuente supera el presupuesto; no se transfirieron valores truncados.")
+                            row = row[:-1]
+                        normalized, size = [], 0
+                        for value in row:
+                            rendered = base64.b64encode(bytes(value)).decode("ascii") if isinstance(value, (bytes, bytearray, memoryview)) else _cell_text(value)
+                            cell_size = len(rendered.encode("utf-8")) if rendered is not None else 0
+                            if cell_size > MAX_CELL_TEXT_BYTES:
+                                raise SourceError("SOURCE_SIZE_LIMIT", "Una celda supera el límite de 64 KiB.")
+                            size += cell_size
+                            normalized.append(rendered)
+                        if size > effective.batch_bytes:
+                            raise SourceError("SOURCE_SIZE_LIMIT", "Un registro supera el presupuesto del lote.")
+                        if rows and (len(rows) >= effective.batch_rows or batch_bytes + size > effective.batch_bytes):
+                            checkpoint()
+                            yield result(rows)
+                            rows, batch_bytes = [], 0
+                        total_rows += 1
+                        total_bytes += size
+                        if total_rows > effective.max_rows or total_bytes > effective.max_observed_bytes:
+                            raise SourceError("SOURCE_SIZE_LIMIT", "La fuente supera los límites efectivos; no se publicaron datos parciales.")
+                        rows.append(normalized)
+                        batch_bytes += size
+                checkpoint()
+                if rows or total_rows == 0:
+                    yield result(rows)
+            finally:
+                cursor.close()
+
 
 class PostgreSQLDatasetSource(DatabaseDatasetSource):
     source_kind = "POSTGRESQL"
@@ -294,6 +372,24 @@ class PostgreSQLDatasetSource(DatabaseDatasetSource):
             sql.SQL(", ").join(sql.Identifier(c["name"]) for c in columns),
             sql.Identifier(schema_name), sql.Identifier(object_name)), (limit,))
         return cursor
+
+    def _select_volume(self, connection: Any, schema_name: str, object_name: str,
+                       columns: list[dict[str, Any]], limit: int) -> tuple[Any, bool]:
+        # Evaluate oversize in the source server BEFORE the driver receives an
+        # arbitrarily large cell. The sentinel fails the whole acquisition;
+        # substituted NULLs never become a published/truncated observation.
+        guards, selected = [], []
+        for column in columns:
+            name = sql.Identifier(column["name"])
+            measured = name if column["native_type"].casefold() == "bytea" else sql.SQL("CAST({} AS text)").format(name)
+            guard = sql.SQL("COALESCE(octet_length({}), 0) > {}").format(measured, sql.Literal(MAX_CELL_TEXT_BYTES))
+            guards.append(guard)
+            selected.append(sql.SQL("CASE WHEN {} THEN NULL ELSE {} END AS {}").format(guard, name, name))
+        selected.append(sql.SQL("({}) AS __tv_oversize").format(sql.SQL(" OR ").join(guards)))
+        cursor = connection.cursor(name="trackvance_snapshot")
+        cursor.execute(sql.SQL("SELECT {} FROM {}.{} LIMIT %s").format(
+            sql.SQL(", ").join(selected), sql.Identifier(schema_name), sql.Identifier(object_name)), (limit,))
+        return cursor, True
 
 
 def _quote_mssql(identifier: str) -> str:
@@ -377,6 +473,26 @@ class SQLServerDatasetSource(DatabaseDatasetSource):
         cursor.execute(f"SELECT TOP ({limit}) {', '.join(selected)} FROM "
                        f"{_quote_mssql(schema_name)}.{_quote_mssql(object_name)}")
         return cursor
+
+    def _select_volume(self, connection: Any, schema_name: str, object_name: str,
+                       columns: list[dict[str, Any]], limit: int) -> tuple[Any, bool]:
+        guards, selected = [], []
+        for column in columns:
+            name = _quote_mssql(column["name"])
+            native = re.sub(r"\s*\([^)]*\)", "", column["native_type"].casefold()).strip()
+            binary = native in {"binary", "varbinary", "rowversion", "image"}
+            measured = name if binary else f"CONVERT(nvarchar(max), {name})"
+            ceiling = MAX_CELL_TEXT_BYTES * 3 // 4 if binary else MAX_CELL_TEXT_BYTES * 2
+            guard = f"COALESCE(DATALENGTH({measured}), 0) > {ceiling}"
+            guards.append(guard)
+            value = f"CONVERT(nvarchar(50), {name}, 127)" if native == "datetimeoffset" else (
+                f"CONVERT(nvarchar(50), {name}, 126)" if native in {"datetime", "datetime2", "smalldatetime"} else name)
+            selected.append(f"CASE WHEN {guard} THEN NULL ELSE {value} END AS {name}")
+        selected.append(f"CASE WHEN {' OR '.join(guards)} THEN 1 ELSE 0 END AS __tv_oversize")
+        cursor = connection.cursor()
+        cursor.execute(f"SELECT TOP ({limit}) {', '.join(selected)} FROM "
+                       f"{_quote_mssql(schema_name)}.{_quote_mssql(object_name)}")
+        return cursor, True
 
 
 class DatasetSourceRegistry:

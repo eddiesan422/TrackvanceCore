@@ -36,6 +36,7 @@ from .delivery_schemas import (
 )
 from .delivery_service import (
     DeliveryOperationError,
+    _owned_version,
     attempt_dto,
     create_delivery_configuration,
     current_destination_version,
@@ -321,6 +322,10 @@ def delivery_preflight(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
+    from .delivery_streams import DeliveryLimits
+    version, _dataset, _artifact, _records = _owned_version(db, body.dataset_version_id, user.organization_id)
+    if version.row_count > DeliveryLimits.configured().synchronous_rows:
+        raise DeliveryOperationError(412, "PREFLIGHT_ASYNC_REQUIRED", "Registra el preflight completo en /delivery/validations para esta población.")
     return preflight_delivery(db, user.organization_id, body)
 
 
@@ -333,6 +338,7 @@ def list_delivery_configurations(
         .where(
             Configuration.organization_id == user.organization_id,
             Configuration.module == "DELIVERY",
+            Configuration.status == "PUBLISHED",
         )
         .order_by(Configuration.created_at.desc())
     ).all()
@@ -342,6 +348,7 @@ def list_delivery_configurations(
 @router.post("/configurations", status_code=201)
 def publish_delivery_configuration(
     body: DeliveryConfigurationBody,
+    validation_run_id: str | None = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
@@ -356,6 +363,7 @@ def publish_delivery_configuration(
         name=body.name,
         owner=body.owner,
         description=body.description,
+        validation_run_id=validation_run_id,
     )
     return delivery_config_dto(db, config)
 
@@ -364,6 +372,7 @@ def publish_delivery_configuration(
 def publish_delivery_configuration_version(
     configuration_id: str,
     body: DeliveryConfigurationVersionBody,
+    validation_run_id: str | None = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
@@ -387,6 +396,7 @@ def publish_delivery_configuration_version(
         owner=previous.owner,
         description=body.description if body.description is not None else previous.description,
         previous=previous,
+        validation_run_id=validation_run_id,
     )
     return delivery_config_dto(db, config)
 

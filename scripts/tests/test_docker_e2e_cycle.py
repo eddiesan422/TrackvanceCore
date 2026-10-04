@@ -25,6 +25,8 @@ def test_existing_project_is_never_started_or_deleted(monkeypatch, tmp_path, exi
 
     def execute(arguments, **_kwargs):
         calls.append(arguments)
+        if arguments[-1] == 'label=com.docker.compose.project=trackvance-certification':
+            return ''
         if arguments[1:3] == ["ps", "-aq"] and existing_kind == "container":
             return "existing-container"
         if arguments[1:3] == ["volume", "ls"] and existing_kind == "volume":
@@ -35,7 +37,7 @@ def test_existing_project_is_never_started_or_deleted(monkeypatch, tmp_path, exi
 
     monkeypatch.setattr(runner, "execute", execute)
     monkeypatch.setattr(runner.sys, "argv", [
-        "docker_e2e_cycle.py", "--project", "trackvance-e2e-existing",
+        "docker_e2e_cycle.py", "--project", "trackvance-v070-test-e2e-existing-0123456789ab",
         "--port", "3200", "--evidence-dir", str(tmp_path),
     ])
     assert runner.main() == 1
@@ -53,7 +55,7 @@ def test_failed_start_cleans_only_its_new_isolated_project(monkeypatch, tmp_path
             raise RuntimeError("Container did not become healthy")
         return ""
 
-    project = "trackvance-e2e-new-test"
+    project = "trackvance-v070-test-e2e-new-0123456789ab"
     monkeypatch.setattr(runner, "execute", execute)
     monkeypatch.setattr(runner.sys, "argv", [
         "docker_e2e_cycle.py", "--project", project,
@@ -62,8 +64,10 @@ def test_failed_start_cleans_only_its_new_isolated_project(monkeypatch, tmp_path
     assert runner.main() == 1
     assert start_environment["DEMO_ACCESS_ENABLED"] == "true"
     assert start_environment["DEMO_SEED_ENABLED"] == "true"
-    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml",
-                         "down", "-v", "--remove-orphans"]
+    down = next(command for command in calls if 'down' in command)
+    assert down[-3:] == ['down', '-v', '--remove-orphans']
+    assert down[down.index('-p') + 1] == project
+    assert down[2:4] == ['--env-file', str(tmp_path / 'private.empty.env')]
     result = json.loads((tmp_path / "result.json").read_text())
     assert result["status"] == "FAIL" and result["cleanup"] == "PASS"
 
@@ -95,7 +99,7 @@ def test_clean_demo_starts_without_seeding_and_uses_only_the_clean_browser_scena
             assert kwargs["environment"]["TV_EXPECT_CLEAN_DEMO"] == "true"
         if "inspect" in arguments:
             return "no"
-        if arguments[-2:] == ["ps", "-q"]:
+        if arguments[-2:] == ["ps", "-aq"]:
             return "isolated-api"
         return "{}" if kwargs.get("capture") and "snapshot" in arguments else ""
 
@@ -104,7 +108,7 @@ def test_clean_demo_starts_without_seeding_and_uses_only_the_clean_browser_scena
     monkeypatch.setattr(runner, "run_browser", lambda _pnpm, arguments, **_kwargs:
                         browser_arguments.extend(arguments) or {"status": "PASS", "expected": 1})
     monkeypatch.setattr(runner.sys, "argv", ["docker_e2e_cycle.py", "--clean-demo",
-                        "--project", "trackvance-e2e-clean-test", "--port", "3200",
+                        "--project", "trackvance-v070-test-e2e-clean-0123456789ab", "--port", "3200",
                         "--evidence-dir", str(tmp_path)])
     assert runner.main() == 0
     assert browser_arguments == ["tests-e2e/demo-access-clean.spec.ts"]
@@ -118,7 +122,9 @@ def test_compose_isolates_source_and_delivery_secrets_by_worker_lane():
     shared, services = compose.split("services:", 1)
     api, remaining = services.split("  api:", 1)[1].split("  worker:", 1)
     worker, remaining = remaining.split("  delivery-worker:", 1)
-    delivery_worker = remaining.split("  web:", 1)[0]
+    delivery_worker, remaining = remaining.split("  acquisition-worker:", 1)
+    acquisition_worker, dispatchers = remaining.split("  scheduler:", 1)
+    dispatchers = dispatchers.split("  web:", 1)[0]
 
     assert "- trackvance_data:/var/lib/trackvance" in shared
     assert "connection_credentials:/var/lib/trackvance-credentials" not in shared
@@ -144,6 +150,18 @@ def test_compose_isolates_source_and_delivery_secrets_by_worker_lane():
     )
     assert "- delivery_keys:/var/lib/trackvance-delivery-keys" in delivery_worker
     assert "TRACKVANCE_WORKER_LANE: DELIVERY" in delivery_worker
+    assert "- connection_credentials:/var/lib/trackvance-credentials" in acquisition_worker
+    assert "- connection_keys:/var/lib/trackvance-keys" in acquisition_worker
+    assert "delivery_credentials:/var/lib/trackvance-delivery-credentials" not in acquisition_worker
+    assert "delivery_keys:/var/lib/trackvance-delivery-keys" not in acquisition_worker
+    assert "TRACKVANCE_WORKER_LANE: ACQUISITION" in acquisition_worker
+    for private_mount in (
+        "connection_credentials:/var/lib/trackvance-credentials",
+        "connection_keys:/var/lib/trackvance-keys",
+        "delivery_credentials:/var/lib/trackvance-delivery-credentials",
+        "delivery_keys:/var/lib/trackvance-delivery-keys",
+    ):
+        assert private_mount not in dispatchers
 
 
 def test_direct_start_isolates_source_secrets_from_delivery_worker():

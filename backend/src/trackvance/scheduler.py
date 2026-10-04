@@ -18,6 +18,7 @@ from .models import (
     Run,
     User,
 )
+from .permissions import effective_permissions
 from .processing import ProcessingError
 from .services import audit, enqueue
 
@@ -52,6 +53,8 @@ def schedule_dto(db: Session, schedule: MonitorSchedule) -> dict:
         "interval_seconds": revision.interval_seconds, "enabled": schedule.enabled,
         "next_run_at": iso(schedule.next_run_at), "starts_at": iso(revision.starts_at),
         "updated_at": iso(schedule.updated_at), "source_policy": "LATEST_REGISTERED_SNAPSHOT",
+        "responsible_user_id": revision.responsible_user_id,
+        "requires_executor_assignment": revision.responsible_user_id is None,
         "misfire_policy": "COALESCE_LATEST", "overlap_policy": "SKIP_WHILE_ACTIVE",
     }
 
@@ -59,6 +62,7 @@ def schedule_dto(db: Session, schedule: MonitorSchedule) -> dict:
 def save_schedule(
     db: Session, monitor: Configuration, user: User, *, interval_seconds: int,
     enabled: bool, starts_at: datetime | None, expected_version: int | None,
+    responsible_user_id: str | None = None,
 ) -> MonitorSchedule:
     if monitor.module != "sentinel" or monitor.organization_id != user.organization_id:
         raise ScheduleError(404, "MONITOR_NOT_FOUND", "No se encontró el monitor.")
@@ -72,6 +76,12 @@ def save_schedule(
     schedule = db.scalar(select(MonitorSchedule).where(
         MonitorSchedule.monitor_id == monitor.id, MonitorSchedule.organization_id == user.organization_id,
     ))
+    prior = current_revision(db, schedule) if schedule else None
+    responsible_id = responsible_user_id or (prior.responsible_user_id if prior else user.id)
+    if enabled and responsible_id is None:
+        raise ScheduleError(422, "EXECUTOR_ASSIGNMENT_REQUIRED", "Asigna explícitamente un responsable para habilitar esta programación histórica.")
+    if enabled:
+        authorize_responsible(db, responsible_id, user.organization_id)
     if schedule is None:
         if expected_version is not None:
             raise ScheduleError(409, "SCHEDULE_CONFLICT", "La programación cambió. Actualiza e intenta nuevamente.")
@@ -94,6 +104,7 @@ def save_schedule(
     revision = MonitorScheduleVersion(
         organization_id=user.organization_id, schedule_id=schedule.id, version=schedule.version,
         interval_seconds=interval_seconds, enabled=enabled, starts_at=start, actor_id=user.id,
+        responsible_user_id=responsible_id,
     )
     db.add(revision)
     db.flush()
@@ -102,6 +113,21 @@ def save_schedule(
           {"schedule_id": schedule.id, "schedule_version_id": revision.id,
            "version": schedule.version, "enabled": enabled, "interval_seconds": interval_seconds})
     return schedule
+
+
+def authorize_responsible(db: Session, user_id: str | None, organization_id: str):
+    user = db.get(User, user_id) if user_id else None
+    if user is None or user.organization_id != organization_id or not user.active or user.deleted:
+        raise ScheduleError(412, "SCHEDULE_EXECUTOR_DISABLED", "El responsable no está habilitado o requiere asignación.")
+    if not {"sentinel:read", "sentinel:execute", "datasets:read"}.issubset(effective_permissions(db, user)):
+        raise ScheduleError(412, "SCHEDULE_PERMISSION_REVOKED", "El responsable ya no conserva permisos para ejecutar Sentinel.")
+    return user
+
+
+def authorize_scheduled_run(db: Session, run: Run):
+    metadata = (run.execution_plan or {}).get("schedule")
+    if metadata:
+        authorize_responsible(db, metadata.get("responsible_user_id"), run.organization_id)
 
 
 def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) -> int:
@@ -159,8 +185,14 @@ def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) 
             )
             db.add(occurrence)
             db.flush()
+            try:
+                authorize_responsible(db, revision.responsible_user_id, schedule.organization_id)
+            except ScheduleError as error:
+                occurrence.status, occurrence.reason_code = "BLOCKED", error.code
             if source is not None and active is None:
                 try:
+                    if occurrence.status == "BLOCKED":
+                        raise ScheduleError(412, occurrence.reason_code or "SCHEDULE_BLOCKED", "Ejecución automática bloqueada.")
                     with db.begin_nested():
                         run = enqueue(db, monitor, source, None, SCHEDULER_ACTOR.display_name)
                         occurrence.run_id = run.id
@@ -172,10 +204,26 @@ def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) 
                             "planned_at": iso(planned), "dispatched_at": iso(instant),
                             "interval_seconds": revision.interval_seconds, "coalesced_intervals": missed,
                             "source_policy": "LATEST_REGISTERED_SNAPSHOT",
+                            "responsible_user_id": revision.responsible_user_id,
                             "misfire_policy": "COALESCE_LATEST", "overlap_policy": "SKIP_WHILE_ACTIVE",
                         }}
+                        if run.status == "FAILED_PRECONDITION":
+                            from .events import record_run_event
+
+                            record_run_event(db, run)
                 except (ProcessingError, ValueError):
                     occurrence.status, occurrence.reason_code = "FAILED_PRECONDITION", "INVALID_MONITOR_CONFIGURATION"
+                except ScheduleError as error:
+                    occurrence.status, occurrence.reason_code = "BLOCKED", error.code
+            if occurrence.run_id is None:
+                from .events import append_event
+
+                append_event(db, organization_id=schedule.organization_id,
+                    dedupe_key=f"monitor-occurrence:{occurrence.id}", event_type="MONITOR_SCHEDULE_BLOCKED",
+                    aggregate_type="MONITOR_OCCURRENCE", aggregate_id=occurrence.id, module="sentinel",
+                    payload={"recipient_user_id": revision.responsible_user_id, "origin": "SCHEDULED",
+                             "status": occurrence.status, "reason_code": occurrence.reason_code,
+                             "monitor_id": monitor.id})
             audit(db, "MONITOR_SCHEDULE_DISPATCHED", "configuration", monitor.id,
                   "Intervalo Sentinel registrado", SCHEDULER_ACTOR, schedule.organization_id,
                   {"schedule_id": schedule.id, "schedule_version_id": revision.id,

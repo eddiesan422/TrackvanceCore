@@ -129,7 +129,7 @@ for (const [engine, engineLabel, host, tls] of [
     fixture(engine, 'correct')
     await page.goto(`/datasets/${source.dataset.id}`)
     await page.getByRole('button', { name: 'Nueva versión desde la fuente', exact: true }).click()
-    await expect(page.getByText('Versión 2 creada desde la fuente. Los snapshots anteriores permanecen intactos.')).toBeVisible()
+    await expect(page.getByText('Versión publicada después de leer y perfilar la fuente completa.').first()).toBeVisible()
     const corrected = await execute(page, contract.id)
     expect(corrected.decision).toBe('APPROVED')
     expect(corrected.dataset_version_id).not.toBe(source.version.id)

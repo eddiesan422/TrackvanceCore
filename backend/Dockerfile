@@ -1,5 +1,10 @@
 FROM ghcr.io/astral-sh/uv:0.12.13 AS uv
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
+
+# Spark 4.0.3 supports Java 17/21. The same locked runtime is used by driver/executors.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
@@ -10,6 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PYTHON_DOWNLOADS=never \
     TRACKVANCE_BACKEND_DIR=/app/backend \
     TRACKVANCE_STORAGE_DIR=/var/lib/trackvance \
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
     PATH="/app/backend/.venv/bin:$PATH"
 
 WORKDIR /app/backend

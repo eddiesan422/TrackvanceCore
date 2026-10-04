@@ -40,6 +40,11 @@ jobs:
       - name: Check Python types
         working-directory: backend
         run: uv run mypy src/trackvance --check-untyped-defs --ignore-missing-imports
+      - name: Verify generated HTTP, model and permission contracts
+        working-directory: backend
+        run: |
+          uv run python ../scripts/export_contracts.py
+          git diff --exit-code -- openapi.json ../docs/specification/model_contract_0.7.0.json ../docs/specification/permission_contract_0.7.0.json ../docs/development/permission-matrix.md
       - name: Verify PostgreSQL migration round trip on disposable database
         working-directory: backend
         env:
@@ -76,18 +81,10 @@ jobs:
         run: pnpm build
   compose-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     needs: [backend, frontend]
     env:
-      COMPOSE_PROJECT_NAME: trackvance-ci
-      COMPOSE_FILE: compose.yml
-      TV_E2E_PRIVATE_ARTIFACTS: '1'
-      POSTGRES_PASSWORD: disposable-compose-password
-      WEB_PORT: '3100'
-      TRACKVANCE_WEB_ORIGIN: http://localhost:3100
-      PLAYWRIGHT_BASE_URL: http://localhost:3100
       PLAYWRIGHT_CHANNEL: chromium
-      DEMO_ACCESS_ENABLED: 'true'
-      DEMO_SEED_ENABLED: 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -97,62 +94,28 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --global pnpm@11.19.0
-      - name: Install frontend test dependencies
+      - name: Install locked frontend and browser dependencies
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
-      - name: Install browser
-        working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Verify demo access without demo seed on fresh volumes
-        env:
-          DEMO_ACCESS_ENABLED: 'true'
-          DEMO_SEED_ENABLED: 'false'
-          TV_EXPECT_CLEAN_DEMO: 'true'
         run: |
-          set -euo pipefail
-          cleanup() {
-            result=$?
-            if [ "$result" -ne 0 ]; then
-              docker compose logs --tail=120 || true
-            fi
-            docker compose down -v --remove-orphans || true
-            return "$result"
-          }
-          trap cleanup EXIT
-          docker compose up --build --detach --wait --wait-timeout 240
-          (cd frontend && pnpm exec playwright test tests-e2e/demo-access-clean.spec.ts)
-      - name: Start isolated local stack
-        run: docker compose up --build --detach --wait --wait-timeout 240
-      - name: Readiness and worker
-        run: python scripts/doctor.py --base-url http://localhost:3100 --docker
-      - name: API smoke
-        run: python scripts/smoke_test.py --base-url http://localhost:3100
-      - name: Browser flows with sanitized credential evidence
-        run: python scripts/tests/browser_evidence.py --project trackvance-ci --evidence-dir .codex-local/compose-e2e
-      - name: Restart with retained volumes
-        run: |
-          docker compose exec -T api python - snapshot < scripts/verify_storage.py > persistence-before.json
-          docker compose restart
-          docker compose up --detach --wait --wait-timeout 120
-          python scripts/doctor.py --base-url http://localhost:3100 --docker
-          docker compose exec -T api python - snapshot < scripts/verify_storage.py > persistence-after.json
-          python scripts/verify_storage.py compare persistence-before.json persistence-after.json
-      - name: Upload browser evidence
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Verify demo access without seed in a fresh guarded project
+        run: python scripts/tests/docker_e2e_cycle.py --clean-demo
+      - name: Verify all browser flows, restart persistence and migration history
+        run: python scripts/tests/docker_e2e_cycle.py
+      - name: Upload sanitized browser, persistence and migration evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: browser-evidence
           path: |
-            .codex-local/compose-e2e/browser-summary.json
-            persistence-before.json
-            persistence-after.json
+            .codex-local/architecture-e2e/**/result.json
+            .codex-local/architecture-e2e/**/browser-summary.json
+            .codex-local/architecture-e2e/**/before.json
+            .codex-local/architecture-e2e/**/after.json
+            .codex-local/architecture-e2e/**/migrations.json
+          include-hidden-files: true
           if-no-files-found: ignore
-      - name: Container logs on failure
-        if: failure()
-        run: docker compose logs --tail=120
-      - name: Stop isolated stack without deleting volumes
-        if: always()
-        run: docker compose down
   identity-sso-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -210,7 +173,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: connections-evidence
-          path: .codex-local/connections-e2e/
+          path: |
+            .codex-local/connections-e2e/**/result.json
+            .codex-local/connections-e2e/**/browser-summary.json
           include-hidden-files: true
           if-no-files-found: ignore
   delivery-e2e:
@@ -240,7 +205,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: delivery-evidence
-          path: .codex-local/delivery-e2e/
+          path: |
+            .codex-local/delivery-e2e/**/result.json
+            .codex-local/delivery-e2e/**/browser-summary.json
           include-hidden-files: true
           if-no-files-found: ignore
   backup-restore-e2e:
@@ -256,10 +223,12 @@ jobs:
           python-version: '3.12'
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
-      - name: Restore an authentic 0.5.1 backup into 0.6.1
+      - name: Restore an authentic 0.5.1 backup into 0.7.0
         run: python scripts/tests/identity_legacy_restore_cycle.py
       - name: Preserve notification history from an authentic 0.6.0 backup
         run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
+      - name: Restore the authentic 0.6.1 baseline with strict legacy preservation
+        run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.1
       - name: Upload sanitized recovery results only
         if: always()
         uses: actions/upload-artifact@v7
@@ -306,5 +275,100 @@ jobs:
         with:
           name: delivery-benchmark-smoke-results
           path: .codex-local/delivery-benchmarks/**/result.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+  spark-local-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Build the locked isolated Java and PySpark runtime
+        run: docker build --tag trackvance-v070-isolated:backend --file backend/Dockerfile .
+      - name: Real JVM parity and all three modules at one million records
+        run: python scripts/tests/spark_local_docker_cycle.py --evidence .codex-local/v070/spark/ci-local --rows 1000000
+      - name: Upload sanitized Spark local results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-local-results
+          path: |
+            .codex-local/v070/spark/ci-local/*summary.json
+            .codex-local/v070/spark/ci-local/*evidence.json
+            .codex-local/v070/spark/ci-local/parity.xml
+          include-hidden-files: true
+          if-no-files-found: ignore
+  spark-standalone-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Build the same locked driver and executor runtime
+        run: docker build --tag trackvance-v070-isolated:backend --file backend/Dockerfile .
+      - name: Real driver, two executors, parity and one million records
+        run: python scripts/tests/spark_docker_cycle.py --evidence .codex-local/v070/spark/ci-standalone --rows 1000000
+      - name: Upload sanitized Spark Standalone results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-standalone-results
+          path: |
+            .codex-local/v070/spark/ci-standalone/*summary.json
+            .codex-local/v070/spark/ci-standalone/*evidence.json
+            .codex-local/v070/spark/ci-standalone/parity.xml
+          include-hidden-files: true
+          if-no-files-found: ignore
+  async-volume-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        tier-mib: [100, 500, 1024]
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: python -m pip install uv
+      - run: npm install --global pnpm@11.19.0
+      - name: Install locked fixture and browser dependencies
+        run: |
+          uv sync --project backend --frozen
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: One million records across CSV, JSONL and Parquet with exact SQL output
+        run: |
+          extra=()
+          if [ '${{ matrix.tier-mib }}' = '100' ]; then
+            extra+=(--with-browser --with-recovery)
+          fi
+          uv run --project backend python scripts/tests/v070_cycle.py --tier-mib '${{ matrix.tier-mib }}' "${extra[@]}"
+      - name: Upload safe aggregates without env, database dumps or raw browser artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: async-volume-${{ matrix.tier-mib }}-results
+          path: |
+            .codex-local/v070/**/cycle-summary.json
+            .codex-local/v070/**/volume-evidence.json
+            .codex-local/v070/**/automation-results.json
+            .codex-local/v070/**/browser-summary.json
+            .codex-local/v070/**/browser-volume-integrity.json
+            .codex-local/v070/**/result.json
           include-hidden-files: true
           if-no-files-found: ignore

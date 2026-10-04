@@ -32,18 +32,21 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 5
+VERIFY_SCHEMA_VERSION = 6
+IDENTITY_VERIFY_SCHEMA_VERSION = 5
+IDENTITY_MIGRATION = "0012_delivery_target_audit"
 REVIEW_VERIFY_SCHEMA_VERSION = 4
 REVIEW_MIGRATION = "0009_delivery_reviews"
 DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION = 3
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0012_delivery_target_audit"
+CURRENT_MIGRATION = "0015_sentinel_execution_identity"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
-PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
-OPTIONAL_SERVICES = frozenset({"scheduler"})
+LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
+PRIMARY_SERVICES = LEGACY_PRIMARY_SERVICES | {"acquisition-worker", "scheduler", "events-notifications", "events-chaining"}
+OPTIONAL_SERVICES = frozenset({"scheduler", "spark-master", "spark-worker"})
 PRIMARY_VOLUMES = frozenset(
     {
         "postgres_data",
@@ -117,7 +120,11 @@ IDENTITY_STATE_TABLES = frozenset({
     "roles", "role_permissions", "external_identities", "oidc_login_attempts",
     "notification_deliveries", "delivery_target_policies",
 })
-CURRENT_STATE_TABLES = REVIEW_STATE_TABLES | IDENTITY_STATE_TABLES
+IDENTITY_STATE_TABLES_ALL = REVIEW_STATE_TABLES | IDENTITY_STATE_TABLES
+ASYNC_STATE_TABLES = frozenset({"acquisition_uploads", "acquisition_runs", "delivery_automations",
+    "delivery_automation_versions", "delivery_occurrences", "delivery_input_claims", "delivery_target_guards",
+    "delivery_target_decisions", "outbox_events", "event_consumptions", "internal_notifications"})
+CURRENT_STATE_TABLES = IDENTITY_STATE_TABLES_ALL | ASYNC_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -287,7 +294,9 @@ def _by_key(items: Iterable[Mapping[str, Any]], key: str) -> dict[str, Mapping[s
 def require_backup_inventory(state: Mapping[str, Any]) -> None:
     services = _by_key(state["containers"], "service")
     volumes = _by_key(state["volumes"], "logical_name")
-    missing_services = sorted(PRIMARY_SERVICES - services.keys())
+    modern = set(services).intersection(PRIMARY_SERVICES - LEGACY_PRIMARY_SERVICES - {"scheduler"})
+    required_services = PRIMARY_SERVICES if modern else LEGACY_PRIMARY_SERVICES
+    missing_services = sorted(required_services - services.keys())
     missing_volumes = sorted(PRIMARY_VOLUMES - volumes.keys())
     unsupported_volumes = sorted(set(volumes) - PRIMARY_VOLUMES)
     if missing_services or missing_volumes:
@@ -456,7 +465,7 @@ def _stop_services(state: Mapping[str, Any], services: Iterable[str]) -> list[st
 
 
 def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None:
-    order = ("postgres", "api", "worker", "delivery-worker", "scheduler", "web")
+    order = ("postgres", "api", "worker", "delivery-worker", "acquisition-worker", "scheduler", "events-notifications", "events-chaining", "web")
     for service in order:
         for container in state["containers"]:
             if container["service"] == service and container["id"] in identifiers:
@@ -466,7 +475,7 @@ def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     execute(["docker", "cp", str(VERIFY_SCRIPT), f"{api_id}:/tmp/verify_storage.py"])
     output = execute(
@@ -492,7 +501,7 @@ def backup(project: str, destination: Path) -> Path:
     if not postgres["running"] or not api["running"]:
         raise OperationError("PostgreSQL y API deben estar activos para tomar el respaldo.")
     try:
-        _stop_services(state, ("web", "scheduler", "delivery-worker", "worker"))
+        _stop_services(state, ("web", "scheduler", "events-chaining", "events-notifications", "acquisition-worker", "delivery-worker", "worker"))
         snapshot_state = _copy_snapshot(str(api["id"]), destination / "state.json")
         _stop_services(state, ("api",))
 
@@ -625,12 +634,20 @@ def validate_legacy_state(state: Mapping[str, Any]) -> None:
 
 
 def validate_delivery_state(state: Mapping[str, Any]) -> None:
-    """Reject incomplete native 0.5.0/0.5.1 fingerprints before Docker mutation."""
+    """Reject incomplete or unknown native fingerprints before Docker mutation."""
+    expected_migrations = {DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION: DELIVERY_BASELINE_MIGRATION,
+        REVIEW_VERIFY_SCHEMA_VERSION: REVIEW_MIGRATION, IDENTITY_VERIFY_SCHEMA_VERSION: IDENTITY_MIGRATION,
+        VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
+    if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
+            or state.get("migration") != expected_migrations[state["schema_version"]]):
+        raise OperationError("La huella Delivery no tiene el inventario esperado para su revisión.")
     expected_tables = (
         DELIVERY_BASELINE_STATE_TABLES
         if state.get("schema_version") == DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
         else REVIEW_STATE_TABLES
         if state.get("schema_version") == REVIEW_VERIFY_SCHEMA_VERSION
+        else IDENTITY_STATE_TABLES_ALL
+        if state.get("schema_version") == IDENTITY_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -725,6 +742,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == REVIEW_MIGRATION:
         expected_state_schema = REVIEW_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == IDENTITY_MIGRATION:
+        expected_state_schema = IDENTITY_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -785,8 +804,9 @@ def validate_restored_state(
     normalized_legacy_state: Mapping[str, Any] | None = None,
 ) -> None:
     schema_version = manifest.get("schema_version")
+    validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
-        if manifest.get("migration") in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION}:
+        if manifest.get("migration") in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, IDENTITY_MIGRATION}:
             tables = restored_state.get("tables")
             if (
                 restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
@@ -795,8 +815,9 @@ def validate_restored_state(
                 or (manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
                     and tables.get("delivery_reviews") != {})
                 or normalized_legacy_state != expected_state
+                or any(tables.get(name) != {} for name in ASYNC_STATE_TABLES)
             ):
-                release = "0.5.0" if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION else "0.5.1"
+                release = "0.5.0" if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION else "0.5.1" if manifest.get("migration") == REVIEW_MIGRATION else "0.6.1"
                 raise OperationError(f"La huella {release} normalizada no coincide con el respaldo.")
             return
         if restored_state != expected_state:
@@ -811,7 +832,7 @@ def validate_restored_state(
     # backups.  A future backup schema must record that evidence at backup time.
     tables = restored_state.get("tables")
     delivery_empty = isinstance(tables, Mapping) and all(
-        tables.get(table) == {} for table in DELIVERY_TABLES | {"delivery_reviews"}
+        tables.get(table) == {} for table in DELIVERY_TABLES | {"delivery_reviews"} | ASYNC_STATE_TABLES
     )
     if (
         restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
@@ -988,6 +1009,8 @@ def _restore_verified(
             if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
             else "snapshot-legacy-v4"
             if manifest.get("migration") == REVIEW_MIGRATION
+            else "snapshot-legacy-v5"
+            if manifest.get("migration") == IDENTITY_MIGRATION
             else None
         )
         if legacy_command:

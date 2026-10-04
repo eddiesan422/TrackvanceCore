@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import docker_state
+from isolation_profile import isolate_compose
 
 _smoke_spec = importlib.util.spec_from_file_location("benchmark_smoke", SCRIPTS / "smoke_test.py")
 assert _smoke_spec and _smoke_spec.loader
@@ -951,6 +952,7 @@ def main() -> int:
             "-f",
             str(ROOT / "deploy" / "docker" / "compose.benchmark.yml"),
         ]
+        compose = isolate_compose(compose, environment, evidence, project)
         up = [*compose, "up", "-d", "--wait"]
         if not options.skip_build:
             up.append("--build")

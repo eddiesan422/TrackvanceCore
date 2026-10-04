@@ -30,7 +30,56 @@ PATH_COLUMNS = {
     "dataset_versions": ("original_path", "canonical_path"),
     "runs": ("result_path", "evidence_path"),
     "artifacts": ("path",),
+    "acquisition_uploads": ("path",),
 }
+
+
+def validate_multipart(connection, storage: Path, *, physical_storage: Path | None = None):
+    """Descriptors retain relative part locators; no JSON bytes are relocated."""
+    if "artifacts" not in table_names(connection):
+        return
+    columns = {row[1] for row in connection.execute('PRAGMA table_info("artifacts")')}
+    if "media_type" not in columns:
+        return
+    required = {"id", "organization_id", "path", "sha256", "size_bytes", "media_type"}
+    if not required.issubset(columns):
+        raise ValueError("El inventario de artifacts no permite verificar conjuntos Parquet.")
+    records = {row[0]: dict(zip(["id", "organization_id", "path", "sha256", "size_bytes", "media_type"], row))
+        for row in connection.execute('SELECT id,organization_id,path,sha256,size_bytes,media_type FROM artifacts')}
+    physical_storage = physical_storage or storage
+    for artifact in records.values():
+        if artifact["media_type"] != "application/vnd.trackvance.parquet-set+json":
+            continue
+        descriptor_path = physical_storage / Path(artifact["path"]).relative_to(storage)
+        if (not descriptor_path.resolve(strict=True).is_relative_to(physical_storage.resolve(strict=True))
+                or descriptor_path.stat().st_size != artifact["size_bytes"]
+                or descriptor_path.stat().st_size > 16 * 1024 * 1024 or digest(descriptor_path) != artifact["sha256"]):
+            raise ValueError("Integridad del descriptor Parquet incorrecta.")
+        descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+        parts = descriptor.get("parts")
+        if descriptor.get("schema_version") != 1 or descriptor.get("kind") != "PARQUET_DATASET" or not isinstance(parts, list) or not 1 <= len(parts) <= 100000:
+            raise ValueError("Descriptor Parquet inválido.")
+        seen, rows, size = set(), 0, 0
+        for ordinal, part in enumerate(parts):
+            if not isinstance(part, dict):
+                raise ValueError("Parte Parquet inválida.")  # noqa: TRY004 -- malformed persisted backup payload
+            reference = part.get("path")
+            if not isinstance(reference, str) or not reference or "\\" in reference or Path(reference).is_absolute() or ".." in Path(reference).parts or reference in seen:
+                raise ValueError("Ruta de parte Parquet inválida.")
+            seen.add(reference)
+            registered = records.get(part.get("artifact_id"))
+            if registered is None or registered["organization_id"] != artifact["organization_id"]:
+                raise ValueError("La parte Parquet no pertenece al inventario de su descriptor.")
+            if (part.get("ordinal") != ordinal or type(part.get("row_count")) is not int or part["row_count"] < 0
+                    or part.get("sha256") != registered["sha256"] or part.get("size_bytes") != registered["size_bytes"]
+                    or Path(registered["path"]).relative_to(storage).as_posix() != reference):
+                raise ValueError("La parte Parquet no coincide con su artifact registrado.")
+            path = physical_storage / reference
+            if not path.resolve(strict=True).is_relative_to(physical_storage.resolve(strict=True)) or path.stat().st_size != part["size_bytes"] or digest(path) != part["sha256"]:
+                raise ValueError("Integridad de la parte Parquet incorrecta.")
+            rows, size = rows + part["row_count"], size + part["size_bytes"]
+        if descriptor.get("row_count") != rows or descriptor.get("data_size_bytes") != size:
+            raise ValueError("Los totales del descriptor Parquet no coinciden.")
 
 
 def digest(path: Path) -> str:
@@ -52,7 +101,8 @@ def path_entries(connection: sqlite3.Connection):
             continue
         for column in columns:
             # Identifiers come only from the fixed allowlist above.
-            for identifier, value in connection.execute(f'SELECT id, "{column}" FROM "{table}"'):
+            predicate = " WHERE status IN ('RECEIVED','REGISTERED')" if table == "acquisition_uploads" else ""
+            for identifier, value in connection.execute(f'SELECT id, "{column}" FROM "{table}"{predicate}'):
                 if value:
                     yield table, column, identifier, value
 
@@ -148,6 +198,7 @@ def backup(runtime: Path, destination: Path) -> None:
         if snapshot.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("La base de datos no supera integrity_check.")
         artifact_paths = {Path(row[3]).resolve(strict=True) for row in path_entries(snapshot)}
+        validate_multipart(snapshot, storage)
     for path in sorted(artifact_paths):
         if not path.is_relative_to(storage) or not path.is_file():
             raise ValueError("Un artifact apunta fuera del almacenamiento declarado.")
@@ -254,6 +305,7 @@ def verify(source: Path) -> dict:
         if not isinstance(source_storage, str) or not source_storage:
             raise ValueError("Formato de backup no reconocido.")
         old_storage = Path(source_storage)
+        validate_multipart(connection, old_storage, physical_storage=source / "storage")
         for _, _, _, value in path_entries(connection):
             try:
                 relative = Path(value).relative_to(old_storage)
@@ -300,6 +352,7 @@ def restore(source: Path, destination: Path) -> None:
         if connection.execute("PRAGMA foreign_key_check").fetchall():
             raise ValueError("La restauración detectó referencias inconsistentes.")
         validate_connection_material(connection, set(manifest["files"]))
+        validate_multipart(connection, new_storage)
     for name, expected in manifest["files"].items():
         if name != "trackvance.db" and digest(destination / name) != expected["sha256"]:
             raise ValueError("La copia restaurada perdió integridad.")

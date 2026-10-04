@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -21,9 +22,10 @@ import uuid
 from pathlib import Path
 
 from browser_evidence import run_browser
+from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
-PROJECT_PREFIX = "trackvance-e2e-"
+PROJECT_PREFIX = "trackvance-v070-test-e2e-"
 
 
 def available_port() -> int:
@@ -45,12 +47,17 @@ def execute(
         arguments,
         cwd=cwd,
         env=environment,
-        check=True,
+        check=False,
         text=True,
-        stdout=subprocess.PIPE if capture else None,
+        capture_output=True,
         input=input_text,
         encoding="utf-8",
     )
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, arguments)
+    if any(value and value in result.stdout + result.stderr for key, value in environment.items()
+           if key in {"POSTGRES_PASSWORD", "MOCK_OIDC_CLIENT_SECRET"}):
+        raise RuntimeError("Se detectó una credencial en la salida; contenido suprimido.")
     return result.stdout if capture else ""
 
 
@@ -62,7 +69,7 @@ def storage_snapshot(compose: list[str], environment: dict[str, str]) -> str:
 
 
 def validated_project_name(value: str) -> str:
-    if not re.fullmatch(r"trackvance-e2e-[a-z0-9-]+", value):
+    if not re.fullmatch(r"trackvance-v070-test-e2e-[a-z0-9-]*[a-f0-9]{12}", value):
         raise ValueError(
             f"El proyecto aislado debe comenzar por {PROJECT_PREFIX!r} y usar minúsculas."
         )
@@ -78,7 +85,7 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path, help="Directorio para las instantáneas de persistencia.")
     parser.add_argument(
         "--project",
-        default=f"{PROJECT_PREFIX}{os.getpid()}-{uuid.uuid4().hex[:6]}",
+        default=f"{PROJECT_PREFIX}{uuid.uuid4().hex[:12]}",
     )
     options = parser.parse_args()
     try:
@@ -86,8 +93,8 @@ def main() -> int:
     except ValueError as error:
         parser.error(str(error))
     port = options.port or available_port()
-    if not 1 <= port <= 65535:
-        parser.error("--port debe estar entre 1 y 65535")
+    if not 1 <= port <= 65535 or port == 3100:
+        parser.error("--port debe estar entre 1 y 65535 y no seleccionar 3100")
 
     environment = os.environ.copy()
     base_url = f"http://127.0.0.1:{port}"
@@ -96,7 +103,7 @@ def main() -> int:
             "COMPOSE_PROJECT_NAME": project,
             "WEB_PORT": str(port),
             "TRACKVANCE_WEB_ORIGIN": base_url,
-            "POSTGRES_PASSWORD": "trackvance-isolated-e2e",
+            "POSTGRES_PASSWORD": secrets.token_urlsafe(36),
             "DEMO_ACCESS_ENABLED": "true",
             "DEMO_SEED_ENABLED": "false" if options.clean_demo else "true",
             "TV_EXPECT_CLEAN_DEMO": "true" if options.clean_demo else "false",
@@ -105,15 +112,20 @@ def main() -> int:
         }
     )
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml"]
-    evidence = options.evidence_dir or ROOT / ".codex-local" / "architecture-e2e" / project
+    evidence = options.evidence_dir or ROOT / ".codex-local" / "v070" / project
     evidence.mkdir(parents=True, exist_ok=True)
+    environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
+    compose = isolate_compose(compose, environment, evidence, project)
     started = False
     began = time.monotonic()
     outcome = 1
-    result = {"version": "0.6.1", "status": "FAIL", "project": project, "port": port,
+    result = {"version": "0.7.0", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
+    inventory_run = lambda arguments: execute(arguments, environment=environment, capture=True)
+    main_before = None
     try:
         execute(["docker", "info", "--format", "{{.OSType}}"], environment=environment)
+        main_before = main_inventory(inventory_run)
         existing = execute(
             ["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"],
             environment=environment,
@@ -134,10 +146,14 @@ def main() -> int:
         up = [*compose, "up", "-d", "--wait"]
         if not options.skip_build:
             up.insert(-2, "--build")
+        else:
+            up.insert(-2, "--no-build")
         started = True
         execute(up, environment=environment)
+        execute([*compose, 'exec', '-T', 'api', 'python', '-c',
+                 "import trackvance; assert trackvance.__version__ == '0.7.0'"], environment=environment)
         execute(
-            [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker"],
+            [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],
             environment=environment,
         )
         execute(
@@ -164,9 +180,11 @@ def main() -> int:
 
         before = evidence / "before.json"
         after = evidence / "after.json"
+        execute([*compose, 'stop', 'web', 'scheduler', 'events-notifications', 'events-chaining',
+                 'worker', 'delivery-worker', 'acquisition-worker'], environment=environment)
         before.write_text(storage_snapshot(compose, environment), encoding="utf-8")
-        execute([*compose, "restart"], environment=environment)
-        execute([*compose, "up", "-d", "--wait"], environment=environment)
+        execute([*compose, "restart", 'api', 'postgres'], environment=environment)
+        execute([*compose, "up", "-d", "--wait", 'api', 'postgres'], environment=environment)
         after.write_text(storage_snapshot(compose, environment), encoding="utf-8")
         execute(
             [sys.executable, "scripts/verify_storage.py", "compare", str(before), str(after)],
@@ -174,7 +192,7 @@ def main() -> int:
         )
 
         container_ids = execute(
-            [*compose, "ps", "-q"], environment=environment, capture=True
+            [*compose, "ps", "-aq"], environment=environment, capture=True
         ).split()
         restart_policies = {
             execute(
@@ -197,6 +215,7 @@ def main() -> int:
         result.update(status="PASS", smoke="NOT_RUN_CLEAN_DEMO" if options.clean_demo else "PASS",
                       playwright="SKIPPED" if options.skip_playwright else "PASS",
                       migrations="PASS", persistence_after_restart="PASS",
+                      persistence_components_quiesced=True,
                       restart_policies=sorted(restart_policies))
         print(
             f"OK: ciclo aislado, Playwright/smoke y persistencia tras reinicio en {project}.",
@@ -216,6 +235,13 @@ def main() -> int:
                 outcome = 1
         else:
             result["cleanup"] = "NOT_STARTED"
+        if main_before is not None:
+            try:
+                assert_main_unchanged(main_before, inventory_run)
+                result['main_inventory'] = 'UNCHANGED'
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+                result.update(status='FAIL', main_inventory='CHANGED_OR_UNVERIFIABLE')
+                outcome = 1
         result["duration_seconds"] = round(time.monotonic() - began, 3)
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     return outcome

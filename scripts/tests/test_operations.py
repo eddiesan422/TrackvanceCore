@@ -77,6 +77,61 @@ def test_backup_restore_preserves_identity_and_bytes(runtime, tmp_path):
     assert json.loads((restored / "restoration.json").read_text())["database_sha256"]
 
 
+def add_multipart_dataset(runtime):
+    storage = runtime / 'storage'
+    part = storage / 'datasets/part-00000.parquet'
+    part.parent.mkdir()
+    part.write_bytes(b'immutable parquet partition')
+    descriptor = storage / 'datasets/canonical.parquet-set.json'
+    descriptor.write_text(json.dumps({'schema_version': 1, 'kind': 'PARQUET_DATASET', 'schema': [],
+        'row_count': 2, 'data_size_bytes': part.stat().st_size, 'parts': [{'ordinal': 0,
+        'artifact_id': 'part', 'path': 'datasets/part-00000.parquet', 'row_count': 2,
+        'sha256': backup_module.digest(part), 'size_bytes': part.stat().st_size}]}), encoding='utf-8')
+    with sqlite3.connect(runtime / 'trackvance.db') as db:
+        db.execute('CREATE TABLE artifacts (id TEXT PRIMARY KEY, organization_id TEXT, path TEXT, sha256 TEXT, size_bytes INTEGER, media_type TEXT)')
+        db.executemany('INSERT INTO artifacts VALUES (?,?,?,?,?,?)', [
+            ('part', 'org', str(part), backup_module.digest(part), part.stat().st_size, 'application/vnd.apache.parquet'),
+            ('set', 'org', str(descriptor), backup_module.digest(descriptor), descriptor.stat().st_size, 'application/vnd.trackvance.parquet-set+json')])
+        db.execute('UPDATE dataset_versions SET canonical_path=?', (str(descriptor),))
+        db.commit()
+    return descriptor, part
+
+
+def test_multipart_restore_relocates_metadata_preserving_descriptor_and_partition_bytes(runtime, tmp_path):
+    descriptor, part = add_multipart_dataset(runtime)
+    original_descriptor, original_part = descriptor.read_bytes(), part.read_bytes()
+    backup, restored = tmp_path / 'backup', tmp_path / 'portable'
+    backup_module.backup(runtime, backup)
+    backup_module.restore(backup, restored)
+    assert (restored / 'storage/datasets/canonical.parquet-set.json').read_bytes() == original_descriptor
+    assert (restored / 'storage/datasets/part-00000.parquet').read_bytes() == original_part
+    with sqlite3.connect(restored / 'trackvance.db') as db:
+        assert all(Path(row[0]).is_relative_to(restored / 'storage') for row in db.execute('SELECT path FROM artifacts'))
+        backup_module.validate_multipart(db, restored / 'storage')
+
+
+@pytest.mark.parametrize('damage', ['bytes', 'organization', 'missing_registration', 'row_total'])
+def test_multipart_backup_rejects_corruption_before_creating_manifest(runtime, tmp_path, damage):
+    descriptor, part = add_multipart_dataset(runtime)
+    with sqlite3.connect(runtime / 'trackvance.db') as db:
+        if damage == 'bytes':
+            part.write_bytes(b'corrupt')
+        elif damage == 'organization':
+            db.execute("UPDATE artifacts SET organization_id='foreign' WHERE id='part'")
+        elif damage == 'missing_registration':
+            db.execute("DELETE FROM artifacts WHERE id='part'")
+        else:
+            payload = json.loads(descriptor.read_text())
+            payload['row_count'] = 3
+            descriptor.write_text(json.dumps(payload), encoding='utf-8')
+            db.execute("UPDATE artifacts SET sha256=?,size_bytes=? WHERE id='set'", (backup_module.digest(descriptor), descriptor.stat().st_size))
+        db.commit()
+    backup = tmp_path / 'backup'
+    with pytest.raises(ValueError, match='Parquet'):
+        backup_module.backup(runtime, backup)
+    assert not (backup / 'backup-manifest.json').exists()
+
+
 def test_backup_restore_preserves_connection_secret_and_default_locations(
     runtime, tmp_path, capsys
 ):

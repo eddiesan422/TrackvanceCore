@@ -24,7 +24,7 @@ print(json.dumps({'status': 'FAIL' if leaked else 'PASS', 'files_scanned': len(f
 
 
 def validated_project(value: str) -> str:
-    if not re.fullmatch(r"trackvance-(?:identity-e2e|e2e|connections-e2e|delivery-e2e|ci)(?:-[a-z0-9-]+)?", value):
+    if not re.fullmatch(r"trackvance-(?:v070-test-[a-z0-9-]+-[a-f0-9]{12}|(?:identity-e2e|e2e|connections-e2e|delivery-e2e|ci)(?:-[a-z0-9-]+)?)", value):
         raise ValueError("Se requiere un proyecto desechable de certificación.")
     return value
 

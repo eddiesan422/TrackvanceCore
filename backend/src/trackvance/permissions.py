@@ -8,7 +8,7 @@ from .models import Role, RolePermission, User
 
 GROUPS = {"datasets": "Datasets", "connections": "Conexiones", "intake": "Data Intake", "recon": "ReconOps", "sentinel": "Sentinel", "delivery": "Data Delivery", "destinations": "Destinos", "exceptions": "Excepciones", "rules": "Reglas", "exports": "Evidencia / exports", "artifacts": "Evidencia / exports", "audit": "Auditoría", "users": "Usuarios", "roles": "Roles", "notifications": "Notificaciones", "system": "Sistema", "runs": "Ejecuciones"}
 ACTIONS = {"read": "Consultar", "write": "Crear y editar", "use": "Utilizar", "manage": "Administrar", "configure": "Configurar", "execute": "Ejecutar", "schedule": "Programar", "overwrite": "Reemplazar contenido", "alter_target": "Crear o modificar target", "review_unknown": "Revisar UNKNOWN", "repair_evidence": "Reparar evidencia", "close": "Cerrar", "download": "Descargar"}
-_ACTIONS_BY_GROUP = {"datasets": "read write", "connections": "read use manage", "intake": "read configure execute", "recon": "read configure execute", "sentinel": "read configure execute schedule", "delivery": "read configure execute overwrite alter_target review_unknown repair_evidence", "destinations": "read use manage", "exceptions": "read write close", "rules": "read", "exports": "download", "artifacts": "download", "audit": "read", "users": "read manage", "roles": "read manage", "notifications": "read manage", "system": "read", "runs": "read execute"}
+_ACTIONS_BY_GROUP = {"datasets": "read write", "connections": "read use manage", "intake": "read configure execute", "recon": "read configure execute", "sentinel": "read configure execute schedule", "delivery": "read configure execute schedule overwrite alter_target review_unknown repair_evidence", "destinations": "read use manage", "exceptions": "read write close", "rules": "read", "exports": "download", "artifacts": "download", "audit": "read", "users": "read manage", "roles": "read manage", "notifications": "read manage", "system": "read", "runs": "read execute"}
 CATALOG = frozenset(f"{group}:{action}" for group, actions in _ACTIONS_BY_GROUP.items() for action in actions.split())
 NON_DELEGABLE = frozenset({"users:manage", "roles:manage"})
 DEPENDENCIES: dict[str, frozenset[str]] = {}
@@ -19,6 +19,7 @@ for _code in CATALOG:
 for _code in ("delivery:overwrite", "delivery:alter_target", "delivery:repair_evidence"):
     DEPENDENCIES[_code] |= {"delivery:execute"}
 DEPENDENCIES["sentinel:schedule"] |= {"sentinel:execute"}
+DEPENDENCIES["delivery:schedule"] |= {"delivery:execute", "delivery:configure"}
 DEPENDENCIES["exceptions:close"] |= {"exceptions:write"}
 for _module in ("intake", "recon", "sentinel", "delivery"):
     DEPENDENCIES[f"{_module}:configure"] |= {"datasets:read"}
@@ -42,7 +43,7 @@ def permissions_for_role(db: Session, role: Role | None) -> list[str]:
 def effective_permissions(db: Session, user: User) -> list[str]:
     if not user.active or user.deleted:
         return []
-    role = db.get(Role, user.role_id)
+    role = db.get(Role, user.role_id, populate_existing=True)
     if role is None or role.organization_id != user.organization_id:
         return []
     return permissions_for_role(db, role)
@@ -63,9 +64,9 @@ def dependency_closure(grants: set[str]) -> set[str]:
 
 
 # Defaults seed new organizations only; editing a role never reapplies these grants.
-_READ = {f"{group}:read" for group in ("datasets", "connections", "intake", "recon", "sentinel", "delivery", "destinations", "exceptions", "rules", "runs")}
+_READ = {f"{group}:read" for group in ("datasets", "connections", "intake", "recon", "sentinel", "delivery", "destinations", "exceptions", "rules", "runs", "notifications")}
 _EXPORT = {"exports:download", "artifacts:download"}
-_AUTHOR = {"datasets:write", "runs:execute", "exceptions:write", "connections:use", "destinations:use"} | {f"{group}:{action}" for group in ("intake", "recon", "sentinel", "delivery") for action in ("configure", "execute")} | {"sentinel:schedule", "delivery:overwrite", "delivery:alter_target", "delivery:review_unknown", "delivery:repair_evidence"}
+_AUTHOR = {"datasets:write", "runs:execute", "exceptions:write", "connections:use", "destinations:use"} | {f"{group}:{action}" for group in ("intake", "recon", "sentinel", "delivery") for action in ("configure", "execute")} | {"sentinel:schedule", "delivery:schedule", "delivery:overwrite", "delivery:alter_target", "delivery:review_unknown", "delivery:repair_evidence"}
 DEFAULT_ROLE_GRANTS = {
     "Administrator": set(),
     "Data Owner / Lead": dependency_closure(_READ | _EXPORT | _AUTHOR | {"audit:read", "exceptions:close", "connections:manage", "destinations:manage"}),
@@ -131,6 +132,18 @@ _routes("delivery:configure", "POST", "/delivery/preview", "/delivery/preflight"
 _routes("delivery:execute", "POST", "/delivery/runs")
 _routes("delivery:repair_evidence", "POST", "/delivery/runs/{id}/repair-evidence")
 _routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/reviews")
+_routes("datasets:read", "GET", "/acquisitions", "/acquisitions/{id}")
+_routes("datasets:write", "POST", "/datasets/uploads/stage", "/datasets/{id}/acquisitions", "/acquisitions/{id}/cancel")
+_routes("datasets:write", "GET", "/datasets/uploads/{id}/inspect")
+_routes("connections:use", "POST", "/connections/{id}/acquisitions", "/datasets/{id}/acquisitions/refresh")
+_routes("delivery:configure", "POST", "/delivery/validations", "/delivery/validations/{id}/cancel")
+_routes("delivery:read", "GET", "/delivery/validations", "/delivery/validations/{id}")
+_routes("delivery:read", "GET", "/delivery/automations", "/delivery/automations/{id}", "/delivery/automations/{id}/occurrences")
+_routes("delivery:schedule", "POST", "/delivery/automations", "/delivery/automations/{id}/versions")
+_routes("delivery:execute", "POST", "/delivery/automations/{id}/dispatch")
+_routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/resume-target")
+_routes("notifications:read", "GET", "/notifications/inbox", "/notifications/unread-count")
+_routes("notifications:read", "POST", "/notifications/inbox/read-all", "/notifications/inbox/{id}/read")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

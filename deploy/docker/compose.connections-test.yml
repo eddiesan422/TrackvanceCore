@@ -3,6 +3,9 @@
 services:
   source-postgres:
     image: postgres:16-alpine
+    cpus: 1
+    mem_limit: 512m
+    pids_limit: 256
     environment:
       POSTGRES_DB: trackvance_source
       POSTGRES_USER: source_admin
@@ -18,6 +21,9 @@ services:
 
   source-sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    cpus: 2
+    mem_limit: 3g
+    pids_limit: 512
     environment:
       ACCEPT_EULA: 'Y'
       MSSQL_PID: Developer

@@ -27,7 +27,7 @@ def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     mapper = registry()
     mapped = []
     for name in ("Artifact", "ArtifactLink", "Configuration", "DeliveryAttempt",
-                 "DeliveryDestination", "DeliveryDestinationVersion", "Job", "Run"):
+                 "DeliveryDestination", "DeliveryDestinationVersion", "Job", "Run", "MonitorSchedule", "MonitorScheduleVersion"):
         current = getattr(models, name)
         table = metadata.tables[current.__tablename__]
         for column in table.columns:
@@ -36,7 +36,7 @@ def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
         mapper.map_imperatively(historical, table)
         mapped.append(historical)
     (Artifact, ArtifactLink, Configuration, DeliveryAttempt, DeliveryDestination,
-     DeliveryDestinationVersion, Job, Run) = mapped
+     DeliveryDestinationVersion, Job, Run, MonitorSchedule, MonitorScheduleVersion) = mapped
 
     now = datetime(2026, 9, 11, 12, 34, 56, 123456, tzinfo=UTC)
     common = {"organization_id": "historical", "created_at": now}
@@ -130,6 +130,19 @@ def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
                     source_type=source_type, source_id=source_id,
                     target_type=target_type, target_id=target_id,
                 ))
+        # Historical actor_id is NOT NULL but has no User FK: an old SYSTEM
+        # marker is intentionally not a provable executor.
+        for label, actor_id in (("unresolved", "SYSTEM"), ("verified", legacy_ids["users"])):
+            monitor_id, schedule_id = f"0008-monitor-{label}", f"0008-schedule-{label}"
+            session.add(Configuration(**common, id=monitor_id, name=f"Historical monitor {label}",
+                module="sentinel", dataset_id=legacy_ids["datasets"], owner="Migration fixture", config={}))
+            session.flush()
+            session.add(MonitorSchedule(**common, id=schedule_id, monitor_id=monitor_id,
+                version=1, enabled=True, next_run_at=now, updated_at=now))
+            session.flush()
+            session.add(MonitorScheduleVersion(**common, id=f"0008-schedule-revision-{label}",
+                schedule_id=schedule_id, version=1, interval_seconds=3600, enabled=True,
+                starts_at=now, actor_id=actor_id))
         session.commit()
 
 
@@ -218,6 +231,13 @@ def check() -> dict:
                 if name != "alembic_version"
             }
             connection.rollback()
+            command.upgrade(config, "0012_delivery_target_audit")
+            connection.commit()
+            identity_baseline = sa.MetaData()
+            identity_baseline.reflect(bind=connection)
+            identity_rows = {name: [dict(row) for row in connection.execute(sa.select(table).order_by(*table.primary_key.columns)).mappings()]
+                             for name, table in identity_baseline.tables.items() if name != "alembic_version"}
+            connection.rollback()
             command.upgrade(config, "head")
             connection.commit()
             upgraded = sa.MetaData()
@@ -225,14 +245,38 @@ def check() -> dict:
             assert set(upgraded.tables) - set(delivery_baseline.tables) == {
                 "delivery_reviews", "roles", "role_permissions", "external_identities",
                 "oidc_login_attempts", "notification_deliveries", "delivery_target_policies",
+                "acquisition_uploads", "acquisition_runs", "delivery_automations", "delivery_automation_versions",
+                "delivery_occurrences", "delivery_input_claims", "delivery_target_guards", "delivery_target_decisions",
+                "outbox_events", "event_consumptions", "internal_notifications",
             }
+            for name, historical in identity_rows.items():
+                actual = [dict(row) for row in connection.execute(
+                    sa.select(*(upgraded.tables[name].c[column.name] for column in identity_baseline.tables[name].columns))
+                    .order_by(*identity_baseline.tables[name].primary_key.columns)).mappings()]
+                if name == "monitor_schedules":
+                    for row in actual:
+                        if row["id"] == "0008-schedule-unresolved":
+                            assert row["enabled"] is False
+                            row["enabled"] = True  # Only the documented legacy safety pause is projected.
+                assert actual == historical, f"0012→0015 changed {name}"
+            schedule_table, revision_table = upgraded.tables["monitor_schedules"], upgraded.tables["monitor_schedule_versions"]
+            unresolved = connection.execute(sa.select(schedule_table).where(schedule_table.c.id == "0008-schedule-unresolved")).mappings().one()
+            assert unresolved["legacy_enabled_before_identity"] is True and unresolved["enabled"] is False
+            verified_revision = connection.execute(sa.select(revision_table).where(revision_table.c.id == "0008-schedule-revision-verified")).mappings().one()
+            legacy_revision = connection.execute(sa.select(revision_table).where(revision_table.c.id == "0008-schedule-revision-unresolved")).mappings().one()
+            assert verified_revision["responsible_user_id"] == ids["users"] and legacy_revision["responsible_user_id"] is None
             for name, historical in baseline_rows.items():
                 actual = [dict(row) for row in connection.execute(
                     sa.select(*(upgraded.tables[name].c[column.name]
                                 for column in delivery_baseline.tables[name].columns))
                     .order_by(upgraded.tables[name].c.id)
                 ).mappings()]
-                assert actual == historical, f"0008→0012 changed {name}"
+                if name == "monitor_schedules":
+                    for row in actual:
+                        if row["id"] == "0008-schedule-unresolved":
+                            assert row["enabled"] is False
+                            row["enabled"] = True
+                assert actual == historical, f"0008→0015 changed {name}"
             migrated_user = connection.execute(sa.select(upgraded.tables["users"]).where(
                 upgraded.tables["users"].c.id == ids["users"])).mappings().one()
             assert migrated_user["username"] and migrated_user["role_id"]
@@ -262,7 +306,7 @@ def check() -> dict:
                 actual = [dict(row) for row in connection.execute(
                     sa.select(delivery_baseline.tables[name]).order_by(delivery_baseline.tables[name].c.id)
                 ).mappings()]
-                assert actual == historical, f"0012→0008 changed {name}"
+                assert actual == historical, f"0015→0008 changed {name}"
             connection.rollback()
             command.upgrade(config, "head")
             connection.commit()
@@ -275,7 +319,9 @@ def check() -> dict:
             connection.commit()
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
-                "0008_0012_roundtrip": "PASS", "0008_tables_preserved": len(baseline_rows),
+                "0008_0015_roundtrip": "PASS", "0012_0015_preservation": "PASS",
+                "sentinel_verified_executor": "PASS", "sentinel_legacy_safety_pause": "PASS",
+                "0012_tables_preserved": len(identity_rows), "0008_tables_preserved": len(baseline_rows),
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
                 "0008_delivery_lineage_edges_preserved": 8}
     finally:

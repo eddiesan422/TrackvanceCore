@@ -15,14 +15,23 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+IDENTITY_SCHEMA_VERSION = 5
 REVIEW_SCHEMA_VERSION = 4
 DELIVERY_BASELINE_SCHEMA_VERSION = 3
 LEGACY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 REVIEW_MIGRATION = "0009_delivery_reviews"
-CURRENT_MIGRATION = "0012_delivery_target_audit"
+IDENTITY_MIGRATION = "0012_delivery_target_audit"
+CURRENT_MIGRATION = "0015_sentinel_execution_identity"
+ASYNC_TABLES = frozenset({"acquisition_uploads", "acquisition_runs", "delivery_automations",
+    "delivery_automation_versions", "delivery_occurrences", "delivery_input_claims",
+    "delivery_target_guards", "delivery_target_decisions", "outbox_events", "event_consumptions",
+    "internal_notifications"})
+ASYNC_COLUMNS = {"jobs": frozenset({"acquisition_id"}),
+    "monitor_schedule_versions": frozenset({"responsible_user_id"}),
+    "monitor_schedules": frozenset({"legacy_enabled_before_identity"})}
 IDENTITY_TABLES = frozenset({
     "roles", "role_permissions", "external_identities", "oidc_login_attempts",
     "notification_deliveries", "delivery_target_policies",
@@ -39,7 +48,7 @@ REVIEW_OUTCOMES = frozenset({
     "REMOTE_COMMIT_OBSERVED", "REMOTE_NOT_COMMITTED_OBSERVED", "INCONCLUSIVE",
 })
 ACTIVE_STATUSES = frozenset({"QUEUED", "RUNNING"})
-JOB_LANES = frozenset({"DEFAULT", "DELIVERY"})
+JOB_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION"})
 DELIVERY_ATTEMPT_STATUSES = frozenset({"STARTED", "COMMITTED", "FAILED", "UNKNOWN"})
 DELIVERY_TABLES = frozenset(
     {
@@ -61,7 +70,8 @@ FINGERPRINT_TABLES = {
     LEGACY_MIGRATION: LEGACY_TABLES,
     DELIVERY_BASELINE_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES,
     REVIEW_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE},
-    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES,
+    IDENTITY_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES,
+    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES,
 }
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
@@ -73,6 +83,7 @@ POLYMORPHIC_TABLES = {
     "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions",
     "DELIVERY_ATTEMPT": "delivery_attempts",
     "DELIVERY_TARGET_POLICY": "delivery_target_policies",
+    "ACQUISITION": "acquisition_runs",
 }
 LEGACY_POLYMORPHIC_TABLES = {
     key: value
@@ -200,13 +211,23 @@ def validate_relationships(
             lane = str(job.get("lane", ""))
             if lane not in JOB_LANES:
                 raise ValueError("Lane persistido no reconocido en jobs.")
+            run_id, acquisition_id = job.get("run_id"), job.get("acquisition_id")
+            if bool(run_id) == bool(acquisition_id):
+                raise ValueError("Un Job requiere exactamente un Run o una adquisición.")
+            if acquisition_id:
+                acquisition = index.get("acquisition_runs", {}).get(str(acquisition_id))
+                if acquisition is None or lane != "ACQUISITION":
+                    raise ValueError("La lane o identidad del Job de adquisición es inválida.")
+                _require_same_organization(job, acquisition, "jobs.acquisition_id")
+                checks += 1
+                continue
             run = index.get("runs", {}).get(str(job.get("run_id")))
             if run is None:
                 # The declared SQL FK reports the same corruption with a more precise field.
                 continue
             expected_lane = (
                 "DELIVERY"
-                if str(run.get("module", "")).upper() == "DELIVERY"
+                if str(run.get("module", "")).upper() in {"DELIVERY", "DELIVERY_PREFLIGHT"}
                 else "DEFAULT"
             )
             if lane != expected_lane:
@@ -242,6 +263,55 @@ def validate_relationships(
     return checks
 
 
+def project_async_upgrade(rows, foreign_keys):
+    """Only deterministic 0013–0015 additions can be removed from a v5 proof."""
+    foreign_keys = list(foreign_keys)
+    if set(rows) != FINGERPRINT_TABLES[CURRENT_MIGRATION]:
+        raise ValueError("La proyección 0.6.1 requiere el inventario completo de 0.7.0.")
+    validate_relationships(rows, foreign_keys)
+    if any(rows.get(table) for table in ASYNC_TABLES):
+        raise ValueError("La proyección 0.6.1 contiene actividad nueva de 0.7.0.")
+    if any(job.get("acquisition_id") is not None for job in rows.get("jobs", [])):
+        raise ValueError("La proyección histórica contiene Jobs nuevos de adquisición.")
+    if any(run.get("module") == "DELIVERY_PREFLIGHT" for run in rows.get("runs", [])):
+        raise ValueError("La proyección histórica contiene preflights nuevos.")
+    users = {str(user["id"]): user for user in rows.get("users", [])}
+    revisions = {}
+    for revision in rows.get("monitor_schedule_versions", []):
+        actor = users.get(str(revision.get("actor_id")))
+        expected = actor["id"] if actor and actor.get("organization_id") == revision.get("organization_id") else None
+        if revision.get("responsible_user_id") != expected:
+            raise ValueError("La programación contiene una asignación nueva de responsable.")
+        revisions[(revision["schedule_id"], revision["version"])] = revision
+    previous = {name: [{key: value for key, value in dict(row).items()
+                       if key not in ASYNC_COLUMNS.get(name, frozenset())} for row in values]
+                for name, values in rows.items() if name not in ASYNC_TABLES}
+    for current, projected in zip(rows.get("monitor_schedules", []), previous.get("monitor_schedules", [])):
+        prior_enabled = current.get("legacy_enabled_before_identity")
+        revision = revisions.get((current["id"], current["version"]))
+        unresolved = revision is None or revision.get("responsible_user_id") is None
+        if unresolved:
+            if type(prior_enabled) is not bool or current.get("enabled") is not False:
+                raise ValueError("La pausa de programación histórica no coincide con la migración.")
+            projected["enabled"] = prior_enabled
+        elif prior_enabled is not None:
+            raise ValueError("La programación verificable contiene una bandera legacy inesperada.")
+    previous_fks = [fk for fk in foreign_keys if fk[0] not in ASYNC_TABLES and fk[2] not in ASYNC_TABLES
+                    and fk[1] not in ASYNC_COLUMNS.get(fk[0], frozenset())]
+    return previous, previous_fks
+
+
+def legacy_v5_report(rows, foreign_keys, *, current_migration, verified_artifacts,
+                     verified_source_secrets, verified_delivery_secrets):
+    if current_migration != CURRENT_MIGRATION:
+        raise ValueError("La proyección 0.6.1 requiere la migración 0015.")
+    previous, previous_fks = project_async_upgrade(rows, foreign_keys)
+    return {"schema_version": IDENTITY_SCHEMA_VERSION, "tables": _table_hashes(previous),
+        "verified_artifacts": verified_artifacts, "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets, "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(previous, previous_fks), "migration": IDENTITY_MIGRATION}
+
+
 def _table_hashes(
     rows: Mapping[str, list[Mapping[str, Any]]],
 ) -> dict[str, dict[str, str]]:
@@ -262,12 +332,15 @@ def legacy_v2_report(
     """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
 
     foreign_keys = list(foreign_keys)
-    if current_migration not in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration not in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, IDENTITY_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La compatibilidad 0.4.1 requiere la migración 0008 o 0009 aplicada.")
     excluded = DELIVERY_TABLES | {REVIEW_TABLE}
     if any(rows.get(table) for table in excluded):
         raise ValueError("Un backup 0.4.1 no puede contener registros de Data Delivery.")
     if current_migration == CURRENT_MIGRATION:
+        rows, foreign_keys = project_async_upgrade(rows, foreign_keys)
+        current_migration = IDENTITY_MIGRATION
+    if current_migration == IDENTITY_MIGRATION:
         rows, foreign_keys = project_identity_upgrade(rows, foreign_keys)
     if any(str(run.get("module", "")).upper() == "DELIVERY" for run in rows.get("runs", [])):
         raise ValueError("Un backup 0.4.1 no puede contener Runs DELIVERY.")
@@ -315,10 +388,13 @@ def legacy_v3_report(
     verified_source_secrets: int, verified_delivery_secrets: int,
 ) -> dict[str, Any]:
     """Project a fresh 0009 upgrade onto the exact, unchanged 0.5.0 state."""
-    if current_migration not in {REVIEW_MIGRATION, CURRENT_MIGRATION} or rows.get(REVIEW_TABLE):
+    if current_migration not in {REVIEW_MIGRATION, IDENTITY_MIGRATION, CURRENT_MIGRATION} or rows.get(REVIEW_TABLE):
         raise ValueError("La proyección 0.5.0 requiere 0009 y revisiones vacías.")
     foreign_keys = list(foreign_keys)
     if current_migration == CURRENT_MIGRATION:
+        rows, foreign_keys = project_async_upgrade(rows, foreign_keys)
+        current_migration = IDENTITY_MIGRATION
+    if current_migration == IDENTITY_MIGRATION:
         rows, foreign_keys = project_identity_upgrade(rows, foreign_keys)
     validate_relationships(rows, foreign_keys)
     previous = {name: values for name, values in rows.items() if name != REVIEW_TABLE}
@@ -370,8 +446,10 @@ def project_identity_upgrade(rows, foreign_keys):
 def legacy_v4_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
     """Recreate the exact 0.5.1 fingerprint after the additive 0.6.0 migration."""
-    if current_migration != CURRENT_MIGRATION:
+    if current_migration not in {IDENTITY_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección 0.5.1 requiere la migración 0012.")
+    if current_migration == CURRENT_MIGRATION:
+        rows, foreign_keys = project_async_upgrade(rows, foreign_keys)
     previous, previous_fks = project_identity_upgrade(rows, foreign_keys)
     return {
         "schema_version": REVIEW_SCHEMA_VERSION,
@@ -393,9 +471,9 @@ def _snapshot_inputs() -> tuple[
     int,
     int,
 ]:
-    from sqlalchemy import select, text
+    from sqlalchemy import inspect, select, text
 
-    from trackvance.artifactstore import artifact_store
+    from trackvance.artifactstore import artifact_store, storage_provider
     from trackvance.credential_store import secret_store
     from trackvance.db import Base, SessionLocal
     from trackvance.models import (
@@ -412,6 +490,9 @@ def _snapshot_inputs() -> tuple[
             raise ValueError("Finaliza las ejecuciones pendientes antes de tomar la huella.")
 
         migration = session.scalar(text("SELECT version_num FROM alembic_version"))
+        actual_tables = set(inspect(session.connection()).get_table_names()) - {"alembic_version"}
+        if actual_tables != set(Base.metadata.tables):
+            raise ValueError("El catálogo físico contiene tablas desconocidas o faltantes; no se puede omitir estado.")
         rows: dict[str, list[Mapping[str, Any]]] = {
             name: list(session.execute(select(table)).mappings())
             for name, table in sorted(Base.metadata.tables.items())
@@ -430,7 +511,16 @@ def _snapshot_inputs() -> tuple[
         verified_artifacts = 0
         for artifact in session.scalars(select(Artifact)):
             artifact_store.verify(artifact)
+            if artifact.media_type == "application/vnd.trackvance.parquet-set+json":
+                artifact_store.dataset_paths(artifact)
             verified_artifacts += 1
+        if "acquisition_uploads" in Base.metadata.tables:
+            from trackvance.acquisition_models import AcquisitionUpload
+
+            for upload in session.scalars(select(AcquisitionUpload).where(
+                    AcquisitionUpload.status.in_({"RECEIVED", "REGISTERED"}))):
+                storage_provider.materialize_reference(upload.path, expected_sha256=upload.sha256,
+                                                       expected_size=upload.size_bytes)
         verified_source_secrets = 0
         for version in session.scalars(select(ExternalConnectionVersion)):
             secret_store.get(version.organization_id, version.secret_reference)
@@ -474,6 +564,7 @@ def snapshot() -> dict[str, Any]:
             LEGACY_SCHEMA_VERSION if legacy else
             DELIVERY_BASELINE_SCHEMA_VERSION if migration == DELIVERY_BASELINE_MIGRATION else
             REVIEW_SCHEMA_VERSION if migration == REVIEW_MIGRATION else
+            IDENTITY_SCHEMA_VERSION if migration == IDENTITY_MIGRATION else
             SCHEMA_VERSION
         ),
         "tables": _table_hashes(rows),
@@ -518,7 +609,7 @@ def snapshot_legacy_v3() -> dict[str, Any]:
 
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
     if before.get("schema_version") not in {
-        DELIVERY_BASELINE_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION, SCHEMA_VERSION,
+        DELIVERY_BASELINE_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION, IDENTITY_SCHEMA_VERSION, SCHEMA_VERSION,
     }:
         raise ValueError("Versión del informe previo no reconocida.")
     if after.get("schema_version") != before.get("schema_version"):
@@ -542,6 +633,7 @@ def main() -> int:
     commands.add_parser("snapshot-legacy-v2")
     commands.add_parser("snapshot-legacy-v3")
     commands.add_parser("snapshot-legacy-v4")
+    commands.add_parser("snapshot-legacy-v5")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -556,6 +648,12 @@ def main() -> int:
         elif args.command == "snapshot-legacy-v4":
             migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
             print(json.dumps(legacy_v4_report(
+                rows, fks, current_migration=migration, verified_artifacts=artifacts,
+                verified_source_secrets=source, verified_delivery_secrets=delivery,
+            ), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v5":
+            migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
+            print(json.dumps(legacy_v5_report(
                 rows, fks, current_migration=migration, verified_artifacts=artifacts,
                 verified_source_secrets=source, verified_delivery_secrets=delivery,
             ), indent=2, sort_keys=True))

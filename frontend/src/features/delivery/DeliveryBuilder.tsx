@@ -1,4 +1,5 @@
 import { PreflightChecks } from './PreflightChecks'
+import { DeliveryValidation } from './DeliveryValidation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -98,6 +99,7 @@ export function DeliveryBuilder() {
   const [mappings, setMappings] = useState<ColumnMapping[]>([]), [strategy, setStrategy] = useState<WriteStrategy>('APPEND'), [upsertKeys, setUpsertKeys] = useState<string[]>([])
   const [previewData, setPreviewData] = useState<DeliveryPreview | null>(null), [preflightData, setPreflightData] = useState<DeliveryPreflight | null>(null)
   const [published, setPublished] = useState<DeliveryConfiguration | null>(null)
+  const [validationId, setValidationId] = useState('')
   const initialApplied = useRef(false), mappingKey = useRef(''), metadataKey = useRef(''), idempotencyKey = useRef('')
 
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api<Collection>('/datasets') })
@@ -106,7 +108,8 @@ export function DeliveryBuilder() {
   const dataset = useQuery({ queryKey: ['dataset', datasetId], queryFn: () => api<DatasetRecord>(`/datasets/${datasetId}`), enabled: !!datasetId })
   const destination = useQuery({ queryKey: ['delivery-destination', destinationId], queryFn: () => api<DeliveryDestination>(`/delivery/destinations/${destinationId}`), enabled: !!destinationId })
   const versions = dataset.data?.versions || [], selectedVersion = versions.find(version => version.id === versionId)
-  const profile = useQuery({ queryKey: ['profile', versionId], queryFn: () => api<{ profile?: { columns?: DatasetColumn[] }; schema?: DatasetColumn[]; sample?: Record<string, unknown>[] }>(`/dataset-versions/${versionId}/profile`), enabled: !!versionId })
+  const profile = useQuery({ queryKey: ['profile', versionId], queryFn: () => api<{ profile?: { columns?: DatasetColumn[] }; schema?: DatasetColumn[]; sample?: Record<string, unknown>[]; delivery_preflight_synchronous_rows?: number }>(`/dataset-versions/${versionId}/profile`), enabled: !!versionId })
+  const synchronousRows = profile.data?.delivery_preflight_synchronous_rows ?? 100_000
   const sourceColumns = useMemo(() => profileColumns(profile.data, selectedVersion?.schema), [profile.data, selectedVersion?.schema])
   const schemas = useQuery({ queryKey: ['delivery-destination-schemas', destinationId, destinationVersionId(destination.data)], queryFn: () => api<unknown>(`/delivery/destinations/${destinationId}/schemas`), enabled: !!destinationId && !!destination.data?.enabled })
   const effectiveSchema = targetMode === 'CREATE_TABLE' && schemaMode === 'NEW' ? newSchemaName.trim() : schemaName
@@ -229,7 +232,7 @@ export function DeliveryBuilder() {
   currentFingerprint.current = draftFingerprint
   const previousFingerprint = useRef('')
   useEffect(() => {
-    if (previousFingerprint.current && previousFingerprint.current !== draftFingerprint) { setPreviewData(null); setPreflightData(null); setPublished(null) }
+    if (previousFingerprint.current && previousFingerprint.current !== draftFingerprint) { setPreviewData(null); setPreflightData(null); setPublished(null); setValidationId('') }
     previousFingerprint.current = draftFingerprint
   }, [draftFingerprint])
 
@@ -240,14 +243,14 @@ export function DeliveryBuilder() {
   })
   const preflight = useMutation({
     mutationFn: ({ value }: { value: DeliveryDraft; fingerprint: string }) => post<DeliveryPreflight>('/delivery/preflight', value),
-    onMutate: () => { setPreflightData(null) },
+    onMutate: () => { setPreflightData(null); setValidationId('') },
     onSuccess: (data, variables) => { if (variables.fingerprint === currentFingerprint.current) setPreflightData(data) },
   })
   const publish = useMutation({
     mutationFn: ({ value, publishedName, publishedOwner, publishedDescription }: { value: DeliveryDraft; fingerprint: string; publishedName: string; publishedOwner: string; publishedDescription: string }) => {
       return initial
-        ? post<DeliveryConfiguration>(`/delivery/configurations/${initial.id}/versions`, { ...value, description: publishedDescription })
-        : post<DeliveryConfiguration>('/delivery/configurations', { ...value, name: publishedName, owner: publishedOwner, description: publishedDescription })
+        ? post<DeliveryConfiguration>(`/delivery/configurations/${initial.id}/versions${validationId ? `?validation_run_id=${encodeURIComponent(validationId)}` : ''}`, { ...value, description: publishedDescription })
+        : post<DeliveryConfiguration>(`/delivery/configurations${validationId ? `?validation_run_id=${encodeURIComponent(validationId)}` : ''}`, { ...value, name: publishedName, owner: publishedOwner, description: publishedDescription })
     },
     onSuccess: (data, variables) => {
       if (variables.fingerprint !== currentFingerprint.current) return
@@ -336,7 +339,8 @@ export function DeliveryBuilder() {
 
       {step === 6 && <div className="delivery-step-content form-stack"><div className="delivery-review-grid"><div><span>DatasetVersion</span><strong>{dataset.data?.name} · v{selectedVersion?.version}</strong><code>{versionId}</code></div><div><span>Destino</span><strong>{destination.data?.name} · revisión {destination.data?.version}</strong><code>{draft.destination_version_id}</code></div><div><span>Target</span><strong>{effectiveSchema}.{tableName}</strong><Badge value={targetMode}/></div><div><span>Estrategia</span><Badge value={draft.write_strategy}/><strong>{number(deliveryColumns.length)} columnas</strong></div></div>
         <div className="delivery-preview-map"><div className="delivery-section-copy"><div><h3>Origen → destino</h3><p>Selección, orden, nombres y tipos técnicos que quedarán publicados.</p></div></div><div className="table-scroll"><table><thead><tr><th>#</th><th>Origen</th><th/><th>Destino</th><th>Tipo</th><th>Nulos</th></tr></thead><tbody>{deliveryColumns.map((column, index) => <tr key={column.source_name}><td>{index + 1}</td><td className="mono">{column.source_name}</td><td><ArrowRight size={14}/></td><td className="mono">{column.target_name}</td><td>{column.target_type}{column.precision != null ? `(${column.precision},${column.scale || 0})` : column.length != null ? `(${column.length})` : ''}</td><td>{column.nullable ? 'Sí' : 'No'}</td></tr>)}</tbody></table></div></div>
-        <div className="delivery-validation-actions"><button type="button" className="button secondary" disabled={preview.isPending || !mappingValid} onClick={() => preview.mutate({ value: draft, fingerprint: draftFingerprint })}><Eye size={16}/>{preview.isPending ? 'Generando preview…' : 'Generar preview'}</button><button type="button" className="button primary" disabled={preflight.isPending || !mappingValid || !targetValid} onClick={() => preflight.mutate({ value: draft, fingerprint: draftFingerprint })}><RefreshCw size={16}/>{preflight.isPending ? 'Validando…' : 'Ejecutar preflight'}</button></div>
+        <div className="delivery-validation-actions"><button type="button" className="button secondary" disabled={preview.isPending || !mappingValid} onClick={() => preview.mutate({ value: draft, fingerprint: draftFingerprint })}><Eye size={16}/>{preview.isPending ? 'Generando preview…' : 'Generar preview'}</button>{Number(selectedVersion?.row_count || 0) <= synchronousRows && <button type="button" className="button primary" disabled={preflight.isPending || !mappingValid || !targetValid} onClick={() => preflight.mutate({ value: draft, fingerprint: draftFingerprint })}><RefreshCw size={16}/>{preflight.isPending ? 'Validando…' : 'Ejecutar preflight'}</button>}</div>
+        {Number(selectedVersion?.row_count || 0) > synchronousRows && <DeliveryValidation draft={draft} ready={mappingValid && targetValid} onUse={(result, id) => { setPreflightData(result); setValidationId(id) }}/>}
         {preview.error && <ErrorState error={preview.error}/>} {preflight.error && <ErrorState error={preflight.error}/>} {previewData && <section className="delivery-sample"><div className="delivery-section-copy"><div><h3>Preview técnico</h3><p>Muestra acotada; no publica artifacts ni escribe en el destino.</p></div><Badge value="READY">{number(previewData.sampled_rows)} filas</Badge></div>{previewData.source_rows.length ? <div className="table-scroll"><table><thead><tr><th>Antes · DatasetVersion</th><th>Después · representación de salida</th></tr></thead><tbody>{previewData.source_rows.slice(0, 8).map((row, index) => <tr key={index}><td><pre>{jsonValue(row)}</pre></td><td><pre>{jsonValue(previewData.destination_rows[index] || {})}</pre></td></tr>)}</tbody></table></div> : <Notice>La DatasetVersion no contiene filas de muestra.</Notice>}</section>}
         {preflightData && <section className={`delivery-preflight ${preflightData.status.toLowerCase()}`}><div><ShieldCheck size={23}/><div><h3>{preflightData.status === 'PASS' ? 'Preflight aprobado' : 'Preflight no aprobado'}</h3><p>Validación de solo lectura sobre artifact, destino, metadata, permisos y compatibilidad.</p></div><Badge value={preflightData.status}/></div><PreflightChecks checks={preflightData.checks}/>{preflightData.warnings?.map(warning => <Notice key={warning}>{warning}</Notice>)}</section>}
       </div>}

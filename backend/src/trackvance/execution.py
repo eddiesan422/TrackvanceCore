@@ -37,7 +37,7 @@ class LocalExecutionEngine:
     """In-process adapter using the current Polars/Python implementation."""
 
     key = "LOCAL"
-    supported_processing_engines = frozenset({"POLARS"})
+    supported_processing_engines = frozenset({"POLARS", "PYSPARK"})
 
     def execute(
         self,
@@ -49,6 +49,11 @@ class LocalExecutionEngine:
     ) -> None:
         # Delayed import keeps the port independent from application services
         # and avoids a services -> execution -> services import cycle.
+        if run.module == "DELIVERY_PREFLIGHT":
+            from .delivery_validation import execute_validation_run
+
+            execute_validation_run(db, run, lease_owner=lease_owner)
+            return
         if run.module == "DELIVERY":
             from .delivery_service import execute_delivery_run
 

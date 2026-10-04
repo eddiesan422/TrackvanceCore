@@ -62,6 +62,51 @@ def test_backup_inventory_requires_delivery_secret_volumes():
         docker_state.require_backup_inventory(state)
 
 
+def modern_inventory():
+    state = sample_inventory()
+    for service in sorted(docker_state.PRIMARY_SERVICES - docker_state.LEGACY_PRIMARY_SERVICES):
+        state['containers'].append({'id': f'container-{service}', 'name': f"{state['project']}-{service}-1",
+            'service': service, 'image_id': 'sha256:image', 'running': True})
+    return state
+
+
+def test_backup_accepts_exact_nine_services_and_rejects_partial_upgrade():
+    state = modern_inventory()
+    docker_state.require_backup_inventory(state)
+    state['containers'] = [item for item in state['containers'] if item['service'] != 'events-chaining']
+    with pytest.raises(docker_state.OperationError, match='completo'):
+        docker_state.require_backup_inventory(state)
+
+
+def test_backup_quiesces_every_mutating_component_before_fingerprint(monkeypatch, tmp_path):
+    state = modern_inventory()
+    stopped = []
+    monkeypatch.setattr(docker_state, 'inventory', lambda _project: state)
+    monkeypatch.setattr(docker_state, 'execute', lambda args, **_kwargs: stopped.append(args[2]) if args[:2] == ['docker', 'stop'] else '')
+    monkeypatch.setattr(docker_state, '_restart_containers', lambda *_args: None)
+    def stop_at_snapshot(*_args, **_kwargs):
+        assert set(stopped) == {f'container-{service}' for service in docker_state.PRIMARY_SERVICES - {'postgres', 'api'}}
+        raise docker_state.OperationError('snapshot-boundary')
+    monkeypatch.setattr(docker_state, '_copy_snapshot', stop_at_snapshot)
+    with pytest.raises(docker_state.OperationError, match='snapshot-boundary'):
+        docker_state.backup(state['project'], tmp_path / 'backup')
+
+
+@pytest.mark.parametrize('damage', ['unknown_schema', 'unknown_table', 'missing_table', 'revision'])
+def test_current_fingerprint_refuses_unknown_or_missing_state(damage):
+    state = restored_current_state()
+    if damage == 'unknown_schema':
+        state['schema_version'] = 99
+    elif damage == 'unknown_table':
+        state['tables']['plugin_history'] = {}
+    elif damage == 'missing_table':
+        del state['tables']['outbox_events']
+    else:
+        state['migration'] = docker_state.IDENTITY_MIGRATION
+    with pytest.raises(docker_state.OperationError, match='inventario'):
+        docker_state.validate_delivery_state(state)
+
+
 def test_archive_traversal_and_links_are_rejected(tmp_path):
     archive_path = tmp_path / "malicious.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
@@ -425,7 +470,9 @@ def restored_current_state():
     return {
         "schema_version": docker_state.VERIFY_SCHEMA_VERSION,
         "migration": docker_state.CURRENT_MIGRATION,
-        "tables": {table: {} for table in docker_state.DELIVERY_TABLES | {"delivery_reviews"}},
+        "tables": {table: {} for table in docker_state.CURRENT_STATE_TABLES},
+        "verified_artifacts": 0,
+        "validated_relationships": 0,
         "verified_secrets": 0,
         "verified_source_secrets": 0,
         "verified_delivery_secrets": 0,
@@ -446,9 +493,9 @@ def test_validate_restored_state_accepts_exact_normalized_041_upgrade(tmp_path):
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        ("migration", "migración segura"),
+        ("migration", "migración segura|inventario"),
         ("delivery_rows", "migración segura"),
-        ("delivery_secrets", "migración segura"),
+        ("delivery_secrets", "contadores"),
         ("normalized_job", "normalizada"),
     ],
 )
@@ -461,7 +508,7 @@ def test_validate_restored_state_rejects_incomplete_or_changed_041_upgrade(
     if mutation == "migration":
         restored["migration"] = "0007_monitor_scheduling"
     elif mutation == "delivery_rows":
-        restored["tables"]["delivery_attempts"] = {"attempt": "hash"}
+        restored["tables"]["delivery_attempts"] = {"attempt": "a" * 64}
     elif mutation == "delivery_secrets":
         restored["verified_delivery_secrets"] = 1
         restored["verified_secrets"] = 2
@@ -532,7 +579,7 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
                     migration=docker_state.CURRENT_MIGRATION)
     restored["tables"]["delivery_reviews"] = {}
-    restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES | docker_state.ASYNC_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
     extracted, snapshot_commands = [], []
     monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _source: None)
@@ -564,12 +611,12 @@ def test_validate_restored_050_keeps_delivery_and_projects_only_empty_review_tab
     expected["schema_version"] = 3
     expected["migration"] = "0008_data_delivery"
     expected["tables"].pop("delivery_reviews")
-    expected["tables"]["delivery_attempts"] = {"committed": "immutable-hash"}
+    expected["tables"]["delivery_attempts"] = {"committed": "a" * 64}
     restored = restored_current_state()
     restored["tables"]["delivery_attempts"] = expected["tables"]["delivery_attempts"].copy()
     docker_state.validate_restored_state(manifest, expected, restored, expected)
-    restored["tables"]["delivery_reviews"]["unexpected"] = "hash"
-    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada"):
+    restored["tables"]["delivery_reviews"]["unexpected"] = "a" * 64
+    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada|inventario"):
         docker_state.validate_restored_state(manifest, expected, restored, expected)
 
 
@@ -585,7 +632,7 @@ def test_validate_restored_050_rejects_partial_or_changed_upgrade(mutation):
         restored["schema_version"] = 3
     else:
         normalized["verified_artifacts"] = 99
-    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada"):
+    with pytest.raises(docker_state.OperationError, match="0.5.0 normalizada|inventario"):
         docker_state.validate_restored_state(manifest, expected, restored, normalized)
 
 

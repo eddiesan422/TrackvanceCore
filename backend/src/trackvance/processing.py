@@ -352,6 +352,55 @@ def normalized_value(value, policy: dict):
     return value
 
 
+def transform_value(value, kind: str, p: dict):
+    """Shared exact scalar transform, also used in bounded Spark executor batches."""
+    if value is None:
+        return None
+    value = str(value)
+    if kind == "trim":
+        return value.strip()
+    if kind == "empty_to_null":
+        return None if value == "" else value
+    if kind == "case":
+        return value.upper() if p.get("case", "UPPER") == "UPPER" else value.lower()
+    if kind == "unicode_normalization":
+        return unicodedata.normalize(p.get("form", "NFC"), value)
+    if kind == "id_padding":
+        return (
+            value.rjust(p["width"], p.get("fill", "0"))
+            if p.get("side", "left") == "left"
+            else value.ljust(p["width"], p.get("fill", "0"))
+        )
+    if kind == "remove_characters":
+        return value.translate(str.maketrans("", "", p.get("characters", "")))
+    if kind == "decimal_parse":
+        sep = p.get("thousands_separator", ",")
+        cleaned = value.replace(sep, "") if sep else value
+        parsed = money(cleaned.replace(p.get("decimal_separator", "."), "."))
+        return str(parsed) if parsed is not None else value
+    if kind == "date_parse":
+        for fmt in p["formats"]:
+            try:
+                # This declared transform extracts a calendar date; UTC
+                # makes the intermediate datetime independent of host TZ.
+                return datetime.strptime(value, fmt).replace(tzinfo=UTC).date().isoformat()
+            except ValueError:
+                continue
+        return value
+    raise ProcessingError(f"Transformación no soportada: {kind}")
+
+def apply_row_transforms(row: dict, transforms: list[dict]) -> dict:
+    result = dict(row)
+    for transform in transforms:
+        column = transform["column"]
+        if column not in result:
+            raise ProcessingError(f"Columna de transformación ausente: {column}")
+        result[column] = transform_value(
+            result[column], transform["type"], transform.get("parameters", {})
+        )
+    return result
+
+
 def apply_transforms(frame: pl.DataFrame, transforms: list[dict]) -> pl.DataFrame:
     """Apply the ordered contract declarations; never modify the input frame."""
     result = frame.clone()
@@ -359,45 +408,8 @@ def apply_transforms(frame: pl.DataFrame, transforms: list[dict]) -> pl.DataFram
         column, kind, p = transform["column"], transform["type"], transform.get("parameters", {})
         if column not in result.columns:
             raise ProcessingError(f"Columna de transformación ausente: {column}")
-
-        def convert(value, kind=kind, p=p):
-            if value is None:
-                return None
-            value = str(value)
-            if kind == "trim":
-                return value.strip()
-            if kind == "empty_to_null":
-                return None if value == "" else value
-            if kind == "case":
-                return value.upper() if p.get("case", "UPPER") == "UPPER" else value.lower()
-            if kind == "unicode_normalization":
-                return unicodedata.normalize(p.get("form", "NFC"), value)
-            if kind == "id_padding":
-                return (
-                    value.rjust(p["width"], p.get("fill", "0"))
-                    if p.get("side", "left") == "left"
-                    else value.ljust(p["width"], p.get("fill", "0"))
-                )
-            if kind == "remove_characters":
-                return value.translate(str.maketrans("", "", p.get("characters", "")))
-            if kind == "decimal_parse":
-                sep = p.get("thousands_separator", ",")
-                cleaned = value.replace(sep, "") if sep else value
-                parsed = money(cleaned.replace(p.get("decimal_separator", "."), "."))
-                return str(parsed) if parsed is not None else value
-            if kind == "date_parse":
-                for fmt in p["formats"]:
-                    try:
-                        # This declared transform extracts a calendar date; UTC
-                        # makes the intermediate datetime independent of host TZ.
-                        return datetime.strptime(value, fmt).replace(tzinfo=UTC).date().isoformat()
-                    except ValueError:
-                        continue
-                return value
-            raise ProcessingError(f"Transformación no soportada: {kind}")
-
         result = result.with_columns(
-            pl.Series(column, [convert(v) for v in result[column]], dtype=pl.String)
+            pl.Series(column, [transform_value(v, kind, p) for v in result[column]], dtype=pl.String)
         )
     return result
 
@@ -758,6 +770,7 @@ def sentinel(
     previous_schema: list | None = None,
     history: list | None = None,
     references: dict[str, pl.DataFrame] | None = None,
+    column_rule_counts: dict[int, dict | None] | None = None,
 ) -> tuple[list, dict]:
     checks, metric_records = [], []
     observed = observed_at or datetime.now(UTC)
@@ -866,7 +879,7 @@ def sentinel(
             profile["row_count"] > 0,
             "Sin historial: se verifica que existan registros",
         )
-    for definition in config.get("rules", []):
+    for rule_index, definition in enumerate(config.get("rules", [])):
         rule = RuleDefinition.model_validate(definition)
         if not rule.enabled:
             continue
@@ -887,9 +900,10 @@ def sentinel(
                 rule_id=rule.rule_id,
             )
         else:
-            if frame is None:
+            if frame is None and column_rule_counts is None:
                 raise ProcessingError("El control por registro requiere el Parquet canónico.")
-            if set(rule_columns(rule)) - set(frame.columns):
+            if ((column_rule_counts is not None and column_rule_counts.get(rule_index) is None)
+                    or (frame is not None and set(rule_columns(rule)) - set(frame.columns))):
                 add(
                     rule.code,
                     f"{rule.code} · {column}",
@@ -902,19 +916,30 @@ def sentinel(
                     rule_id=rule.rule_id,
                 )
                 continue
-            evaluation = PolarsCompiler().evaluate(frame, compile_rule(rule, observed), references)
-            mask = evaluation.passed
-            failed = sum(not value for value in mask)
+            if column_rule_counts is not None:
+                counts = column_rule_counts[rule_index]
+                assert counts is not None
+                failed, evaluated_count, skipped_count = (
+                    counts["failed_count"], counts["evaluated_count"], counts["skipped_count"]
+                )
+                total_rows = profile["row_count"]
+            else:
+                assert frame is not None
+                evaluation = PolarsCompiler().evaluate(frame, compile_rule(rule, observed), references)
+                failed = sum(not value for value in evaluation.passed)
+                evaluated_count = sum(evaluation.evaluated)
+                total_rows = frame.height
+                skipped_count = total_rows - evaluated_count
             add(
                 rule.code,
                 f"{rule.code} · {column}",
                 failed,
                 {"max_failed": 0, **p},
                 failed == 0,
-                rule.message or f"{failed} registros incumplen de {frame.height}",
+                rule.message or f"{failed} registros incumplen de {total_rows}",
                 column=column,
-                evaluated_count=sum(evaluation.evaluated),
-                skipped_count=frame.height - sum(evaluation.evaluated),
+                evaluated_count=evaluated_count,
+                skipped_count=skipped_count,
                 failed_count=failed,
                 severity=rule.severity,
                 rule_id=rule.rule_id,

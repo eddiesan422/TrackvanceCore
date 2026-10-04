@@ -1,4 +1,4 @@
-"""Build authentic 0.5.1/0.6.0 installations and certify isolated 0.6.1 restores."""
+"""Build authentic historical installations and certify isolated 0.7.0 restores."""
 from __future__ import annotations
 
 import argparse
@@ -28,8 +28,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = {
     "0.5.1": ("4519ed354202ea8f220682758da234e07b6df3ed", "0009_delivery_reviews", 4),
     "0.6.0": ("587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5),
+    "0.6.1": ("6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5),
 }
-TARGET_VERSION = "0.6.1"
+TARGET_VERSION = "0.7.0"
 
 
 def health_version(port: int) -> str:
@@ -118,9 +119,13 @@ def certify_061_credentials(api: RecoveryApi, compose: list[str], environment: d
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-version", choices=SOURCES, default="0.5.1")
+    parser.add_argument("--source-version", choices=SOURCES, default="0.6.1")
     parser.add_argument("--evidence-dir", type=Path)
     options = parser.parse_args()
+    if options.source_version == "0.6.1":
+        from v070_recovery import authentic_061_cycle
+
+        return authentic_061_cycle(SOURCES["0.6.1"][0], options.evidence_dir)
     baseline_commit, expected_migration, expected_state = SOURCES[options.source_version]
     suffix = uuid4().hex[:12]
     source = f"trackvance-recovery-src-{options.source_version.replace('.', '')}-{suffix}"
@@ -197,12 +202,12 @@ def main() -> int:
         target_claimed = True
         receipt = docker_state.restore(backup, target, start=True, web_port=target_port)
         if health_version(target_port) != TARGET_VERSION:
-            raise ValueError("La restauración no ejecuta 0.6.1.")
+            raise ValueError("La restauración no ejecuta 0.7.0.")
         restored = docker_state.inventory(target)
         api_container = next(item for item in restored["containers"] if item["service"] == "api")
         after = docker_state._copy_snapshot(str(api_container["id"]), evidence / "restored-state.json")
-        normalized = after if expected_state == 5 else docker_state._copy_snapshot(
-            str(api_container["id"]), evidence / "legacy-state.json", command="snapshot-legacy-v4")
+        normalized = docker_state._copy_snapshot(str(api_container["id"]), evidence / "legacy-state.json",
+            command="snapshot-legacy-v5" if expected_state == 5 else "snapshot-legacy-v4")
         if normalized != before:
             raise ValueError("El restore modificó los datos históricos.")
         result.update(source_state_sha256=docker_state.canonical_hash(before),

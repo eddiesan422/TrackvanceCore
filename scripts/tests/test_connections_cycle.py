@@ -22,6 +22,8 @@ def test_connections_runner_never_mutates_existing_resources(monkeypatch, tmp_pa
 
     def execute(arguments, **_kwargs):
         calls.append(arguments)
+        if arguments[-1] == "label=com.docker.compose.project=trackvance-certification":
+            return ""
         if arguments[1:3] == ["ps", "-aq"] and kind == "container":
             return "existing-container"
         if arguments[1:3] == ["volume", "ls"] and kind == "volume":
@@ -48,7 +50,10 @@ def test_connections_runner_failure_cleans_only_new_project_and_redacts_secrets(
     monkeypatch.setattr(runner.secrets, "token_hex", lambda _length: "never-persist-this-credential")
     monkeypatch.setattr(runner.sys, "argv", ["connections_cycle.py", "--project", project, "--port", "3200", "--evidence-dir", str(tmp_path)])
     assert runner.main() == 1
-    assert calls[-1] == ["docker", "compose", "-p", project, "-f", "compose.yml", "-f", "deploy/docker/compose.connections-test.yml", "down", "-v", "--remove-orphans"]
+    deletion_calls = [arguments for arguments in calls if "down" in arguments]
+    assert deletion_calls == [["docker", "compose", "--env-file", str(tmp_path / "private.empty.env"),
+                              "-p", project, "-f", "compose.yml", "-f", "deploy/docker/compose.connections-test.yml",
+                              "-f", str(tmp_path / "private-compose.json"), "down", "-v", "--remove-orphans"]]
     evidence = (tmp_path / "result.json").read_text(encoding="utf-8")
     assert "never-persist-this-credential" not in evidence
     assert "[REDACTED]" in evidence

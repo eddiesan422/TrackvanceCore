@@ -5,21 +5,28 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 import time
+from collections.abc import Sequence
 from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid5
 
-import polars as pl
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import __version__
-from .artifactstore import ArtifactIntegrityError, artifact_dto, link_artifact, storage_provider
+from .artifactstore import (
+    ArtifactIntegrityError,
+    artifact_dto,
+    artifact_store,
+    link_artifact,
+    storage_provider,
+)
 from .audit_context import Actor
-from .config import MAX_ROWS
 from .credential_store import SecretStoreError
 from .data_sinks import (
     AUDIT_NAMES,
@@ -37,14 +44,14 @@ from .data_sinks import (
     timestamp_policy_for_native,
     utf16_code_units,
 )
-from .db import iso, require_record, utcnow
+from .db import SessionLocal, iso, require_record, utcnow
 from .delivery_audit import target_policy
 from .delivery_credential_store import destination_secret_store
 from .delivery_metrics import delivery_metric_semantics
 from .delivery_schemas import DeliveryDraft, DeliveryReviewBody
+from .delivery_streams import DatasetRecords, DeliveryLimits, PreparedRows, unique_keys
 from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
-from .preflight_messages import preflight_message
 from .models import (
     Artifact,
     ArtifactLink,
@@ -61,9 +68,48 @@ from .models import (
     User,
     uid,
 )
+from .preflight_messages import preflight_message
 from .services import audit, run_actor
 
 DELIVERY_LEASE_FENCE_SECONDS = 90
+
+
+def delivery_control(run_id: str, lease_owner: str | None):
+    deadline = time.monotonic() + DeliveryLimits.configured().preparation_timeout_seconds
+    checked_at = 0.0
+
+    def check():
+        nonlocal checked_at
+        now = time.monotonic()
+        if now - checked_at < 0.5:
+            return
+        checked_at = now
+        try:
+            with SessionLocal() as control:
+                current = control.get(Run, run_id)
+                job = control.scalar(select(Job).where(Job.run_id == run_id))
+                if current is None or current.cancel_requested or current.status == "CANCELLED":
+                    raise DeliveryOperationError(409, "RUN_CANCELLED", "La ejecución fue cancelada antes del intento remoto.")
+                if lease_owner is not None and (job is None or job.lease_owner != lease_owner or job.status != "RUNNING"
+                        or job.lease_until is None or job.lease_until.replace(tzinfo=UTC) <= utcnow()):
+                    raise DeliveryOperationError(409, "WORKER_LEASE_LOST", "El worker ya no posee esta ejecución.")
+            if now >= deadline:
+                raise DeliveryOperationError(412, "DELIVERY_PREPARATION_TIMEOUT", "La validación o preparación superó su presupuesto de tiempo.")
+            if shutil.disk_usage(artifact_store.root).free < DeliveryLimits.configured().reserve_disk_bytes:
+                raise DeliveryOperationError(412, "RESOURCE_DISK_INSUFFICIENT", "No hay reserva de disco suficiente para completar la preparación.")
+        except (SQLAlchemyError, OSError):
+            raise DeliveryOperationError(409, "WORKER_LEASE_LOST", "No pudo verificarse la autoridad del worker.") from None
+
+    return check
+
+
+def authorize_delivery_initiator(db: Session, run: Run, draft: DeliveryDraft):
+    from .automation import _authorized
+
+    metadata = (run.execution_plan or {}).get("automation") or {}
+    identity = metadata.get("responsible_user_id") if metadata else run.initiated_by_id
+    user = db.get(User, identity, populate_existing=True) if identity else None
+    _authorized(db, user, run.organization_id, draft)
 
 
 class DeliveryOperationError(Exception):
@@ -379,7 +425,7 @@ def test_saved_destination(
 
 def _owned_version(
     db: Session, version_id: str, organization_id: str
-) -> tuple[DatasetVersion, Dataset, Artifact, pl.DataFrame]:
+) -> tuple[DatasetVersion, Dataset, Artifact, DatasetRecords]:
     version = db.scalar(
         select(DatasetVersion).where(
             DatasetVersion.id == version_id,
@@ -410,7 +456,8 @@ def _owned_version(
             "La versión no tiene un artifact canónico verificable.",
         )
     try:
-        frame = pl.read_parquet(storage_provider.materialize(artifact))
+        frame = DatasetRecords(storage_provider.dataset_paths(artifact),
+                               [column["name"] for column in version.schema_json])
     except Exception as exc:
         raise DeliveryOperationError(
             412,
@@ -539,7 +586,7 @@ def _matching_upsert_constraints(
 def _target_compatibility(
     draft: DeliveryDraft,
     metadata: dict[str, Any],
-    records: list[dict[str, Any]],
+    records: Sequence[dict[str, Any]],
     checks: list[dict[str, Any]],
     sink_type: str,
 ) -> None:
@@ -658,13 +705,9 @@ def _target_compatibility(
         )
         target_length = target_column.get("length")
         if mapping.target_type == "STRING":
-            text_values = [
-                str(record[mapping.source_name])
-                for record in records
-                if record.get(mapping.source_name) is not None
-            ]
             observed_length = max(
-                (utf16_code_units(value) for value in text_values), default=0
+                (utf16_code_units(str(record[mapping.source_name])) for record in records
+                 if record.get(mapping.source_name) is not None), default=0
             )
             if target_length not in {None, -1}:
                 configured_length = mapping.length or observed_length
@@ -677,8 +720,8 @@ def _target_compatibility(
                 )
             supplementary = any(
                 ord(character) > 0xFFFF
-                for value in text_values
-                for character in value
+                for record in records if record.get(mapping.source_name) is not None
+                for character in str(record[mapping.source_name])
             )
             collation_ok = (
                 sink_type != "SQLSERVER"
@@ -826,11 +869,15 @@ def preflight_delivery(
     draft: DeliveryDraft,
     *,
     raise_on_failure: bool = True,
+    control=None,
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     version, dataset, artifact, frame = _owned_version(
         db, draft.dataset_version_id, organization_id
     )
+    frame.control = control
+    if control:
+        control()
     _check(checks, "DATASET_VERSION", True, "DatasetVersion inmutable disponible.")
     _check(checks, "CANONICAL_ARTIFACT", True, "Artifact canónico íntegro y legible.")
     destination = db.scalar(
@@ -910,7 +957,7 @@ def preflight_delivery(
             _check(checks, error.code, False, error.message)
     _check(checks, "COLUMN_MAPPING", mapping_ok, "Mapping técnico sin ambigüedades.")
     records = (
-        frame.select([column.source_name for column in draft.columns]).to_dicts()
+        frame.select([column.source_name for column in draft.columns])
         if not missing_source
         else []
     )
@@ -1022,13 +1069,19 @@ def preflight_delivery(
     payload_ok = values_ok
     if payload_ok:
         try:
-            sink.prepare(
+            payload = sink.prepare_batched(
                 records,
                 [column.model_dump() for column in draft.columns],
                 prepared_target,
                 draft.write_strategy,
                 draft.upsert_keys,
+                binding={"dataset_version_id": version.id, "canonical_sha256": artifact.sha256,
+                         "destination_version_id": destination_version.id,
+                         "destination_config_hash": destination_version.config_hash,
+                         "draft_hash": configuration_hash(draft.snapshot())},
             )
+            if isinstance(payload.rows, PreparedRows):
+                payload.rows.remove()
         except DeliveryError as error:
             payload_ok = False
             _check(checks, error.code, False, error.message)
@@ -1040,21 +1093,11 @@ def preflight_delivery(
     )
     if draft.write_strategy == "UPSERT":
         mapping_by_target = {column.target_name: column for column in draft.columns}
-        key_values: list[tuple[Any, ...]] = []
-        keys_valid = True
-        for record in records:
-            values = tuple(
-                convert_value(
-                    record.get(mapping_by_target[key].source_name),
-                    mapping_by_target[key].model_dump(),
-                )
-                for key in draft.upsert_keys
-            )
-            if any(value is None for value in values):
-                keys_valid = False
-            key_values.append(values)
-        if len(set(key_values)) != len(key_values):
-            keys_valid = False
+        keys_valid = unique_keys(
+            tuple(convert_value(record.get(mapping_by_target[key].source_name),
+                                mapping_by_target[key].model_dump())
+                  for key in draft.upsert_keys) for record in records
+        )
         _check(
             checks,
             "UPSERT_SOURCE_KEYS",
@@ -1064,7 +1107,7 @@ def preflight_delivery(
     resource_ok = (
         frame.height == version.row_count
         and frame.width == version.column_count
-        and frame.height <= MAX_ROWS
+        and frame.height <= DeliveryLimits.configured().max_rows
         and frame.width <= 100
     )
     _check(
@@ -1131,6 +1174,7 @@ def create_delivery_configuration(
     owner: str,
     description: str,
     previous: Configuration | None = None,
+    validation_run_id: str | None = None,
 ) -> Configuration:
     destination = owned_destination(db, draft.destination_id, user)
     destination_version = exact_destination_version(db, destination, draft.destination_version_id)
@@ -1138,7 +1182,14 @@ def create_delivery_configuration(
         db, destination, destination_version, draft.target.model_dump(), lock=True
     )
     _require_target_permissions(db, user, draft, policy)
-    preflight_delivery(db, user.organization_id, draft)
+    if validation_run_id:
+        from .delivery_validation import validated_preflight
+        validated_preflight(db, user, draft, validation_run_id)
+    else:
+        source_version = require_record(db, DatasetVersion, draft.dataset_version_id)
+        if source_version.row_count > DeliveryLimits.configured().synchronous_rows:
+            raise DeliveryOperationError(412, "PREFLIGHT_ASYNC_REQUIRED", "Registra y aprueba el preflight completo en segundo plano antes de publicar.")
+        preflight_delivery(db, user.organization_id, draft)
     version, dataset, _artifact, _frame = _owned_version(
         db, draft.dataset_version_id, user.organization_id
     )
@@ -1766,6 +1817,7 @@ def execute_delivery_run(
     *,
     lease_owner: str | None = None,
 ) -> None:
+    from .automation import AutomationError, authorize_automated_run, claim_delivery_target
     if run.module != "DELIVERY":
         raise DeliveryOperationError(422, "WRONG_MODULE", "La Run no pertenece a Delivery.")
     if run.status in {
@@ -1823,11 +1875,16 @@ def execute_delivery_run(
         return
     preflight_started = time.perf_counter()
     try:
-        preflight = preflight_delivery(db, run.organization_id, draft)
-    except (DeliveryOperationError, DeliveryError) as error:
+        authorize_automated_run(db, run)
+        authorize_delivery_initiator(db, run, draft)
+        preflight = preflight_delivery(db, run.organization_id, draft, control=delivery_control(run.id, lease_owner))
+    except (DeliveryOperationError, DeliveryError, AutomationError) as error:
+        if error.code == "WORKER_LEASE_LOST":
+            raise
+        _fence_delivery_job(db, run, lease_owner)
         code = error.code
         message = error.message
-        run.status = "FAILED_PRECONDITION"
+        run.status = "CANCELLED" if code == "RUN_CANCELLED" else "FAILED_PRECONDITION"
         run.decision = "FAILED"
         run.error = message
         run.finished_at = utcnow()
@@ -1851,6 +1908,8 @@ def execute_delivery_run(
         db, destination, draft.destination_version_id
     )
     try:
+        authorize_automated_run(db, run)
+        authorize_delivery_initiator(db, run, draft)
         attempt_timestamp = utcnow()
         system_audit: dict[str, Any] = {}
         if draft.audit_columns_enabled:
@@ -1864,9 +1923,8 @@ def execute_delivery_run(
         _version, _dataset, source_artifact, frame = _owned_version(
             db, source.id, run.organization_id
         )
-        selected_records = frame.select(
-            [column.source_name for column in draft.columns]
-        ).to_dicts()
+        frame.control = delivery_control(run.id, lease_owner)
+        selected_records = frame.select([column.source_name for column in draft.columns])
         sink = sink_registry.create(settings_for(destination, destination_version))
         prepared_target = draft.target.model_dump()
         if system_audit:
@@ -1885,15 +1943,26 @@ def execute_delivery_run(
             prepared_target["_upsert_constraint"] = min(
                 str(constraint["name"]) for constraint in matching
             )
-        prepared = sink.prepare(
+        preparation_binding = {"run_id": run.id, "dataset_version_id": source.id,
+                     "canonical_sha256": source_artifact.sha256,
+                     "destination_version_id": destination_version.id,
+                     "destination_config_hash": destination_version.config_hash,
+                     "schema_hash": source.schema_hash,
+                     "config_hash": configuration_hash(draft.snapshot()),
+                     "row_count": source.row_count}
+        prepared = sink.prepare_batched(
             selected_records,
             [column.model_dump() for column in draft.columns],
             prepared_target,
             draft.write_strategy,
             draft.upsert_keys,
+            binding=preparation_binding,
         )
-    except (DeliveryOperationError, DeliveryError) as error:
-        run.status = "FAILED_PRECONDITION"
+    except (DeliveryOperationError, DeliveryError, AutomationError) as error:
+        if error.code == "WORKER_LEASE_LOST":
+            raise
+        _fence_delivery_job(db, run, lease_owner)
+        run.status = "CANCELLED" if error.code == "RUN_CANCELLED" else "FAILED_PRECONDITION"
         run.decision = "FAILED"
         run.error = error.message
         run.finished_at = utcnow()
@@ -1914,7 +1983,40 @@ def execute_delivery_run(
     # Fence immediately before STARTED. The conditional write holds the Job row
     # through the marker commit, so another worker cannot claim the same Run in
     # the local-preparation/check-to-commit window.
-    _fence_delivery_start(db, run, lease_owner)
+    try:
+        if isinstance(prepared.rows, PreparedRows):
+            prepared.rows.verify({**preparation_binding, "sink_type": destination.sink_type,
+                "columns": prepared.columns, "target": prepared.target,
+                "strategy": prepared.strategy, "upsert_keys": prepared.upsert_keys})
+        _fence_delivery_start(db, run, lease_owner)
+        authorize_automated_run(db, run)
+        authorize_delivery_initiator(db, run, draft)
+        claim_delivery_target(db, run)
+    except (AutomationError, DeliveryOperationError) as error:
+        if error.code == "WORKER_LEASE_LOST":
+            if isinstance(prepared.rows, PreparedRows):
+                prepared.rows.remove()
+            raise
+        if isinstance(prepared.rows, PreparedRows):
+            prepared.rows.remove()
+        run.status, run.decision, run.error = "FAILED_PRECONDITION", "FAILED", error.message
+        run.finished_at, run.progress_stage = utcnow(), "Target bloqueado"
+        audit(db, "DELIVERY_FAILED", "run", run.id, error.message, actor, run.organization_id, {"error_code": error.code}, run_id=run.id)
+        db.commit()
+        return
+    except (ValueError, OSError):
+        if isinstance(prepared.rows, PreparedRows):
+            prepared.rows.remove()
+        _fence_delivery_job(db, run, lease_owner)
+        run.status, run.decision, run.error = "FAILED_PRECONDITION", "FAILED", "La preparación local perdió su integridad o corresponde a otra configuración."
+        run.finished_at, run.progress_stage = utcnow(), "Preparación local fallida"
+        audit(db, "DELIVERY_FAILED", "run", run.id, run.error, actor, run.organization_id, {"error_code": "PREPARED_BINDING_MISMATCH"}, run_id=run.id)
+        db.commit()
+        return
+    except BaseException:
+        if isinstance(prepared.rows, PreparedRows):
+            prepared.rows.remove()
+        raise
     attempt_number = (prior.attempt_number + 1) if prior else 1
     target_locator = f"{draft.target.schema_name}.{draft.target.table_name}"
     attempt = DeliveryAttempt(
@@ -1962,6 +2064,9 @@ def execute_delivery_run(
         _fence_delivery_result(db, run, attempt, lease_owner)
         _record_remote_failure(db, run, attempt, error, actor)
         return
+    finally:
+        if isinstance(prepared.rows, PreparedRows):
+            prepared.rows.remove()
     write_seconds = time.perf_counter() - write_started
     # A successful remote return is not authority to overwrite an outcome that
     # another worker already reconciled. Fence the queue projection and refresh

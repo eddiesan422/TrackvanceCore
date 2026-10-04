@@ -2,11 +2,12 @@
 
 import csv
 import hashlib
-import io
 import json
 import logging
 import os
 import secrets
+import shutil
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import UTC, timedelta
 from pathlib import Path
@@ -17,6 +18,7 @@ import polars as pl
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from fastapi import APIRouter, Depends, FastAPI, File, Form, Request, Response, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -25,13 +27,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from . import (
     __version__,
     identity_bootstrap,  # noqa: F401
 )
+from .acquisition_api import router as acquisition_router
 from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
+from .automation import AutomationError
+from .automation_api import router as automation_router
 from .config import (
     DEMO_ACCESS_ENABLED,
     DEMO_SEED_ENABLED,
@@ -56,6 +62,7 @@ from .dataset_sources import SourceError
 from .db import SessionLocal, get_db, iso, utcnow
 from .delivery_api import router as delivery_router
 from .delivery_service import DeliveryOperationError
+from .delivery_validation import router as delivery_validation_router
 from .exceptions_api import router as exceptions_router
 from .identity_api import UserResponse, user_dto
 from .identity_api import router as identity_router
@@ -75,6 +82,7 @@ from .models import (
     User,
     uid,
 )
+from .notifications_api import router as notifications_router
 from .operations_common import OperationError
 from .permissions import (
     PUBLIC_ENDPOINTS,
@@ -97,6 +105,7 @@ from .services import (
     enqueue,
     exception_dto,
     finding_dto,
+    iter_result_rows,
     register_export,
     result_rows,
     run_actor,
@@ -131,6 +140,14 @@ def error_response(request: Request, status: int, code: str, message: str, detai
 
 @asynccontextmanager
 async def lifespan(_app):
+    from .acquisition_config import AcquisitionLimits
+    from .delivery_streams import DeliveryLimits
+    from .planner import ResourceBudget
+    from .spark_engine import SparkSettings
+    AcquisitionLimits.configured()
+    DeliveryLimits.configured()
+    ResourceBudget.from_environment()
+    SparkSettings.from_environment()
     migrate()
     with SessionLocal() as db:
         backfill_artifacts(db)
@@ -219,6 +236,11 @@ async def schedule_error(request: Request, exc: ScheduleError):
     return error_response(request, exc.status, exc.code, exc.message)
 
 
+@app.exception_handler(AutomationError)
+async def automation_error(request: Request, exc: AutomationError):
+    return error_response(request, exc.status, exc.code, exc.message)
+
+
 @app.exception_handler(SourceError)
 async def source_error(request, exc):
     return error_response(request, 422, exc.code, str(exc))
@@ -258,7 +280,7 @@ async def conflict_error(request, _exc):
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
     import logging
-    logging.getLogger(__name__).exception("Request %s failed", request.state.request_id, exc_info=exc)
+    logging.getLogger(__name__).error("Request %s failed (%s)", request.state.request_id, type(exc).__name__)
     return error_response(request, 500, "INTERNAL_ERROR", "No se pudo completar la operación. Consulta el registro del servidor.")
 
 
@@ -756,12 +778,12 @@ def dataset_schema(
     try:
         if version.canonical_artifact_id:
             canonical_artifact = owned(db, Artifact, version.canonical_artifact_id, user)
-            canonical_path = storage_provider.materialize(canonical_artifact)
+            canonical_path = storage_provider.dataset_paths(canonical_artifact)
         else:
-            canonical_path = storage_provider.materialize_reference(
+            canonical_path = [storage_provider.materialize_reference(
                 version.canonical_path,
                 expected_sha256=version.sha256 if version.source_type == "INTAKE_OUTPUT" else None,
-            )
+            )]
         physical_schema = pl.scan_parquet(canonical_path).collect_schema()
     except (OSError, pl.exceptions.PolarsError) as exc:
         raise APIError(
@@ -818,8 +840,28 @@ def upload_version(
 def profile(version_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     version = owned(db, DatasetVersion, version_id, user)
     artifact = verify_registered_file(db, version.canonical_path, user.organization_id)
-    path = storage_provider.materialize(artifact)
-    return {**version_dto(version, db), "sample": pl.read_parquet(path, n_rows=20).to_dicts()}
+    from .delivery_streams import DatasetRecords, DeliveryLimits
+    records = DatasetRecords(storage_provider.dataset_paths(artifact), [column["name"] for column in version.schema_json])
+    sample, sample_bytes, limited = bounded_profile_sample(records)
+    return {**version_dto(version, db), "sample": sample, "sampled_rows": len(sample),
+            "sample_bytes": sample_bytes, "sample_limited": limited,
+            "sample_byte_limit": 8 * 1024 * 1024,
+            "delivery_preflight_synchronous_rows": DeliveryLimits.configured().synchronous_rows}
+
+
+def bounded_profile_sample(records, *, byte_limit: int = 8 * 1024 * 1024):
+    """Bound only the presentation sample; the stored global profile is unchanged."""
+    sample: list[dict[str, object]] = []
+    sample_bytes = 2  # JSON array delimiters
+    for record in records.head(20):
+        encoded = json.dumps(jsonable_encoder(record), ensure_ascii=False,
+                             separators=(",", ":")).encode("utf-8")
+        size = len(encoded) + int(bool(sample))
+        if sample_bytes + size > byte_limit:
+            return sample, sample_bytes, True
+        sample.append(record)
+        sample_bytes += size
+    return sample, sample_bytes, False
 
 
 class ColumnRules(InputModel):
@@ -971,22 +1013,28 @@ def monitor(body: MonitorBody, db: Session = Depends(get_db), user: User = Depen
 class IntakeRunBody(InputModel):
     contract_id: str
     dataset_version_id: str
+    requested_engine: Literal["AUTO", "POLARS", "PYSPARK"] = "AUTO"
 
 
 class ReconRunBody(InputModel):
     control_id: str
     source_version_id: str
     target_version_id: str
+    requested_engine: Literal["AUTO", "POLARS", "PYSPARK"] = "AUTO"
 
 
 class MonitorRunBody(InputModel):
     dataset_version_id: str | None = None
+    requested_engine: Literal["AUTO", "POLARS", "PYSPARK"] = "AUTO"
 
 
-def new_run(module, config_id, source_id, target_id, db, user, request=None):
+def new_run(module, config_id, source_id, target_id, db, user, request=None, requested_engine="AUTO"):
     key = request.headers.get("Idempotency-Key") if request else None
     route = request.url.path if request else ""
-    request_hash = hashlib.sha256(json.dumps([module, config_id, source_id, target_id]).encode()).hexdigest()
+    parameters = [module, config_id, source_id, target_id]
+    if requested_engine != "AUTO":
+        parameters.append(requested_engine)
+    request_hash = hashlib.sha256(json.dumps(parameters).encode()).hexdigest()
     if key:
         if len(key) > 128 or not key.strip():
             raise APIError(422, "INVALID_IDEMPOTENCY_KEY", "La clave de idempotencia debe tener entre 1 y 128 caracteres.")
@@ -1000,7 +1048,7 @@ def new_run(module, config_id, source_id, target_id, db, user, request=None):
         raise APIError(422, "WRONG_MODULE", "La configuración no pertenece a este módulo.")
     source = owned(db, DatasetVersion, source_id, user)
     target = owned(db, DatasetVersion, target_id, user) if target_id else None
-    run = enqueue(db, config, source, target, user.name)
+    run = enqueue(db, config, source, target, user.name, requested_engine=requested_engine)
     if key:
         db.add(IdempotencyKey(organization_id=user.organization_id, route=route, key=key, request_hash=request_hash, run_id=run.id))
     try:
@@ -1016,12 +1064,12 @@ def new_run(module, config_id, source_id, target_id, db, user, request=None):
 
 @router.post("/intake/runs", status_code=202)
 def intake_run(body: IntakeRunBody, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return new_run("intake", body.contract_id, body.dataset_version_id, None, db, user, request)
+    return new_run("intake", body.contract_id, body.dataset_version_id, None, db, user, request, body.requested_engine)
 
 
 @router.post("/recon/runs", status_code=202)
 def recon_run(body: ReconRunBody, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return new_run("recon", body.control_id, body.source_version_id, body.target_version_id, db, user, request)
+    return new_run("recon", body.control_id, body.source_version_id, body.target_version_id, db, user, request, body.requested_engine)
 
 
 @router.post("/monitors/{monitor_id}/runs", status_code=202)
@@ -1033,7 +1081,7 @@ def monitor_run(monitor_id: str, body: MonitorRunBody, request: Request, db: Ses
         if not version:
             raise APIError(422, "NO_VERSION", "Carga una versión del dataset antes de ejecutar el monitor.")
         source_id = version.id
-    return new_run("sentinel", config.id, source_id, None, db, user, request)
+    return new_run("sentinel", config.id, source_id, None, db, user, request, body.requested_engine)
 
 
 @router.get("/runs")
@@ -1152,6 +1200,23 @@ def artifact_download(artifact_id: str, db: Session = Depends(get_db), user: Use
     if not related and prerequisite not in effective_permissions(db, user):
         raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite consultar el recurso del artefacto.")
     path = authorize_artifact_file(artifact)
+    if artifact.media_type == "application/vnd.trackvance.parquet-set+json":
+        parts = storage_provider.dataset_paths(artifact)
+        descriptor = json.loads(path.read_text(encoding="utf-8"))
+        bundle = storage_provider.temporary_path(".zip")
+        try:
+            require_export_disk(bundle, sum(part.stat().st_size for part in parts) + path.stat().st_size)
+            with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.write(path, "descriptor.json")
+                for part, metadata in zip(parts, descriptor["parts"], strict=True):
+                    require_export_disk(bundle, part.stat().st_size)
+                    archive.write(part, metadata["path"])
+            audit(db, "ARTIFACT_DOWNLOADED", "artifact", artifact.id, "Conjunto Parquet completo descargado", user.name, user.organization_id, {"kind": artifact.kind, "sha256": artifact.sha256, "parts": len(parts)})
+            db.commit()
+        except BaseException:
+            bundle.unlink(missing_ok=True)
+            raise
+        return FileResponse(bundle, media_type="application/zip", filename=f"trackvance_{artifact.id}_parquet.zip", background=BackgroundTask(bundle.unlink, missing_ok=True))
     audit(db, "ARTIFACT_DOWNLOADED", "artifact", artifact.id, "Artefacto descargado", user.name, user.organization_id, {"kind": artifact.kind, "sha256": artifact.sha256})
     db.commit()
     media = XLSX_MIME_TYPE if artifact.kind == "EXPORT_XLSX" else artifact.media_type
@@ -1184,7 +1249,14 @@ def export_excel(run_id: str, db: Session = Depends(get_db), user: User = Depend
         actor=run_actor(run),
         artifacts=artifacts,
     )
-    rows = result_rows(run, limit=MAX_ROWS * 100, db=db)["items"]
+    rows: list[dict] = []
+    cells = observed_bytes = 0
+    for row in iter_result_rows(run, db=db):
+        cells += len(row)
+        observed_bytes += sum(len(str(value).encode("utf-8")) for value in row.values() if value is not None)
+        if len(rows) >= 100_000 or cells > 500_000 or observed_bytes > 16 * 1024**2:
+            raise APIError(422, "EXPORT_LIMIT_EXCEEDED", "El reporte Excel supera 100.000 filas, 500.000 celdas o 16 MiB de valores. Descarga el CSV completo desde esta ejecución.", {"complete_download": f"/api/v1/runs/{run.id}/export.csv"})
+        rows.append(row)
     try:
         content = build_run_workbook(run_dto(db, run), config_dto(db, config), inputs, manifest, rows)
     except ValueError as exc:
@@ -1200,6 +1272,12 @@ def export_excel(run_id: str, db: Session = Depends(get_db), user: User = Depend
     return Response(content=content, media_type=XLSX_MIME_TYPE, headers={"Content-Disposition": f'attachment; filename="{export_filename(run.module, run.id)}"', "X-Artifact-ID": artifact.id})
 
 
+def require_export_disk(path: Path, expected_bytes: int = 0) -> None:
+    from .delivery_streams import DeliveryLimits
+    if shutil.disk_usage(path.parent).free < DeliveryLimits.configured().reserve_disk_bytes + expected_bytes:
+        raise APIError(412, "RESOURCE_DISK_INSUFFICIENT", "La descarga completa necesita más espacio temporal libre. Conserva la reserva de disco y vuelve a intentarlo.")
+
+
 def csv_cell(value):
     if value is None:
         return ""
@@ -1207,7 +1285,7 @@ def csv_cell(value):
     return "'" + rendered if rendered.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")) else rendered
 
 
-@router.get("/runs/{run_id}/export.csv", deprecated=True, description="Compatibilidad para clientes históricos. La interfaz utiliza el informe Excel estructurado.")
+@router.get("/runs/{run_id}/export.csv", description="Descarga completa de resultados por lotes, sin truncamiento y con protección contra fórmulas CSV.")
 def export_csv(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     run = owned(db, Run, run_id, user)
     if run.module == "DELIVERY":
@@ -1215,15 +1293,33 @@ def export_csv(run_id: str, db: Session = Depends(get_db), user: User = Depends(
     if run.status != "SUCCESS":
         raise APIError(409, "RESULTS_NOT_READY", "Los resultados estarán disponibles al completar la ejecución.")
     verify_registered_file(db, run.result_path, user.organization_id)
-    rows = result_rows(run, limit=MAX_ROWS * 100, db=db)["items"]
-    out = io.StringIO(newline="")
-    fields = list(rows[0]) if rows else ["classification", "message"]
-    writer = csv.DictWriter(out, fieldnames=fields)
-    writer.writeheader()
-    writer.writerows({key: csv_cell(value) for key, value in row.items()} for row in rows)
-    audit(db, "EXPORT_DOWNLOADED", "run", run.id, "Exportación CSV legacy descargada", user.name, user.organization_id, {"format": "CSV_LEGACY"}, run_id=run.id)
-    db.commit()
-    return Response(content="\ufeff" + out.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="trackvance-{run.id}.csv"'})
+    from .artifactstore import link_artifact
+    rows = iter(iter_result_rows(run, db=db))
+    first = next(rows, None)
+    fields = list(first) if first is not None else ["classification", "message"]
+    temporary = storage_provider.temporary_path(".csv")
+    try:
+        require_export_disk(temporary)
+        with temporary.open("w", encoding="utf-8-sig", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=fields)
+            writer.writeheader()
+            if first is not None:
+                writer.writerow({key: csv_cell(value) for key, value in first.items()})
+            for ordinal, row in enumerate(rows, 1):
+                if ordinal % 1000 == 0:
+                    require_export_disk(temporary)
+                writer.writerow({key: csv_cell(value) for key, value in row.items()})
+        require_export_disk(temporary, temporary.stat().st_size)
+        artifact = storage_provider.put_file(db, temporary, "EXPORT_CSV", run.organization_id, f"trackvance-{run.id}.csv", media_type="text/csv")
+        link_artifact(db, run.organization_id, "EXPORT_OF", "ARTIFACT", artifact.id, "RUN", run.id)
+        audit(db, "EXPORT_DOWNLOADED", "run", run.id, "Exportación CSV completa descargada", user.name, user.organization_id, {"format": "CSV", "artifact_id": artifact.id, "sha256": artifact.sha256}, run_id=run.id)
+        db.commit()
+    finally:
+        close = getattr(rows, "close", None)
+        if close:
+            close()
+        temporary.unlink(missing_ok=True)
+    return FileResponse(storage_provider.materialize(artifact), media_type="text/csv; charset=utf-8", filename=f"trackvance-{run.id}.csv", headers={"X-Artifact-ID": artifact.id})
 
 
 @router.get("/monitors/{monitor_id}/metrics")
@@ -1294,9 +1390,17 @@ def rules():
 
 @router.get("/system/engines")
 def engines():
+    from .acquisition_config import AcquisitionLimits
+    from .delivery_streams import DeliveryLimits
+    from .dispatcher import component_status
+    from .spark_engine import runtime_status
     from .worker import worker_status
-    workers = {"DEFAULT": worker_status("DEFAULT"), "DELIVERY": worker_status("DELIVERY")}
-    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local CSV y Parquet; conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark local", "version": None, "available": False, "status": "UNAVAILABLE", "description": "Adaptador opcional aún no implementado. El plan rechaza cargas que superen el presupuesto local; no simula su ejecución."}], "worker": workers["DEFAULT"], "workers": workers, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS}, "mode": "local-prototype"}
+    workers = {lane: worker_status(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION")}
+    acquisition = AcquisitionLimits.configured()
+    delivery = DeliveryLimits.configured()
+    spark = runtime_status()
+    components = {name: {"status": component_status(name)} for name in ("scheduler", "events-notifications", "events-chaining")}
+    return {"items": [{"id": "polars", "name": "Polars", "version": pl.__version__, "available": True, "status": "ACTIVE", "description": "Procesamiento local y conciliación monetaria exacta con Decimal."}, {"id": "spark", "name": "Apache Spark / PySpark", "status": "ACTIVE" if spark["available"] else "UNAVAILABLE", "description": "Ejecución local[K] o Standalone client con agregaciones globales y partes inmutables.", **spark}], "worker": workers["DEFAULT"], "workers": workers, "components": components, "limits": {"max_upload_mb": MAX_UPLOAD_BYTES / 1024 / 1024, "max_rows": MAX_ROWS, "acquisition": acquisition.as_dict(), "delivery": delivery.__dict__}, "mode": "local-prototype"}
 
 
 @router.get("/dashboard")
@@ -1367,11 +1471,13 @@ class PlanPreviewBody(InputModel):
     configuration_id: str
     dataset_version_id: str
     target_version_id: str | None = None
+    requested_engine: Literal["AUTO", "POLARS", "PYSPARK"] = "AUTO"
 
 
 @router.post("/execution-plans/preview")
 def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     from .planner import ExecutionPlanner, WorkloadInput
+    from .services import rule_reference_versions
     config = owned(db, Configuration, body.configuration_id, user)
     if f"{config.module.lower()}:execute" not in effective_permissions(db, user):
         raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite planificar ejecuciones de este módulo.")
@@ -1380,7 +1486,10 @@ def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user
         versions.append(owned(db, DatasetVersion, body.target_version_id, user))
     if versions[0].dataset_id != config.dataset_id or (config.module == "recon" and (len(versions) != 2 or versions[1].dataset_id != config.target_dataset_id)):
         raise APIError(422, "DATASET_MISMATCH", "Las versiones no corresponden a los datasets de la configuración.")
-    return ExecutionPlanner().plan(config.module, [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in versions], effective_config(config.module, config.config))
+    effective = effective_config(config.module, config.config)
+    versions.extend(rule_reference_versions(db, effective, config.organization_id))
+    inputs = [WorkloadInput.from_version(db, version) for version in {v.id: v for v in versions}.values()]
+    return ExecutionPlanner().plan(config.module, inputs, effective, requested_engine=body.requested_engine)
 
 
 app.include_router(router)
@@ -1390,6 +1499,10 @@ app.include_router(identity_router)
 app.include_router(exceptions_router)
 app.include_router(sentinel_router)
 app.include_router(sso_router)
+app.include_router(acquisition_router)
+app.include_router(automation_router)
+app.include_router(notifications_router)
+app.include_router(delivery_validation_router)
 
 
 def openapi_contract():

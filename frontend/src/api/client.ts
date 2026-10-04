@@ -12,7 +12,7 @@ export class ApiError extends Error {
 }
 export async function api<T = RecordData>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
-  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (options.method && options.method !== 'GET') headers.set('X-CSRF-Token', csrfToken)
   let response: Response
   try { response = await fetch(`/api/v1${path}`, { ...options, headers, credentials: 'same-origin' }) }
@@ -26,6 +26,31 @@ export async function api<T = RecordData>(path: string, options: RequestInit = {
   return response.status === 204 ? undefined as T : response.json()
 }
 export function post<T = RecordData>(path: string, data: unknown = {}) { return api<T>(path, { method: 'POST', body: JSON.stringify(data) }) }
+export function uploadBinary<T>(path: string, file: File, progress: (bytes: number) => void, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    request.open('POST', `/api/v1${path}`)
+    request.withCredentials = true
+    request.setRequestHeader('Content-Type', 'application/octet-stream')
+    request.setRequestHeader('X-CSRF-Token', csrfToken)
+    request.upload.onprogress = event => progress(event.loaded)
+    const abort = () => request.abort()
+    const finish = () => signal?.removeEventListener('abort', abort)
+    request.onload = () => {
+      finish()
+      let body: { error?: { message?: string; request_id?: string }; detail?: string | { message?: string } } & T
+      try { body = JSON.parse(request.responseText) } catch { reject(new ApiError('El servidor devolvió una respuesta incompleta.', request.status)); return }
+      if (request.status >= 200 && request.status < 300) { progress(file.size); resolve(body); return }
+      if (request.status === 401 || request.status === 403) window.dispatchEvent(new Event('trackvance:session-refresh'))
+      reject(new ApiError(body.error?.message || (typeof body.detail === 'string' ? body.detail : body.detail?.message) || 'No se pudo recibir el archivo.', request.status, body.error?.request_id))
+    }
+    request.onerror = () => { finish(); reject(new ApiError('No pudimos conectar para recibir el archivo.', 0)) }
+    request.onabort = () => { finish(); reject(new ApiError('Transferencia cancelada antes de registrar la adquisición.', 0)) }
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) { reject(new ApiError('Transferencia cancelada.', 0)); return }
+    request.send(file)
+  })
+}
 export async function download(path: string, fileName: string) {
   let response: Response
   try { response = await fetch(`/api/v1${path}`, { credentials: 'same-origin' }) }

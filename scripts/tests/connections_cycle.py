@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from browser_evidence import run_browser
+from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-connections-e2e-"
@@ -480,12 +481,16 @@ def main() -> int:
                "-f", "deploy/docker/compose.connections-test.yml"]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "connections-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
+    compose = isolate_compose(compose, environment, evidence, project)
 
     def command(arguments, **kwargs):
         return execute(arguments, environment=environment, credentials=credentials, **kwargs)
 
     def run(arguments, **kwargs):
         return command([*compose, *arguments], **kwargs)
+
+    inventory_reader = lambda arguments: command(arguments, capture=True)
+    main_before = main_inventory(inventory_reader)
 
     started = False
     checks = smoke.Checks()
@@ -545,8 +550,8 @@ def main() -> int:
                           f"{result['source_type']}: conserva credenciales cifradas y runs tras reinicio")
         logs = run(["logs", "--no-color", "api", "worker", "delivery-worker"], capture=True)
         assert_no_credentials(logs, credentials, "Secreto en logs de la aplicación")
-        database_dump = run(["exec", "-T", "postgres", "pg_dump", "-U", "trackvance",
-                             "-d", "trackvance", "--data-only"], capture=True)
+        database_dump = run(["exec", "-T", "postgres", "pg_dump", "-U", environment["POSTGRES_USER"],
+                             "-d", environment["POSTGRES_DB"], "--data-only"], capture=True)
         assert_no_credentials(database_dump, credentials, "Credencial en texto plano en metadata")
         audits = api.get("/api/v1/audit-events")
         assert_no_credentials(audits, credentials, "Secreto filtrado en auditoría")
@@ -580,6 +585,7 @@ def main() -> int:
     finally:
         if started:
             run(["down", "-v", "--remove-orphans"])
+        assert_main_unchanged(main_before, inventory_reader)
 
 
 if __name__ == "__main__":

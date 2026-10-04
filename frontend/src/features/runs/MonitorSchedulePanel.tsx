@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom'
 import { CalendarClock, RefreshCw } from 'lucide-react'
 import { api, post } from '../../api/client'
 import type { Collection, RecordData } from '../../api/client'
-import { usePermission } from '../../app/session'
+import { usePermission, useSession } from '../../app/session'
 import { Badge, date, Empty, ErrorState, Field, Loading, Notice, number } from '../../components/ui'
 import './monitor-schedule.css'
 
 type Schedule = {
   id: string; version: number; enabled: boolean; interval_seconds: number;
   next_run_at: string; starts_at: string;
+  responsible_user_id?: string | null; requires_executor_assignment?: boolean;
 }
 type MetricPoint = { run_id: string; configuration_id: string; dataset_version_id: string; observed_at: string; value: number | null; exact_value?: string | null; decision: string }
 type MetricSeries = { metric_key: string; dimensions: Record<string, unknown>; method: string; metric_definition_version: number; points: MetricPoint[] }
@@ -18,6 +19,7 @@ type SeriesResponse = { items: MetricSeries[]; sample_count: number; limit: numb
 
 function ScheduleEditor({ monitorId, schedule }: { monitorId: string; schedule: Schedule | null }) {
   const cache = useQueryClient()
+  const session = useSession(), [assignSelf, setAssignSelf] = useState(false)
   const canConfigure = usePermission('sentinel:schedule'), canExecute = usePermission('sentinel:execute')
   const [minutes, setMinutes] = useState(String((schedule?.interval_seconds || 3600) / 60))
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true), [start, setStart] = useState('')
@@ -26,6 +28,7 @@ function ScheduleEditor({ monitorId, schedule }: { monitorId: string; schedule: 
       interval_seconds: Math.round(Number(minutes) * 60), enabled,
       starts_at: start ? new Date(start).toISOString() : null,
       expected_version: schedule?.version ?? null,
+      ...(assignSelf ? { responsible_user_id: session?.user.id } : {}),
     }),
     onSuccess: () => { cache.invalidateQueries({ queryKey: ['monitor-schedule', monitorId] }); cache.invalidateQueries({ queryKey: ['audit'] }) },
   })
@@ -36,9 +39,10 @@ function ScheduleEditor({ monitorId, schedule }: { monitorId: string; schedule: 
       <label className="schedule-enabled"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={!canConfigure || !canExecute}/> Programación activa</label>
     </div>
     <Notice>Evalúa el último snapshot registrado. Para incluir cambios de una base externa, actualiza primero su dataset. Los intervalos atrasados se agrupan y se omite un intervalo si el monitor sigue ejecutándose.</Notice>
+    {schedule?.requires_executor_assignment && <><Notice>Esta programación histórica está pausada porque no tiene un responsable verificable. Asígnate explícitamente antes de habilitarla.</Notice><label><input type="checkbox" checked={assignSelf} disabled={!canConfigure || !canExecute} onChange={event => setAssignSelf(event.target.checked)}/> Asignarme como responsable de ejecución</label></>}
     {schedule && <p className="muted">Revisión {schedule.version} · {schedule.enabled ? `Próxima ejecución: ${date(schedule.next_run_at)}` : 'Programación pausada'}</p>}
     {save.error && <ErrorState error={save.error}/>}
-    <div><button className="button secondary small" disabled={!canConfigure || (enabled && !canExecute) || save.isPending || !minutes}>{save.isPending ? 'Guardando…' : 'Guardar programación'}</button></div>
+    <div><button className="button secondary small" disabled={!canConfigure || (enabled && (!canExecute || !!schedule?.requires_executor_assignment && !assignSelf)) || save.isPending || !minutes}>{save.isPending ? 'Guardando…' : 'Guardar programación'}</button></div>
   </form>
 }
 

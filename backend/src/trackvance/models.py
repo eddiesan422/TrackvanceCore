@@ -289,8 +289,12 @@ class Run(Record, Base):
 
 class Job(Record, Base):
     __tablename__ = "jobs"
-    __table_args__ = (Index("ix_jobs_lane_status_created_at", "lane", "status", "created_at"),)
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), unique=True)
+    __table_args__ = (
+        Index("ix_jobs_lane_status_created_at", "lane", "status", "created_at"),
+        CheckConstraint("(run_id IS NOT NULL AND acquisition_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND lane = 'ACQUISITION')", name="ck_job_subject_lane"),
+    )
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=True)
+    acquisition_id: Mapped[str | None] = mapped_column(ForeignKey("acquisition_runs.id"), unique=True, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
     lane: Mapped[str] = mapped_column(String(20), default="DEFAULT", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -462,6 +466,7 @@ class MonitorSchedule(Record, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    legacy_enabled_before_identity: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class MonitorScheduleVersion(Record, Base):
@@ -473,6 +478,7 @@ class MonitorScheduleVersion(Record, Base):
     enabled: Mapped[bool] = mapped_column(Boolean)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     actor_id: Mapped[str] = mapped_column(String(64))
+    responsible_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class MonitorOccurrence(Record, Base):
@@ -488,3 +494,10 @@ class MonitorOccurrence(Record, Base):
     status: Mapped[str] = mapped_column(String(30))
     reason_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
     coalesced_intervals: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# Register the pre-version acquisition subject for Job foreign keys. Import the
+# module (rather than an attribute) so direct imports of acquisition_models are
+# also safe during SQLAlchemy metadata discovery.
+from . import acquisition_models as _acquisition_models  # noqa: F401
+from . import automation_models as _automation_models  # noqa: F401

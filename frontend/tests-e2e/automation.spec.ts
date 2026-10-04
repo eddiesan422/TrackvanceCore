@@ -1,0 +1,38 @@
+import { expect, test } from '@playwright/test'
+
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+test.setTimeout(180_000)
+test.skip(process.env.TV_AUTOMATION_E2E !== 'true', 'Requires automation_cycle.py disposable fixtures')
+
+test('real automation history, exact Intake origin and personal inbox', async ({ page }) => {
+  const automationId = process.env.TV_AUTOMATION_ID
+  expect(automationId).toBeTruthy()
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
+  await page.getByRole('link', { name: /^Data Delivery/ }).click()
+  await page.getByRole('link', { name: 'Automatizaciones', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Automatizaciones de Delivery', exact: true })).toBeVisible()
+  await page.goto(`/delivery/automation/${automationId}`)
+  await expect(page.getByRole('heading', { name: 'Ocurrencias y resultados', exact: true })).toBeVisible()
+  await expect(page.getByText('VERSION_ALREADY_PROCESSED')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Ver entrega', exact: true }).first()).toBeVisible()
+  await page.getByRole('link', { name: 'Ver entrega', exact: true }).first().click()
+  await expect(page.getByText('Confirmado', { exact: true }).first()).toBeVisible()
+  await page.getByRole('link', { name: 'Notificaciones', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Notificaciones', exact: true })).toBeVisible()
+  await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
+  const detail = page.getByRole('link', { name: 'Ver detalle', exact: true }).first()
+  await expect(detail).toHaveAttribute('href', /\/runs\/[a-z0-9-]+/)
+  await page.getByRole('button', { name: 'Marcar todas como leídas', exact: true }).click()
+  await expect(page.getByText('Sin leer · ', { exact: true })).toHaveCount(0)
+  await page.getByLabel('Lectura', { exact: true }).selectOption('READ')
+  await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
+  await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')
+  await expect(page.getByText('Sin notificaciones', { exact: true })).toBeVisible()
+  await page.getByLabel('Lectura', { exact: true }).selectOption('ALL')
+  await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
+  expect(errors).toEqual([])
+})

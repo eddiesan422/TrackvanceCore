@@ -9,6 +9,8 @@ import { Badge, Empty, ErrorState, Loading, number, PageHeading, SearchBox } fro
 import { DestinationDetail, DestinationsPage } from './Destinations'
 import { DeliveryBuilder } from './DeliveryBuilder'
 import { DeliveryNavigation } from './DeliveryNavigation'
+import { DeliveryAutomationPage } from './DeliveryAutomation'
+import { DeliveryValidationDetail } from './DeliveryValidationDetail'
 import type { DeliveryConfiguration, DeliveryDestination } from './types'
 import './delivery.css'
 
@@ -52,7 +54,7 @@ export function DeliveriesPage() {
 }
 
 export function DeliveryRoutes() {
-  return <Routes><Route index element={<DeliveriesPage/>}/><Route path="new" element={<DeliveryBuilder/>}/><Route path="destinations" element={<DestinationsPage/>}/><Route path="destinations/:id" element={<DestinationDetail/>}/><Route path="*" element={<div className="empty-state"><h1>Sección de Data Delivery no encontrada</h1><Link className="button primary" to="/delivery">Volver a Entregas <ArrowUpRight size={15}/></Link></div>}/></Routes>
+  return <Routes><Route index element={<DeliveriesPage/>}/><Route path="new" element={<DeliveryBuilder/>}/><Route path="automation" element={<DeliveryAutomationPage/>}/><Route path="automation/:id" element={<DeliveryAutomationPage/>}/><Route path="validation/:id" element={<DeliveryValidationDetail/>}/><Route path="destinations" element={<DestinationsPage/>}/><Route path="destinations/:id" element={<DestinationDetail/>}/><Route path="*" element={<div className="empty-state"><h1>Sección de Data Delivery no encontrada</h1><Link className="button primary" to="/delivery">Volver a Entregas <ArrowUpRight size={15}/></Link></div>}/></Routes>
 }
 
 export { DeliveryNavigation }

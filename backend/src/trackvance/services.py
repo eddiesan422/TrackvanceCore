@@ -1,12 +1,17 @@
 import hashlib
 import json
+import shutil
+import time
 from collections import Counter
-from datetime import UTC
+from collections.abc import Iterator
+from datetime import UTC, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, func, or_, select, update
+from sqlalchemy import cast as sql_cast
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from . import __version__
@@ -595,9 +600,10 @@ def enqueue(
     config: Configuration,
     source: DatasetVersion,
     target: DatasetVersion | None,
-    actor: str,
+    actor: Actor | str,
     *,
     queue: JobQueue | None = None,
+    requested_engine: str = "AUTO",
 ) -> Run:
     if source.dataset_id != config.dataset_id:
         raise ProcessingError("La versión de origen no pertenece al dataset del contrato/control.")
@@ -610,7 +616,8 @@ def enqueue(
     effective = effective_config(config.module, config.config)
     references = rule_reference_versions(db, effective, config.organization_id)
     plan = ExecutionPlanner().plan(config.module,
-        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target, *references] if v], effective)
+        [WorkloadInput.from_version(db, v) for v in {v.id: v for v in [source, target, *references] if v}.values()], effective,
+        requested_engine=requested_engine)
     plan["config_hash"] = configuration_hash(effective)
     run = Run(id=uid(), organization_id=config.organization_id, module=config.module, name=config.name,
               config_id=config.id, dataset_version_id=source.id, target_version_id=target.id if target else None,
@@ -630,12 +637,21 @@ def enqueue(
     audit(db, "RUN_QUEUED" if plan["allowed"] else "RUN_FAILED", "run", run.id,
           f"Ejecución programada: {run.name}" if plan["allowed"] else f"{run.name}: {run.error}",
           actor, run.organization_id, {"reason_code": plan["reason_code"]})
+    if not plan["allowed"]:
+        from .events import record_run_event
+
+        record_run_event(db, run)
     db.flush()
     return run
 
 
 def ensure_input(v: DatasetVersion, db: Session | None = None) -> pl.DataFrame:
     try:
+        if db is not None:
+            from .dataset_scans import iter_version_batches
+
+            batches = list(iter_version_batches(db, v))
+            return pl.concat(batches) if batches else pl.DataFrame(schema={c["name"]: pl.String for c in v.schema_json})
         original_path = None
         if v.original_path:
             original_path = storage_provider.materialize_reference(
@@ -662,9 +678,18 @@ def ensure_input(v: DatasetVersion, db: Session | None = None) -> pl.DataFrame:
         raise ProcessingError(str(exc)) from exc
 
 
-def input_record_numbers(version: DatasetVersion) -> tuple[list[int], str]:
+def input_record_numbers(version: DatasetVersion, db: Session | None = None) -> tuple[list[int], str]:
     """Use only after ensure_input has verified the original bytes and canonical artifact."""
     metadata = version.ingestion_metadata or {}
+    if db is not None and metadata.get("record_number_column"):
+        from .batch_readers import RECORD_NUMBER_COLUMN
+        from .dataset_scans import iter_version_batches
+
+        numbers = [number for batch in iter_version_batches(db, version, include_record_numbers=True)
+                   for number in batch[RECORD_NUMBER_COLUMN]]
+        if len(numbers) != version.row_count:
+            raise ProcessingError("RECORD_NUMBER_MISMATCH")
+        return numbers, metadata.get("row_numbering", "RECORD_NUMBER")
     source_format = metadata.get("source_format")
     row_numbering = metadata.get("row_numbering")
     if version.original_path and source_format in {None, "CSV", "TXT"}:
@@ -810,12 +835,71 @@ def refresh_pending_exception_validations(db: Session, run: Run, actor: Actor | 
                 db.refresh(case)
 
 
+def _sentinel_context(db: Session, run: Run, source: DatasetVersion, config: Configuration) -> dict:
+    from .config_semantics import effective_config
+
+    baseline = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == source.dataset_id,
+                         DatasetVersion.version < source.version).order_by(DatasetVersion.version.desc()))
+    windows: dict[str, int] = {}
+    for rule in effective_config("sentinel", config.config).get("rules", []):
+        if rule.get("type") != "historical_band" or not rule.get("enabled", True):
+            continue
+        parameters = rule["parameters"]
+        column = rule.get("column") or parameters.get("column")
+        metric = parameters.get("metric", "historical_band")
+        key = f"{metric}:{column}" if column else metric
+        windows[key] = max(windows.get(key, 0), parameters.get("window", 10))
+    query = (select(SentinelMetricHistory).join(Run, SentinelMetricHistory.run_id == Run.id)
+             .join(Configuration, SentinelMetricHistory.monitor_id == Configuration.id)
+             .where(SentinelMetricHistory.organization_id == run.organization_id,
+                    Configuration.dataset_id == config.dataset_id, Configuration.name == config.name,
+                    Run.status == "SUCCESS", Run.id != run.id,
+                    SentinelMetricHistory.method == source.profile.get("metric_method", "LEGACY_NORMALIZED"),
+                    SentinelMetricHistory.metric_definition_version == source.profile.get("metric_definition_version", 1),
+                    SentinelMetricHistory.numeric_value.is_not(None),
+                    sql_cast(SentinelMetricHistory.numeric_value, String) != "null")
+             .order_by(SentinelMetricHistory.observed_at.desc(), SentinelMetricHistory.id.desc()))
+    # Historical bands consume only the last compatible window (max 1,000).
+    # Filtering before LIMIT preserves the full-history result, including NULL.
+    rows = [item for key, window in windows.items()
+            for item in reversed(db.scalars(query.where(SentinelMetricHistory.metric_key == key).limit(window)).all())]
+    history = [{"metric_key": item.metric_key, "numeric_value": item.numeric_value, "method": item.method,
+                "metric_definition_version": item.metric_definition_version, "observed_at": iso(item.observed_at),
+                "run_id": item.run_id, "status": "SUCCESS"} for item in rows]
+    return {"profile": source.profile, "schema": source.schema_json, "created_at": source.created_at,
+            "baseline": baseline.profile if baseline else None,
+            "previous_schema": baseline.schema_json if baseline else None, "history": history}
+
+
 def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_at=None):
+    """Execute and clean only this attempt's provider-allocated compute staging."""
+    directories: list[Path] = []
+    try:
+        return _execute_run_impl(db, run, lease_owner, observed_at, directories)
+    finally:
+        for directory in directories:
+            shutil.rmtree(artifact_store.checked_path(directory), ignore_errors=True)
+
+
+def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, observed_at=None,
+                      spark_directories: list[Path] | None = None):
     """Shared worker/seed service. Configuration and dataset references are immutable."""
     from .config_semantics import effective_config
     from .planner import ExecutionPlanner, WorkloadInput
+    from .scheduler import ScheduleError, authorize_scheduled_run
+    from .spark_execution import SparkRunCancelled, compute_spark_run
 
     if run.status in {"SUCCESS", "FAILED_PRECONDITION", "CANCELLED"}:
+        return
+    try:
+        authorize_scheduled_run(db, run)
+    except ScheduleError as exc:
+        _verify_lease(db, run, lease_owner)
+        run.status, run.error, run.progress_stage, run.finished_at = (
+            "FAILED_PRECONDITION", exc.code, "No se cumplen las condiciones de ejecución", utcnow()
+        )
+        audit(db, "RUN_FAILED", "run", run.id, exc.message, "Worker", run.organization_id,
+              {"reason_code": exc.code})
         return
     config = require_record(db, Configuration, run.config_id)
     effective = effective_config(config.module, config.config)
@@ -823,70 +907,116 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
     target = require_record(db, DatasetVersion, run.target_version_id) if run.target_version_id else None
     reference_versions = rule_reference_versions(db, effective, run.organization_id)
     current_plan = ExecutionPlanner().plan(config.module,
-        [WorkloadInput(v.row_count, v.column_count, v.size_bytes) for v in [source, target, *reference_versions] if v], effective)
+        [WorkloadInput.from_version(db, v) for v in {v.id: v for v in [source, target, *reference_versions] if v}.values()], effective,
+        requested_engine=(run.execution_plan or {}).get("requested_engine", "AUTO"))
+    run.execution_plan = {**run.execution_plan, **current_plan, "config_hash": configuration_hash(effective)}
     if not current_plan["allowed"]:
-        raise ProcessingError(current_plan["rejection_code"])
+        _verify_lease(db, run, lease_owner)
+        run.status, run.error, run.progress_stage, run.finished_at = (
+            "FAILED_PRECONDITION", current_plan["rejection_code"], "No se cumplen las condiciones de ejecución", utcnow()
+        )
+        return
     if run.cancel_requested:
         run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
         return
     run.status, run.progress_stage = "RUNNING", "Procesando datos"
     run.started_at = run.started_at or observed_at or utcnow()
     db.commit()
-    frame = ensure_input(source, db)
-    reference_frames = {v.id: ensure_input(v, db) for v in reference_versions}
-    source_numbers, source_numbering = input_record_numbers(source)
     accepted = None
-    if run.module == "intake":
+    spark_result = None
+    accepted_profile = None
+    if current_plan["engine"] == "PYSPARK":
+        from .dataset_scans import profile_paths
+        from .spark_execution import spark_input
+
+        directory = storage_provider.temporary_path(".spark")
+        if spark_directories is not None:
+            spark_directories.append(directory)
+        deadline = time.monotonic() + current_plan["resource_budget"]["timeout_seconds"]
+
+        def profile_checkpoint():
+            from .db import SessionLocal
+
+            with SessionLocal() as control:
+                current = control.get(Run, run.id)
+                if current is None or current.cancel_requested:
+                    raise SparkRunCancelled("RUN_CANCELLED")
+                if lease_owner is not None:
+                    job = control.scalar(select(Job).where(Job.run_id == run.id))
+                    if (not job or job.lease_owner != lease_owner or job.status != "RUNNING"
+                            or not job.lease_until or job.lease_until.replace(tzinfo=UTC) <= utcnow()):
+                        raise ProcessingError("WORKER_LEASE_LOST")
+            if time.monotonic() >= deadline:
+                raise ProcessingError("RUN_TIMEOUT_EXCEEDED")
+            if shutil.disk_usage(directory).free < current_plan["resource_budget"]["temp_min_free_bytes"]:
+                raise ProcessingError("RESOURCE_DISK_INSUFFICIENT")
+
+        try:
+            spark_result = compute_spark_run(db, run, source, effective, directory, target=target,
+                                            references=reference_versions, lease_owner=lease_owner,
+                                            sentinel_context=_sentinel_context(db, run, source, config) if run.module == "sentinel" else None)
+            # Global profile scans spill; publication retains the fence for only
+            # verified immutable copies and metadata, rather than the scan itself.
+            if spark_result.accepted_paths:
+                accepted_profile = profile_paths(list(spark_result.accepted_paths), check=profile_checkpoint)
+        except SparkRunCancelled:
+            db.refresh(run)
+            _verify_lease(db, run, lease_owner)
+            run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
+            return
+        metrics, decision = spark_result.metrics, spark_result.decision
+        run.execution_plan = {**run.execution_plan, "runtime": spark_result.runtime}
+        source_numbering = spark_input(db, source).row_numbering
+        if target:
+            metrics["target_row_numbering"] = spark_input(db, target).row_numbering
+        rows = metrics.get("checks", [])  # Bounded Sentinel checks only; Recon uses global counts.
+    else:
+        frame = ensure_input(source, db)
+        reference_frames = {v.id: ensure_input(v, db) for v in reference_versions}
+        source_numbers, source_numbering = input_record_numbers(source, db)
+    if spark_result is not None:
+        pass
+    elif run.module == "intake":
         rows, metrics, accepted = intake(frame, effective, observed_at=run.started_at, input_row_numbers=source_numbers, references=reference_frames)
         decision = metrics["decision"]
     elif run.module == "recon":
         target_version = require_record(db, DatasetVersion, run.target_version_id)
         target_frame = ensure_input(target_version, db)
-        target_numbers, target_numbering = input_record_numbers(target_version)
+        target_numbers, target_numbering = input_record_numbers(target_version, db)
         rows, metrics = reconcile(frame, target_frame, effective, source_row_numbers=source_numbers, target_row_numbers=target_numbers)
         metrics["target_row_numbering"] = target_numbering
         decision = "CONFORME" if metrics["matched"] == metrics["total_rows"] else "WITH_FINDINGS"
     else:
-        baseline = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == source.dataset_id,
-                             DatasetVersion.version < source.version).order_by(DatasetVersion.version.desc()))
-        history = [{"metric_key": item.metric_key, "numeric_value": item.numeric_value, "method": item.method,
-                    "metric_definition_version": item.metric_definition_version, "observed_at": iso(item.observed_at),
-                    "run_id": item.run_id, "status": "SUCCESS"} for item in db.scalars(
-                        select(SentinelMetricHistory).join(Run, SentinelMetricHistory.run_id == Run.id)
-                        .join(Configuration, SentinelMetricHistory.monitor_id == Configuration.id)
-                        .where(SentinelMetricHistory.organization_id == run.organization_id,
-                               Configuration.dataset_id == config.dataset_id, Configuration.name == config.name,
-                               Run.status == "SUCCESS", Run.id != run.id)
-                        .order_by(SentinelMetricHistory.observed_at))]
-        rows, metrics = sentinel(source.profile, source.schema_json, effective, source.created_at,
-                                 baseline.profile if baseline else None, observed_at=run.started_at,
-                                 frame=frame, previous_schema=baseline.schema_json if baseline else None, history=history, references=reference_frames)
+        rows, metrics = sentinel(config=effective, observed_at=run.started_at,
+                                 frame=frame, references=reference_frames, **_sentinel_context(db, run, source, config))
         decision = "HEALTHY" if metrics["failed_checks"] == 0 else "ALERT"
     metrics["source_row_numbering"] = source_numbering
+    computed_plan = dict(run.execution_plan)
     db.refresh(run)
     if run.cancel_requested:
         run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
         return
     _verify_lease(db, run, lease_owner)
+    run.execution_plan = computed_plan
     # Provider-generated artifact identities keep retries immutable without
     # exposing a local directory layout to the application service.
-    results = storage_provider.temporary_path(".parquet")
-    try:
-        pl.DataFrame({"classification": [r.get("classification", "") for r in rows],
-                      "payload": [json.dumps(r, ensure_ascii=False) for r in rows]},
-                     schema={"classification": pl.String, "payload": pl.String}).write_parquet(results)
-        result_artifact = storage_provider.put_file(
-            db,
-            results,
-            {"intake": "INTAKE_ERRORS", "recon": "RECON_RESULTS", "sentinel": "SENTINEL_PROFILE"}[run.module],
-            run.organization_id,
-            "results.parquet",
-            media_type="application/vnd.apache.parquet",
-        )
-    finally:
-        results.unlink(missing_ok=True)
+    result_kind = {"intake": "INTAKE_ERRORS", "recon": "RECON_RESULTS", "sentinel": "SENTINEL_PROFILE"}[run.module]
+    if spark_result is not None:
+        result_artifact = storage_provider.put_dataset(db, list(spark_result.result_paths), result_kind,
+            run.organization_id, name="results.dataset.json",
+            metadata={"engine": "PYSPARK", "sort_column": "__tv_sort_key", "complete": True})
+    else:
+        results = storage_provider.temporary_path(".parquet")
+        try:
+            pl.DataFrame({"classification": [r.get("classification", "") for r in rows],
+                          "payload": [json.dumps(r, ensure_ascii=False) for r in rows]},
+                         schema={"classification": pl.String, "payload": pl.String}).write_parquet(results)
+            result_artifact = storage_provider.put_file(db, results, result_kind, run.organization_id,
+                                                       "results.parquet", media_type="application/vnd.apache.parquet")
+        finally:
+            results.unlink(missing_ok=True)
     link_artifact(db, run.organization_id, "RUN_OUTPUT", "RUN", run.id, "ARTIFACT", result_artifact.id)
-    if accepted is not None and not run.output_version_id:
+    if (accepted is not None or spark_result is not None and spark_result.accepted_paths) and not run.output_version_id:
         output_dataset = db.scalar(select(Dataset).where(Dataset.organization_id == run.organization_id,
                                   Dataset.name == require_record(db, Dataset, source.dataset_id).name + " · Aprobados"))
         if not output_dataset:
@@ -896,14 +1026,24 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                                      owner=original_dataset.owner, criticality=original_dataset.criticality)
             db.add(output_dataset)
             db.flush()
-        accepted_path = storage_provider.temporary_path(".parquet")
-        try:
-            accepted.write_parquet(accepted_path)
-            output = create_version(db, output_dataset, accepted_path, "accepted.parquet",
-                                    Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), "INTAKE_OUTPUT",
-                                    parent_version_id=source.id, source_run_id=run.id)
-        finally:
-            accepted_path.unlink(missing_ok=True)
+        if spark_result is not None:
+            from .dataset_scans import publish_materialized_version
+
+            output = publish_materialized_version(db, output_dataset, list(spark_result.accepted_paths),
+                filename="accepted.parquet", actor=Actor("WORKER", lease_owner or "trackvance:worker", "Worker"),
+                parent_version_id=source.id, source_run_id=run.id, profiled=accepted_profile,
+                metadata={"source_format": "PARQUET", "row_numbering": source_numbering,
+                          "engine": "PYSPARK", "record_number_column": "__tv_record_number"})
+        else:
+            assert accepted is not None
+            accepted_path = storage_provider.temporary_path(".parquet")
+            try:
+                accepted.write_parquet(accepted_path)
+                output = create_version(db, output_dataset, accepted_path, "accepted.parquet",
+                                        Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), "INTAKE_OUTPUT",
+                                        parent_version_id=source.id, source_run_id=run.id)
+            finally:
+                accepted_path.unlink(missing_ok=True)
         run.output_version_id = output.id
     if run.module == "intake":
         for rule in metrics["rules"]:
@@ -915,7 +1055,9 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
                     db.add(Finding(organization_id=run.organization_id, run_id=run.id, fingerprint=fingerprint, code=code, title=f"{rule['column']}: {rule['failed_count']} incumplimientos de {rule['code']}", severity="MEDIUM" if rule.get("severity") == "WARNING" else "HIGH", details=rule))
     else:
         issues = [r for r in rows if r.get("classification") not in ("MATCH", "PASS")]
-        grouped = Counter(r.get("classification") for r in issues) if run.module == "recon" else None
+        grouped = ({code: count for code, count in metrics["counts"].items() if code != "MATCH" and count}
+                   if spark_result is not None and run.module == "recon"
+                   else Counter(r.get("classification") for r in issues) if run.module == "recon" else None)
         findings: list[dict[str, Any]] = [{"code": code, "title": f"{count} registros · {code}", "details": {"count": count, "classification": code}, "severity": "HIGH" if code == "VALUE_MISMATCH" else "MEDIUM"} for code, count in (grouped or {}).items()]
         if run.module == "sentinel":
             findings = [{"code": r["code"], "title": r["name"], "details": r, "severity": "MEDIUM" if r.get("severity") == "WARNING" else "HIGH"} for r in issues]
@@ -987,6 +1129,23 @@ def result_rows(
 ) -> dict:
     if not run.result_path:
         return {"items": [], "total": 0}
+    if offset < 0 or not 1 <= limit <= 100000:
+        raise ValueError("El resultado paginado admite offset positivo y hasta 100.000 registros.")
+    from .dataset_scans import bounded_scan
+
+    paths = _result_paths(run, db)
+    with bounded_scan(paths) as connection:
+        where = " WHERE classification = ?" if classification else ""
+        parameters = [classification] if classification else []
+        total = connection.execute("SELECT COUNT(*) FROM population" + where, parameters).fetchone()[0]
+        order = " ORDER BY \"__tv_sort_key\"" if "__tv_sort_key" in pl.read_parquet_schema(paths[0]) else ""
+        values = connection.execute("SELECT payload FROM population" + where + order + " LIMIT ? OFFSET ?",
+                                    [*parameters, limit, offset]).fetchall()
+    return {"items": [json.loads(value[0]) for value in values], "total": total}
+
+
+def _result_paths(run: Run, db: Session | None) -> list[Path]:
+    assert run.result_path is not None
     if db is not None:
         artifact = db.scalar(
             select(Artifact).where(
@@ -996,25 +1155,49 @@ def result_rows(
         )
         if not artifact:
             raise ArtifactIntegrityError("No existe un artefacto registrado para el resultado.")
-        result_path = storage_provider.materialize(artifact)
+        return storage_provider.dataset_paths(artifact)
     else:
         # Compatibility for internal callers operating on historical local rows.
-        result_path = storage_provider.materialize_reference(run.result_path)
-    frame = pl.scan_parquet(result_path)
-    if classification:
-        frame = frame.filter(pl.col("classification") == classification)
-    total = frame.select(pl.len()).collect().item()
-    items = [json.loads(payload) for payload in frame.slice(offset, limit).collect()["payload"].to_list()]
-    return {"items": items, "total": total}
+        return [storage_provider.materialize_reference(run.result_path)]
+
+
+def iter_result_rows(run: Run, classification: str | None = None, *, db: Session | None = None,
+                     batch_rows: int = 2048) -> Iterator[dict]:
+    """Read all verified evidence, globally ordered, with bounded spill and fetches."""
+    if not run.result_path:
+        return
+    if not 1 <= batch_rows <= 10000:
+        raise ValueError("El lote del resultado debe tener entre 1 y 10.000 registros.")
+    from .dataset_scans import bounded_scan
+
+    paths = _result_paths(run, db)
+    with bounded_scan(paths) as connection:
+        where = " WHERE classification = ?" if classification else ""
+        order = " ORDER BY \"__tv_sort_key\"" if "__tv_sort_key" in pl.read_parquet_schema(paths[0]) else ""
+        cursor = connection.execute("SELECT payload FROM population" + where + order,
+                                    [classification] if classification else [])
+        while batch := cursor.fetchmany(batch_rows):
+            for payload, in batch:
+                yield json.loads(payload)
 
 
 def _verify_lease(db: Session, run: Run, lease_owner: str | None) -> None:
-    if lease_owner is None:
+    transaction = db.get_transaction()
+    previous = db.info.get("run_publication_fence")
+    if previous and previous[:2] == (run.id, lease_owner) and previous[2] is transaction:
         return
-    job = db.scalar(select(Job).where(Job.run_id == run.id).execution_options(populate_existing=True))
-    if (not job or job.lease_owner != lease_owner or job.status != "RUNNING"
-            or not job.lease_until or job.lease_until.replace(tzinfo=UTC) <= utcnow()):
-        raise ProcessingError("WORKER_LEASE_LOST: El worker ya no posee esta ejecución.")
+    # Run then conditional Job UPDATE is the publication fence. PostgreSQL row
+    # locks remain held until the caller commits; a replacement owner cannot
+    # publish through an expired SELECT check while this transaction is active.
+    db.scalar(select(Run.id).where(Run.id == run.id).with_for_update())
+    if lease_owner is not None:
+        now = utcnow()
+        result = db.execute(update(Job).where(Job.run_id == run.id, Job.lease_owner == lease_owner,
+            Job.status == "RUNNING", Job.lease_until.is_not(None), Job.lease_until > now)
+            .values(lease_until=now + timedelta(seconds=90)).execution_options(synchronize_session=False))
+        if cast(CursorResult, result).rowcount != 1:
+            raise ProcessingError("WORKER_LEASE_LOST: El worker ya no posee esta ejecución.")
+    db.info["run_publication_fence"] = (run.id, lease_owner, db.get_transaction())
 
 
 def _record_metric_history(db: Session, run: Run, metrics: dict) -> None:

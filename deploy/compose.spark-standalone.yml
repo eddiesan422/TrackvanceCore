@@ -1,0 +1,57 @@
+# Optional same-host Standalone. PySpark uses client mode: driver is worker.
+# All executors see immutable snapshots/staging at the same filesystem path.
+services:
+  api:
+    environment:
+      TRACKVANCE_SPARK_MASTER: spark://spark-master:7077
+      TRACKVANCE_SPARK_MEMORY_BUDGET_BYTES: "3221225472"
+  worker:
+    environment:
+      TRACKVANCE_SPARK_MASTER: spark://spark-master:7077
+      TRACKVANCE_SPARK_DRIVER_HOST: worker
+      TRACKVANCE_SPARK_DRIVER_BIND_ADDRESS: 0.0.0.0
+      TRACKVANCE_SPARK_DRIVER_PORT: "7078"
+      TRACKVANCE_SPARK_BLOCK_MANAGER_PORT: "7079"
+      TRACKVANCE_SPARK_MEMORY_BUDGET_BYTES: "3221225472"
+    depends_on:
+      spark-master:
+        condition: service_started
+  spark-master:
+    profiles: [spark-standalone]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: [python, -c, "import os,pyspark; os.execv(pyspark.__path__[0]+'/bin/spark-class', ['spark-class','org.apache.spark.deploy.master.Master','--host','spark-master','--port','7077'])"]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+    restart: "no"
+    cpus: 0.5
+    mem_limit: 512m
+  spark-executor-1:
+    profiles: [spark-standalone]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: [python, -c, "import os,pyspark; os.execv(pyspark.__path__[0]+'/bin/spark-class', ['spark-class','org.apache.spark.deploy.worker.Worker','--host','spark-executor-1','--cores','1','--memory','768m','spark://spark-master:7077'])"]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+    volumes:
+      - trackvance_data:/var/lib/trackvance
+    depends_on: [spark-master]
+    restart: "no"
+    cpus: 1
+    mem_limit: 1536m
+  spark-executor-2:
+    profiles: [spark-standalone]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: [python, -c, "import os,pyspark; os.execv(pyspark.__path__[0]+'/bin/spark-class', ['spark-class','org.apache.spark.deploy.worker.Worker','--host','spark-executor-2','--cores','1','--memory','768m','spark://spark-master:7077'])"]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+    volumes:
+      - trackvance_data:/var/lib/trackvance
+    depends_on: [spark-master]
+    restart: "no"
+    cpus: 1
+    mem_limit: 1536m

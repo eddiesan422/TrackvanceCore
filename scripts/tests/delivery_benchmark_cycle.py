@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from isolation_profile import isolate_compose
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -321,6 +323,7 @@ def main() -> int:
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml",
                "-f", "deploy/docker/compose.delivery-test.yml",
                "-f", "deploy/docker/compose.delivery-benchmark.yml"]
+    compose = isolate_compose(compose, environment, evidence, project)
 
     def run(arguments, *, input_text=None, capture=False):
         return bench.execute([*compose, *arguments], environment, credentials,

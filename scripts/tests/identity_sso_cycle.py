@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from browser_evidence import run_browser
 from credential_leak_probe import scan as scan_credentials
+from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +35,7 @@ def available_port() -> int:
 
 
 def validated_project(value: str) -> str:
-    if not re.fullmatch(r"trackvance-identity-e2e-[a-z0-9-]+", value):
+    if not re.fullmatch(r"trackvance-v070-test-identity-[a-f0-9]{12}", value):
         raise ValueError("Se requiere un proyecto identity-e2e aislado.")
     return value
 
@@ -49,8 +50,10 @@ def storage_snapshot(run, compose: list[str]) -> dict:
 
 
 def main() -> int:
-    project = validated_project(f"trackvance-identity-e2e-{uuid4().hex[:12]}")
+    project = validated_project(f"trackvance-v070-test-identity-{uuid4().hex[:12]}")
     port, oidc_port = (available_port() for _ in range(2))
+    while port == oidc_port or port == 3100 or oidc_port == 3100:
+        port, oidc_port = (available_port() for _ in range(2))
     base_url = f"http://127.0.0.1:{port}"
     client_secret, database_password = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     environment = {
@@ -65,12 +68,14 @@ def main() -> int:
     }
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml", "-f",
                "deploy/docker/compose.identity-test.yml"]
-    evidence = ROOT / ".codex-local" / "identity-sso-e2e" / project
+    evidence = ROOT / ".codex-local" / "v070" / project
     evidence.mkdir(parents=True, exist_ok=False)
+    compose = isolate_compose(compose, environment, evidence, project)
     started = False
     began = time.monotonic()
-    result: dict = {"version": "0.6.1", "project": project, "status": "FAIL",
+    result: dict = {"version": "0.7.0", "project": project, "status": "FAIL",
                     "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS", "mock_provider": True}
+    main_before, outcome = None, 1
 
     def run(arguments, *, cwd=ROOT, capture=False, input_text=None, stage=None):
         completed = subprocess.run(arguments, cwd=cwd, env=environment, text=True,
@@ -115,8 +120,9 @@ def main() -> int:
 
     try:
         run(["docker", "info", "--format", "{{.OSType}}"])
+        main_before = main_inventory(lambda arguments: run(arguments, capture=True))
         for kind in ("container", "volume", "network"):
-            existing = run(["docker", kind, "ls", "-q", "--filter",
+            existing = run(["docker", kind, "ls", "-q", *(['-a'] if kind == 'container' else []), "--filter",
                             f"label=com.docker.compose.project={project}"], capture=True)
             if existing.strip():
                 raise RuntimeError("El proyecto de prueba ya contiene recursos.")
@@ -124,7 +130,7 @@ def main() -> int:
         run([*compose, "up", "--build", "-d", "--wait", "--wait-timeout", "300"])
         with urllib.request.urlopen(base_url + "/api/v1/health", timeout=10) as response:
             health = json.load(response)
-        if health.get("version") != "0.6.1":
+        if health.get("version") != "0.7.0":
             raise RuntimeError("La API no ejecuta la versión objetivo.")
         run([sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project])
         pnpm = shutil.which("pnpm")
@@ -210,11 +216,11 @@ def main() -> int:
             raise RuntimeError("El reinicio modificó el estado persistente de identidad.")
         result.update(status="PASS", restart="PASS", migration=after["migration"],
                       tables={name: len(rows) for name, rows in after["tables"].items()})
-        return 0
+        outcome = 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        result["error"] = str(error)
-        print(str(error), file=sys.stderr)
-        return 1
+        result["error_type"] = type(error).__name__
+        print('ERROR: falló la certificación Identity/SSO; diagnóstico saneado.', file=sys.stderr)
+        outcome = 1
     finally:
         if started:
             # All names are generated here and proven fresh before creation.
@@ -222,10 +228,19 @@ def main() -> int:
                 run([*compose, "down", "-v", "--remove-orphans"])
                 result["cleanup"] = "PASS"
             except (OSError, RuntimeError):
-                result["cleanup"] = "FAIL"
+                result.update(status='FAIL', cleanup='FAIL')
+                outcome = 1
+        if main_before is not None:
+            try:
+                assert_main_unchanged(main_before, lambda arguments: run(arguments, capture=True))
+                result['main_inventory'] = 'UNCHANGED'
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                result.update(status='FAIL', main_inventory='CHANGED_OR_UNVERIFIABLE')
+                outcome = 1
         result["duration_seconds"] = round(time.monotonic() - began, 3)
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, indent=2), flush=True)
+    return outcome
 
 
 if __name__ == "__main__":

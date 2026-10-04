@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -92,6 +93,12 @@ def test_enqueue_accepts_a_queue_port_without_changing_run_semantics(database, t
             db.add(job)
             return job
 
+        def submit_acquisition(self, db, acquisition):
+            job = Job(organization_id=acquisition.organization_id,
+                      acquisition_id=acquisition.id, lane="ACQUISITION", status="QUEUED")
+            db.add(job)
+            return job
+
     source_path = tmp_path / "queue.csv"
     source_path.write_text("id\n001\n", encoding="utf-8")
     queue = RecordingQueue()
@@ -156,7 +163,7 @@ def test_application_flows_materialize_opaque_storage_references(
     authenticated, database, monkeypatch, tmp_path
 ):
     """A provider locator is not a filesystem path, even with local compute."""
-    from trackvance import api, services
+    from trackvance import api, dataset_scans, services
 
     class OpaqueStorageProvider:
         def __init__(self):
@@ -191,6 +198,25 @@ def test_application_flows_materialize_opaque_storage_references(
                 expected_size=artifact.size_bytes,
             )
 
+        def dataset_paths(self, artifact):
+            # The opaque locator stays within the provider boundary.
+            local = SimpleNamespace(path=str(self.materialize(artifact)),
+                media_type=artifact.media_type, sha256=artifact.sha256, size_bytes=artifact.size_bytes)
+            return self.local.dataset_paths(local)
+
+        def put_dataset(self, db, parts, kind, organization_id, *, name="canonical.dataset.json",
+                        artifact_id=None, metadata=None):
+            artifact = self.local.put_dataset(db, parts, kind, organization_id, name=name,
+                artifact_id=artifact_id, metadata=metadata)
+            for item in db.scalars(select(Artifact).where(Artifact.organization_id == organization_id)):
+                if item.path.startswith("test-object://"):
+                    continue
+                reference = f"test-object://bucket/{item.id}"
+                self.references[reference] = item.path
+                item.path = reference
+            db.flush()
+            return artifact
+
         def exists(self, artifact):
             return artifact.path in self.references
 
@@ -201,6 +227,7 @@ def test_application_flows_materialize_opaque_storage_references(
     assert isinstance(provider, StorageProvider)
     monkeypatch.setattr(api, "storage_provider", provider)
     monkeypatch.setattr(services, "storage_provider", provider)
+    monkeypatch.setattr(dataset_scans, "storage_provider", provider)
     content = b"order_id,amount\n001,10\n002,-1\n"
     dataset = authenticated.post("/api/v1/datasets", json={"name": "Opaque storage"}).json()
     upload = authenticated.post(
@@ -237,7 +264,7 @@ def test_application_flows_materialize_opaque_storage_references(
 
     assert process_once("opaque-storage-worker")
     detail = authenticated.get(f"/api/v1/runs/{run_id}").json()
-    assert detail["status"] == "SUCCESS" and detail["decision"] == "REJECTED"
+    assert detail["status"] == "SUCCESS" and detail["decision"] == "REJECTED", detail.get("error")
     assert authenticated.get(f"/api/v1/runs/{run_id}/results").json()["total"] == 1
     manifest = authenticated.get(f"/api/v1/runs/{run_id}/evidence")
     assert manifest.status_code == 200 and manifest.json()["run_id"] == run_id

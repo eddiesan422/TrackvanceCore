@@ -357,6 +357,84 @@ def check_by_code(result: dict[str, Any], code: str) -> list[dict[str, Any]]:
     return [check for check in result["checks"] if check["code"] == code]
 
 
+def test_complete_preflight_is_persisted_private_bound_and_read_only(authenticated, database, delivery_case, monkeypatch):
+    from trackvance.delivery_validation import owned_validation
+    from trackvance.worker import process_once
+
+    monkeypatch.setenv("TRACKVANCE_DELIVERY_SYNCHRONOUS_ROWS", "1")
+    synchronous = authenticated.post("/api/v1/delivery/preflight", json=delivery_case.draft)
+    assert synchronous.status_code == 412
+    assert synchronous.json()["error"]["code"] == "PREFLIGHT_ASYNC_REQUIRED"
+    response = authenticated.post("/api/v1/delivery/validations", json=delivery_case.draft)
+    assert response.status_code == 202
+    identity = response.json()["id"]
+    with database() as db:
+        run = db.get(Run, identity)
+        assert db.scalar(select(Job).where(Job.run_id == identity)).lane == "DELIVERY"
+        assert db.get(Configuration, run.config_id).status == "VALIDATION_PRIVATE"
+        other = User(id="another-person", organization_id=run.organization_id)
+        with pytest.raises(DeliveryOperationError) as denied:
+            owned_validation(db, other, identity)
+        assert denied.value.status == 404
+    assert authenticated.get("/api/v1/delivery/configurations").json()["items"] == []
+    assert process_once(lane="DELIVERY")
+    complete = authenticated.get(f"/api/v1/delivery/validations/{identity}").json()
+    assert complete["status"] == "SUCCESS" and complete["result"]["status"] == "PASS"
+    assert not any(call[0] == "deliver_prepared" for call in delivery_case.runtime.calls)
+    body = {"name": "Bound publication", **delivery_case.draft}
+    assert authenticated.post("/api/v1/delivery/configurations", json=body).status_code == 412
+    changed = deepcopy(body)
+    changed["columns"][3]["length"] = 63
+    assert authenticated.post(f"/api/v1/delivery/configurations?validation_run_id={identity}", json=changed).status_code == 412
+    published = authenticated.post(f"/api/v1/delivery/configurations?validation_run_id={identity}", json=body)
+    assert published.status_code == 201
+    with database() as db:
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
+
+
+def test_complete_preflight_cancel_and_permission_revocation_create_no_attempt(authenticated, database, delivery_case):
+    from trackvance.worker import process_once
+
+    first = authenticated.post("/api/v1/delivery/validations", json=delivery_case.draft).json()
+    cancelled = authenticated.post(f"/api/v1/delivery/validations/{first['id']}/cancel").json()
+    assert cancelled["status"] == "CANCELLED"
+    assert not process_once(lane="DELIVERY")
+    second = authenticated.post("/api/v1/delivery/validations", json=delivery_case.draft).json()
+    with database() as db:
+        db.get(User, "test-user").active = False
+        db.commit()
+    assert process_once(lane="DELIVERY")
+    with database() as db:
+        assert db.get(Run, second["id"]).status == "FAILED_PRECONDITION"
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
+    assert not any(call[0] == "deliver_prepared" for call in delivery_case.runtime.calls)
+
+
+def test_complete_preflight_finds_failure_outside_preview(authenticated, database, delivery_case, tmp_path):
+    from trackvance.worker import process_once
+
+    source = tmp_path / "whole-population.csv"
+    source.write_text("tenant_id,external_id,amount,note\n" + "".join(
+        f"T,{i},12.25,{'x' * 200 if i == 1000 else 'okay'}\n" for i in range(1001)), encoding="utf-8")
+    with database() as db:
+        dataset = db.get(Dataset, delivery_case.source["dataset_id"])
+        version = create_version(db, dataset, source, source.name, actor="Test User")
+        db.commit()
+        identity = version.id
+    draft = {**delivery_case.draft, "dataset_version_id": identity}
+    preview = authenticated.post("/api/v1/delivery/preview", json=draft)
+    assert preview.status_code == 200 and preview.json()["sampled_rows"] <= 20
+    response = authenticated.post("/api/v1/delivery/validations", json=draft)
+    assert response.status_code == 202
+    assert process_once(lane="DELIVERY")
+    outcome = authenticated.get(f"/api/v1/delivery/validations/{response.json()['id']}").json()
+    assert outcome["status"] == "SUCCESS" and outcome["result"]["status"] == "FAIL"
+    assert any(check["status"] == "FAIL" for check in outcome["result"]["checks"])
+    assert "x" * 200 not in json.dumps(outcome)
+    with database() as db:
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
+
+
 @pytest.mark.parametrize("failure", [
     None, "permission", "missing_table", "generated", "length", "decimal",
     "nullability", "missing_column", "missing_required", "upsert_constraint",
