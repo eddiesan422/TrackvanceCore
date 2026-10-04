@@ -1,11 +1,11 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: 0.6.1, credenciales temporales visibles una vez,
-RBAC/SSO y auditoría de publicación conservados, 27 de septiembre de 2026. La certificación integrada se registra por separado;
+Revisión de implementación: 0.7.0, adquisición asíncrona, ejecución Spark,
+automatizaciones, eventos y bandeja personal, 3 de octubre de 2026. La certificación integrada se registra por separado;
 los resultados históricos no certifican automáticamente esta revisión.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y
-dos workers que comparten los modelos y servicios del backend. Docker Compose con
+tres workers, un scheduler y dos consumidores de eventos que comparten los modelos y servicios del backend. Docker Compose con
 PostgreSQL es la instalación local principal. Las reglas y los módulos conservan
 sus contratos al sustituir infraestructura mediante puertos. No se plantea dividir
 el producto en microservicios para completar esta evolución.
@@ -25,37 +25,45 @@ flowchart LR
   A --> P[(PostgreSQL: metadata y jobs)]
   K[Worker DEFAULT] --> P
   KD[Delivery worker] --> P
-  K --> SCH[Scheduler Sentinel local]
-  SCH --> P
+  KA[Acquisition worker] --> P
+  SCH[Scheduler independiente] --> P
+  EN[Consumidor notificaciones] --> P
+  EC[Consumidor encadenamiento] --> P
   A --> S[StorageProvider]
   K --> S
   KD --> S
+  KA --> S
   S --> V[(Volumen persistente de artifacts)]
-  K --> E[LocalExecutionEngine: Polars / Python]
+  K --> E[ExecutionEngine: Polars / PySpark]
   A --> D[DatasetSource + DatasetReader]
+  KA --> D
   D --> F[CSV / XLSX / JSON / Parquet / TXT]
   D --> EXT[PostgreSQL / SQL Server externos]
   A --> SEC[SecretStore de fuentes]
+  KA --> SEC
   A --> DSEC[SecretStore de destinos]
   KD --> DSEC
   KD --> DS[DataSink]
   DS --> OUT[PostgreSQL / SQL Server destino]
 ```
 
-Compose levanta `web`, `api`, `worker`, `delivery-worker` y `postgres`. Solamente `web` publica un
+Compose levanta nueve servicios: `web`, `api`, `postgres`, `worker`,
+`delivery-worker`, `acquisition-worker`, `scheduler`, `events-notifications` y
+`events-chaining`. Solamente `web` publica un
 puerto, ligado a `127.0.0.1`. La API y PostgreSQL son accesibles dentro de la red
-del proyecto. Los cinco servicios tienen `restart: "no"`: el usuario inicia
+del proyecto. Los nueve servicios tienen `restart: "no"`: el usuario inicia
 Trackvance manualmente. Una instalación nueva usa puerto 3000; la instalación
 `trackvance-certification` de este equipo usa 3100.
 
 El volumen `postgres_data` guarda metadata transaccional: organización, usuarios,
 datasets y versiones, configuraciones, runs, jobs, excepciones, auditoría y
 referencias de evidencia, incluidos destinos/revisiones/intentos de Delivery. El
-volumen `trackvance_data`, compartido por API y ambos workers, conserva archivos recibidos, Parquet canónicos, resultados, manifests y
+volumen `trackvance_data`, compartido por API y procesos de aplicación, conserva archivos recibidos, Parquet canónicos, resultados, manifests y
 exports. Los bytes de los archivos no se guardan en PostgreSQL. Detener o recrear
 contenedores conservando sus volúmenes mantiene esas partes de la instalación.
-Solo la API monta los secretos de fuente (`connection_credentials` y
+La API monta los secretos de fuente (`connection_credentials` y
 `connection_keys`) y de destino (`delivery_credentials` y `delivery_keys`). El
+`acquisition-worker` monta exclusivamente los secretos de fuente. El
 worker `DEFAULT` accede únicamente a `trackvance_data`; el `delivery-worker`
 accede a artifacts y secretos de destino, pero nunca a los de fuente. La
 recuperación requiere conservar metadata, artifacts y los cuatro volúmenes de
@@ -69,21 +77,71 @@ No representa la topología principal ni comparte datos con PostgreSQL en Compos
 
 | Frontera | Responsabilidad | Adaptador actual | Evolución preparada |
 | --- | --- | --- | --- |
-| `StorageProvider` | Publicar artifacts inmutables, leerlos, materializarlos y asignar staging temporal | `FileArtifactStore`, volumen local | S3/Azure Blob, cache local acotado y migración de locators |
-| `DatasetSource` | Adquirir datos y entregar `DatasetReadResult` | Archivos locales, PostgreSQL y SQL Server | APIs, otros motores y object storage como fuentes |
+| `StorageProvider` | Publicar artifacts inmutables, verificar descriptor/partes, materializar y asignar staging temporal | `FileArtifactStore`, volumen local, Parquet multipart | S3/Azure Blob, cache local acotado y migración de locators |
+| `DatasetSource` | Adquirir lotes acotados y conservar snapshots inmutables | Archivos, PostgreSQL y SQL Server; `DatasetReadResult` legacy | APIs, otros motores y object storage como fuentes |
 | `DataSink` | Descubrir targets, validar permisos y publicar una DatasetVersion mediante transacción remota | PostgreSQL y SQL Server | S3/Blob/REST, warehouses u otros sinks con contratos específicos |
 | `SecretStore` | Guardar y recuperar credenciales aisladas por organización | Fernet en volumen local; clave en volumen separado | Key Vault, Secrets Manager o Vault |
 | `DatasetReader` | Interpretar un formato y normalizar su estructura | CSV, XLSX, JSON/JSON Lines, Parquet, TXT/TSV | Nuevos formatos sin cambios en reglas |
-| `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine`, Polars/Python | Adaptador de ejecución distribuida |
-| `ProcessingEngine` | Compilar/evaluar expresiones portables de reglas | Compiladores Polars y DuckDB | Otros compiladores con pruebas de paridad |
+| `ExecutionEngine` | Ejecutar un `Run` persistido y generar su evidencia | `LocalExecutionEngine` con Polars/PySpark; `PySparkExecutionEngine` | Otros despliegues distribuidos |
+| `ProcessingEngine` | Compilar/evaluar reglas y operaciones globales | Polars, PySpark con kernels portables acotados; DuckDB para paridad | Otros compiladores con pruebas de paridad |
 | `JobQueue` | Registrar la entrega de un run para ejecución asíncrona | `DatabaseJobQueue`, consumida mediante leases | Publicación y consumo Redis/Celery |
-| Notificaciones históricas | Conservar metadata de entregas 0.6.0 | Lectura histórica, sin envíos ni adaptador SMTP | Futuro módulo de eventos y destinatarios; canal por decidir según el cliente |
+| Notificaciones históricas | Conservar metadata de entregas 0.6.0 | Lectura histórica, sin envíos ni adaptador SMTP; eventos nuevos en bandeja personal independiente | Otros canales con adaptadores explícitos |
+| Automatización y eventos | Despachar ocurrencias, encadenar Intake→Delivery y publicar avisos personales | Scheduler, outbox transaccional, consumidores y bandeja interna | Otros canales con adaptadores explícitos |
 
-`ExecutionPlanner` estima memoria y disco antes de aceptar una ejecución. Elige
-POLARS dentro del presupuesto local; si la carga necesita PYSPARK, devuelve
-`ENGINE_UNAVAILABLE`, porque el adaptador distribuido todavía no está instalado.
-DuckDB sí está implementado para compilación/paridad de reglas y lectura de
-metadata Parquet, pero no ejecuta un run completo como motor seleccionable.
+`ExecutionPlanner` acepta `AUTO`, `POLARS` o `PYSPARK`, incluye origen, destino y
+versiones de referencia, y usa el tamaño real de las partes canónicas. AUTO elige
+Polars dentro del presupuesto de población materializada y Spark para cargas
+mayores. Una elección explícita conserva el motor solicitado. Runtime ausente,
+presupuestos insuficientes o disco insuficiente generan `FAILED_PRECONDITION`
+con código persistido. Las estimaciones no sustituyen los límites del proceso.
+DuckDB compila reglas para paridad y ejecuta scans globales con spill para perfil,
+paginación y exportación; no es un motor seleccionable de Run.
+
+### Ejecución Spark y memoria
+
+La imagen fija Python 3.12, Java 17 y PySpark 4.0.3. El despliegue base usa
+`local[2]`. El overlay `deploy/compose.spark-standalone.yml` añade un master y
+dos executors; el driver permanece en `worker` mediante client mode, compatible
+con aplicaciones Python Standalone. API y worker comparten el master y el
+presupuesto para que el plan persistido describa la ejecución real. Los executors
+montan sólo artifacts, nunca credenciales de fuentes o destinos.
+
+Spark distribuye lectura, unicidad, referencias, cruces globales y escritura de
+partes. Los RDD se persisten en disco. Los predicados escalares se compilan con el
+kernel Polars existente en lotes de executor; esta decisión conserva Decimal
+arbitrario, Unicode, condiciones y fechas sin conversión a `DECIMAL(38)` ni float.
+Unicidad y referencia ordenan lookup antes de los registros aplicables y cruzan
+el flujo sin buffers Python por valor repetido, incluso con una clave muy frecuente.
+El runtime lo declara como `PORTABLE_POLARS_BATCH_V1`. ReconOps reparte y ordena
+claves compuestas completas; cada grupo preserva filas originales y se evalúa
+con la misma semántica de comparaciones y agregaciones del motor local.
+
+Los límites predeterminados son 2.048 registros y 8 MiB por lote, 64 KiB de
+contenido y margen por registro, y 10.000 registros/16 MiB por grupo ReconOps.
+El perfil global aporta una cota de anchura por todas las columnas; sin esa
+información histórica, Arrow lee un registro por lote. El límite se comprueba
+también después de transformar. Una clave sesgada o un registro demasiado ancho
+fallan con código de recursos y sin truncar resultados. Estas cotas limitan los
+buffers de aplicación; Arrow/JVM, páginas Parquet y librerías conservan overhead
+propio, por lo que Docker impone además límites reales de memoria/CPU.
+
+La población y la evidencia completa se publican como Parquet multipart con
+descriptor, filas, tamaños y hashes verificados. Los aceptados Intake conservan
+el número original en `__tv_record_number`; esa columna interna se excluye del
+esquema de negocio. El driver recibe contadores y checks acotados; la optimización
+de fallos escasos admite como máximo un lote de números enteros para broadcast.
+No recoge registros de negocio de la población. La paginación y el CSV completo
+usan cursor acotado y spill; Excel exige sus límites explícitos de filas/celdas/bytes.
+
+Cada Run crea una aplicación y JobGroup identificables. Un monitor comprueba
+cancelación, lease, tiempo y disco; la publicación vuelve a bloquear Run y retiene
+la autoridad mediante CAS del Job hasta commit. Los executors reciben snapshots
+materializados y código del paquete, sin sesiones SQL ni secretos. La evidencia
+registra versión, master, application ID, parámetros efectivos y presupuestos.
+El histórico Sentinel consulta sólo la ventana compatible de cada métrica,
+hasta 1.000 registros por regla, antes de calcular medianas y bandas exactas.
+Ver [ADR 0022](adr/0022-spark-exact-bounded-execution.md) y
+[medición Spark](development/spark-volume-0.7.0.md).
 
 Las fronteras son incrementales. Algunos puertos reciben sesiones SQLAlchemy y
 modelos ORM; los campos históricos `*_path` siguen almacenando locators locales.
@@ -112,6 +170,9 @@ completamente independientes.
 | Modelo persistido | `models.py`, `db.py`, `backend/migrations/` | ORM, transacciones y evolución del schema |
 | Almacenamiento y entrada | `artifactstore.py`, `dataset_readers.py` | Puertos, adaptadores locales, integridad y lectura multiformato |
 | Ejecución asíncrona | `execution.py`, `jobqueue.py`, `worker.py`, `planner.py` | Entrega de jobs, leases, heartbeat, presupuesto y procesamiento |
+| Spark | `spark_engine.py`, `spark_execution.py` | RDD globales, kernels acotados, materialización multipart y control de autoridad |
+| Adquisición | `acquisition.py`, `batch_readers.py`, `dataset_scans.py` | Upload/snapshot asíncrono, límites, partes canónicas y perfil global exacto |
+| Automatización y bandeja | `automation.py`, `dispatcher.py`, `events.py`, `notifications_api.py` | Ocurrencias IANA, encadenamiento, outbox, consumidores y avisos personales |
 | Sentinel programado | `scheduler.py`, `sentinel_api.py` | Programaciones, revisiones, ocurrencias, despacho transaccional e histórico de series |
 | Gestión de casos | `exceptions_api.py` | Responsable, prioridad, SLA, comentarios, adjuntos y filtros; validación compartida en servicios |
 | Administración e identidad | `identity_api.py`, `permissions.py`, `sso_api.py`, `notifications.py` | RBAC persistido, catálogo, username, credencial efímera, primer acceso, OIDC, revocación y auditoría |
@@ -205,12 +266,16 @@ actúan antes de normalizar claves y agregar; las configuraciones nuevas no toma
 arbitrariamente el primer valor no agregado de un grupo. La compatibilidad legacy
 se centraliza y no reescribe snapshots ni fingerprints históricos.
 
-El scheduler usa tres tablas: `monitor_schedules`, revisiones inmutables en
+El scheduler Sentinel conserva tres tablas: `monitor_schedules`, revisiones inmutables en
 `monitor_schedule_versions` y `monitor_occurrences` enlazadas a configuración,
-DatasetVersion y Run. Despacha la última versión registrada con actor SYSTEM.
+DatasetVersion y Run. Despacha la última versión registrada con actor SYSTEM y
+responsable User explícito; se revalidan permisos vigentes al despachar y ejecutar.
 Agrupa atrasos y omite solapamientos; cada decisión queda registrada. No refresca
 fuentes ni añade un servicio externo. La cronología visible usa fechas previstas,
-despacho e inicio real; el worker detenido implica programación detenida.
+despacho e inicio real. Desde 0.7.0 lo atiende `scheduler`, separado del worker.
+Las automatizaciones Delivery incorporan revisiones inmutables, zona IANA,
+ocurrencias idempotentes y reglas activables Intake→Delivery. Outbox y consumidores
+persisten cada decisión y publican avisos internos sin SMTP.
 
 ### Data Delivery y confirmación remota
 
@@ -221,9 +286,9 @@ al publicar y nuevamente al ejecutar. `CREATE_AND_LOAD`, `APPEND`, `OVERWRITE` y
 `UPSERT` operan dentro de una transacción del motor remoto. No existe una
 transacción distribuida entre PostgreSQL interno y el destino.
 
-Cada job Delivery usa la lane `DELIVERY`; el resto usa `DEFAULT`. Los heartbeats
-`worker-heartbeat-default.json` y `worker-heartbeat-delivery.json` permiten
-diagnosticar ambos procesos. El scheduler Sentinel sólo corre en DEFAULT. Un
+Cada job Delivery, incluido preflight persistido, usa la lane `DELIVERY`;
+adquisición usa `ACQUISITION` y calidad usa `DEFAULT`. Los heartbeats por lane
+permiten diagnosticar los tres procesos. El scheduler corre de forma independiente. Un
 `DeliveryAttempt` iniciado termina `COMMITTED`, `FAILED` o `UNKNOWN`. `UNKNOWN`
 preserva una confirmación de commit perdida o un intento recuperado sin prueba:
 no se reinterpreta ni se reintenta automáticamente. El receipt sólo existe tras
@@ -325,8 +390,9 @@ mantienen separados de los backups.
 En 0.6.0 NotificationService intentaba enviar la temporal por SMTP; 0.6.1 retira
 ese flujo y el adaptador. notification_deliveries, sus filas y 0011 se conservan
 para lectura histórica y recuperación. No se crea una entrega ni un evento de
-envío al administrar usuarios. El futuro módulo de notificaciones y su canal se
-decidirán según necesidad del cliente. Ver [identidad](development/identity-060.md).
+envío al administrar usuarios. 0.7.0 añade avisos operativos en una bandeja
+personal mediante outbox; la credencial temporal sigue visible una sola vez y
+no se envía por ese canal. Ver [identidad](development/identity-060.md).
 
 ### Carga diferida de la interfaz
 
@@ -345,12 +411,12 @@ de warning artificialmente aumentado. El entry JS medido baja de 611.407 a
 
 | Componente | Local implementado | Producto objetivo |
 | --- | --- | --- |
-| Despliegue | Docker Compose, cinco servicios | Kubernetes: AKS, EKS u OpenShift; mismos límites del monolito |
+| Despliegue | Docker Compose, nueve servicios; overlay Spark Standalone opcional | Kubernetes: AKS, EKS u OpenShift; mismos límites del monolito |
 | Metadata | PostgreSQL 16 en volumen | PostgreSQL administrado, políticas de disponibilidad y recuperación |
 | Artifacts | `FileArtifactStore` en volumen | S3 o Azure Blob mediante `StorageProvider` |
 | Fuentes | Cinco formatos de archivo, PostgreSQL y SQL Server | S3, Azure Blob, APIs y otros motores mediante `DatasetSource` |
 | Destinos | PostgreSQL y SQL Server mediante `DataSink`; escritura transaccional controlada | S3/Blob/REST, warehouses y otros sinks con gobierno productivo |
-| Procesamiento | Polars/Python; DuckDB para reglas portables | Polars y PySpark según presupuesto y capacidad instalada |
+| Procesamiento | Polars y PySpark Local/Standalone; DuckDB para reglas y scans acotados | Nuevos despliegues según presupuesto y capacidad instalada |
 | Cola | Jobs PostgreSQL, leases, reintentos y heartbeat | Redis/Celery con entrega fiable y workers escalables |
 | Identidad | RBAC dinámico, usuarios locales, primer acceso y OIDC Microsoft/Google | Gobierno ampliado, grupos/dominios y directorio multi-organización |
 | Secretos | Stores y claves separados para fuentes y destinos | Key Vault, Secrets Manager o Vault y rotación |
@@ -359,7 +425,7 @@ de warning artificialmente aumentado. El entry JS medido baja de 611.407 a
 | Entrega | Workflow de checks backend/frontend/migraciones/E2E | Controles de seguridad, dependencias e imágenes y promoción de entornos |
 
 No se han añadido dependencias cloud al prototipo. Kubernetes, Redis/Celery,
-PySpark runtime, gestores de secretos, telemetría distribuida y Terraform/Helm
+gestores de secretos cloud, telemetría distribuida y Terraform/Helm
 son objetivos de producto; su presencia en este mapa no significa que existan
 adaptadores o despliegues certificados.
 
@@ -374,12 +440,16 @@ revisión local, se controla con `DEMO_ACCESS_ENABLED` y requiere sustitución a
 de una exposición de producto. `DEMO_SEED_ENABLED` es independiente: sólo decide
 si se crean datos sintéticos durante el arranque.
 
-La carga admite por defecto 10 MiB, 100.000 filas y 100 columnas. La inspección
+La adquisición asíncrona admite por defecto 1 GiB de archivo, 5.000.000 de filas,
+100 columnas y 2 GiB observados; los lotes se limitan a 5.000 filas/8 MiB y
+el perfil usa 256 MiB con spill. CSV, TXT, JSON Lines, Parquet y snapshots SQL
+se consumen incrementalmente. XLSX y JSON array usan un adaptador acotado a
+10 MiB/100.000 filas, con rechazo explícito al superar ese dominio. La ruta
+síncrona histórica conserva 10 MiB/100.000 filas. La inspección
 previa usa hasta 100 registros cuando corresponde, o metadata embebida Parquet;
-no exige un escaneo completo sólo para ofrecer las columnas. La carga/perfil
-inicial permanece síncrona y acotada. Las ejecuciones de módulos pasan al worker.
-La lectura XLSX/JSON y el profiling de gran volumen requieren una evolución
-asíncrona antes de ampliar estos límites.
+no exige un escaneo completo sólo para ofrecer las columnas. El upload/snapshot
+nuevo pasa a ACQUISITION y el perfil se publica tras verificar la población
+completa. Las ejecuciones de calidad pasan a DEFAULT.
 
 Data Delivery trabaja con la DatasetVersion canónica registrada y conserva los
 límites de columnas del prototipo. El preflight diagnostica incompatibilidades;
@@ -411,7 +481,7 @@ vacío y asignó lane DEFAULT a los jobs históricos. En 0.5.1 el restore llega 
 25 tablas/0009; los backups anteriores empiezan sin revisiones UNKNOWN y los
 backups nuevos deben recuperarlas íntegramente. La recertificación de ambos
 orígenes se informa en validación y no se deduce del ensayo histórico.
-En 0.6.0 y 0.6.1 el destino es 0012/state 5 con 31 tablas; se compara el estado nativo
+En 0.6.0 y 0.6.1 el destino histórico es 0012/state 5 con 31 tablas; se compara el estado nativo
 completo o las proyecciones legacy-v4/v3/v2 según la versión real del origen.
 En el ciclo 0.6.1 se ejecutaron nuevamente el drill nativo y las restauraciones
 auténticas desde 0.6.0 y 0.5.1. Las restauraciones desde 0.4.1 y 0.5.0 son
@@ -425,8 +495,11 @@ conserva explícita.
 El framework de volumen registra recursos y resultados medidos. Los límites por
 defecto no aumentan porque exista un runner: sólo una medición completa puede
 justificar cambiarlos en ExecutionPlanner. Un volumen rechazado por preflight o
-no ejecutado por recursos no se presenta como máximo certificado. PySpark sigue
-sin adaptador operativo.
+no ejecutado por recursos no se presenta como máximo certificado. La medición
+0.7.0 ejercita PySpark Local y Standalone con un millón de filas en Intake,
+ReconOps y Sentinel; documenta recursos y límites por separado. El estado nativo
+0.7.0 llega a 0015/state 6 con 42 tablas y verifica también multipart y outbox,
+según [ADR 0021](adr/0021-v070-state-compatibility.md).
 
 La medición histórica 0.4.0 usó payload variado determinista: 106.194.531 bytes de
 archivo, 50.000 filas, cuatro columnas y 79.145.600 bytes de Parquet canónico.

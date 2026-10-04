@@ -1,92 +1,38 @@
-# Validación de Trackvance Core 0.6.1
+# Validación de Trackvance Core 0.7.0
 
-Baseline real `587909bc4462683e87e403dd2ea29a1d6d4afe08`, versión 0.6.0, rama
-`feat/local-prototype`; se verificaron local y remoto antes de editar y antes de
-publicar. Implementación `4d3c656ab0bc250f50eb53972d22839da9e4485c`. No existían cambios ajenos que sobrescribir.
-La instalación principal parte realmente de 0.6.0/0012/state 5.
+Baseline auténtica `6fac26b3648cb4a4b50c094ef12c1e103bc97ddd`, versión 0.6.1/0012/31 tablas; rama `feat/local-prototype`. El proyecto principal permanece intacto durante desarrollo y certificación.
 
-Estos resultados son ejecuciones nuevas de 0.6.1. Los escenarios de navegador se
-deduplican y los opt-in se prueban en sus proyectos dedicados. Los antecedentes
-se conservan en [validation-0.6.0.md](validation-0.6.0.md), sin convertirlos en
-certificación actual. [Matriz de 22 criterios](acceptance-0.6.1.md),
-[revisión de seguridad](security-review-0.6.1.md), [permisos](permission-matrix.md)
-y [evidencia](evidence/0.6.1/README.md) amplían los resultados.
+La release sigue abierta hasta completar todos los gates obligatorios, documentación/PDF final, CI del SHA final y upgrade real. Las omisiones JVM del host se ejecutan en suites Docker dedicadas sin SKIP.
 
-| Gate 0.6.1 | Resultado observado |
-| --- | --- |
-| Corte y procedencia | 27 septiembre 2026; feat/local-prototype. Baseline 587909bc4462683e87e403dd2ea29a1d6d4afe08, sin commits remotos posteriores al iniciar. Implementación 4d3c656ab0bc250f50eb53972d22839da9e4485c. Ejecuciones nuevas 0.6.1; no se heredan éxitos 0.6.0. |
-| Backend local | 1.197 pytest backend/scripts PASS en 95,850 s tras corregir el runner; 0 FAIL y dos avisos upstream conocidos. Incluye cinco regresiones nuevas de diagnóstico seguro; 70 focales del harness PASS. Antes: 1.192 PASS y 54 focales identidad/SSO PASS, conservados como ejecución inicial. Ruff PASS, Mypy 42 archivos PASS y uv sync --frozen PASS. Overlays SQL de prueba validados con Compose y healthcheck TCP. |
-| Frontend local | 174 Vitest / 20 archivos PASS en 13,056 s; 0 FAIL/0 SKIP. Instalación pnpm congelada, ESLint, TypeScript y production build PASS. Modal, cierre/pagehide, respuesta tardía y query/mutation cache comprobados. |
-| OpenAPI y permisos | 0.6.1: 96 paths, 117 operaciones, 89 schemas; snapshot exacto probado. 41 permisos y 105 reglas protegidas. 31 tablas, head 0012_delivery_target_audit, cero nuevas migraciones. Modelos persistentes y 0001..0012 intactos; hashes de bytes antes/después coinciden. |
-| Migraciones PostgreSQL | PostgreSQL 16 real: upgrade/check/downgrade/upgrade, paridad ORM y preservación histórica PASS. Roundtrip 0008↔0012 conserva 24 tablas y ocho vínculos Delivery, con COMMITTED/UNKNOWN. Contenedor desechable eliminado. |
-| Compose integral | PASS: smoke API 84; Playwright 26 PASS / 15 opt-in SKIP / 0 FAIL en 125,025 s. Doctor, migraciones, restart=no, snapshot exacto tras restart y cleanup PASS. El tercer intento corrigió sincronización del test y CRLF del clipboard Windows; ambos fallos anteriores están registrados. |
-| Identity/SSO | 9/9 Playwright PASS en 45,173 s; ciclo 104,251 s. Temporal/primer acceso/regeneración/revocación, roles y cuatro perfiles OIDC mock RS256. Expiración, cero entregas nuevas, privacidad y restart PASS. No Mailpit. |
-| Privacidad ejecutada | Alta y regeneración nunca entran en mutation cache. Copiar3, cerrar y ausencia en DOM/storage/cookies/URL PASS. Probe stdin: 14 secretos RAM en Compose y 15 en identidad, DB/log/artifacts/archivos de navegador PASS. Backups decodificados nativo/060/051 y excepciones inyectadas PASS. Sin screenshots, trace, vídeo ni contexto DOM sensible publicado. |
-| Conexiones reales | 96 comprobaciones PostgreSQL/SQL Server y smoke 84 PASS. Playwright 30 PASS / 11 opt-in SKIP / 0 FAIL en 166,452 s. Tipos temporales, adquisición/refresh/historia y módulos; secretos y persistencia tras reinicio PASS. |
-| Delivery real | 308 comprobaciones PostgreSQL 16/18 y SQL Server PASS; Playwright 1/1 en 5,189 s. fechaIngesta/usuario, policies, CREATE/APPEND/OVERWRITE/UPSERT, drift, receipt/manifest/linaje y actor interno local/SSO conservados; reinicio y scans PASS. |
-| UNKNOWN y límites | Pérdida de acknowledgement inyectada en el adaptador después de commit SQL real PASS, con policy required y sin replay. Fallo físico de red en ventana exacta: NOT_RUN_NONDETERMINISTIC. No se equiparan esas pruebas. |
-| Demo limpia y cobertura | Demo sin seed 1/1 PASS en 1,878 s; ciclo 61,566 s, restart y cleanup PASS. 41 escenarios distintos cubiertos: 26 comunes + 4 conexiones + 9 identidad + 1 Delivery + 1 demo limpio. Repeticiones no se suman; SKIP opt-in cubiertos por suites dedicadas. |
-| Recovery nativo 0.6.1 | PASS: 9 artifacts, dos secretos SQL, 269 relaciones, 6 roles/95 grants y tablas operativas pobladas. Notificación histórica declarada como fixture sintética; alta/regeneración no añaden filas. Origen destruido antes de restore. Dump decodificado y 15 archivos examinados contra seis secretos conocidos, sin fugas. Ciclo completo repetido después del ajuste TCP: PASS, con preservación, scan y limpieza. |
-| Restore auténtico 0.6.0 | PASS desde 587909b/0012/state 5: 78 artifacts y estado histórico exacto; una entrega FAILED/NO_PROVIDER real de la baseline preservada. Nuevas emisiones 0.6.1 sin entregas adicionales. Backup decodificado (82 archivos), logs y cleanup PASS; 143,074 s. Dos fallos iniciales del harness se corrigieron y documentaron. |
-| Restore auténtico 0.5.1 | PASS desde 4519ed3/0009/state4: 78 artifacts, proyección histórica SHA-256 idéntica, migración a0012/state 5, cinco roles y usuario heredado. Emisión/regeneración y backup sin plaintext ni nuevas notificaciones; cleanup PASS, 136,233 s. Drills041/050 permanecen antecedentes060, no se atribuyen como nuevas ejecuciones061. |
-| Benchmarks acotados | General file-only PASS: 1,074,923 bytes / 1,000 filas / cuatro columnas, 38,509 s, pico muestreado 391,066,417 bytes. Delivery smoke 8/8 PASS, mismo input, 140,991 s, versión 0.6.1. Sin OOM ni certificación de capacidad o percentiles. |
-| Proveedores externos | Microsoft personal/Entra y Google Gmail/Workspace: NOT_RUN_EXTERNAL_CREDENTIALS por alcance explícito. SSO implementado, opcional y disabled by default. SMTP fue retirado: no es un proveedor pendiente de certificar ni una dependencia. Canal de futuras notificaciones sin decidir. |
-| Instalación Docker real | PASS: trackvance-certification en http://localhost:3100; contenedores existentes 0.6.0 iniciados para backup verificado y upgrade 0.6.1 sin borrar volúmenes. State 5 exacto antes/después y tras reinicio; cinco servicios healthy, API/ambos workers 0.6.1, restart=no, doctor y Alembic 0012. UI/health/footer 0.6.1, Usuarios/Roles/Autenticación sin Notificaciones, local habilitado y Microsoft/Google disabled. Conservados 3 datasets, 2 usuarios, una conexión, un destino, cuatro Runs, nueve artifacts y dos secretos SQL. Acceso demo existente comprobado en principal; login con contraseña local probado en desechables. Sin mutaciones de negocio para validar. |
-| GitHub Actions producto | SUCCESS: nueve jobs, commit 4d3c656ab0bc250f50eb53972d22839da9e4485c, workflow 36327154050, intento 1. Backend, frontend, compose-e2e, connections-e2e, delivery-e2e, identity-sso-e2e, backup-restore-e2e, benchmark-smoke y delivery-benchmark-smoke. https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050 |
-| GitHub Actions publicación | Primer cierre afb8f8d, workflow 36328842735: 8/9 SUCCESS; falló preparar PostgreSQL externo antes de iniciar Trackvance. Causa exacta no recuperable; condición prematura de readiness reproducida y corregida con TCP. Nativo y pytest repetidos PASS. El informe externo sólo cierra cuando los nueve jobs del HEAD corregido terminen SUCCESS. |
-| Publicación PDF | Candidato renderizado e inspeccionado por completo antes de --publish. Páginas, SHA-256, hash de fuente/OpenAPI/validación, source commit y revisión se registran en pdf-verification.json. Copia oficial sincronizada en Documentación; edición060 archivada intacta. |
+| Gate | Evidencia actual |
+|---|---|
+| Baseline | PROBADO: 6fac26b, 0.6.1, Alembic 0012 y 31 tablas. Baseline inicial: 1197 backend y 174 frontend; esos resultados son antecedentes. |
+| Preflight mensajes | PROBADO: e37d529 separado, mensajes/códigos y decisiones preservados; pruebas focales de backend/UI. |
+| Suite host completa | PROBADO final: 1527 PASS, 17 SKIP y 0 fallos/errores. Dos invocaciones disjuntas: backend 1076 PASS/17 SKIP/226.00 s sobre 191ff280, fuentes backend idénticas en a5f12dd; scripts completos 451 PASS/0 SKIP/7.43 s sobre el guard/toolkit final a5f12dd. Suma de tiempos 233.43 s, no reloj integral. Incluye Decimal, recuperación multipart, metadata/vista previa Delivery Arrow concurrente y guard de tablas/columnas/FK físicas. Doce casos SQLite reales y transports copiados/stdin con SHA rechazan omisiones y tamper; PostgreSQL aislado real: 42 tablas/509 columnas/75 FK PASS. Dieciséis opt-ins JVM se ejecutan en suites Linux dedicadas; un symlink requiere permisos ausentes en Windows y se ejecuta en CI Linux. Ninguna omisión es PASS. Ruff del alcance CI y mypy de 61 módulos con cuerpos sin anotación PASS. Contratos idempotentes: 117 rutas, 42 permisos, 42 tablas/509 campos/95 índices/164 restricciones; 11 nuevas, 3 modificadas y 28 preservadas. Doce migraciones históricas idénticas al baseline auténtico. CI final vuelve a ejecutar ambos conjuntos juntos en el HEAD documental completo. |
+| Frontend | PROBADO final: 198 PASS/25 archivos, 10.95 s; lint y types PASS sobre a5f12dd. Build de producción previo PASS, fuentes de producto sin cambios posteriores. Incluye defaults null del snapshot, rechazo de cambios reales de precisión/auditoría/DatasetVersion, cinco etiquetas de formato e historial ordenado. Nueva regresión verifica avisos CHAINED omitidos y COMMITTED coexistentes con sus destinos distintos. El selector E2E exige Confirmado/Encadenado y href /runs dentro de la fila confirmada; conserva todos los asserts/timeouts. El CI59 falló en el selector genérico; 13 otros jobs SUCCESS. El rerun real se exige sobre el HEAD final. |
+| Delivery focal | PROBADO: 99 pytest PASS; spool acotado, binding/tamper, claves globales, preflight persistente y compatibilidad. |
+| Automatización SQL/API | PROBADO: PostgreSQL real, 2→4→6 filas, salida exacta Intake, no-repeat, exclusión concurrente de target, recuperación del consumidor y bandeja personal. Cuatro decisiones finales sobre Intakes reales: warnings default bloqueado/0 escrituras; warnings opt-in exacto/2 filas; REJECTED bloqueado/0; salida APPROVED vacía bloqueada EMPTY_INPUT_BLOCKED/0. Duplicar eventos no repite las cuatro entregas/decisiones. Main intacto y cero trabajos/leases al concluir. |
+| Navegador automatización | PROBADO: certificación final 2/2 Playwright PASS, 0 SKIP/flaky/unexpected, privacidad PASS, 206.098 s. El recorrido normal adquiere 1 M, publica contrato y configuración, preflight completo, CHAINED, Spark, SQL y bandeja; fuente/aceptados/SQL tienen hash completo idéntico. |
+| Spark LOCAL | PROBADO final: 35 PASS/0 SKIP (16 escenarios JVM + 19 contratos/guards), suite 57.828 s; ciclo 216.452 s. Intake/Recon/Sentinel sobre 1 M y 999900 aceptados: todos los valores y posiciones iguales al oráculo y a Standalone. Pico cgroup 2151247872 bytes bajo cota 3 GiB, driver exit 0 y cero OOM; cancelación y publicación fenced incluidas. |
+| Spark STANDALONE | PROBADO final: 35 PASS/0 SKIP (16 escenarios JVM + 19 contratos/guards), suite 65.767 s; ciclo 263.744 s. Driver client y dos executors reales; los cuatro fingerprints completos coinciden con oráculo y Local. Executors pico cgroup 792555520/796758016 bytes, cota 1.5 GiB cada uno, exit 0 y cero OOM. Misma huella de fuentes en ambos modos. En esta suite, 15 escenarios JVM utilizan el cluster y la prueba de publicación Run/Job fija local[2]; los tres módulos de millón de filas sí utilizan driver y dos executors Standalone. No se atribuye esa publicación Local al cluster. |
+| Migraciones PostgreSQL | PROBADO: roundtrip 0008→0015, conservación 0012→0015 de 31 tablas y 8 relaciones históricas, paridad ORM y pausa de identidad no verificable; 5.24 s. |
+| Volumen integrado | PROBADO: 100, 500 y 1024 MiB, cada uno con 1 M de registros en CSV/JSONL/Parquet; perfil completo y hash canónico idéntico de fuente, aceptados y SQL. Incluye cadena Spark→SQL→bandeja, extracción/refresh/cancel PostgreSQL real, recuperación de lease y rechazo de staging corrupto. El FAIL 504 inicial y el reintento PASS quedan registrados; causa interna NOT_PROVEN. |
+| CSV integral y etapas | PROBADO final sobre 191ff280: tres recorridos nuevos 100/500/1024 MiB, HTTP→Intake APPROVED→Delivery COMMITTED→hash SQL completo→inbox, en 191.686482/237.246066/319.704406 s de reloj real, incluidas verificaciones. No se suman fases ni se dividen tiempos del ensayo anterior. PROFILING separado por polling de 0.5 s: intervalos 12.498934–13.516264/11.999178–13.015148/16.004406–17.032454 s, no tiempos exactos; 4/3/5 ciclos de recursos dentro de ventanas estables. Perfil/esquema completos iguales al original y versiones anteriores intactas; source/accepted/SQL 1 M y hashes iguales, inbox 3. Jobs/adquisiciones/Runs/jobleases/eventleases 0 y principal UNCHANGED. Evidencia saneada: acquisition-timing-certification.json. |
+| Recursos CSV adicionales | PROBADO 191ff280: pico conjunto cgroup máximo entre samplers independientes 1911558144/4216512512/5981884416 bytes, bajo guard 6 GiB; no instantánea atómica ni suma de máximos por rol. RSS acquisition-worker en PROFILING 348119040/475639808/504508416 bytes; CPU 7.411996/7.084830/13.356226 s entre probes. Spill perfil 0/395608064/884178944 bytes. Integral 1024: CPU backend 381.188579 s, spill 1023967232 bytes, temporales 3139728234 bytes, disco libre mínimo 1328863682560 bytes. memory.events.max perfil 1024 adquisición +19206; integral 500 adquisición +3259; integral 1024 adquisición/API/Delivery/DEFAULT +40334/+10182/+83/+22373. OOM/oom_kill 0; presión real sin garantía de concurrencia adicional. Inbox CPU null por una sonda; spill separado de fases de cadena no retenido/null. Recursos completos por rol/fase y límites 256 MiB/5000 filas/8 MiB en el JSON saneado. |
+| Antecedente publicación CSV adicional | CONSERVADO: primer intento FAIL 504 después de preflight completo; configuración efectivamente publicada, sin repetir POST. Stack tardío inactivo y causa interna NOT_PROVEN. Tras descriptor/muestra Arrow en API Delivery se recreó sólo API aislada y se repitieron los tres CSV con UUID/reloj nuevos sobre 191ff280; todos PASS. Sin aumentar timeouts/cotas ni rescatar tiempos del intento fallido. Antecedente y GET posteriores 200 registrados en acquisition-timing-certification.json. |
+| Recuperación | PROBADO: nativa 42 tablas/0015, 5643 artefactos, 4 secretos fuente y 6 Delivery; huella completa original/restaurada idéntica y multipartes PASS. Backup 11.28 GB, escaneo privado 5666 archivos y SQL descomprimido PASS. Los dos FAIL de backfill se conservaron; fix sin editar filas y fase posterior 150.541 s (no tiempo total del backup). Auténtica 0.6.1 6fac26b→0.7.0 PASS: 31→42 tablas, 11 nuevas vacías, 29 artefactos, 1+1 secretos y notificación histórica preservada, cero replay; origen destruido antes restore, 114.609 s ciclo completo. Automáticos detenidos durante comparación, main intacto y limpieza propia PASS. |
+| SQL/E2E regresión | PROBADO: Delivery final 312 comprobaciones PostgreSQL16/18 y SQL Server/cuatro estrategias, navegador 1/1, 0 SKIP/fallos, 7.202 s. Connections final 97 comprobaciones + smoke84; navegador30 PASS/13 exclusiones opt-in de otras suites/0 fallos/flaky, 194.160 s. FreeTDS real: 30000 filas y 61440000 bytes payload, fetchmany<=8, primer yield a264 filas, RSS delta5283840 bytes, cancel tras520 leídos y cierre cursor/conexión, 14.525 s. Core/identity y ambos smokes CI48a SUCCESS; final se reejecuta sobre HEAD documental completo. |
+| Promoción final GitHub | PENDIENTE: todos los workflows/jobs del SHA final con código, documentación y PDF. CI191 completó las cuatro etapas de recuperación (operacional 0.7.0 y auténticas 0.5.1/0.6.0/0.6.1): PASS; 133 s paso operacional GitHub de resolución 1 s y 149.785/150.416/124.619 s medidos por los runners históricos. ci-191-recovery.json conserva los resultados y el FAIL anterior ba183 por identidad SQL del fixture 0.6.0, corregido sin ignorar huella ni replay. Estos verdes intermedios no certifican el HEAD documental final. CI59 terminó 13 SUCCESS y un FAIL del navegador 100 MiB en href de notificación sin scope; API/formatos y cuatro decisiones reales PASS. Investigación segura ci-intermediate-59-investigation.json; fix de selector en a5f12dd, pendiente de ejecución real del HEAD final. |
+| Upgrade instalación | PENDIENTE hasta aprobar todos los gates. Proyecto principal intacto; plan/backup preparado sin ejecución. |
+| Certificación release | NO CERRADA mientras existan obligaciones pendientes. |
+| Perfil concurrente | PROBADO: 10 solicitudes con paralelismo 2 y 30 con paralelismo 10: 40/40 HTTP 200, perfil 1 M y muestra 20 exactos; máximo 4.686 s. JSONL 1 GiB: HTTP 200 en 3.035 s, timeout 30 s intacto. Footer/hashes/esquema de todas las partes verificados; Arrow presenta la muestra acotada sin COUNT ni DuckDB. El proceso anterior mostró espera de importcache/importlib; causa completa NOT_PROVEN. |
 
-## Fallos encontrados y correcciones
+Los fallos y reintentos conservan historia saneada. La pérdida determinista de acuse tras un commit SQL real certifica UNKNOWN, sin afirmar una caída física de red no determinista. Ningún tier obligatorio omitido se presenta como certificado.
 
-- El primer CI de publicación, `afb8f8d` / workflow `36328842735`, terminó con
-  ocho jobs SUCCESS y `backup-restore-e2e` FAILURE. Falló `psql` en la preparación
-  del PostgreSQL externo, antes de iniciar Trackvance o ejecutar backup/restore.
-  El diagnóstico original suprimió stderr; su causa exacta no se puede recuperar.
-  Una reproducción aislada demostró que el healthcheck por socket aceptaba el
-  servidor temporal de initdb y que una consulta podía ser interrumpida al
-  detenerlo. El healthcheck TCP espera al servidor definitivo. Se añadió
-  diagnóstico de exit code y categoría cerrada, sin SQL/stdout/stderr, y regresiones
-  con secretos sintéticos. El [intento fallido](evidence/0.6.1/ci-publication-attempt1.json)
-  y la [reproducción controlada](evidence/0.6.1/native-recovery/readiness-reproduction.json)
-  conservan hechos y límites; no se atribuye retrospectivamente una causa no observada.
-- La primera pasada focal de backend requirió ajustar fixtures heredados al
-  envelope nuevo; no se relajaron permisos ni reglas de negocio. La revisión
-  reprodujo una excepción de hashing del primer acceso que podía llevar texto
-  secreto al logger. Alta/regeneración y primer cambio ahora usan fronteras de
-  error fijo; las regresiones inyectadas comprueban plaintext/hash ausentes.
-- Compose inicial: 25 PASS / 1 FAIL / 15 SKIP; el modal de edición siguió abierto tras
-  cambiar la contraseña desde otro contexto. No se conservó la respuesta HTTP de
-  ese fallo, por lo que no se afirma haber observado 409. El test refresca estado
-  y comprueba PATCH 200. Segundo intento: 25 PASS / 1 FAIL; una prueba sintética aisló
-  la normalización LF→CRLF del clipboard Windows. Se normaliza sólo el texto
-  compuesto; username y password se comparan exactamente. Tercero: 26 PASS.
-- Restore 0.6.0 inicial falló por una ruta relativa resuelta desde el checkout
-  histórico, antes de crear contenedores. El segundo conservó state 5 exactamente
-  y falló al probar alta porque restore deshabilita demo access deliberadamente.
-  Se usa ruta absoluta y se habilita demo únicamente después de comparar el
-  destino desechable, sin seed. El tercer ciclo completo pasó. Todos limpiaron
-  sus recursos propios; resultados iniciales saneados permanecen publicados.
-- Se conservan los avisos upstream Starlette/httpx y AnyIO BlockingPortal.
-  Git informa la conversión LF→CRLF del checkout Windows; no se modificaron las
-  migraciones: hashes de bytes antes/después idénticos y diff Git vacío.
+Ver [Spark](spark-volume-0.7.0.md), [parámetros](parameters-0.7.0.md), [permisos](permission-matrix.md) y [antecedente 0.6.1](validation-0.6.1.md).
 
-## Límites y evidencia sensible
-
-Microsoft/Google reales no se ejecutan por alcance explícito; el mock RS256
-certifica nuestro cliente OIDC. La reproducción física exacta de una pérdida
-de red no determinista permanece NOT_RUN_NONDETERMINISTIC. Los benchmarks son
-smoke de 1.000 filas, no certifican 100/500 MiB, GiB, percentiles o capacidad productiva.
-El drill recovery nativo comprueba UI HTTP 200 y declara navegador
-NOT_RUN_IN_THIS_DRILL; el navegador se prueba en las suites dedicadas.
-
-Los informes no publican contraseñas, dumps, backups, configuración privada,
-screenshots de temporales, traces ni error-context con DOM. Los valores de
-prueba se mantienen en RAM y los escáneres reciben secretos por stdin. Copiar
-al clipboard es una acción explícita del administrador y su historial externo
-queda fuera del almacenamiento de Trackvance. Se elimina retención controlada
-por la aplicación; no se promete zeroization forense de JavaScript/Python.
-
-La validación de la instalación principal usa navegación de lectura; alta y
-regeneración se prueban en entornos desechables. Las auditorías/sesiones de
-login legítimas se producen después de comparar el estado persistente del
-upgrade y reinicio. El informe final externo registra el CI del HEAD documental.
+El ensayo CSV adicional y sus métricas por fase se documentan en
+[acquisition-volume-0.7.0.md](acquisition-volume-0.7.0.md) y en el informe saneado
+[acquisition-timing-certification.json](evidence/0.7.0/acquisition-timing-certification.json),
+medido sobre `191ff2805f755f7b2d090ef3aeaa642fc2ae476a`. Los resultados originales
+y ambos antecedentes HTTP 504 permanecen separados de esos tres relojes nuevos.

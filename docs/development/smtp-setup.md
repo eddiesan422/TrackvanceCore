@@ -1,6 +1,6 @@
-# SMTP: antecedente histórico de 0.6.0, deshabilitado en 0.6.1
+# SMTP: antecedente histórico de 0.6.0, deshabilitado desde 0.6.1
 
-Esta página se conserva para explicar datos y documentación de instalaciones anteriores. **Trackvance Core 0.6.1 no configura, habilita ni envía correo SMTP.** El adaptador, servicio, template operativo y pantalla de Notificaciones se retiraron. No se ha elegido un transporte futuro.
+Esta página se conserva para explicar datos y documentación de instalaciones anteriores. **Trackvance Core 0.7.0 no configura, habilita ni envía correo SMTP.** El adaptador, servicio, template operativo y pantalla SMTP se retiraron en 0.6.1. La bandeja personal de ejecución añadida en 0.7.0 registra avisos internos; no entrega correo ni transporta credenciales. No se ha elegido un transporte futuro.
 
 ## Flujo vigente de credenciales
 
@@ -12,11 +12,11 @@ La API devuelve `UserCredentialIssueResponse` únicamente desde alta/regeneraci�
 
 ## Compatibilidad con instalaciones 0.6.0
 
-0.6.0 tenía un adaptador SMTP con STARTTLS/SSL/TLS y NONE limitado explícitamente a pruebas locales. Los nombres históricos `TRACKVANCE_SMTP_ENABLED`, HOST, PORT, USERNAME, PASSWORD, FROM_ADDRESS, FROM_NAME, SECURITY y ALLOW_INSECURE pertenecen a ese release. **No tienen efecto en 0.6.1 y no existe una combinación que reactive el envío.** No añadas variables, un overlay Mailpit ni secretos SMTP a una instalación nueva.
+0.6.0 tenía un adaptador SMTP con STARTTLS/SSL/TLS y NONE limitado explícitamente a pruebas locales. Los nombres históricos `TRACKVANCE_SMTP_ENABLED`, HOST, PORT, USERNAME, PASSWORD, FROM_ADDRESS, FROM_NAME, SECURITY y ALLOW_INSECURE pertenecen a ese release. **No tienen efecto en 0.7.0 y no existe una combinación que reactive el envío.** No añadas variables, un overlay Mailpit ni secretos SMTP a una instalación nueva.
 
 La tabla notification_deliveries se mantiene para preservar backups e historial. SENT documentaba aceptación por un servidor; FAILED podía registrar NO_PROVIDER u otros códigos; PENDING podía quedar tras una interrupción. Esos estados históricos no cambian ni provocan reenvíos. Alta/regeneración 0.6.1 no añade filas ni eventos NOTIFICATION_SENT/FAILED.
 
-Las lecturas API deprecated `/notifications/deliveries` y `/notifications/status` conservan compatibilidad con permisos y organización. El estado actual es siempre disabled/unconfigured, availability=HISTORICAL_ONLY. No existe pantalla para habilitarlo. Las migraciones 0001..0012 y NotificationDeliveryRecord se conservan intactos; no hay migración 0013.
+Las lecturas API deprecated `/notifications/deliveries` y `/notifications/status` conservan compatibilidad con permisos y organización. El estado actual es siempre disabled/unconfigured, availability=HISTORICAL_ONLY. No existe pantalla para habilitarlo. Las migraciones 0001..0012 y NotificationDeliveryRecord se conservan intactos. Las nuevas 0013..0015 corresponden a adquisición, automatización, outbox/bandeja e identidad ejecutora; no reactivan SMTP ni reinterpretan sus registros históricos.
 
 ## SSO y recuperación
 

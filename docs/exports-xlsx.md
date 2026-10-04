@@ -5,6 +5,15 @@ la configuración y los resultados efectivos de una ejecución. Un Excel es
 un artifact de evidencia; el almacenamiento canónico de datasets y resultados
 sigue siendo Parquet.
 
+## Límites vigentes 0.7.0 y descarga completa
+
+El workbook conserva límites propios y la API aplica 100.000 filas, 500.000 celdas
+y 16 MiB de valores. Si se supera alguno, devuelve 422 `EXPORT_LIMIT_EXCEEDED`
+con enlace al CSV completo; no trunca filas ni celdas para aparentar éxito.
+El detalle de Run ofrece CSV completo mediante descarga nativa, con protección
+de fórmulas, Artifact, hash y linaje. Los scanners recorren todas las partes por
+páginas o iteradores, sin materializar la población en un DataFrame.
+
 ## Diseño compartido
 
 Encabezados navy, acentos teal, rojo para incumplimientos y amber para
@@ -80,10 +89,10 @@ se excluye. Controles XML inválidos se escapan visiblemente.
 No se trunca silenciosamente evidencia: valores mayores que 32767 caracteres
 o tablas fuera del límite de Excel producen 422 `EXPORT_LIMIT_EXCEEDED`.
 Corrupción de archivos produce 409 `ARTIFACT_INTEGRITY_ERROR`; no cambia el
-run histórico. La API CSV permanece **deprecated** para consumidores antiguos
-del prototipo; conserva autorización, protección y auditoría. La UI ofrece
-únicamente Exportar Excel. Las pruebas CSV de compatibilidad se mantienen por
-esta razón junto a las nuevas pruebas XLSX.
+run histórico. En 0.7.0, CSV es también la descarga completa para resultados que
+superan los límites del informe Excel. La UI ofrece ambas descargas; conservan
+autorización, protección y auditoría. Las pruebas CSV de compatibilidad se
+mantienen junto a las pruebas XLSX.
 
 ## Generar los tres ejemplos
 

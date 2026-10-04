@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "prefix": "trackvance-v070-test-spark-81c7ab57777e",
+  "image": "trackvance-v070-isolated:backend",
+  "rows": 1000000,
+  "memory_limits_bytes": {
+    "master": 536870912,
+    "executor1": 1610612736,
+    "executor2": 1610612736,
+    "driver": 2147483648
+  },
+  "sampled_docker_working_set_peak_bytes": {
+    "master": 170917888,
+    "executor1": 702545920,
+    "executor2": 717855129,
+    "driver": 811178393
+  },
+  "cgroup_peak_bytes": {
+    "master": 182153216,
+    "executor1": 783015936,
+    "executor2": 783962112
+  },
+  "driver_exit_code": 0,
+  "oom_killed": false,
+  "elapsed_seconds": 240.777,
+  "cleanup_finished": true
+}

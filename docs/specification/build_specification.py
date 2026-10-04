@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.6.1"
-EDITION_DATE = "27 septiembre 2026"
+VERSION = "0.7.0"
+EDITION_DATE = "3 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -131,6 +131,10 @@ class Diagram(Flowable):
         self.height = 188 if kind != "exceptions" else 195
         if kind == "create-credentials":
             self.height = 464
+        elif kind == "delivery-lanes":
+            self.height = 234
+        elif kind in {"local", "acquisition", "automation", "spark", "delivery-preparation"}:
+            self.height = 310
 
     def box(self, x, y, w, h, title, detail=""):
         c = self.canv
@@ -166,17 +170,71 @@ class Diagram(Flowable):
                 self.arrow(x + (w - 32) / 10, 74, x + (w - 32) / 10, 56)
             self.arrow(w / 2, 139, w / 2, 121)
         elif self.kind == "local":
-            self.box(0, 124, 103, 48, "Navegador / web", "React + nginx")
-            self.box(122, 124, 108, 48, "API FastAPI", "Mismo monolito")
-            self.box(249, 124, 126, 48, "Worker DEFAULT", "Scheduler + módulos")
-            self.box(394, 124, 132, 48, "Worker DELIVERY", "Preflight + DataSink")
-            self.box(122, 34, 151, 51, "PostgreSQL 16", "Metadata + jobs")
-            self.box(322, 34, 153, 51, "FileArtifactStore", "Volumen trackvance_data")
-            self.arrow(104, 149, 120, 149)
-            self.arrow(176, 124, 176, 87)
-            self.arrow(312, 123, 250, 87)
-            self.arrow(460, 123, 449, 87)
-            self.arrow(376, 123, 398, 87)
+            self.box(0, 248, 150, 50, "Web / navegador", "React + nginx")
+            self.box(188, 248, 150, 50, "API / RBAC", "HTTP + staging acotado")
+            self.box(376, 248, 150, 50, "PostgreSQL 16", "Metadata + cola + outbox")
+            self.arrow(152, 274, 185, 274)
+            self.arrow(340, 274, 374, 274)
+            for i, (title, detail) in enumerate([
+                ("Acquisition worker", "Sólo secretos de fuentes"),
+                ("DEFAULT worker", "Polars / PySpark local"),
+                ("Delivery worker", "Sólo secretos de destinos"),
+            ]):
+                x = i * 188
+                self.box(x, 156, 150, 56, title, detail)
+                self.arrow(x + 75, 214, 450, 246)
+            for i, (title, detail) in enumerate([
+                ("Scheduler", "Sentinel + Delivery: despacho"),
+                ("Events CHAINING", "Intake output exacto"),
+                ("Events NOTIFICATIONS", "Bandeja personal"),
+            ]):
+                self.box(i * 188, 80, 150, 55, title, detail)
+            self.box(0, 5, w, 52, "StorageProvider / volumen de artefactos", "Snapshots + partes + descriptor + perfiles + resultados + manifiestos")
+            # The lightweight processes are independent peers coordinated by
+            # PostgreSQL, rather than the next stage of an individual worker.
+        elif self.kind in {"acquisition", "automation", "spark", "delivery-preparation"}:
+            flows = {
+                "acquisition": [
+                    ("Recibir / explorar", "Staging privado; opciones y dueño"),
+                    ("Registrar AcquisitionRun", "202 durable; Job ACQUISITION"),
+                    ("Leer / materializar", "Lotes; snapshot; IDs estables"),
+                    ("Perfilar / verificar", "Toda la población; hashes"),
+                    ("Publicar con lease", "Partes + descriptor + versión"),
+                    ("Outbox / Notificación", "Transacción de transición"),
+                ],
+                "automation": [
+                    ("Tick o evento Intake", "Scheduler / CHAINING separados"),
+                    ("Resolver autorización", "Usuario real y permisos vigentes"),
+                    ("Congelar ocurrencia", "Revisión + DatasetVersion exacta"),
+                    ("No repetición / target", "Claims, overlap, UNKNOWN"),
+                    ("Job DELIVERY", "SYSTEM + responsable capturado"),
+                    ("Resultado y aviso", "Commit remoto; bandeja personal"),
+                ],
+                "spark": [
+                    ("Plan congelado", "AUTO / POLARS / PYSPARK"),
+                    ("Driver DEFAULT", "Local[K] o Standalone client"),
+                    ("Executors limitados", "Reglas portables; grupos globales"),
+                    ("Partes de salida", "Sin metadata ni JDBC de negocio"),
+                    ("Fence de publicación", "Run + Job owner y lease vigente"),
+                    ("Resultados completos", "Perfil, métricas, evidencia, linaje"),
+                ],
+                "delivery-preparation": [
+                    ("Preflight persistido", "DELIVERY_PREFLIGHT; sin intento"),
+                    ("Validación completa", "Tipos, claves, destino, permisos"),
+                    ("PreparedRows sellado", "SQLite: hashes + binding exacto"),
+                    ("Revalidar / STARTED", "Autorización y target guard"),
+                    ("Una transacción SQL", "Lotes; cuatro estrategias"),
+                    ("COMMITTED / FAILED / UNKNOWN", "Evidencia; nunca replay ciego"),
+                ],
+            }
+            for i, (title, detail) in enumerate(flows[self.kind]):
+                row, column = divmod(i, 2)
+                x, y = column * 280, 230 - row * 105
+                self.box(x, y, 246, 70, title, detail)
+                if column == 0:
+                    self.arrow(248, y + 35, 278, y + 35)
+                elif row < 2:
+                    self.arrow(402, y - 2, 123, y - 33)
         elif self.kind == "exceptions":
             names = ["ABIERTA / ASIGNADA", "EN GESTIÓN", "PENDIENTE DE VALIDACIÓN", "RESUELTA"]
             for i, title in enumerate(names):
@@ -203,11 +261,16 @@ class Diagram(Flowable):
             self.arrow(164, 70, 179, 70)
             self.arrow(345, 70, 360, 70)
         elif self.kind == "delivery-lanes":
-            self.box(0, 128, w, 47, "API -> JobQueue durable", "Autorización + snapshots + idempotencia")
-            self.box(0, 54, 247, 53, "Worker DEFAULT", "Intake / Recon / Sentinel + scheduler")
-            self.box(279, 54, 247, 53, "Worker DELIVERY", "Solo salidas; secretos de destino")
-            self.arrow(122, 127, 122, 109)
-            self.arrow(402, 127, 402, 109)
+            self.box(0, 178, 247, 47, "API", "Autorización + snapshots + idempotencia")
+            self.box(279, 178, 247, 47, "Scheduler independiente", "Sólo despacho; no calcula datasets")
+            self.arrow(122, 177, 122, 168)
+            self.arrow(402, 177, 402, 168)
+            self.box(0, 120, w, 47, "JobQueue durable", "Lane + lease + XOR Run / AcquisitionRun")
+            self.box(0, 54, 166, 53, "Worker DEFAULT", "Intake / Recon / Sentinel")
+            self.box(180, 54, 166, 53, "Worker DELIVERY", "Preflight + entrega; secretos destino")
+            self.box(360, 54, 166, 53, "Worker ACQUISITION", "Lectura / perfil; secretos fuente")
+            for x in (83, 263, 443):
+                self.arrow(x, 119, x, 109)
             self.box(0, 0, w, 45, "Metadata y StorageProvider compartidos", "No hay transacción distribuida con la base externa")
         elif self.kind == "delivery-states":
             self.box(173, 137, 180, 42, "STARTED", "Marcador persistido antes del remoto")
@@ -360,6 +423,63 @@ def openapi_table():
     return table(rows, [49, 299, CONTENT - 348])
 
 
+def input_document(name):
+    value = json.loads((REPO / "docs/specification" / f"{name}_{VERSION}.json").read_text(encoding="utf-8"))
+    if isinstance(value, dict) and value.get("version", VERSION) != VERSION:
+        raise ValueError(f"El insumo {name} no corresponde a {VERSION}.")
+    return value
+
+
+def model_tables():
+    story = []
+    for entity in input_document("model_contract")["entities"]:
+        # Keep the model title, evolution label, table header and first fields
+        # together; a heading alone at the foot of a page is not useful.
+        story.append(CondPageBreak(120))
+        story.append(paragraph(entity["table"], "h2"))
+        evolution = {"NEW": "Nueva en 0.7.0", "MODIFIED": "Evolucionada en 0.7.0",
+                     "PRESERVED": "Estructura histórica preservada"}.get(entity.get("evolution"))
+        if evolution:
+            story.append(paragraph(evolution, "small"))
+        rows = [["Campo", "Tipo, nulabilidad y relación"]]
+        for column in entity["columns"]:
+            detail = column["type"] + ("; nullable" if column["nullable"] else "; obligatorio")
+            if column["primary_key"]:
+                detail += "; PK"
+            if column["references"]:
+                detail += "; FK " + ", ".join(column["references"])
+            rows.append([column["name"], detail])
+        story.append(table(rows, [CONTENT * 0.43, CONTENT * 0.57]))
+        for constraint in entity["constraints"]:
+            story.append(paragraph("Restricción: " + constraint, "small"))
+        for index in entity["indexes"]:
+            story.append(paragraph("Índice: " + index["name"] + " (" + ", ".join(index["columns"]) + ")" + (" UNIQUE" if index["unique"] else ""), "small"))
+    return story
+
+
+def permission_tables():
+    data = input_document("permission_contract")
+    codes = [["Código", "Dependencias / delegable"]]
+    for entry in data["catalog"]:
+        codes.append([entry["code"], ", ".join(entry["dependencies"]) + ("; Sí" if entry["delegable"] else "; No")])
+    routes = [["Método", "Ruta", "Permiso"]]
+    routes.extend([[entry["method"], entry["path"], entry["permission"]] for entry in data["routes"]])
+    return [table(codes, [CONTENT * 0.43, CONTENT * 0.57]), table(routes, [49, 280, CONTENT - 329])]
+
+
+def parameter_tables():
+    data = input_document("parameters")
+    rows = [["Variable", "Default, unidad, rango y control"]]
+    for entry in data["variables"]:
+        detail = f"{entry['default']} {entry['unit']}. {entry['range']}. {entry['scope']}. {entry['guard']} {entry['restart']}"
+        rows.append([entry["variable"], detail])
+    fixed = [["Cota fija", "Contrato y alcance"]]
+    fixed.extend([[str(index), entry] for index, entry in enumerate(data["fixed_limits"], 1)])
+    return [table(rows, [CONTENT * 0.43, CONTENT * 0.57]),
+            paragraph("Cotas fijas y controles complementarios", "h2"),
+            table(fixed, [CONTENT * 0.15, CONTENT * 0.85])]
+
+
 def build(candidate: Path, results: dict, draft: bool):
     story = []
     logo = REPO / "frontend/public/trackvance-logo.jpg"
@@ -412,6 +532,14 @@ def build(candidate: Path, results: dict, draft: bool):
             story.append(openapi_table())
         elif line == "@validation":
             story.append(table([["Verificación", "Resultado ejecutado"], *[[k, v] for k, v in results.items()]]))
+        elif line in {"@models", "@newmodels"}:
+            story.extend(model_tables())
+        elif line == "@permissions":
+            story.extend(permission_tables())
+        elif line == "@parameters":
+            story.extend(parameter_tables())
+        elif line == "@volume":
+            story.append(table([["Ejecución", "Medición / alcance"], *[[k, v] for k, v in input_document("volume_results").items()]]))
         elif line.startswith("|"):
             rows = []
             while i < len(lines) and lines[i].strip().startswith("|"):

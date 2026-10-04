@@ -184,8 +184,23 @@ ni envío de credenciales.
   `semantic_tag: "IDENTIFIER"`. El override se valida contra el archivo y se
   persiste en el esquema inmutable de esa versión.
 - `GET /dataset-versions/{id}/profile` → Version más `{sample:row[],sampled_rows,sample_bytes,sample_limited,sample_byte_limit,delivery_preflight_synchronous_rows}`. La muestra tiene como máximo 20 filas y 8 MiB de JSON UTF-8 observado; `sample_limited` indica que una fila excedería el límite de bytes. El perfil persistido sigue describiendo la población completa, aunque la muestra sea menor o vacía.
+  Los valores Decimal nativos de Parquet se presentan como texto decimal exacto,
+  por ejemplo `"12345678901234567890.12345678"`, sin conversión intermedia a float.
+  `sample_bytes` cuenta esa misma representación JSON UTF-8, incluidos comillas,
+  escapes, separadores y corchetes. El archivo y el perfil persistido no cambian.
+  La presentación usa ese perfil persistido y lee la muestra con Arrow, sin
+  ejecutar conteos ni consultas analíticas. Antes de convertir a objetos Python,
+  limita el lote mediante la cota global de anchura observada; si una versión
+  histórica carece de ella, lee un registro por lote. La integridad SHA-256,
+  el esquema y el conteo de cada parte siguen verificados; el conteo físico se
+  obtiene del footer Parquet. La cota de 8 MiB se aplica a la muestra serializada,
+  sin recalcular ni reducir las estadísticas globales.
 
 ## Conexiones externas (solo lectura)
+
+Las rutas de registro y refresh 201 de esta sección son compatibilidad síncrona
+con límites pequeños. El recorrido normal 0.7.0 usa las rutas 202 de adquisición
+y refresh descritas al inicio, sin reinterpretar la respuesta de estos endpoints.
 
 Las operaciones respetan organización, sesión y CSRF. `connections:read` permite
 leer metadata; `connections:manage`, administrar conexiones; `connections:use`,

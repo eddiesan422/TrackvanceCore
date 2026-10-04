@@ -1,0 +1,82 @@
+{
+  "status": "PASS",
+  "certified_at_utc": "2026-10-04T04:20:35.803178+00:00",
+  "git_sha": "48a1f3ac50d0e42f2d8e9a1a81df4e98981fc888",
+  "runner_sha256": "97a9d99abe4b573fb8f2ee9b89090fa3e5b7fb230d63e09d0586f8174acb80ad",
+  "environment": {
+    "project": "trackvance-v070-test-core-5e417a35814f",
+    "execution": "REAL_API_POSTGRESQL_PRIVATE_CORE",
+    "main_inventory": "UNCHANGED"
+  },
+  "scope": "Actual Intake execution, published output and transactional outbox; API automation and PostgreSQL Delivery. No browser coverage attributed.",
+  "positive_scheduler_chain": {
+    "sql_rows": 6,
+    "cursor_occurrence_unique": "PASS",
+    "no_repeat": "PASS",
+    "request_idempotency": "PASS",
+    "deliberate_repeat": "PASS",
+    "lease_recovery": "PASS",
+    "target_concurrency": "PASS",
+    "administrator_personal_inbox": "PASS",
+    "cross_user_read_denied": "PASS"
+  },
+  "chain_decisions": [
+    {
+      "case": "warnings_default",
+      "status": "PASS",
+      "intake_decision": "APPROVED_WITH_WARNINGS",
+      "occurrence_status": "SKIPPED",
+      "reason_code": "INTAKE_DECISION_NOT_ACCEPTED",
+      "sql_rows_added": 0,
+      "exact_accepted_sql_sha256": null,
+      "duplicate_event_no_replay": "PASS",
+      "fixture": "REAL_INTAKE_RULES"
+    },
+    {
+      "case": "warnings_opt_in",
+      "status": "PASS",
+      "intake_decision": "APPROVED_WITH_WARNINGS",
+      "occurrence_status": "SUCCESS",
+      "reason_code": null,
+      "sql_rows_added": 2,
+      "exact_accepted_sql_sha256": "3e38cf3db6c14aed5730a47a678ae02012aa5e35d588ff114519102405cd460e",
+      "duplicate_event_no_replay": "PASS",
+      "fixture": "REAL_INTAKE_RULES"
+    },
+    {
+      "case": "rejected",
+      "status": "PASS",
+      "intake_decision": "REJECTED",
+      "occurrence_status": "SKIPPED",
+      "reason_code": "INTAKE_DECISION_NOT_ACCEPTED",
+      "sql_rows_added": 0,
+      "exact_accepted_sql_sha256": null,
+      "duplicate_event_no_replay": "PASS",
+      "fixture": "REAL_INTAKE_RULES"
+    },
+    {
+      "case": "empty",
+      "status": "PASS",
+      "intake_decision": "APPROVED",
+      "occurrence_status": "SKIPPED",
+      "reason_code": "EMPTY_INPUT_BLOCKED",
+      "sql_rows_added": 0,
+      "exact_accepted_sql_sha256": null,
+      "duplicate_event_no_replay": "PASS",
+      "fixture": "REAL_INTAKE_EMPTY_HEADER_ONLY"
+    }
+  ],
+  "hash_definition": "SHA-256 of UTF-8 compact JSON ordered tuples (id, exact decimal text), sorted by id; all two accepted DatasetVersion rows equal all two SQL rows.",
+  "quiescence": {
+    "jobs_queued_running": 0,
+    "acquisitions_queued_running": 0,
+    "runs_queued_running": 0,
+    "job_live_leases": 0,
+    "event_consumptions_running": 0,
+    "event_live_leases": 0
+  },
+  "privacy": {
+    "public_fields": "ALLOWLISTED_AGGREGATES",
+    "credentials_sql_rows_logs_traces": "EXCLUDED"
+  }
+}

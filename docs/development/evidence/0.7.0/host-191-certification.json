@@ -1,0 +1,87 @@
+{
+  "schema_version": 2,
+  "status": "PASS",
+  "code_commit": "191ff2805f755f7b2d090ef3aeaa642fc2ae476a",
+  "documentation_contract_commit": "59e2e16a22afec29f5a5566d42676afd261511e4",
+  "platform": "Windows Python 3.13.3",
+  "commands": [
+    {
+      "scope": "backend",
+      "command": "python -m pytest -q --junitxml=<private>",
+      "working_directory": "backend",
+      "passed": 1076,
+      "skipped": 17,
+      "failed": 0,
+      "errors": 0,
+      "elapsed_seconds_pytest": 226.0,
+      "elapsed_seconds_junit": 225.74,
+      "junit_sha256": "b69910e9a43319723ec3e11abc0a439a3c3b18276728b7a3bca7d13a5d6e658d"
+    },
+    {
+      "scope": "scripts",
+      "command": "python -m pytest ../scripts/tests -q --junitxml=<private>",
+      "working_directory": "backend",
+      "passed": 433,
+      "skipped": 0,
+      "failed": 0,
+      "errors": 0,
+      "elapsed_seconds_pytest": 6.31,
+      "elapsed_seconds_junit": 6.294,
+      "junit_sha256": "44e69f336dac13930c8cfa4793017c355e633101d7e895607852568f57806866"
+    }
+  ],
+  "passed": 1509,
+  "skipped": 17,
+  "failed": 0,
+  "errors": 0,
+  "elapsed_seconds_sum_of_disjoint_invocations": 232.31,
+  "counts_are_disjoint_backend_and_scripts": true,
+  "sum_of_invocation_seconds_is_not_an_integral_cycle": true,
+  "working_tree_modified_at_host_suite": true,
+  "working_tree_note": "Only documentation/generator/contract export edits remained. Backend implementation was the committed 191ff280 revision. Full model export was independently checked against ORM and regenerated idempotently.",
+  "skips": {
+    "jvm_opt_in": {
+      "count": 16,
+      "reason": "Opt-in disabled here; dedicated real JVM suites and final Linux CI execute them."
+    },
+    "windows_symlink_permission": {
+      "count": 1,
+      "reason": "Host cannot create symlink; Linux CI executes this case."
+    }
+  },
+  "ruff": {
+    "command": "ruff check src tests ../scripts",
+    "working_directory": "backend",
+    "status": "PASS"
+  },
+  "mypy": {
+    "command": "mypy src/trackvance --check-untyped-defs --ignore-missing-imports",
+    "source_files": 61,
+    "status": "PASS"
+  },
+  "generated_contracts": {
+    "status": "PASS",
+    "paths": 117,
+    "tables": 42,
+    "columns": 509,
+    "indexes": 95,
+    "constraints": 164,
+    "permissions": 42,
+    "model_evolution": {
+      "NEW": 11,
+      "MODIFIED": 3,
+      "PRESERVED": 28
+    },
+    "idempotent": true
+  },
+  "historical_migrations": {
+    "status": "PASS",
+    "count": 12,
+    "baseline_commit": "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd"
+  },
+  "privacy": {
+    "raw_logs_or_credentials_published": false
+  },
+  "previous_host_result": "host-48a-certification.json",
+  "final_ci_gate": "All applicable jobs on the complete final documentation HEAD must pass."
+}

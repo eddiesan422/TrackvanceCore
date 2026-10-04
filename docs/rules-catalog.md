@@ -168,3 +168,29 @@ código/columna o `SHA256(code:column)`, con `evaluated_count > 0` y
 `IGNORE`, una condición no aplicó o faltan métricas históricas. Esos casos informan
 `INTAKE_RULE_NOT_EVALUATED` o `INTAKE_RULE_EVIDENCE_INSUFFICIENT` y requieren una
 nueva ejecución evaluable. Los cierres y las ejecuciones históricos se conservan.
+
+## Ejecución portable en 0.7.0
+
+El catálogo anterior conserva los mismos códigos, severidades y decisiones en
+Polars y PySpark. La elección `AUTO`, `POLARS` o `PYSPARK` se valida antes de
+encolar; el Run conserva engine efectivo, versión, plan, recursos y motivo.
+La elección explícita de Spark exige un runtime disponible y un plan viable.
+
+Intake calcula unicity y referencias contra poblaciones completas. Sus filas
+aceptadas conservan valores y orden lógico, y las transforms declaradas se
+aplican con los kernels portables en executors. Decimal no se convierte en float
+para comparar importes, tolerancias, sumas o escalas. ReconOps reúne claves
+globalmente y rechaza todo el trabajo si un grupo excede 10.000 filas o 16 MiB;
+esa cota evita que una sola clave agote memoria. Sentinel evalúa agregaciones
+completas y consulta únicamente la ventana histórica compatible requerida por
+cada check, con máximo 1000 observaciones por serie.
+
+En Spark, cada batch se limita simultáneamente a 2048 filas y 8 MiB; cada fila
+a 64 KiB. Estos límites no seleccionan muestras ni truncan resultados. Un fallo
+de recursos o una cancelación impiden publicar una versión parcial. CSV/JSONL
+identifican `RECORD_NUMBER`; los snapshots SQL identifican `SNAPSHOT_ROW` y
+conservan el ordinal estable del snapshot, sin inventar líneas físicas.
+
+Las cotas efectivas y cómo reiniciar los procesos se describen en
+[parámetros 0.7.0](development/parameters-0.7.0.md). La evidencia de paridad JVM,
+local[K], Standalone y volumen se encuentra en [validación](development/validation.md).

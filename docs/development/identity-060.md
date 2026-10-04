@@ -1,7 +1,7 @@
-# Identidad y autorización 0.6.1; compatibilidad con 0.6.0
+# Identidad y autorización 0.7.0; compatibilidad con 0.6.0 y 0.6.1
 
 Este documento conserva la arquitectura de identidad introducida en 0.6.0 y
-describe el flujo de credenciales vigente en 0.6.1. Los resultados ejecutados se
+describe el flujo de credenciales vigente en 0.7.0, establecido en 0.6.1. Los resultados ejecutados se
 registran por release en `validation.md` y `evidence/`. Una capacidad implementada no equivale a una
 prueba real de Microsoft/Google. Los ensayos externos sin credenciales conservan
 `NOT_RUN_EXTERNAL_CREDENTIALS`.
@@ -245,17 +245,39 @@ Ver [ADR 0018](../adr/0018-notification-delivery.md).
 
 ## Migración, compatibilidad, seguridad y pruebas
 
+0.7.0 incorpora una bandeja de ejecución personal. Un evento terminal y sus
+consumidores se registran en la misma transacción que publica el resultado; cada
+consumidor mantiene su lease, reintentos e idempotencia propios. La notificación
+se dirige al usuario que inició el trabajo o al responsable persistido de su
+automatización/schedule. No se inventa una cuenta para actores SYSTEM históricos,
+no se generan avisos retroactivos y un administrador no accede a la bandeja de
+otras cuentas. Cada lectura vuelve a validar organización, destinatario y permiso
+vigente del módulo. Estado técnico, decisión funcional y resultado remoto se
+describen por separado. La lectura y el contador no conceden acceso al recurso.
+
+Delivery automático y Sentinel exigen un User verificable, activo, no eliminado
+y con permisos actuales; se vuelven a comprobar al disparar y ejecutar. Cambiar
+roles, deshabilitar destinos o retirar permisos bloquea el trabajo posterior.
+Un schedule legacy sin responsable verificable queda pausado tras migrar y
+requiere una asignación explícita. Esta bandeja usa `internal_notifications`;
+`notification_deliveries` conserva exclusivamente el antecedente SMTP. Ver
+[ADR 0024](../adr/0024-automation-events-personal-inbox.md).
+
 `0010_dynamic_rbac_identity` añade roles, role_permissions, external_identities,
 oidc_login_attempts, los nuevos campos de usuarios y el método de sesión.
 `0011_notification_delivery` añade los metadatos de entrega.
 `0012_delivery_target_audit` añade políticas físicas y metadata por intento.
-0.6.1 no añade migraciones: 0001..0012 permanecen byte a byte intactas y el head
-continúa en 0012. Upgrade, downgrade y
+0.6.1 no añadió migraciones y conservó 0012. 0.7.0 añade
+`0013_async_acquisition`, `0014_automation_outbox` y
+`0015_sentinel_execution_identity`; 0001..0012 permanecen byte a byte intactas.
+Upgrade, downgrade y
 upgrade se prueban únicamente sobre bases desechables. Un downgrade descarta las
 capacidades nuevas; no es un procedimiento de operación para datos 0.6.0 activos.
 
 La verificación de almacenamiento incorpora claves compuestas y una huella nueva
-state 5. Restore de 0.5.1 produce una proyección state 4 que excluye únicamente las
+state 6 para las 42 tablas actuales. Restore de 0.6.1/0.6.0 exige una proyección
+state 5 exacta, sin filas nuevas de adquisición, eventos o bandeja. Restore de
+0.5.1 produce una proyección state 4 que excluye únicamente las
 adiciones definidas; exige identidad exacta de las filas/campos históricos.
 Los formatos anteriores soportados mantienen su proyección propia. Un restore
 de 0.6.0 a 0.6.1 conserva esquema, historial y huella funcional. `.env` y los
@@ -272,7 +294,7 @@ para probar navegador, replay, state/nonce, issuer/audience/expiración, usuario
 inexistentes/desactivados/eliminados y sujeto estable. Estos resultados se
 publican con sus conteos reales; no certifican el servicio externo.
 
-Fuera de 0.6.1: auto-provisioning, group-to-role/domain, dominios administrables,
-gobierno ampliado, notificaciones de ejecución, SMTP OAuth2, secretos cloud,
-SHIST/SCD, masking, retención avanzada y plataformas distribuidas. DatasetVersion
+Fuera de 0.7.0: auto-provisioning, group-to-role/domain, dominios administrables,
+gobierno ampliado, transporte SMTP/OAuth2, secretos cloud,
+SHIST/SCD, masking y retención avanzada. DatasetVersion
 sigue siendo el versionado inmutable interno.

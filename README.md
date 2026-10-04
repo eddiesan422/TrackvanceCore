@@ -1,40 +1,64 @@
 # Trackvance Core
 
-## Corrección funcional local 0.6.1
+## Ejecución de volumen y automatización 0.7.0
 
-0.6.1 simplifica el alta y regeneración: Trackvance genera una contraseña temporal
-de 32 caracteres, persiste sólo Argon2 y la muestra **una sola vez** al
-Administrator autorizado. El modal permite copiar username, contraseña o ambas
-credenciales. Al cerrarlo no se pueden recuperar: si se pierden, hay que generar
-una temporal nueva. Vence a las 24 horas y el primer login exige cambiarla.
+Trackvance conserva el monolito FastAPI/React, PostgreSQL 16 y datos/versiones
+inmutables. La revisión añade adquisición asíncrona, datasets multipartes,
+PySpark real para Intake/ReconOps/Sentinel, preflight persistido y preparación
+Delivery por lotes en disco, automatización versionada y bandeja personal.
+Los resultados de cada suite y tamaño se registran en
+[validación](docs/development/validation.md); capacidad implementada y certificada
+se distinguen, y la release permanece abierta mientras falten gates obligatorios.
 
-**No se envían correos ni se necesita SMTP.** La decisión de 0.6.0 de intentar
-entregar credenciales por email se revierte deliberadamente. Se retiran el
-adaptador SMTP, las variables estándar, Mailpit de los E2E y la pestaña
-Notificaciones. La tabla y sus registros históricos se conservan; notificaciones
-de ejecuciones y sus canales vuelven al backlog.
+La UI normal recibe el archivo a staging, permite confirmar opciones, registra
+202 y muestra historial/etapa/filas/bytes/cancelación/enlace a versión. CSV,
+TXT/TSV, JSONL/NDJSON y Parquet usan lectura acotada. XLSX y JSON no lineal
+mantienen límites menores explícitos. Los endpoints legacy conservan su contrato
+síncrono pequeño. Navegar después del registro durable no cancela el trabajo;
+una transferencia incompleta debe volver a iniciarse.
 
-Se conservan RBAC dinámico, Administrator protegido, bajas lógicas, aislamiento,
-propagación de permisos y revocación de sesiones. Microsoft/Google OIDC están
-implementados y **deshabilitados por defecto**: su activación se decide durante
-la implantación según el cliente. Login local no depende de SSO. No se ejecutan
-pruebas contra proveedores externos en este ciclo; el mock OIDC sigue vigente.
+Cada ejecución permite Automático, Polars o PySpark y guarda el engine efectivo,
+versión, recursos y motivo de selección/rechazo. PySpark 4.0.3/Java 17 ejecuta
+reglas portables y operaciones globales; no retorna toda la población al driver.
+El modo estándar es local[2]; un overlay opcional prueba Standalone con driver
+DEFAULT y dos executors en el mismo host. No amplía recursos físicos ni certifica
+escalamiento multinodo. Véase [Spark y evidencia](docs/development/spark-volume-0.7.0.md).
 
-Data Delivery conserva fechaIngesta/usuario, política permanente por tabla,
-estrategias SQL, drift, UNKNOWN y evidencia. DatasetVersion permanece inmutable.
-No hay cambio de schema: Alembic sigue `0012_delivery_target_audit`, state 5 y
-31 tablas; **0001..0012 no se modifican**. Compose conserva cinco servicios y
-`restart: "no"`.
+Data Delivery conserva sus cuatro estrategias y una transacción por intento.
+Preflight grande se sigue como trabajo; su reutilización exige borrador exacto.
+PreparedRows sellado fija configuración/fuente/destino/esquema/hashes/conteos.
+Automatización admite horarios con zona y entradas fijas/última registrada/salida
+exacta del Intake. No repetición, idempotencia y claims son controles distintos.
+UNKNOWN bloquea target hasta revisión y decisión explícita; reparar evidencia
+no vuelve a escribir. La bandeja entrega resúmenes al iniciador/responsable real,
+sin enviar correo ni credenciales y con permisos vigentes al consultar.
 
-- [Identidad, credenciales de una sola presentación y primer acceso](docs/development/identity-060.md).
-- [Configuración opcional de Microsoft y Google](docs/development/sso-setup.md).
-- [Retirada de SMTP y antecedente 0.6.0](docs/development/smtp-setup.md).
-- [Auditoría de Delivery conservada](docs/development/delivery-audit.md).
-- [Validación ejecutada y limitaciones](docs/development/validation.md).
+Alembic añade `0013_async_acquisition`, `0014_automation_outbox` y
+`0015_sentinel_execution_identity`. Las migraciones `0001..0012` permanecen intactas.
+El modelo tiene 42 tablas/state 6; backup/restore verifica conjuntos multipartes
+con metadata, secretos fuente/destino y claves separados. Sentinel legacy sin
+usuario verificable queda pausado hasta asignación explícita. Roles personalizados,
+actores y notification_deliveries históricos se conservan.
 
-Los resultados de versiones anteriores conservados debajo son antecedentes,
-no certificación automática de 0.6.1. El cambio funcional se documenta en
-CHANGELOG y en la especificación técnica sin borrar la historia 0.6.0.
+Compose inicia nueve servicios: postgres, api, web, worker, acquisition-worker,
+delivery-worker, scheduler, events-chaining y events-notifications. Todos mantienen
+`restart: "no"`. Cada worker tiene su lane; adquisición monta sólo secretos de
+fuentes y Delivery sólo secretos de destinos. Calidad/Spark y procesos ligeros no
+tienen credenciales SQL de negocio. Los parámetros efectivos y unidades
+están en [parámetros](docs/development/parameters-0.7.0.md); la UI de Sistema muestra
+cotas y salud separadas. La instalación principal conserva proyecto/volúmenes,
+puerto/origen y SSO desactivado; nunca sirve como entorno de pruebas.
+
+- [Arquitectura](docs/architecture.md) y [especificación v1.1, implementación 0.7.0](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf).
+- [Contrato HTTP](backend/API_CONTRACT.md) y [permisos](docs/development/permission-matrix.md).
+- [Operación y recuperación](docs/development/operations.md).
+- [ADRs 0020–0024](docs/adr/0020-async-acquisition-multipart.md).
+
+Los apartados históricos siguientes conservan contexto de 0.5.x/0.6.x y sus
+propias cifras; no sustituyen la certificación 0.7.0. Credenciales temporales de
+una presentación, primer acceso y RBAC/SSO opcional continúan vigentes. No se
+reactiva SMTP ni Mailpit. Redis/Celery, Kubernetes, masking, gobierno y conectores
+adicionales continúan fuera del alcance.
 
 ### Base funcional conservada de 0.5.1
 
@@ -160,7 +184,7 @@ powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 ```
 
 El bootstrap conserva un `.env` existente o crea uno con una contraseña local
-aleatoria, construye las imágenes, aplica Alembic y espera la salud de los cinco
+aleatoria, construye las imágenes, aplica Alembic y espera la salud de los nueve
 servicios. Abre **http://localhost:3000** en una instalación nueva, o el puerto
 configurado. La instalación de este equipo usa **http://localhost:3100**.
 El botón **Entrar al entorno demo** abre la sesión local cuando ese modo está
@@ -176,9 +200,11 @@ docker compose stop
 
 Después de actualizar el código, **Start** de Docker Desktop sólo inicia los
 contenedores existentes. Para instalar una revisión nueva se requiere un backup
-verificado y `docker compose up --build -d --wait`; no uses `down -v`. La API
-aplica la migración al iniciar. Comprueba `/api/v1/health` y conserva el mismo
-proyecto/volúmenes; reconstruir no implica crear una instalación vacía.
+verificado y reconstruir las imágenes conservando el mismo proyecto y volúmenes.
+Inicia primero PostgreSQL y API, compara la preservación con los procesos
+automáticos detenidos y después reactívalos según el procedimiento de
+[actualización](docs/development/operations.md#actualización-y-recuperación-070).
+La API aplica la migración al iniciar. Comprueba `/api/v1/health`; no uses `down -v`.
 
 PostgreSQL guarda metadata; los archivos y artefactos permanecen fuera de la
 base, en un volumen persistente compartido por API y worker. Todos los servicios
@@ -291,8 +317,9 @@ En otros sistemas, copia `.env.example` a `.env`, reemplaza
 docker compose up --build -d --wait
 ```
 
-Servicios: `web` en localhost:3000, API, worker `DEFAULT`, `delivery-worker` en
-lane `DELIVERY` y PostgreSQL.
+Servicios: `web` en localhost:3000, API, PostgreSQL, worker `DEFAULT`,
+`delivery-worker` en lane `DELIVERY`, `acquisition-worker` en lane `ACQUISITION`,
+scheduler, `events-notifications` y `events-chaining`.
 Los archivos y los metadatos persisten en volúmenes Docker. No expone
 PostgreSQL ni la API al exterior. Detener con `docker compose down` conserva
 los volúmenes. No uses `down -v` si quieres conservar los datos.
@@ -320,15 +347,17 @@ como `STRING`; Trackvance no inventa una zona horaria ni pierde precisión duran
 la adquisición o Data Delivery.
 
 La fuente externa es distinta del PostgreSQL interno de Trackvance. Utiliza una
-cuenta externa de solo lectura y un host accesible desde el contenedor API. Para
+cuenta externa de solo lectura y un host accesible desde la API y
+`acquisition-worker`. Para
 una base instalada en el PC, usa `host.docker.internal`. El Compose base admite
 esa salida; el overlay offline debe retirarse si necesitas fuentes externas.
 
 Las contraseñas se cifran fuera de PostgreSQL y del almacenamiento de artifacts.
 Conserva los volúmenes `connection_credentials` y `connection_keys` al actualizar
 la instalación y respáldalos de forma protegida junto con metadata y artifacts.
-Solo la API monta esos dos volúmenes; el worker `DEFAULT` procesa los snapshots canónicos
-sin acceder a credenciales externas. Al editar host, puerto, base, usuario o modo
+La API y `acquisition-worker` montan esos dos volúmenes; el worker `DEFAULT`
+procesa los snapshots canónicos sin acceder a credenciales externas. Al editar
+host, puerto, base, usuario o modo
 TLS se exige introducir de nuevo la contraseña antes de probar o guardar.
 Nunca publiques ni incluyas sus contenidos en Git. El cifrado de transporte está
 activado por defecto; configura certificados y permisos en el servidor según tu
@@ -396,7 +425,7 @@ La separación de montajes es deliberada: la API monta secretos de origen y
 destino; el worker `DEFAULT` sólo artifacts; el `delivery-worker`, artifacts y
 secretos de destino, nunca los de origen. 0.6.0 usa permisos propios de destinos y
 Delivery; sobrescribir, crear/alterar targets, revisar UNKNOWN y reparar evidencia
-requieren permisos separados. Otros sinks, scheduler de entregas,
+requieren permisos separados. Otros sinks,
 transformación arbitraria y transacción distribuida permanecen fuera del alcance.
 
 La certificación aislada usa motores y volúmenes desechables, sin tocar la
@@ -414,7 +443,7 @@ resultados ejecutados en
 
 El backup Docker conserva un conjunto consistente: PostgreSQL, artifacts,
 credenciales/clave de conexiones y credenciales/clave de Delivery. Detiene
-brevemente web, scheduler y ambos workers, registra hashes y vuelve a iniciar sólo
+brevemente API/web, scheduler, los tres workers y consumidores, registra hashes y vuelve a iniciar sólo
 los servicios que estaban activos. El restore exige un proyecto nuevo, verifica
 la huella y puede dejarlo detenido o iniciarlo explícitamente.
 La compatibilidad de restore incluye backups schema 1/state 2 de la baseline
@@ -428,7 +457,7 @@ revisiones nuevas se informa en validación, sin reutilizar el PASS histórico.
 SSO, notificaciones y políticas de auditoría Delivery. Su restore admite también
 0.5.1/state 4; las fuentes anteriores se comparan con su proyección legacy exacta.
 En el ciclo histórico 0.6.0, la instalación encontrada en 0.5.0 se comprobó con
-`snapshot-legacy-v3`. El upgrade actual 0.6.0→0.6.1 compara state 5 exactamente;
+`snapshot-legacy-v3`. El antecedente de upgrade 0.6.0→0.6.1 comparó state 5 exactamente;
 `.env`/`external.env` y secretos OAuth se conservan por separado. Los registros
 SMTP anteriores permanecen históricos, sin nuevos envíos en 0.6.1.
 Docker copia cada componente a staging privado/read-only y vuelve a verificar
@@ -439,7 +468,7 @@ inventar esa evidencia histórica.
 ```powershell
 python scripts/docker_state.py backup --project trackvance-certification --destination backups/local
 python scripts/docker_state.py verify --source backups/local
-python scripts/docker_state.py restore --source backups/local --target-project trackvance-restored --web-port 3200 --start
+python scripts/docker_state.py restore --source backups/local --target-project trackvance-restored --web-port 3200
 ```
 
 El respaldo contiene material sensible: protégelo fuera de Git y conserva `.env`
@@ -532,7 +561,7 @@ Las dependencias resueltas se registran en `backend/uv.lock` y
 
 ## Estructura
 
-Las capas se organizan por responsabilidades dentro del monolito; la API y ambos
+Las capas se organizan por responsabilidades dentro del monolito; la API y los tres
 workers comparten modelos y servicios. Los puertos permiten sustituir la
 infraestructura sin cambiar las reglas. El [mapa de arquitectura](docs/architecture.md)
 identifica los archivos y los límites pendientes de esa separación.
@@ -551,23 +580,33 @@ compose.yml    Entorno PostgreSQL local
 
 - Roles administrables y catálogo controlado; Microsoft/Google autentican cuentas
   preprovisionadas. Grupos externos y administración de múltiples organizaciones
-  quedan fuera de esta entrega. No hay SMTP operativo ni notificaciones externas en 0.6.1.
-- Archivos CSV/TXT UTF-8, XLSX, JSON y Parquet de máximo 10 MiB, 100.000
-  filas y 100 columnas. La inspección usa una muestra de hasta 100 filas salvo
-  el esquema embebido de Parquet; la carga completa sigue siendo síncrona.
-- Carga y perfil inicial acotados y síncronos; ejecuciones de módulos en worker.
+  quedan fuera de esta entrega. La bandeja interna es personal; SMTP y canales externos
+  continúan fuera del alcance.
+- La adquisición asíncrona admite CSV/TXT UTF-8, JSONL/NDJSON, Parquet y snapshots
+  PostgreSQL/SQL Server con límites efectivos de filas, bytes observados, celda,
+  lote, memoria, disco y tiempo. Sus defaults son 1 GiB de recepción, 5 millones
+  de filas y 100 columnas. XLSX y JSON no lineal mantienen una cota de 10 MiB y
+  100.000 filas. El endpoint síncrono histórico conserva sus límites originales.
+- La inspección de recepción usa hasta 100 filas; el perfil publicado corresponde
+  a toda la población. La muestra de presentación del perfil tiene hasta veinte
+  filas y 8 MiB de JSON UTF-8, con metadatos que indican su límite.
 - Reglas declarativas portables con compiladores Polars y DuckDB; ReconOps
   incluye comparación exacta, tolerancias numéricas/temporales y agregaciones
-  1:N/N:1 SUM/COUNT. La ejecución completa de runs usa Polars/Python.
-- PySpark tiene una decisión de planificación y rechazo explícito cuando se
-  requiere, pero no un adaptador de ejecución instalado. Redis/Celery, conectores
-  adicionales y object storage son evoluciones preparadas o de producto.
+  1:N/N:1 SUM/COUNT. Intake, ReconOps y Sentinel ejecutan Polars o PySpark real;
+  el planner guarda selección, versión y recursos, y rechaza planes inviables.
+  Las operaciones exactas de Decimal y Unicode conservan la semántica portable.
+  ReconOps limita cada grupo completo a 10.000 filas y 16 MiB; exceder esa cota
+  rechaza el trabajo, sin truncar el grupo.
+- PySpark 4.0.3/Java 17 funciona en local[2] y en Standalone con dos executors.
+  Redis/Celery, conectores adicionales y object storage continúan en backlog.
 - El despliegue local usa cola persistente en PostgreSQL, leases y heartbeat.
-  `DEFAULT` y `DELIVERY` son lanes y heartbeats separados; el scheduler depende
-  sólo del worker DEFAULT y no corre con Docker detenido.
+  `DEFAULT`, `DELIVERY` y `ACQUISITION` tienen workers y heartbeats separados.
+  Scheduler, consumidor de notificaciones y consumidor de encadenamiento son
+  procesos independientes con estado persistente; requieren procesos activos.
 - Data Delivery escribe realmente en PostgreSQL/SQL Server. No incluye otros
-  sinks, DDL/SQL libre, scheduler, transforms de negocio, 2PC, reintento automático
-  tras `UNKNOWN`. El RBAC Delivery es granular desde 0.6.0. Preflight es informativo; existencia,
+  sinks, DDL/SQL libre, transforms de negocio, 2PC ni reintento automático tras
+  `UNKNOWN`. Incluye automatizaciones versionadas y encadenamiento de la salida
+  exacta de Intake. El RBAC Delivery es granular desde 0.6.0. Preflight es informativo; existencia,
   arbitraje UPSERT y políticas que podrían ocultar/omitir filas se revalidan bajo
   bloqueo dentro de la transacción. Otros cambios externos siguen siendo
   responsabilidad operativa del destino.

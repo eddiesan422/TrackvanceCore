@@ -1,0 +1,734 @@
+{
+  "schema_version": 1,
+  "release": "0.7.0",
+  "fixture_rows_per_input": 1000000,
+  "fixture": "Synthetic canonical snapshots: exact Decimal, Unicode, duplicates, nulls and physical record numbers",
+  "date": "2026-10-03",
+  "timezone": "America/Bogota",
+  "modes": {
+    "local": {
+      "status": "PASS",
+      "docker": {
+        "status": "PASS",
+        "deployment_mode": "LOCAL",
+        "prefix": "trackvance-v070-test-spark-2f8bf6911c7b",
+        "image": "trackvance-v070-isolated:backend",
+        "image_id": "sha256:0d54553a57b395cda319fd541b03d4981eb3145d0da4ff321b7dd97f8647dfb8",
+        "source_fingerprint": "3bdfe0166af8dab6e50ee916c83b02fda9d0c3a2b6908717766df443d2acc5d1",
+        "rows": 1000000,
+        "parity_only": false,
+        "memory_limit_bytes": 3221225472,
+        "cpu_limit": 2,
+        "pids_limit": 512,
+        "sampled_docker_working_set_peak_bytes": 1691143372,
+        "cgroup_peak_bytes": 2151247872,
+        "protected_main_inventory_unchanged": true,
+        "cleanup_finished": true,
+        "driver_exit_code": 0,
+        "oom_killed": false,
+        "tests": {
+          "passed": 35,
+          "skipped": 0,
+          "failed": 0
+        },
+        "elapsed_seconds": 216.452
+      },
+      "global_profile": {
+        "elapsed_seconds": 8.947,
+        "process_tree_peak_rss_bytes": 276983808,
+        "driver_container_sampled_peak_bytes": 586551296,
+        "memory_samples": 33,
+        "measurement_method": "PROC_RSS_TREE_AND_CGROUP_V2_250MS",
+        "standalone_executors_measured_separately": true
+      },
+      "complete_value_verification": "PASS",
+      "expected_logical_fingerprints": {
+        "intake": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 188,
+          "sum_sha256": "452b59ace278ceccf6d7cca6faa0a818c3da0e59faca23c7295e37c965edbceb",
+          "xor_sha256": "5a69d7ad16a616a27c31c5203002209cfaf078f11f290404799e52375132a67f",
+          "sha256": "667508dc10a63d4e822c55a527259ee094b54fe108ddd9f5d0c54e24ead1aa33"
+        },
+        "recon": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 1000038,
+          "sum_sha256": "bbf6342eb2dbe4db2fae3b6aa45fbd0a11c2c42056b290a279e6d1dd5304d3a9",
+          "xor_sha256": "761882c492b24aecf694217a168ac895e1c8e6914ca6d3358abd21c3f7282695",
+          "sha256": "9e250cbb4425454943f4654e076f9a0531e6fe7c130e246587fead4c9ef341be"
+        },
+        "sentinel": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 6,
+          "sum_sha256": "af9865bd85493093c745eac812be39a4448ae651cb710fad965b440e5179b021",
+          "xor_sha256": "e8bb20c51857cfe8f69b6ea25dfc847d716d654e6f06e143a1df03f531698b6b",
+          "sha256": "f3257e3de926bfc290fec54766631337f0538f5542c57eb42f11e58f99ea1d66"
+        },
+        "intake_accepted": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 999900,
+          "sum_sha256": "8bcbc8dc52bc15791cb18e4593c5995b81d8ff45a082670ef704c86d1335589b",
+          "xor_sha256": "d571e55cca484306961df691141b30b82928960de7963e429599996836917185",
+          "sha256": "2548c0051e24ce39789257fe1918f6b7bb7ec443474c7d19732b1475c1c17ae5"
+        }
+      },
+      "dedicated_suite_seconds": 57.828,
+      "test_breakdown": {
+        "real_jvm_scenarios": 16,
+        "contracts_and_guards": 19,
+        "real_standalone_scenarios": 0,
+        "real_local_scenarios": 16,
+        "real_jvm_test_names": [
+          "test_real_spark_catalog_intake_global_references_and_exact_values",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[None]",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[SOURCE]",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[TARGET]",
+          "test_real_spark_sentinel_rules_and_profile_metrics",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[ALLOW]",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[FAIL]",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[IGNORE]",
+          "test_real_spark_all_transforms_preserve_original_evidence_and_numbering",
+          "test_real_spark_recon_all_comparisons_normalized_compound_keys_and_empty[False]",
+          "test_real_spark_recon_all_comparisons_normalized_compound_keys_and_empty[True]",
+          "test_real_spark_job_group_cancellation_stops_computation",
+          "test_real_spark_global_hot_key_uniqueness_and_reference",
+          "test_real_spark_recon_count_aggregation_preserves_lineage[SOURCE]",
+          "test_real_spark_recon_count_aggregation_preserves_lineage[TARGET]",
+          "test_real_local_spark_run_publishes_complete_registered_lineage"
+        ]
+      },
+      "provenance_sha256": {
+        "evidence.json": "748cbedfad3a8789d5dca0cb769785d5a6e535e96c3288461d25f3d81c007077",
+        "docker-summary.json": "c8f7d42ed2de26c448998de0bd89a32990e2677503e66a189634b52535698dac",
+        "parity.xml": "7b234e1294e14b507d4f0d050fb568e8cd6330aa066b1f7df861fb45e66ee66a"
+      },
+      "modules": {
+        "intake": {
+          "status": "PASS",
+          "decision": "REJECTED",
+          "elapsed_seconds": 51.699,
+          "results": {
+            "rows": 188,
+            "classification_counts": {
+              "WARNING": 38,
+              "ERROR": 150
+            },
+            "size_bytes": 25355,
+            "parts": 10,
+            "materialization_sha256": "443290f483bcf57fcdb159d3a3cbe22fc7a165c0ce5ae59a13d11db524aaefa3",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 188,
+              "sum_sha256": "452b59ace278ceccf6d7cca6faa0a818c3da0e59faca23c7295e37c965edbceb",
+              "xor_sha256": "5a69d7ad16a616a27c31c5203002209cfaf078f11f290404799e52375132a67f",
+              "sha256": "667508dc10a63d4e822c55a527259ee094b54fe108ddd9f5d0c54e24ead1aa33"
+            }
+          },
+          "accepted": {
+            "rows": 999900,
+            "classification_counts": {},
+            "size_bytes": 14884779,
+            "parts": 492,
+            "materialization_sha256": "147f01b581d15003c35cc7af7fe298c87dd42155ba17b81902340576a26bbfcd",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 999900,
+              "sum_sha256": "8bcbc8dc52bc15791cb18e4593c5995b81d8ff45a082670ef704c86d1335589b",
+              "xor_sha256": "d571e55cca484306961df691141b30b82928960de7963e429599996836917185",
+              "sha256": "2548c0051e24ce39789257fe1918f6b7bb7ec443474c7d19732b1475c1c17ae5"
+            }
+          },
+          "process_tree_peak_rss_bytes": 1737011200,
+          "driver_container_sampled_peak_bytes": 1829416960,
+          "memory_samples": 203,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "LOCAL",
+            "master": "local[2]",
+            "application_id": "local-1791088490897",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/intake/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python"
+            },
+            "resource_budget": {
+              "master": "local[2]",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 1
+          },
+          "counts": {
+            "total_rows": 1000000,
+            "valid_rows": 999900,
+            "error_rows": 100,
+            "warning_rows": 38,
+            "error_count": 150
+          }
+        },
+        "recon": {
+          "status": "PASS",
+          "decision": "WITH_FINDINGS",
+          "elapsed_seconds": 53.161,
+          "results": {
+            "rows": 1000038,
+            "classification_counts": {
+              "MATCH": 999800,
+              "INVALID": 81,
+              "VALUE_MISMATCH": 81,
+              "DUPLICATE_SOURCE": 38,
+              "DUPLICATE_TARGET": 38
+            },
+            "size_bytes": 80071406,
+            "parts": 490,
+            "materialization_sha256": "44daa6c14e307b94e65d45ab8411106f70f83be1c7cae672653c89bbd5b3bf10",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 1000038,
+              "sum_sha256": "bbf6342eb2dbe4db2fae3b6aa45fbd0a11c2c42056b290a279e6d1dd5304d3a9",
+              "xor_sha256": "761882c492b24aecf694217a168ac895e1c8e6914ca6d3358abd21c3f7282695",
+              "sha256": "9e250cbb4425454943f4654e076f9a0531e6fe7c130e246587fead4c9ef341be"
+            }
+          },
+          "accepted": null,
+          "process_tree_peak_rss_bytes": 1853841408,
+          "driver_container_sampled_peak_bytes": 2133057536,
+          "memory_samples": 207,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "LOCAL",
+            "master": "local[2]",
+            "application_id": "local-1791088541740",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/recon/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python"
+            },
+            "resource_budget": {
+              "master": "local[2]",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 1
+          },
+          "counts": {
+            "MATCH": 999800,
+            "VALUE_MISMATCH": 81,
+            "SOURCE_ONLY": 0,
+            "TARGET_ONLY": 0,
+            "DUPLICATE_SOURCE": 38,
+            "DUPLICATE_TARGET": 38,
+            "INVALID": 81
+          }
+        },
+        "sentinel": {
+          "status": "PASS",
+          "decision": "ALERT",
+          "elapsed_seconds": 17.753,
+          "results": {
+            "rows": 6,
+            "classification_counts": {
+              "PASS": 3,
+              "FAIL": 3
+            },
+            "size_bytes": 9763,
+            "parts": 4,
+            "materialization_sha256": "3974fa78f3d61c2b22c5d7d860893dc72a782ff2bd95fe3ac35fc0deeb8dbe88",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 6,
+              "sum_sha256": "af9865bd85493093c745eac812be39a4448ae651cb710fad965b440e5179b021",
+              "xor_sha256": "e8bb20c51857cfe8f69b6ea25dfc847d716d654e6f06e143a1df03f531698b6b",
+              "sha256": "f3257e3de926bfc290fec54766631337f0538f5542c57eb42f11e58f99ea1d66"
+            }
+          },
+          "accepted": null,
+          "process_tree_peak_rss_bytes": 1814925312,
+          "driver_container_sampled_peak_bytes": 1999106048,
+          "memory_samples": 71,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "LOCAL",
+            "master": "local[2]",
+            "application_id": "local-1791088595899",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/sentinel/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python"
+            },
+            "resource_budget": {
+              "master": "local[2]",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 1
+          },
+          "counts": {
+            "failed_checks": 3
+          }
+        }
+      }
+    },
+    "standalone": {
+      "status": "PASS",
+      "docker": {
+        "status": "PASS",
+        "prefix": "trackvance-v070-test-spark-f9e8f7a9a976",
+        "image": "trackvance-v070-isolated:backend",
+        "rows": 1000000,
+        "parity_only": false,
+        "image_id": "sha256:0d54553a57b395cda319fd541b03d4981eb3145d0da4ff321b7dd97f8647dfb8",
+        "source_fingerprint": "3bdfe0166af8dab6e50ee916c83b02fda9d0c3a2b6908717766df443d2acc5d1",
+        "protected_main_inventory_unchanged": true,
+        "cleanup_finished": true,
+        "memory_limits_bytes": {
+          "master": 536870912,
+          "executor1": 1610612736,
+          "executor2": 1610612736,
+          "driver": 2147483648
+        },
+        "sampled_docker_working_set_peak_bytes": {
+          "master": 160746700,
+          "executor1": 705377075,
+          "executor2": 707893657,
+          "driver": 774478233
+        },
+        "cgroup_peak_bytes": {
+          "master": 169070592,
+          "executor1": 792555520,
+          "executor2": 796758016
+        },
+        "driver_exit_code": 0,
+        "oom_killed": false,
+        "tests": {
+          "passed": 35,
+          "skipped": 0,
+          "failed": 0
+        },
+        "elapsed_seconds": 263.744
+      },
+      "global_profile": {
+        "elapsed_seconds": 9.13,
+        "process_tree_peak_rss_bytes": 278343680,
+        "driver_container_sampled_peak_bytes": 418979840,
+        "memory_samples": 34,
+        "measurement_method": "PROC_RSS_TREE_AND_CGROUP_V2_250MS",
+        "standalone_executors_measured_separately": true
+      },
+      "complete_value_verification": "PASS",
+      "expected_logical_fingerprints": {
+        "intake": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 188,
+          "sum_sha256": "452b59ace278ceccf6d7cca6faa0a818c3da0e59faca23c7295e37c965edbceb",
+          "xor_sha256": "5a69d7ad16a616a27c31c5203002209cfaf078f11f290404799e52375132a67f",
+          "sha256": "667508dc10a63d4e822c55a527259ee094b54fe108ddd9f5d0c54e24ead1aa33"
+        },
+        "recon": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 1000038,
+          "sum_sha256": "bbf6342eb2dbe4db2fae3b6aa45fbd0a11c2c42056b290a279e6d1dd5304d3a9",
+          "xor_sha256": "761882c492b24aecf694217a168ac895e1c8e6914ca6d3358abd21c3f7282695",
+          "sha256": "9e250cbb4425454943f4654e076f9a0531e6fe7c130e246587fead4c9ef341be"
+        },
+        "sentinel": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 6,
+          "sum_sha256": "af9865bd85493093c745eac812be39a4448ae651cb710fad965b440e5179b021",
+          "xor_sha256": "e8bb20c51857cfe8f69b6ea25dfc847d716d654e6f06e143a1df03f531698b6b",
+          "sha256": "f3257e3de926bfc290fec54766631337f0538f5542c57eb42f11e58f99ea1d66"
+        },
+        "intake_accepted": {
+          "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+          "rows": 999900,
+          "sum_sha256": "8bcbc8dc52bc15791cb18e4593c5995b81d8ff45a082670ef704c86d1335589b",
+          "xor_sha256": "d571e55cca484306961df691141b30b82928960de7963e429599996836917185",
+          "sha256": "2548c0051e24ce39789257fe1918f6b7bb7ec443474c7d19732b1475c1c17ae5"
+        }
+      },
+      "dedicated_suite_seconds": 65.767,
+      "test_breakdown": {
+        "real_jvm_scenarios": 16,
+        "contracts_and_guards": 19,
+        "real_standalone_scenarios": 15,
+        "real_local_scenarios": 1,
+        "real_jvm_test_names": [
+          "test_real_spark_catalog_intake_global_references_and_exact_values",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[None]",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[SOURCE]",
+          "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[TARGET]",
+          "test_real_spark_sentinel_rules_and_profile_metrics",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[ALLOW]",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[FAIL]",
+          "test_real_spark_global_nulls_conditions_and_collision_free_compound_keys[IGNORE]",
+          "test_real_spark_all_transforms_preserve_original_evidence_and_numbering",
+          "test_real_spark_recon_all_comparisons_normalized_compound_keys_and_empty[False]",
+          "test_real_spark_recon_all_comparisons_normalized_compound_keys_and_empty[True]",
+          "test_real_spark_job_group_cancellation_stops_computation",
+          "test_real_spark_global_hot_key_uniqueness_and_reference",
+          "test_real_spark_recon_count_aggregation_preserves_lineage[SOURCE]",
+          "test_real_spark_recon_count_aggregation_preserves_lineage[TARGET]",
+          "test_real_local_spark_run_publishes_complete_registered_lineage"
+        ]
+      },
+      "provenance_sha256": {
+        "evidence.json": "ded2b399ba17aca62534f09fe86f7f0fde35acaedf427b2392155d623447d562",
+        "docker-summary.json": "651bb02141181068b04e30cc69056678de78ff0d377e822ed3cd531799875e56",
+        "parity.xml": "cf06256b47487f552cd082b7005c733ec18d394eeda9f1e171be904e32693ba9"
+      },
+      "modules": {
+        "intake": {
+          "status": "PASS",
+          "decision": "REJECTED",
+          "elapsed_seconds": 55.453,
+          "results": {
+            "rows": 188,
+            "classification_counts": {
+              "WARNING": 38,
+              "ERROR": 150
+            },
+            "size_bytes": 25371,
+            "parts": 10,
+            "materialization_sha256": "f0e0d704d09e3f5ae859efd3f7a020a100a97f94958bfc911fff29ad42542121",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 188,
+              "sum_sha256": "452b59ace278ceccf6d7cca6faa0a818c3da0e59faca23c7295e37c965edbceb",
+              "xor_sha256": "5a69d7ad16a616a27c31c5203002209cfaf078f11f290404799e52375132a67f",
+              "sha256": "667508dc10a63d4e822c55a527259ee094b54fe108ddd9f5d0c54e24ead1aa33"
+            }
+          },
+          "accepted": {
+            "rows": 999900,
+            "classification_counts": {},
+            "size_bytes": 14886049,
+            "parts": 492,
+            "materialization_sha256": "1cdf3dc592d88e7fa14e1e9e0f7cc0dccd1a8f6e7bc3303d1ef279cab5d0100c",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 999900,
+              "sum_sha256": "8bcbc8dc52bc15791cb18e4593c5995b81d8ff45a082670ef704c86d1335589b",
+              "xor_sha256": "d571e55cca484306961df691141b30b82928960de7963e429599996836917185",
+              "sha256": "2548c0051e24ce39789257fe1918f6b7bb7ec443474c7d19732b1475c1c17ae5"
+            }
+          },
+          "process_tree_peak_rss_bytes": 640225280,
+          "driver_container_sampled_peak_bytes": 767905792,
+          "memory_samples": 220,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "STANDALONE_CLIENT",
+            "master": "spark://master:7077",
+            "application_id": "app-20261004044013-0001",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/intake/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python",
+              "spark.driver.host": "driver",
+              "spark.driver.bindAddress": "0.0.0.0",
+              "spark.driver.port": "7078",
+              "spark.blockManager.port": "7079"
+            },
+            "resource_budget": {
+              "master": "spark://master:7077",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 3
+          },
+          "counts": {
+            "total_rows": 1000000,
+            "valid_rows": 999900,
+            "error_rows": 100,
+            "warning_rows": 38,
+            "error_count": 150
+          }
+        },
+        "recon": {
+          "status": "PASS",
+          "decision": "WITH_FINDINGS",
+          "elapsed_seconds": 60.354,
+          "results": {
+            "rows": 1000038,
+            "classification_counts": {
+              "MATCH": 999800,
+              "INVALID": 81,
+              "VALUE_MISMATCH": 81,
+              "DUPLICATE_SOURCE": 38,
+              "DUPLICATE_TARGET": 38
+            },
+            "size_bytes": 80071406,
+            "parts": 490,
+            "materialization_sha256": "44daa6c14e307b94e65d45ab8411106f70f83be1c7cae672653c89bbd5b3bf10",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 1000038,
+              "sum_sha256": "bbf6342eb2dbe4db2fae3b6aa45fbd0a11c2c42056b290a279e6d1dd5304d3a9",
+              "xor_sha256": "761882c492b24aecf694217a168ac895e1c8e6914ca6d3358abd21c3f7282695",
+              "sha256": "9e250cbb4425454943f4654e076f9a0531e6fe7c130e246587fead4c9ef341be"
+            }
+          },
+          "accepted": null,
+          "process_tree_peak_rss_bytes": 812548096,
+          "driver_container_sampled_peak_bytes": 963596288,
+          "memory_samples": 236,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "STANDALONE_CLIENT",
+            "master": "spark://master:7077",
+            "application_id": "app-20261004044107-0002",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/recon/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python",
+              "spark.driver.host": "driver",
+              "spark.driver.bindAddress": "0.0.0.0",
+              "spark.driver.port": "7078",
+              "spark.blockManager.port": "7079"
+            },
+            "resource_budget": {
+              "master": "spark://master:7077",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 3
+          },
+          "counts": {
+            "MATCH": 999800,
+            "VALUE_MISMATCH": 81,
+            "SOURCE_ONLY": 0,
+            "TARGET_ONLY": 0,
+            "DUPLICATE_SOURCE": 38,
+            "DUPLICATE_TARGET": 38,
+            "INVALID": 81
+          }
+        },
+        "sentinel": {
+          "status": "PASS",
+          "decision": "ALERT",
+          "elapsed_seconds": 22.793,
+          "results": {
+            "rows": 6,
+            "classification_counts": {
+              "PASS": 3,
+              "FAIL": 3
+            },
+            "size_bytes": 9763,
+            "parts": 4,
+            "materialization_sha256": "3974fa78f3d61c2b22c5d7d860893dc72a782ff2bd95fe3ac35fc0deeb8dbe88",
+            "logical_fingerprint": {
+              "method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1",
+              "rows": 6,
+              "sum_sha256": "af9865bd85493093c745eac812be39a4448ae651cb710fad965b440e5179b021",
+              "xor_sha256": "e8bb20c51857cfe8f69b6ea25dfc847d716d654e6f06e143a1df03f531698b6b",
+              "sha256": "f3257e3de926bfc290fec54766631337f0538f5542c57eb42f11e58f99ea1d66"
+            }
+          },
+          "accepted": null,
+          "process_tree_peak_rss_bytes": 747683840,
+          "driver_container_sampled_peak_bytes": 894091264,
+          "memory_samples": 91,
+          "runtime": {
+            "engine": "PYSPARK",
+            "engine_version": "4.0.3",
+            "java_version": "17.0.20.1",
+            "deployment_mode": "STANDALONE_CLIENT",
+            "master": "spark://master:7077",
+            "application_id": "app-20261004044208-0003",
+            "effective_parameters": {
+              "spark.submit.deployMode": "client",
+              "spark.driver.memory": "768m",
+              "spark.executor.memory": "768m",
+              "spark.executor.cores": "1",
+              "spark.cores.max": "2",
+              "spark.sql.shuffle.partitions": "4",
+              "spark.default.parallelism": "4",
+              "spark.driver.maxResultSize": "16777216",
+              "spark.ui.enabled": "false",
+              "spark.ui.showConsoleProgress": "false",
+              "spark.sql.session.timeZone": "UTC",
+              "spark.sql.ansi.enabled": "true",
+              "spark.local.dir": "/var/lib/trackvance/million/sentinel/spill",
+              "spark.task.maxFailures": "2",
+              "spark.python.worker.memory": "128m",
+              "spark.python.worker.reuse": "true",
+              "spark.executorEnv.POLARS_MAX_THREADS": "1",
+              "spark.executorEnv.OMP_NUM_THREADS": "1",
+              "spark.pyspark.python": "/app/backend/.venv/bin/python",
+              "spark.driver.host": "driver",
+              "spark.driver.bindAddress": "0.0.0.0",
+              "spark.driver.port": "7078",
+              "spark.blockManager.port": "7079"
+            },
+            "resource_budget": {
+              "master": "spark://master:7077",
+              "driver_memory_mb": 768,
+              "executor_memory_mb": 768,
+              "executor_cores": 1,
+              "total_cores": 2,
+              "partitions": 4,
+              "batch_rows": 2048,
+              "batch_bytes": 8388608,
+              "max_record_bytes": 65536,
+              "max_group_rows": 10000,
+              "max_group_bytes": 16777216,
+              "max_result_bytes": 16777216
+            },
+            "scalar_kernel": "PORTABLE_POLARS_BATCH_V1",
+            "executor_memory_status_entries": 3
+          },
+          "counts": {
+            "failed_checks": 3
+          }
+        }
+      }
+    }
+  },
+  "hash_semantics": "materialization_sha256 hashes full physical row order. logical_fingerprint is order-independent count plus 256-bit SHA256 sum/XOR, finalized with SHA256; it includes every value and physical position or result lineage. Each population equals a streaming fixture oracle.",
+  "cross_mode_metrics_equal": true,
+  "cross_mode_complete_values_equal": true,
+  "cross_mode_source_equal": true,
+  "status": "PASS",
+  "scope": "FINAL_SPARK_CERTIFICATION",
+  "release_gate_scope": "Spark engines, bounded execution and complete-value parity; the whole release gate is documented separately."
+}

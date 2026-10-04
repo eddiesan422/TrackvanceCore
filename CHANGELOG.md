@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-10-03 — volumen y automatización operativa
+
+- Centraliza los mensajes de preflight por código y resultado, con diagnóstico
+  funcional seguro para permisos, estructura, tipos, claves y recursos.
+- Añade recepción y adquisición asíncrona de archivos y snapshots PostgreSQL/SQL
+  Server, límites por filas y bytes, perfil global, multipart Parquet, progreso,
+  cancelación y recuperación por lease. Conserva el upload síncrono histórico.
+- Implementa PySpark 4.0.3/Java 17 para Intake, ReconOps y Sentinel, incluyendo
+  local[K] y Standalone. Persiste AUTO/Polars/PySpark, plan, versiones y recursos;
+  conserva Decimal exacto, Unicode, referencias globales y linaje.
+- Añade preflight persistente de Delivery y preparación sellada en disco. Las
+  cuatro estrategias mantienen una transacción SQL y la política UNKNOWN.
+- Incorpora automatizaciones versionadas con usuario responsable real, zona
+  horaria, ocurrencias, dedupe y encadenamiento de la salida exacta de Intake.
+- Añade outbox PostgreSQL, dos consumidores independientes y bandeja personal
+  con permisos actuales, filtros y lectura persistente; no restablece SMTP.
+- Añade migraciones 0013..0015 sin cambiar 0001..0012, 42 tablas y backup state6
+  compatible con las proyecciones históricas. Compose opera nueve servicios.
+- Actualiza contratos HTTP, permisos, parámetros, documentación operativa,
+  especificación editable/PDF y runners aislados de certificación. Los resultados
+  de 0.7.0 se publican en `docs/development/validation.md`.
+
 ## 0.6.1 — 2026-09-27 — credenciales temporales de una sola presentación
 
 - Revierte deliberadamente el envío SMTP de credenciales incorporado en 0.6.0.

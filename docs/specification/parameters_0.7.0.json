@@ -1,0 +1,346 @@
+{
+  "version": "0.7.0",
+  "variables": [
+    {
+      "variable": "TRACKVANCE_ACQUISITION_MAX_UPLOAD_BYTES",
+      "default": "1073741824",
+      "unit": "bytes",
+      "range": "1 KiB..5 GiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_MAX_ROWS",
+      "default": "5000000",
+      "unit": "registros",
+      "range": "1..100.000.000",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_MAX_OBSERVED_BYTES",
+      "default": "2147483648",
+      "unit": "bytes UTF-8 observados",
+      "range": "1 KiB..20 GiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_BATCH_ROWS",
+      "default": "5000",
+      "unit": "registros/lote",
+      "range": "1..50.000",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_BATCH_BYTES",
+      "default": "8388608",
+      "unit": "bytes/lote",
+      "range": "64 KiB..64 MiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_BYTES",
+      "default": "10485760",
+      "unit": "bytes JSON no lineal/XLSX",
+      "range": "1 KiB..64 MiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_BOUNDED_FORMAT_ROWS",
+      "default": "100000",
+      "unit": "filas JSON no lineal/XLSX",
+      "range": "1..100.000",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_MEMORY_BYTES",
+      "default": "268435456",
+      "unit": "bytes del motor de perfil DuckDB",
+      "range": "64 MiB..4 GiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota del motor analítico congelada en AcquisitionRun; no es límite de RSS del proceso ni de cgroup. Buffers del lector/writer, Python y file cache se miden aparte y el contenedor conserva su límite declarado.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_MIN_FREE_BYTES",
+      "default": "536870912",
+      "unit": "bytes reserva de disco",
+      "range": "16 MiB..20 GiB",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_TIMEOUT_SECONDS",
+      "default": "1800",
+      "unit": "segundos",
+      "range": "30..86.400",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_ACQUISITION_UPLOAD_TTL_SECONDS",
+      "default": "86400",
+      "unit": "segundos",
+      "range": "300..604.800",
+      "scope": "API / acquisition-worker",
+      "guard": "Cota aplicada durante recepción, lectura, perfil o cleanup según el campo; congelada en AcquisitionRun.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_BATCH_ROWS",
+      "default": "1000",
+      "unit": "filas/lote",
+      "range": "1..10.000",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_SCAN_MEMORY_BYTES",
+      "default": "268435456",
+      "unit": "bytes scan DuckDB",
+      "range": "64 MiB..2 GiB",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_MAX_ROWS",
+      "default": "5000000",
+      "unit": "filas",
+      "range": "1..100.000.000",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_RESERVE_DISK_BYTES",
+      "default": "536870912",
+      "unit": "bytes reserva de disco",
+      "range": "16 MiB..20 GiB",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_SYNCHRONOUS_ROWS",
+      "default": "100000",
+      "unit": "filas endpoint síncrono",
+      "range": "1..100.000",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_DELIVERY_PREPARATION_TIMEOUT_SECONDS",
+      "default": "1800",
+      "unit": "segundos",
+      "range": "30..86.400",
+      "scope": "API / delivery-worker",
+      "guard": "Scan completo, spool/keys en disco y control cooperativo; no cambia garantías de commit remoto.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MASTER",
+      "default": "local[2]",
+      "unit": "URI/modo",
+      "range": "local[K] K>=1 <=TOTAL_CORES; spark://host:port",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_DRIVER_MEMORY_MB",
+      "default": "768",
+      "unit": "MiB JVM",
+      "range": "512..16.384",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_EXECUTOR_MEMORY_MB",
+      "default": "768",
+      "unit": "MiB JVM/executor",
+      "range": "512..16.384",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_EXECUTOR_CORES",
+      "default": "1",
+      "unit": "CPU/executor",
+      "range": "1..16",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_TOTAL_CORES",
+      "default": "2",
+      "unit": "CPU total Spark",
+      "range": "1..64",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_PARTITIONS",
+      "default": "4",
+      "unit": "particiones",
+      "range": "1..256",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_BATCH_ROWS",
+      "default": "2048",
+      "unit": "filas",
+      "range": "1..10.000",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_BATCH_BYTES",
+      "default": "8388608",
+      "unit": "bytes",
+      "range": "64 KiB..64 MiB",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MAX_RECORD_BYTES",
+      "default": "65536",
+      "unit": "bytes/fila",
+      "range": "1 KiB..1 MiB",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MAX_GROUP_ROWS",
+      "default": "10000",
+      "unit": "filas/grupo Recon",
+      "range": "1..100.000",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MAX_GROUP_BYTES",
+      "default": "16777216",
+      "unit": "bytes/grupo Recon",
+      "range": "64 KiB..64 MiB",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MAX_RESULT_BYTES",
+      "default": "16777216",
+      "unit": "bytes resultado driver",
+      "range": "1 MiB..64 MiB",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SPARK_MEMORY_BUDGET_BYTES",
+      "default": "2147483648",
+      "unit": "bytes estimados",
+      "range": "Entero positivo; Standalone overlay usa 3 GiB",
+      "scope": "API planner / DEFAULT / executors",
+      "guard": "Memoria JVM, recursos y cotas efectivas de fila/lote/grupo; budget estima y cgroup impone límite del contenedor.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_WORKER_MEMORY_SOFT_BYTES",
+      "default": "536870912",
+      "unit": "bytes",
+      "range": "Positivo",
+      "scope": "API / DEFAULT planner",
+      "guard": "Presupuesto estimado Polars; no límite duro de RSS.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_TEMP_MIN_FREE_BYTES",
+      "default": "16777216",
+      "unit": "bytes",
+      "range": "Positivo; Compose usa 536870912",
+      "scope": "API / DEFAULT",
+      "guard": "Reserva planner previa y control durante ejecución.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_RUN_TIMEOUT_SECONDS",
+      "default": "300",
+      "unit": "segundos",
+      "range": "Positivo; Compose usa 1800",
+      "scope": "DEFAULT",
+      "guard": "Deadline cooperativo; no terminación arbitraria de un commit SQL.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SCHEDULER_POLL_SECONDS",
+      "default": "5",
+      "unit": "segundos",
+      "range": "1..60",
+      "scope": "scheduler",
+      "guard": "Intervalo aplicado al bucle ligero.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_SCHEDULER_BATCH_SIZE",
+      "default": "100",
+      "unit": "ocurrencias/tick",
+      "range": "1..1.000",
+      "scope": "scheduler",
+      "guard": "Cantidad acotada por tick; no paralelismo de jobs.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_EVENT_LEASE_SECONDS",
+      "default": "300",
+      "unit": "segundos",
+      "range": "60..3.600",
+      "scope": "events-consumers",
+      "guard": "Lease CAS, heartbeat y fence final.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    },
+    {
+      "variable": "TRACKVANCE_EVENT_POLL_SECONDS",
+      "default": "1",
+      "unit": "segundo",
+      "range": "1..60",
+      "scope": "events-consumers",
+      "guard": "Intervalo del bucle independiente.",
+      "restart": "Recrear/reiniciar servicios afectados; jobs conservan plan/límites capturados."
+    }
+  ],
+  "fixed_limits": [
+    "Concurrencia por proceso worker: 1 Job; múltiples réplicas requieren presupuesto adicional.",
+    "MAX_UPLOAD_BYTES = 10 MiB y TRACKVANCE_MAX_ROWS = 100000 permanecen en las rutas síncronas legacy.",
+    "Celdas de adquisición: 64 KiB; columnas: 100. El lote de Delivery admite 8 MiB observados además de BATCH_ROWS.",
+    "PreparedRows: binding, hash y conteos completos; no hay commit por lote.",
+    "Reintentos del consumidor de eventos: máximo 5, persistidos; las reservas y leases no autorizan replay de UNKNOWN.",
+    "Página de resultados: hasta 100.000 filas y 16 MiB UTF-8 antes de decodificar; el exceso produce HTTP 422 RESULT_PAGE_BYTE_LIMIT, sin truncar. Muestra de perfil: hasta 20 filas y 8 MiB de JSON UTF-8."
+  ]
+}

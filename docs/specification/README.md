@@ -1,8 +1,8 @@
 # Especificación técnica
 
 Esta carpeta versiona la **Especificación Técnica v1.1** y su fuente editable para
-la evolución funcional local `0.6.1`. El nombre v1.1 identifica el documento;
-0.6.1 identifica el software. IMPLEMENTADO, PREPARADO y OBJETIVO se distinguen
+la evolución funcional local `0.7.0`. El nombre v1.1 identifica el documento;
+0.7.0 identifica el software. IMPLEMENTADO, PROBADO, PREPARADO y OBJETIVO se distinguen
 en el texto; la productización permanece fuera del roadmap local 1–10.
 
 - `Trackvance_Core_Especificacion_Tecnica_v1.1.md`: fuente editable oficial.
@@ -10,8 +10,12 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
   generar candidato y revisar renderizado.
 - `build_specification.py`: generador portable reportlab/pypdf, separado de las
   dependencias de ejecución del producto.
-- `validation_results_0.6.1.json`: entrada de resultados de esta revisión,
-  preparada durante el cierre; un archivo o gate pendiente no se presume aprobado.
+- `validation_results_0.7.0.json`: resultados reales de esta revisión;
+  un archivo o gate pendiente no se presume aprobado.
+- `parameters_0.7.0.json` y `volume_results_0.7.0.json`: cotas y mediciones.
+- `model_contract_0.7.0.json` y `permission_contract_0.7.0.json`: inventario completo
+  de campos, relaciones, restricciones, índices y permisos exportado del código.
+- `validation_results_0.6.1.json`: resultados históricos 0.6.1, preservados.
 - `validation_results_0.6.0.json`: resultados históricos 0.6.0, preservados.
 - `validation_results_0.5.1.json`: resultados históricos 0.5.1, preservados.
 - `validation_results_0.5.0.json`: resultados históricos 0.5.0, preservados.
@@ -21,11 +25,10 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
 
 ## Generación y publicación
 
-La corrección 0.6.1 reemplaza SMTP por emisión efímera y un modal visible una vez,
-conservando primer acceso, RBAC dinámico, Microsoft/Google OIDC y auditoría
-Delivery. Actualiza contratos, seguridad, operación y pruebas, añade el capítulo
-35 y dos flujos de credenciales. SSO permanece opcional y disabled by default;
-la historia de notificaciones y todas las migraciones se conservan intactas.
+La implementación 0.7.0 documenta adquisición durable por lotes, Parquet multipart,
+PySpark Local/Standalone con paridad completa, Delivery acotado, programaciones,
+encadenamiento y outbox con bandeja personal. Mantiene los contratos históricos,
+identidad y secretos; añade 0013–0015 sin reescribir migraciones anteriores.
 El generador admite índice y marcadores de dos niveles, diagramas de arquitectura,
 secuencia y estados, y bloques JSON paginables. La salida es determinista con los mismos inputs;
 permite contrastar el hash del candidato revisado con el PDF publicado.
@@ -34,11 +37,12 @@ Mientras los gates estén en curso se usa `--draft` y no se publica.
 En un entorno de autoría con Python, reportlab y pypdf, desde el repositorio:
 
 ```sh
-python docs/specification/build_specification.py --draft --results docs/specification/validation_results_0.6.1.json
+python docs/specification/build_specification.py --draft --results docs/specification/validation_results_0.7.0.json
 ```
 
 El generador usa esta fuente, `backend/openapi.json`, el logo del repositorio y
-el JSON de resultados explícito. Reconoce el repositorio desde su ubicación;
+los inventarios de modelos/permisos, parámetros, volumen y resultados explícitos.
+Reconoce el repositorio desde su ubicación;
 `--repo`, `--source`, `--results` y `--output-dir` permiten rutas distintas.
 Usa Arial en Windows y DejaVu/Vera cuando Arial no está disponible. No descarga
 fuentes ni librerías durante la generación.
@@ -47,7 +51,7 @@ El candidato queda en `tmp/pdfs/specification-candidate.pdf`. Revisa las página
 renderizadas, tablas, encabezados, índice y diagramas antes de publicar con:
 
 ```sh
-python docs/specification/build_specification.py --results docs/specification/validation_results_0.6.1.json --publish
+python docs/specification/build_specification.py --results docs/specification/validation_results_0.7.0.json --publish
 ```
 
 `--draft` marca un candidato cuya certificación sigue en curso e impide combinarlo
@@ -64,10 +68,28 @@ sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación consolidada y el inventario de cambios están en
 [validación](../development/validation.md) y la
-[matriz de aceptación 0.6.1](../development/acceptance-0.6.1.md).
+[adquisición/volumen 0.7.0](../development/acquisition-volume-0.7.0.md),
+[Spark/paridad 0.7.0](../development/spark-volume-0.7.0.md) y los cinco ADR 0020–0024.
 El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histórico.
 
-## Publicación 0.6.1
+## Publicación 0.7.0
+
+La edición publicada contiene **114 páginas, 238 marcadores y 38 secciones
+principales**, con texto seleccionable. Su SHA-256 es
+`3f229e2863e0115631a3bfe08526c57c6a45240497acc4a30621d71836aa99e5`.
+Una segunda generación con los mismos inputs produjo exactamente esos bytes.
+Las 114 páginas se revisaron visualmente a 150 dpi y no quedan hallazgos.
+La [prueba de publicación](../development/evidence/0.7.0/pdf-verification.json)
+registra hashes de fuentes, generador, inputs, fuentes tipográficas, extracción,
+renders y copias oficiales. La edición 0.6.1 quedó archivada antes de sustituirla.
+
+El corte de implementación conocido por el documento es
+`a5f12ddc2850dea4053ad77121835e42a37a72cf`. El SHA documental final, sus resultados
+CI y la actualización efectiva de la instalación principal se registran después
+de ese corte en el informe externo de cierre, evitando un hash autorreferente.
+La publicación del PDF por sí sola no declara cerrado ninguno de esos gates.
+
+## Publicación histórica 0.6.1
 
 El producto `4d3c656ab0bc250f50eb53972d22839da9e4485c` completó nueve jobs SUCCESS
 del [workflow 36327154050](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36327154050).

@@ -18,7 +18,18 @@ La evolución funcional local precede a la productización. Este orden sustituye
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.
 
-## Ciclo 0.6.1: simplificar la entrega de credenciales
+## Ciclo 0.7.0: volumen y automatización
+
+Implementa adquisición asíncrona, StorageProvider multipart, PySpark local y
+Standalone opcional, preflight persistido y preparación Delivery por lotes,
+automatización/scheduling/Intake→Delivery, outbox y bandeja personal. La evidencia
+propia comprende1M y progresión100/500/1024MiB, SQL real, recuperación y CI final.
+Los gates pendientes/fallidos mantienen su estado; no se heredan cifrasanteriores.
+No añade Redis/Celery, Kubernetes, nuevos Source/Sink, gobierno, masking, canales
+externos ni notificaciones de asignación. El upgrade real es último gate y sólo
+ocurre después de pruebas/documentos/CI aprobados.
+
+## Antecedente 0.6.1: simplificar la entrega de credenciales
 
 El administrador recibe una temporal nueva una sola vez en pantalla y decide cómo
 comunicarla externamente. Se retira SMTP del onboarding, de Configuración y de las
@@ -92,4 +103,4 @@ secretos administrados, Redis/Celery, object storage,
 observabilidad distribuida y despliegue Kubernetes permanecen como evolución de
 producto. La certificación de cada revisión se publica separada de este estado funcional.
 
-Kubernetes, Redis/Celery productivo, S3/Azure Blob como almacenamiento interno, Vault/Key Vault productivo, Terraform, Helm, PySpark operativo y observabilidad distribuida permanecen como objetivos de producto. No deben presentarse como implementados ni añadirse para completar este roadmap funcional local.
+Kubernetes, Redis/Celery productivo, S3/Azure Blob como almacenamiento interno, Vault/Key Vault productivo, Terraform, Helm y observabilidad distribuida permanecen como objetivos de producto. PySpark operativo y automatización/bandeja interna se implementan en0.7.0; su certificación exige evidencia propia. No deben presentarse como implementados ni añadirse para completar este roadmap funcional local.

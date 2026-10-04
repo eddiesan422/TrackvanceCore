@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "status": "PASS",
+  "scope": "Physical application catalog validation and snapshot helper transport; no production installation operations.",
+  "provenance": {
+    "focused_execution_head": "59e2e16a22afec29f5a5566d42676afd261511e4",
+    "working_tree_modified_at_focused_execution": true,
+    "implementation_containing_commit": "a5f12ddc2850dea4053ad77121835e42a37a72cf",
+    "implementation_commit_recorded_after_execution": true,
+    "note": "The containing commit identifies the reviewed implementation. These observations do not certify a later CI run or a future final commit."
+  },
+  "implementation_sha256": {
+    "scripts/physical_schema_guard.py": "7b5951608045f831087b5cf59a0b3cb8faea66b8554fe18e0f2b602ec7ff7cb2",
+    "scripts/verify_storage.py": "8339a3c0172882073d3b148a84f6427f744220c02e1307032ce72d1519510a3c",
+    "scripts/docker_state.py": "ea86ff717ab18b7c3caab9078bec875fcf7a45b63cb5783ac273e956fdb12d46"
+  },
+  "contract": {
+    "inspection": "SQLAlchemy physical catalog against runtime Base.metadata",
+    "application_tables": "Exact table set within the modeled application schemas; alembic_version is the sole permitted extra table in the default schema.",
+    "columns": "Exact physical column names for every modeled table; missing or extra columns fail.",
+    "foreign_keys": "Exact grouped physical foreign key relationships, including composite mappings and referential actions.",
+    "constraint_names_compared": false,
+    "cross_database_type_spelling_compared": false,
+    "schema_mutation": false,
+    "row_mutation": false,
+    "missing_helper_fallback": false,
+    "helper_transport": "Verifier and guard bytes are both verified by SHA-256 before snapshot execution; stdin transport uses a fresh temporary directory."
+  },
+  "validation": {
+    "real_sqlite_contract_tests": {
+      "status": "PASS",
+      "passed": 12,
+      "source": "scripts/tests/test_physical_schema_guard.py",
+      "coverage": [
+        "Normal runtime contract and unchanged data",
+        "Unknown or missing table",
+        "Extra or missing column",
+        "Missing, extra or divergent foreign key",
+        "Divergent delete action",
+        "Composite foreign key grouping",
+        "Constraint name and database type spelling independence",
+        "Full installed metadata and snapshot rejection of an extra physical column"
+      ]
+    },
+    "focused_guard_and_transport_tests": {
+      "status": "PASS",
+      "passed": 163,
+      "elapsed_seconds": 2.76,
+      "ruff": "PASS",
+      "observation_source": "Automation agent host execution"
+    },
+    "complete_scripts_tests": {
+      "status": "PASS",
+      "passed": 451,
+      "skipped": 0,
+      "elapsed_seconds": 7.43,
+      "ruff": "PASS",
+      "observation_source": "Root agent host execution reported to the automation agent"
+    },
+    "real_postgresql_catalog": {
+      "status": "PASS",
+      "tables": 42,
+      "columns": 509,
+      "foreign_keys": 75,
+      "environment": "Disposable isolated Core API PostgreSQL database",
+      "observation_source": "Root agent real PostgreSQL inspection reported to the automation agent",
+      "production_installation_operated": false
+    }
+  },
+  "privacy": {
+    "raw_database_contents_published": false,
+    "credentials_published": false,
+    "absolute_private_paths_published": false
+  }
+}

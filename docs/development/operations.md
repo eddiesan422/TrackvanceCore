@@ -1,8 +1,10 @@
 # Operación local y verificación de persistencia
 
-Trackvance Core se ejecuta con cinco servicios de Docker Compose: PostgreSQL 16,
-API FastAPI, worker `DEFAULT`, `delivery-worker` y pasarela web React/nginx. Los
-dos workers reutilizan el mismo código del monolito, pero consumen lanes distintas.
+Trackvance Core 0.7.0 se ejecuta con nueve servicios de Docker Compose: PostgreSQL 16,
+API FastAPI, pasarela web React/nginx, `worker`, `delivery-worker`,
+`acquisition-worker`, `scheduler`, `events-notifications` y `events-chaining`.
+Los tres workers consumen lanes `DEFAULT`, `DELIVERY` y `ACQUISITION`; los otros
+tres procesos gestionan calendario y eventos sin ejecutar conectores ni SQL remoto.
 La única puerta publicada es la web, ligada a `127.0.0.1`; PostgreSQL y la API no
 publican puertos al host.
 
@@ -16,7 +18,7 @@ Desde la raíz del repositorio, con Docker Desktop en contenedores Linux:
 
 Si `.env` no existe, bootstrap lo crea desde `.env.example` con una contraseña
 aleatoria local. No la muestra ni la sube a Git. Conserva un `.env` existente.
-El arranque instala las imágenes, aplica Alembic y espera la salud de los cinco
+El arranque instala las imágenes, aplica Alembic y espera la salud de los nueve
 servicios. La interfaz queda en `http://localhost:3000`.
 
 Un entorno adicional puede coexistir con el prototipo nativo:
@@ -37,19 +39,51 @@ volúmenes. No se debe usar `down -v` para reiniciar o actualizar una instalaci�
 El prototipo nativo usa `.local/trackvance.db` y `.local/storage`; ese entorno no
 es la base PostgreSQL de Docker y no se modifica al arrancar Compose.
 
-Los cinco servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
+Los nueve servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
 Windows sin levantar Trackvance; el proyecto permanece detenido hasta ejecutar
 manualmente `docker compose up -d --wait` desde la raíz. Para apagarlo sin borrar
 contenedores ni volúmenes se utiliza `docker compose stop`.
+
+Para el prototipo SQLite en Windows, `scripts/start-local.ps1` inicia API, web,
+los tres workers, scheduler y los dos consumidores; `scripts/stop-local.ps1`
+detiene los PIDs y start-times registrados en `.local/processes.json`. No usa
+los volúmenes del proyecto Docker. La API recibe ambos SecretStore, Acquisition
+sólo los de fuentes, Delivery sólo los de destinos y los procesos de metadata
+y DEFAULT reciben directorios aislados sin sus secretos. El diagnóstico local
+comprueba los seis heartbeats:
+
+```powershell
+.\scripts\start-local.ps1
+python scripts/doctor.py --base-url http://localhost:3000 --storage-dir .local/storage
+.\scripts\stop-local.ps1
+```
 
 ## Readiness y diagnósticos
 
 `GET /api/v1/health/ready` verifica conexión SQL, revisión Alembic y una escritura
 temporal en almacenamiento. Devuelve 503 si alguna comprobación falla. Cada worker
-escribe su propio heartbeat (`worker-heartbeat-default.json` y
-`worker-heartbeat-delivery.json`); `doctor.py --docker` comprueba ambos por lane.
+escribe su propio heartbeat (`worker-heartbeat-default.json`,
+`worker-heartbeat-delivery.json` y `worker-heartbeat-acquisition.json`).
+`doctor.py --docker` comprueba las tres lanes y los heartbeats independientes de
+`scheduler`, `events-notifications` y `events-chaining`.
 El script respeta `COMPOSE_PROJECT_NAME` y nunca imprime la URL de base de datos,
 el contenido de `.env` ni credenciales.
+
+Las sondas de scheduler y consumidores importan `component_health`, que sólo
+lee su archivo JSON y exige una antigüedad entre cero y menos de 30 segundos.
+No importa los motores analíticos ni abre conexiones. Una medición aislada con
+0,25 CPU y 256 MiB observó 0,292 s de importación; la sonda anterior importaba
+dispatcher y tardó 4,082 s, cerca del timeout de 5 segundos. Los límites y el
+timeout se mantienen. Un JSON inválido, fecha futura o archivo fuera del
+directorio de almacenamiento devuelve OFFLINE. Los runners conservan de forma
+saneada duración/exit code de la sonda, estado OOM y límites del contenedor para
+investigar fallos; esos hechos no demuestran por sí solos la causa de fallos previos.
+
+El backfill de linaje del arranque se reserva a las operaciones históricas de
+Intake/ReconOps/Sentinel. Delivery y sus preflights conservan el grafo y los hashes
+que fijaron al registrarse; un restart no les añade enlaces genéricos `RUN_INPUT`.
+La recuperación compara todas las tablas y relaciones, por lo que un enlace nuevo
+inesperado causa FAIL aunque los archivos y secretos sean idénticos.
 
 `smoke_test.py` usa únicamente la biblioteca estándar de Python. Crea datos de
 verificación nuevos y conserva su evidencia. Comprueba autenticación/CSRF, Intake,
@@ -62,12 +96,12 @@ de fórmulas en las celdas de negocio. No reinicia ni elimina datos.
 Las imágenes y paquetes se descargan durante la preparación. Una vez construidos,
 la aplicación, los archivos, PostgreSQL y los workers funcionan localmente. No hay
 storage, fuentes, analítica ni procesamiento cloud obligatorio. El login local
-funciona sin SSO. En 0.6.1 no existe envío operativo de credenciales por SMTP:
+funciona sin SSO. Desde 0.6.1 no existe envío operativo de credenciales por SMTP:
 alta y regeneración muestran la temporal una sola vez al administrador. Microsoft/
 Google SSO siguen implementados, deshabilitados por defecto y opcionales; su
 activación se decide durante la implantación y requiere acceso al proveedor.
 
-### Credenciales locales 0.6.1
+### Credenciales locales 0.7.0
 
 Configuración conserva Usuarios locales, Roles y permisos y Autenticación; la
 pestaña SMTP/Notificaciones ya no pertenece al flujo operativo. El alta solicita
@@ -108,15 +142,19 @@ del equipo del usuario. La web sirve archivos y proxy local, sin necesitar esa s
 
 ## Migraciones y preservación
 
-La revisión actual 0.6.1 permanece en `0012_delivery_target_audit`, precedida por
+La revisión actual 0.7.0 es `0015_sentinel_execution_identity`. Las revisiones
+históricas llegan hasta `0012_delivery_target_audit`, precedida por
 `0001_initial`, `0002_evidence_v2`, `0003_dataset_ingestion_metadata`,
 `0004_exception_validation`, `0005_external_connections` y
 `0006_local_identity_exceptions`, `0007_monitor_scheduling`, `0008_data_delivery`,
 `0009_delivery_reviews`, `0010_dynamic_rbac_identity` y
-`0011_notification_delivery`. No se necesita 0013: la emisión efímera y la retirada
-del transporte SMTP no cambian el schema. 0001..0012 permanecen byte por byte
-intactas; las modificaciones que sí requieran schema se incorporarían mediante
-nuevas migraciones. La API aplica las migraciones pendientes al iniciar.
+`0011_notification_delivery`. 0.6.1 conservó ese head sin modificar el schema.
+0.7.0 añade `0013_async_acquisition`, `0014_automation_outbox` y
+`0015_sentinel_execution_identity`: adquisición asíncrona, automatización,
+outbox, consumidores, bandeja personal y responsable verificable de Sentinel.
+0001..0012 permanecen byte por byte intactas. La API aplica las migraciones
+pendientes al iniciar; las 42 tablas actuales se verifican sin ignorar tablas
+desconocidas.
 En bases SQLite previas sin tabla Alembic, el adaptador
 solo adopta un schema original reconocido o uno que coincida con el modelo actual;
 un schema desconocido exige revisión y no se modifica a ciegas.
@@ -151,22 +189,31 @@ docker compose exec -T api python /tmp/check_postgres_migrations.py
 `scripts/verify_storage.py snapshot` calcula hashes de los registros persistidos y
 verifica tamaño/SHA-256 de todos los artifacts registrados. Su salida contiene IDs
 y hashes, no datos de negocio ni sesiones. Para certificar un reinicio, finalizar
-los runs y detener nuevas operaciones durante ambas capturas:
+los runs/jobs y detener nuevas operaciones. Mantener scheduler, consumidores y
+los tres workers detenidos durante ambas capturas:
+
+El helper `physical_schema_guard.py` exige tablas, columnas y claves foráneas
+físicas idénticas al ORM del runtime instalado antes de leer sus filas. No ignora
+columnas desconocidas, ni compara nombres de constraints o grafías de tipos.
+`docker_state.py` copia ambos scripts y comprueba su SHA antes de ejecutarlos.
 
 ```powershell
+docker compose stop worker delivery-worker acquisition-worker scheduler events-notifications events-chaining
+docker compose cp scripts/physical_schema_guard.py api:/tmp/physical_schema_guard.py
 docker compose cp scripts/verify_storage.py api:/tmp/verify_storage.py
 docker compose exec -T api python /tmp/verify_storage.py snapshot > before.json
-docker compose restart
-docker compose up -d --wait --pull never --no-build
+docker compose restart postgres api
+docker compose up -d --wait --pull never --no-build --no-deps postgres api
 docker compose exec -T api python /tmp/verify_storage.py snapshot > after.json
 python scripts/verify_storage.py compare before.json after.json
 ```
 
-Si se recrea el contenedor, debe copiarse de nuevo el script temporal antes de la
+Después de comparar, reactivar solamente los componentes previamente activos.
+Si se recrea el contenedor, deben copiarse de nuevo ambos scripts antes de la
 segunda captura. No ejecutar login, exports, smoke ni pruebas durante el intervalo:
 son operaciones auditadas y agregan registros legítimos que cambiarían la huella.
 
-## Actualización y recuperación 0.6.1
+## Actualización y recuperación 0.7.0
 
 La actualización de una instalación existente requiere conservar su nombre Compose,
 puerto, configuración externa y los seis volúmenes. Antes de reconstruir, esperar
@@ -179,32 +226,59 @@ no cancela ni vuelve a ejecutar una entrega remota para desbloquear el respaldo.
 2. Guardar por separado la configuración del despliegue, `.env` o `external.env`,
    secretos OAuth, registros de aplicaciones y callbacks. Estos archivos no son
    componentes del backup. Las antiguas variables SMTP no tienen consumidor
-   operativo en 0.6.1; no son necesarias para crear usuarios. No imprimir valores
+   operativo desde 0.6.1; no son necesarias para crear usuarios. No imprimir valores
    privados ni anexarlos a evidencia de validación.
-3. Reconstruir API, ambos workers y web desde la misma versión 0.6.1; conservar
-   PostgreSQL y los volúmenes. Una fuente 0.6.0 ya está en 0012 y no cambia de
-   revisión. Fuentes anteriores aplican las migraciones hasta 0012.
-4. Ejecutar readiness/doctor y verificar la migración. Para comparar la historia
-   anterior a 0.6.0, usar su proyección legacy correspondiente antes de generar
-   datos nuevos. Entre 0.6.0 y 0.6.1 se exige igualdad exacta de state 5; entre
-   0.5.1 y 0.6.1 se usa legacy-v4. No comparar directamente state 4 contra state 5
-   como si sus columnas y tablas fueran idénticas.
+3. Reconstruir los servicios desde la misma versión 0.7.0; conservar PostgreSQL y
+   los volúmenes. Arrancar primero sólo PostgreSQL y API, que migra hasta 0015.
+   Mantener detenidos workers, scheduler y consumidores durante la comparación.
+   No ejecutar login, export, smoke ni fixtures antes de capturar la huella.
+4. Verificar readiness, migración, artifacts y la proyección histórica antes de
+   generar datos nuevos. Para una fuente 0.6.1/0.6.0 se exige igualdad exacta con
+   `snapshot-legacy-v5`; para 0.5.1 se usa `snapshot-legacy-v4`. La captura nativa
+   nueva es state 6. No comparar state 5 y 6 como si fueran schemas idénticos.
+   La proyección admite solamente las adiciones y defaults descritos en
+   [ADR 0021](../adr/0021-v070-state-compatibility.md).
 5. Comprobar login de una cuenta local histórica y el rol asignado. Autenticación
    debe mostrar login local habilitado y Microsoft/Google deshabilitados si el
    despliegue no los configuró. No habilitar SSO ni crear usuarios de prueba sólo
-   para validar la instalación habitual. Reactivar los schedules previstos. El smoke completo
+   para validar la instalación habitual. Antes de reactivar procesos, revisar
+   destinos y schedules restaurados: un schedule sin usuario verificable queda
+   pausado y requiere asignación explícita; UNKNOWN conserva su bloqueo y revisión.
+   Después arrancar los procesos autorizados y comprobar las tres lanes y tres
+   componentes con doctor. El smoke completo
    crea datasets/runs y se reserva para una copia aislada si se requiere preservar
    sin adiciones la instalación operativa.
 
-Ejemplo con un nombre elegido expresamente para la instalación:
+Secuencia para una instalación cuyo nombre y archivo privado se eligieron
+expresamente. Los paths son ejemplos; no seleccionan automáticamente un proyecto.
+Ejecutar después de terminar trabajo pendiente y detener nuevas operaciones:
 
 ```powershell
-$env:COMPOSE_PROJECT_NAME = 'trackvance-core'
-python scripts/docker_state.py inventory --project trackvance-core
-python scripts/docker_state.py backup --project trackvance-core --destination backups/pre-061
-python scripts/docker_state.py verify --source backups/pre-061
-docker compose -p trackvance-core up -d --build --wait
-python scripts/doctor.py --base-url http://localhost:3000 --docker --project trackvance-core --recovery-ready
+$project = 'trackvance-core'
+$privateEnv = 'C:\Trackvance-private\deployment.env'
+$backup = 'C:\Trackvance-private\backups\pre-070'
+$env:COMPOSE_PROJECT_NAME = $project
+Get-Content -LiteralPath $privateEnv | ForEach-Object {
+  if ($_ -and -not $_.StartsWith('#')) {
+    $deploymentPair = $_.Split('=', 2)
+    [Environment]::SetEnvironmentVariable($deploymentPair[0], $deploymentPair[1], 'Process')
+  }
+}
+python scripts/docker_state.py inventory --project $project
+docker compose --env-file $privateEnv -p $project -f compose.yml stop web scheduler events-notifications events-chaining acquisition-worker delivery-worker worker
+python scripts/docker_state.py backup --project $project --destination $backup
+python scripts/docker_state.py verify --source $backup
+docker compose --env-file $privateEnv -p $project -f compose.yml build api worker delivery-worker acquisition-worker scheduler events-notifications events-chaining web
+docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps postgres
+docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps api
+docker compose --env-file $privateEnv -p $project -f compose.yml cp scripts/physical_schema_guard.py api:/tmp/physical_schema_guard.py
+docker compose --env-file $privateEnv -p $project -f compose.yml cp scripts/verify_storage.py api:/tmp/verify_storage.py
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot-legacy-v5 | Set-Content -Encoding utf8 C:\Trackvance-private\after-legacy-v5.json
+python scripts/verify_storage.py compare "$backup/state.json" C:\Trackvance-private\after-legacy-v5.json
+docker compose --env-file $privateEnv -p $project -f compose.yml exec -T api python /tmp/verify_storage.py snapshot | Set-Content -Encoding utf8 C:\Trackvance-private\after-native-v6.json
+# Sólo tras revisar preservación, identidad ejecutora y destinos:
+docker compose --env-file $privateEnv -p $project -f compose.yml up -d --wait --no-deps worker delivery-worker acquisition-worker scheduler events-notifications events-chaining web
+python scripts/doctor.py --base-url http://localhost:3000 --docker --project $project --recovery-ready
 ```
 
 Si el despliegue usa un archivo separado, Compose debe recibirlo explícitamente
@@ -213,7 +287,16 @@ no se carga automáticamente por su nombre; `bootstrap.ps1` prepara `.env`. Los
 comandos Python de operación deben heredar las mismas variables necesarias para
 construir el destino. Restaurar PostgreSQL no recupera valores ausentes del entorno.
 Mantener SSO deshabilitado permite comprobar recuperación local sin esos secretos.
-No se necesita restaurar configuración SMTP para administrar usuarios 0.6.1.
+No se necesita restaurar configuración SMTP para administrar usuarios 0.7.0.
+
+La línea `snapshot-legacy-v5` corresponde a un origen state 5/0012. Usar la
+proyección correspondiente para fuentes anteriores; para un origen 0.7.0 se
+compara `snapshot` nativo state 6. El backup coordinado conserva el estado inicial
+de los servicios: detenerlos antes del backup evita que se reactiven al terminar.
+No usar `restore --start` para revisar una copia con destinos operativos: restaurar
+con el valor por defecto, arrancar sólo API/web tras la verificación y mantener
+los procesos automáticos detenidos hasta configurar destinos de prueba o aprobar
+expresamente la reactivación.
 
 El rollback operativo es restaurar el backup anterior en un proyecto fresco con
 la versión adecuada y cambiar la entrada de acceso después de verificarlo. No se
@@ -223,20 +306,22 @@ COMMITTED; los cambios remotos no pertenecen al backup de Trackvance.
 
 ### Formatos de backup y proyección histórica
 
-El backup Docker actual conserva **manifest 2** y **state 5**,
-revisión `0012_delivery_target_audit`. Los números de manifest y state son contratos
-distintos. State 5 cubre 31 tablas: las 25 de 0.5.1 y `roles`, `role_permissions`,
-`external_identities`, `oidc_login_attempts`, `notification_deliveries`,
-`delivery_target_policies`. Incluye por hash los nuevos campos de User, AuthSession
-y DeliveryAttempt. Verifica además artifacts, FK, linaje y ambas familias de secretos.
+El backup Docker actual conserva **manifest 2** y **state 6**,
+revisión `0015_sentinel_execution_identity`. Los números de manifest y state son
+contratos distintos. State 6 cubre 42 tablas: las 31 históricas de state 5 y las
+11 de adquisición, automatización, outbox, consumidores, bandeja y decisiones de
+destino. Incluye todas sus columnas por hash, Job con Run o AcquisitionRun exclusivo,
+responsables y pausas de Sentinel. Verifica artifacts, descriptor y cada parte de
+datasets multipart, FK, linaje y ambas familias de secretos.
 
-| Fuente | Manifest / state / migración | Validación al restaurar con 0.6.1 |
+| Fuente | Manifest / state / migración | Validación al restaurar con 0.7.0 |
 | --- | --- | --- |
-| 0.6.1 | 2 / 5 / 0012 | Igualdad exacta de la huella completa antes de smoke |
-| 0.6.0 | 2 / 5 / 0012 | Igualdad exacta de la huella completa antes de smoke |
-| 0.5.1 | 2 / 4 / 0009 | Migración a 0012 y proyección `snapshot-legacy-v4` exactamente igual |
-| 0.5.0 | 2 / 3 / 0008 | Migración a 0012, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
-| 0.4.1 | 1 / 2 / 0007 | Migración a 0012, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
+| 0.7.0 | 2 / 6 / 0015 | Igualdad exacta de las 42 tablas y artifacts antes de actividad nueva |
+| 0.6.1 | 2 / 5 / 0012 | Migración a 0015 y `snapshot-legacy-v5` exactamente igual; tablas nuevas vacías |
+| 0.6.0 | 2 / 5 / 0012 | Migración a 0015 y `snapshot-legacy-v5` exactamente igual; tablas nuevas vacías |
+| 0.5.1 | 2 / 4 / 0009 | Migración a 0015 y proyección `snapshot-legacy-v4` exactamente igual |
+| 0.5.0 | 2 / 3 / 0008 | Migración a 0015, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
+| 0.4.1 | 1 / 2 / 0007 | Migración a 0015, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
 
 Las proyecciones excluyen únicamente adiciones de versiones posteriores para
 comparar los registros históricos; no sobrescriben backups ni normalizan sus datos
@@ -282,6 +367,29 @@ requiere `delivery:repair_evidence`; la revisión externa requiere
 
 ### Simulacros aislados reproducibles
 
+Los ciclos 0.7.0 usan exclusivamente proyectos `trackvance-v070-test-*-<12hex>`,
+base/usuario `tv_v070_test`, imágenes privadas, archivos `--env-file` explícitos y
+evidencia dentro de `.codex-local/v070`. El ciclo nativo se ejecuta después de
+terminar otras pruebas con trabajo pendiente en su contexto:
+
+```powershell
+python scripts/tests/docker_backup_cycle.py --v070-context .codex-local/v070/CONTEXTO_AUTORIZADO
+python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.1
+python scripts/doctor.py --base-url http://localhost:32070 --docker --project PROYECTO_DEL_CONTEXTO --certification-context .codex-local/v070/CONTEXTO_AUTORIZADO --recovery-ready
+```
+
+El primero verifica las 42 tablas, ambas familias de secretos y el descriptor y
+partes de un dataset Parquet real. Restaura en otro proyecto y exige hashes
+idénticos; mantiene detenidos workers, scheduler y consumidores. El segundo
+construye el commit auténtico 0.6.1 `6fac26b3648cb4a4b50c094ef12c1e103bc97ddd`,
+respalda su state 5, destruye sólo ese origen desechable y migra la copia a 0.7.0.
+Exige igualdad de las 31 tablas históricas por la proyección explícita, las 11
+tablas nuevas vacías, credenciales SQL recuperadas utilizables y emisión local
+sin correo. El vínculo OIDC, notificación SMTP y policy sintéticos se identifican
+como fixtures de persistencia; no acreditan SMTP, SSO externo ni escritura remota.
+
+Los comandos siguientes conservan las rutas de regresión históricas 0.5/0.6:
+
 ```powershell
 python scripts/tests/docker_backup_cycle.py
 python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
@@ -294,18 +402,19 @@ exacta de la huella y funcionamiento de credenciales SQL. Incluye roles/permisos
 primer acceso y una notificación histórica sintética declarada, un vínculo externo
 sintético y un intento OIDC consumido sin tokens, auditoría Delivery, COMMITTED
 reparado y UNKNOWN revisado. Comprueba que alta y regeneración no crean
-notificaciones; inspecciona en memoria el dump descomprimido, tar de artifacts,
+notificaciones; inspecciona el dump descomprimido por streaming con bloques de
+1 MiB y archivo temporal, tar de artifacts,
 manifests y logs buscando las temporales emitidas, sin publicar sus bytes.
 Las fixtures OIDC prueban persistencia; el flujo OAuth firmado/PKCE se certifica
 por separado con `identity_sso_cycle.py` y `delivery_cycle.py`.
 
 El runner de identidad construye el commit auténtico elegido en un directorio
 privado: 0.6.0 `587909b` o 0.5.1 `4519ed3`. Verifica su versión por health, crea
-backup, destruye ese origen y restaura en 0.6.1. La fuente 0.6.0 crea una
+backup, destruye ese origen y restaura en el runtime vigente. La fuente 0.6.0 crea una
 notificación FAILED/NO_PROVIDER mediante su API auténtica sin SMTP externo;
 el vínculo OIDC y policy no materializada son fixtures explícitas de persistencia.
 Se comparan todas las filas históricas antes de cualquier alta nueva. Después,
-alta/regeneración 0.6.1 deben conservar el número de notificaciones y el nuevo
+alta/regeneración deben conservar el número de entregas SMTP históricas y el nuevo
 backup debe estar libre de las temporales conocidas. Esto no certifica un login
 externo real ni una materialización SQL de la policy sintética.
 
@@ -423,7 +532,7 @@ concurrente aborta la operación.
 `docker_state.py` automatiza PostgreSQL, ArtifactStore y los SecretStore de fuentes
 y destinos con sus claves como una sola unidad. El proyecto y la carpeta de destino
 son explícitos; el destino debe ser nuevo. Durante una ventana breve detiene entrada,
-scheduler, ambos workers y API, rechaza runs/jobs pendientes, genera
+scheduler, ambos consumidores, los tres workers y API, rechaza runs/jobs pendientes, genera
 `pg_dump --format=custom`, archiva los cinco volúmenes de archivos y vuelve a iniciar
 solo los contenedores que estaban activos.
 
@@ -450,12 +559,14 @@ Sin `--start` deja el destino verificado y detenido.
 
 ```powershell
 python scripts/docker_state.py restore --source backups/docker-20260919 `
-  --target-project trackvance-recovery-20260919 --start --web-port 3200
-python scripts/doctor.py --base-url http://localhost:3200 --docker `
-  --project trackvance-recovery-20260919 --recovery-ready
+  --target-project trackvance-recovery-20260919 --web-port 3200
+# Después de la huella exacta y antes de habilitar procesos automáticos:
+docker compose -p trackvance-recovery-20260919 up -d --wait api web
 ```
 
-`--start --web-port 3200` deja la copia activa. `--smoke` requiere `--start` y se
+`--start --web-port 3200` activa también procesos automáticos; sólo se usa cuando
+su reactivación está autorizada y los destinos restaurados son seguros para ese
+entorno. `--smoke` requiere `--start` y se
 reserva para copias aisladas con identidad demo; agrega registros legítimos después
 de comparar la huella. Una falla detiene el proyecto nuevo para diagnóstico y nunca
 modifica ni elimina el origen.

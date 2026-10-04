@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "release": "0.7.0",
+  "source": "GitHub Actions sanitized job logs and repository code inspection",
+  "repository": "eddiesan422/TrackvanceCore",
+  "head_sha": "1a5c85a574375db9fea7e07f03f3117705546610",
+  "run_id": 37172630225,
+  "ci_status": "FAIL",
+  "final_ci_status": "PENDING",
+  "failures": [
+    {
+      "job_id": 111349216488,
+      "job_name": "async-volume-e2e (100)",
+      "step": "One million records across CSV, JSONL and Parquet with exact SQL output",
+      "failed_at": "2026-10-04T03:19:57.486Z",
+      "test_file": "frontend/tests-e2e/volume.spec.ts",
+      "line": 140,
+      "expected_browser_tests": 1,
+      "unexpected_browser_tests": 1,
+      "diagnosis": "The prior fixture subtracts one minute and truncates seconds before registration; it violates the server's sixty-second tolerance and fails the expected HTTP 201 assertion.",
+      "response_body_available": false,
+      "correction": "Register a future whole minute and wait for its activation before initiating Intake.",
+      "local_real_browser_correction": "PASS",
+      "remote_correction_verification": "PENDING"
+    },
+    {
+      "job_id": 111349216443,
+      "job_name": "compose-e2e",
+      "step": "Verify all browser flows, restart persistence and migration history",
+      "failed_at": "2026-10-04T03:08:30.447Z",
+      "expected_browser_tests": 24,
+      "skipped_browser_tests": 17,
+      "unexpected_browser_tests": 2,
+      "diagnoses": [
+        {
+          "test_file": "frontend/tests-e2e/corrections.spec.ts",
+          "line": 343,
+          "diagnosis": "The global tbody selector combines numeric dataset rows with acquisition-history user cells.",
+          "correction": "Scope to the unique dataset table; verify every numeric row in both ascending and descending order."
+        },
+        {
+          "test_file": "frontend/tests-e2e/multiformat-navigation.spec.ts",
+          "line": 84,
+          "diagnosis": "The assertion expects the internal uppercase PARQUET code where the detected human label is Apache Parquet.",
+          "correction": "Verify the exact detected format label beside sample counts, while retaining immutable source_format and Intake assertions."
+        }
+      ],
+      "raw_failure_details_available": false,
+      "remote_correction_verification": "PENDING"
+    }
+  ],
+  "missing_evidence": {
+    "job_id": 111349216443,
+    "artifact_name": "browser-evidence",
+    "reason": "The uploaded glob points to .codex-local/architecture-e2e while the guarded runner writes to .codex-local/v070/trackvance-v070-test-e2e-*; job log explicitly reports no files found.",
+    "correction": "Use the guarded v070 report whitelist; private env, raw logs and traces remain excluded."
+  },
+  "local_checks": {
+    "frontend_focal_tests": 25,
+    "runner_focal_tests": 12,
+    "backend_preflight_acquisition_profile_tests": 80,
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "playwright_discovery": {
+      "tests": 10,
+      "status": "PASS"
+    },
+    "docker_test_execution": "NOT_RUN_RESOURCE_WINDOW",
+    "ci_pass_claimed": false
+  }
+}

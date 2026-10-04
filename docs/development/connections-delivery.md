@@ -1,5 +1,11 @@
 # Entrega de Conexiones — 19 de septiembre de 2026
 
+Antecedente histórico de aquella entrega. Sus cuatro servicios, límites, APIs y
+resultados describen la revisión de esa fecha, no el estado vigente 0.7.0.
+La adquisición asíncrona y Data Delivery posteriores se documentan en
+[arquitectura](../architecture.md), [operación](operations.md),
+[volumen 0.7.0](acquisition-volume-0.7.0.md) y [validación](validation.md).
+
 La aplicación queda disponible en http://localhost:3100 (proyecto `trackvance-certification`), con cuatro servicios healthy y `restart=no`. El acceso demo funciona sin seed. La base principal conserva cero datasets, versiones, runs y conexiones de prueba. Los proyectos temporales de certificación y sus volúmenes fueron retirados.
 
 ## Arquitectura y comportamiento

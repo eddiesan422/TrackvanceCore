@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "release": "0.7.0",
+  "suite": "normal_browser_acquisition_spark_chained_delivery_personal_inbox",
+  "status": "PASS",
+  "browser": {
+    "started_at": "2026-10-04T03:02:10.136Z",
+    "duration_seconds": 206.098,
+    "expected": 2,
+    "unexpected": 0,
+    "skipped": 0,
+    "flaky": 0,
+    "artifact_credentials_scan": "PASS",
+    "raw_artifacts_published": false
+  },
+  "integrity": {
+    "source": {
+      "rows": 1000000,
+      "canonical_rows_sha256": "231a977eb87159a2b5aa2c76290e5ba419b5f9645feb74d8da08e1f175089ece",
+      "observed_null_count": 10000,
+      "observed_empty_string_count": 10000
+    },
+    "accepted": {
+      "rows": 1000000,
+      "canonical_rows_sha256": "231a977eb87159a2b5aa2c76290e5ba419b5f9645feb74d8da08e1f175089ece",
+      "observed_null_count": 10000,
+      "observed_empty_string_count": 10000
+    },
+    "target": {
+      "rows": 1000000,
+      "canonical_rows_sha256": "231a977eb87159a2b5aa2c76290e5ba419b5f9645feb74d8da08e1f175089ece",
+      "max_buffer_rows": 1
+    }
+  },
+  "profile_presentation_regression": {
+    "status": "PASS",
+    "timeout_seconds": 30,
+    "rounds": [
+      {
+        "requests": 10,
+        "parallelism": 2,
+        "wall_seconds": 11.216,
+        "status": "PASS",
+        "max_request_seconds": 2.267
+      },
+      {
+        "requests": 30,
+        "parallelism": 10,
+        "wall_seconds": 12.964,
+        "status": "PASS",
+        "max_request_seconds": 4.686
+      }
+    ],
+    "one_gib_seconds": 3.035,
+    "one_gib_http_status": 200,
+    "global_rows": 1000000,
+    "sample_rows": 20,
+    "full_artifact_verification_preserved": true,
+    "internal_timeout_cause": "NOT_PROVEN",
+    "prior_failure_preserved": true
+  },
+  "main_inventory_unchanged": true,
+  "active_jobs_after": 0,
+  "active_acquisitions_after": 0
+}

@@ -2,6 +2,11 @@
 
 Fecha: 2026-09-16. Estado: aplicado.
 
+Actualización 2026-10-03: el alcance de PySpark y los límites de ejecución de
+0.7.0 se amplían en [ADR 0022](0022-spark-exact-bounded-execution.md). La ausencia
+del adaptador indicada en «Límites actuales» conserva el estado histórico al
+aceptar este ADR; el producto vigente ejecuta Polars y PySpark local/Standalone.
+
 Actualización 2026-09-19: PostgreSQL y SQL Server ya implementan esta frontera.
 La configuración, secretos, snapshots y separación de Data Delivery se deciden en
 [ADR 0007](0007-external-connections.md). Las menciones a esos dos adaptadores como
