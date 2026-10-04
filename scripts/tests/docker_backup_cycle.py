@@ -61,8 +61,20 @@ def available_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def ensure(condition: bool, message: str) -> None:
+class RecoveryCheckError(RuntimeError):
+    """Only a fixed code identifies a failed fixture or preservation check."""
+
+    def __init__(self, message: str, code: str) -> None:
+        if not re.fullmatch(r'[A-Z][A-Z0-9_]{1,79}', code):
+            raise ValueError('Código de verificación inválido.')
+        super().__init__(message)
+        self.code = code
+
+
+def ensure(condition: bool, message: str, *, code: str | None = None) -> None:
     if not condition:
+        if code:
+            raise RecoveryCheckError(message, code)
         raise RuntimeError(message)
 
 
@@ -193,6 +205,9 @@ class RecoveryApi:
 
     def request(self, method: str, path: str, payload: Any = None, *, expected=200,
                 raw: bytes | None = None, content_type: str | None = None) -> bytes:
+        assert_no_secrets(path, self.credentials)
+        safe_path = re.sub(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', '{id}', path.split('?', 1)[0])
+        self.last_request = {'method': method, 'path': safe_path, 'http_status': None}
         headers = {"Accept": "application/json"}
         body = raw
         if content_type:
@@ -211,8 +226,9 @@ class RecoveryApi:
             status, content = error.code, error.read()
         except (urllib.error.URLError, TimeoutError) as error:
             raise RuntimeError("La API del entorno aislado no respondió.") from error
+        self.last_request['http_status'] = status
         assert_no_secrets(content, self.credentials)
-        ensure(status == expected, f"{method} {path}: HTTP {status}; respuesta suprimida.")
+        ensure(status == expected, f"{method} {path}: HTTP {status}; respuesta suprimida.", code='RECOVERY_API_UNEXPECTED_HTTP')
         return content
 
     def json(self, method: str, path: str, payload: Any = None, *, expected=200) -> Any:
@@ -341,7 +357,7 @@ def wait_existing_run(api: RecoveryApi, run_id: str) -> dict[str, Any]:
     while time.monotonic() < deadline:
         run = api.json("GET", f"/runs/{run_id}")
         if run["status"] in {"SUCCESS", "FAILED", "UNKNOWN", "FAILED_PRECONDITION", "CANCELLED"}:
-            ensure(run["status"] == "SUCCESS", "La ejecución restaurada tuvo un error técnico.")
+            ensure(run["status"] == "SUCCESS", "La ejecución restaurada tuvo un error técnico.", code='RECOVERY_RUN_NOT_SUCCESS')
             return run
         time.sleep(0.5)
     raise RuntimeError("La ejecución aislada no terminó a tiempo.")
@@ -353,7 +369,7 @@ def wait_acquisition(api: RecoveryApi, acquisition: dict[str, Any]) -> dict[str,
         run = api.json('GET', f"/acquisitions/{acquisition['id']}")
         if run['status'] in {'SUCCESS', 'FAILED', 'CANCELLED'}:
             ensure(run['status'] == 'SUCCESS' and bool(run['output_version_id']),
-                   'La adquisición SQL aislada no publicó una versión completa.')
+                   'La adquisición SQL aislada no publicó una versión completa.', code='RECOVERY_ACQUISITION_NOT_PUBLISHED')
             dataset = api.json('GET', f"/datasets/{run['dataset_id']}")
             return next(version for version in dataset['versions'] if version['id'] == run['output_version_id'])
         time.sleep(0.5)
@@ -530,29 +546,29 @@ def capture_original(api: RecoveryApi, password: str,
     }, expected=201)
     connection_id = connection["id"]
     test = api.json("POST", f"/connections/{connection_id}/test", {})
-    ensure(test["status"] == "SUCCESS", "La conexión real inicial no pasó la prueba.")
+    ensure(test["status"] == "SUCCESS", "La conexión real inicial no pasó la prueba.", code='SOURCE_CONNECTION_TEST_FAILED')
     schemas = api.json("GET", f"/connections/{connection_id}/schemas")["items"]
-    ensure("recovery_data" in schemas, "El schema externo no es accesible.")
+    ensure("recovery_data" in schemas, "El schema externo no es accesible.", code='SOURCE_SCHEMA_UNAVAILABLE')
     objects = api.json("GET", f"/connections/{connection_id}/objects?schema_name=recovery_data")
     ensure({(item["name"], item["kind"]) for item in objects["items"]}
            >= {("transactions", "TABLE"), ("transaction_view", "VIEW")},
-           "No se descubrieron la tabla y la vista PostgreSQL.")
+           "No se descubrieron la tabla y la vista PostgreSQL.", code='SOURCE_OBJECTS_UNAVAILABLE')
     preview = api.json("GET", f"/connections/{connection_id}/preview"
                        "?schema_name=recovery_data&object_name=transactions&limit=2")
     ensure(preview["sampled_rows"] == 2 and len(preview["columns"]) == 6,
-           "La vista previa PostgreSQL no coincide con la fixture.")
+           "La vista previa PostgreSQL no coincide con la fixture.", code='SOURCE_PREVIEW_MISMATCH')
     registered = api.json("POST", f"/connections/{connection_id}/acquisitions", {
         "name": "Recuperación - fuente PostgreSQL", "domain": "Pruebas aisladas",
         "schema_name": "recovery_data", "object_name": "transactions",
     }, expected=202)
     dataset_id, version = registered["dataset"]["id"], wait_acquisition(api, registered['acquisition'])
     ensure(version["source_type"] == "POSTGRESQL" and version["row_count"] == 4,
-           "El snapshot de origen no corresponde a los datos externos.")
+           "El snapshot de origen no corresponde a los datos externos.", code='SOURCE_SNAPSHOT_MISMATCH')
     source = version["ingestion_metadata"]["source"]
     ensure(source["connection_version_id"] == connection["connection_version_id"]
            and source["config_hash"] == connection["config_hash"]
            and any(item["relation"] == "SOURCE_SNAPSHOT" for item in version["lineage"]),
-           "El snapshot no conserva la configuración y el linaje externos.")
+           "El snapshot no conserva la configuración y el linaje externos.", code='SOURCE_SNAPSHOT_LINEAGE_MISMATCH')
     contract = api.json("POST", "/intake/contracts", {
         "name": "Recuperación - validación", "dataset_id": dataset_id,
         "config": {"required_columns": ["record_id"], "positive_columns": ["amount"],
@@ -560,7 +576,7 @@ def capture_original(api: RecoveryApi, password: str,
     }, expected=201)
     run = wait_run(api, contract["id"], version["id"])
     ensure(run["decision"] == "REJECTED" and run["metrics"]["error_rows"] == 1,
-           "La ejecución original debe conservar un incumplimiento de negocio.")
+           "La ejecución original debe conservar un incumplimiento de negocio.", code='SOURCE_INTAKE_DECISION_MISMATCH')
     case = prepare_exception(api, run)
     monitor = prepare_scheduled_monitor(api, dataset_id, version["id"])
     # Intake adds lineage to the input. Capture the fully completed historical graph.
@@ -1093,6 +1109,7 @@ def main() -> int:
     # Claim only proven-empty projects immediately before attempting their creation.
     claimed: list[str] = []
     main_before = None
+    source_api = None
     result: dict[str, Any] = {
         "status": "FAIL", "schema_version": 4, "source_project": source,
         "target_project": target, "external_database_project": database,
@@ -1221,6 +1238,10 @@ def main() -> int:
             subprocess.SubprocessError) as error:
         # Exception text may contain driver details. Report phase and class only.
         result.update({"failed_stage": stage, "error_type": type(error).__name__})
+        if isinstance(error, RecoveryCheckError):
+            result['error_code'] = error.code
+        if source_api is not None and hasattr(source_api, 'last_request'):
+            result['source_last_request'] = source_api.last_request
         if isinstance(error, DeliveryEvidenceError):
             result["error_code"] = error.code
         if isinstance(error, RecoveryCommandError):

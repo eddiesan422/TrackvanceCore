@@ -1,9 +1,53 @@
 """Recovery adapters reject ambient configuration and unrelated Docker scopes."""
 
+import json
+import os
+import zipfile
+
 import docker_backup_cycle
 import pytest
 import v070_recovery as recovery
 import yaml
+
+
+@pytest.mark.parametrize('failed_stage', ['authentic_source_build', 'authentic_source_start'])
+def test_authentic_failure_retains_safe_diagnostics_and_builds_shared_images_once(tmp_path, monkeypatch, failed_stage):
+    import identity_legacy_restore_cycle
+    import isolation_profile
+
+    monkeypatch.setattr(recovery, 'ROOT', tmp_path)
+    monkeypatch.setattr(recovery.os, 'environ', dict(os.environ))
+    monkeypatch.setattr(recovery.docker_state, 'ensure_fresh_project', lambda _: None)
+    monkeypatch.setattr(recovery.certification_v070, 'inventory', lambda _: [])
+    monkeypatch.setattr(docker_backup_cycle, 'available_port', iter([32001, 32002]).__next__)
+    calls, cleaned = [], []
+    monkeypatch.setattr(docker_backup_cycle, 'cleanup', lambda project, _: cleaned.append(project))
+    monkeypatch.setattr(isolation_profile, 'runtime_diagnostics', lambda project, _: [{'service': 'api', 'oom_killed': False}])
+    monkeypatch.setattr(identity_legacy_restore_cycle, 'health_version', lambda _: pytest.fail('Failure must precede readiness'))
+
+    def run(arguments, environment, **_kwargs):
+        calls.append(arguments)
+        if arguments[:2] == ['git', 'archive']:
+            with zipfile.ZipFile(arguments[arguments.index('--output') + 1], 'w') as bundle:
+                bundle.writestr('compose.yml', 'services: {}')
+        elif 'build' in arguments and failed_stage == 'authentic_source_build':
+            raise docker_backup_cycle.RecoveryCommandError(2, 'BUILD')
+        elif 'up' in arguments:
+            raise docker_backup_cycle.RecoveryCommandError(1, 'UNHEALTHY')
+        return ''
+
+    monkeypatch.setattr(docker_backup_cycle, 'execute', run)
+    evidence = tmp_path / '.codex-local/v070/authentic-test'
+    assert recovery.authentic_061_cycle('6fac26b3648cb4a4b50c094ef12c1e103bc97ddd', evidence) == 1
+    result = json.loads((evidence / 'result.json').read_text())
+    assert result['failed_stage'] == failed_stage
+    assert result['error_category'] == ('BUILD' if failed_stage.endswith('build') else 'UNHEALTHY')
+    assert len(result['runtime_diagnostics']) == 2 and cleaned == [result['source_project']]
+    build = next(arguments for arguments in calls if 'build' in arguments)
+    assert build[-3:] == ['build', 'api', 'web']
+    if failed_stage.endswith('start'):
+        start = next(arguments for arguments in calls if 'up' in arguments)
+        assert '--no-build' in start and '--build' not in start
 
 
 @pytest.mark.parametrize('project', ['trackvance-core', 'trackvance-certification', 'trackvance-v070-test-core', 'trackvance-v070-test-core-nothex'])

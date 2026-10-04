@@ -177,6 +177,31 @@ def test_http_error_never_exposes_response_body():
     assert "private-driver-error" not in str(caught.value)
 
 
+def test_http_failure_evidence_discards_query_record_identifier_and_response_body():
+    api = object.__new__(runner.RecoveryApi)
+    api.base_url, api.credentials, api.csrf = 'http://localhost/api/v1', (), ''
+    record = '62ab0a67-6aa8-4af9-9be0-56ca1945f0a2'
+    error = urllib.error.HTTPError(api.base_url, 422, 'Internal', {}, io.BytesIO(b'private-driver-diagnostic'))
+
+    def fail(*args, **kwargs):
+        raise error
+
+    api.opener = SimpleNamespace(open=fail)
+    with pytest.raises(runner.RecoveryCheckError) as caught:
+        api.request('GET', f'/connections/{record}/preview?schema_name=private-business-name')
+    assert caught.value.code == 'RECOVERY_API_UNEXPECTED_HTTP'
+    assert api.last_request == {'method': 'GET', 'path': '/connections/{id}/preview', 'http_status': 422}
+    assert all(value not in json.dumps(api.last_request) for value in (record, 'private-business-name', 'private-driver-diagnostic'))
+
+
+def test_fixture_check_codes_reject_untrusted_diagnostics():
+    with pytest.raises(ValueError, match='inválido'):
+        runner.ensure(False, 'Fixed check', code='private-driver-error: password=secret')
+    with pytest.raises(runner.RecoveryCheckError) as caught:
+        runner.ensure(False, 'Fixed check', code='SOURCE_SNAPSHOT_LINEAGE_MISMATCH')
+    assert caught.value.code == 'SOURCE_SNAPSHOT_LINEAGE_MISMATCH'
+
+
 @pytest.mark.parametrize("status", ["FAILED_PRECONDITION", "UNKNOWN", "FAILED", "CANCELLED"])
 def test_run_precondition_failure_is_terminal_without_polling_again(status):
     requests = []
@@ -711,8 +736,9 @@ def test_acquisition_poll_uses_exact_published_output_or_rejects_terminal_failur
         assert runner.wait_acquisition(SimpleNamespace(json=request), {'id':'acquisition'}) == {'id':'version-exact'}
         assert calls[-1] == ('GET', '/datasets/dataset')
     else:
-        with pytest.raises(RuntimeError, match='no publicó'):
+        with pytest.raises(runner.RecoveryCheckError, match='no publicó') as caught:
             runner.wait_acquisition(SimpleNamespace(json=request), {'id':'acquisition'})
+        assert caught.value.code == 'RECOVERY_ACQUISITION_NOT_PUBLISHED'
         assert all(path.startswith('/acquisitions/') for _, path in calls)
 
 

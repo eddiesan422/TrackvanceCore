@@ -27,6 +27,7 @@ from .dataset_readers import (
     INSPECTION_ROWS,
     MAX_CELL_TEXT_BYTES,
     MAX_COLUMNS,
+    DatasetCellLimit,
     DatasetReadResult,
     ReaderOptions,
     _cell_text,
@@ -55,6 +56,13 @@ class SourceError(Exception):
     def __init__(self, code: str, message: str):
         self.code, self.message = code, message
         super().__init__(message)
+
+
+def _source_cell_text(value: Any) -> str | None:
+    try:
+        return _cell_text(value)
+    except DatasetCellLimit:
+        raise SourceError("SOURCE_SIZE_LIMIT", "Una celda supera el límite local de 64 KiB.") from None
 
 
 @dataclass(frozen=True)
@@ -224,7 +232,7 @@ class DatabaseDatasetSource:
                         normalized: list[str | None] = []
                         for value in row:
                             rendered = (base64.b64encode(bytes(value)).decode("ascii")
-                                        if isinstance(value, (bytes, bytearray, memoryview)) else _cell_text(value))
+                                        if isinstance(value, (bytes, bytearray, memoryview)) else _source_cell_text(value))
                             cell_size = len(rendered.encode()) if rendered is not None else 0
                             if cell_size > MAX_CELL_TEXT_BYTES:
                                 raise SourceError("SOURCE_SIZE_LIMIT", "Una celda supera el límite local de 64 KiB.")
@@ -297,7 +305,7 @@ class DatabaseDatasetSource:
                             row = row[:-1]
                         normalized, size = [], 0
                         for value in row:
-                            rendered = base64.b64encode(bytes(value)).decode("ascii") if isinstance(value, (bytes, bytearray, memoryview)) else _cell_text(value)
+                            rendered = base64.b64encode(bytes(value)).decode("ascii") if isinstance(value, (bytes, bytearray, memoryview)) else _source_cell_text(value)
                             cell_size = len(rendered.encode("utf-8")) if rendered is not None else 0
                             if cell_size > MAX_CELL_TEXT_BYTES:
                                 raise SourceError("SOURCE_SIZE_LIMIT", "Una celda supera el límite de 64 KiB.")

@@ -216,6 +216,7 @@ def authentic_061_cycle(commit, evidence_path=None):
     """Archive an immutable 0.6.1 source and destroy it before restoring 0.7.0."""
     from docker_backup_cycle import (
         RecoveryApi,
+        RecoveryCommandError,
         assert_no_secrets,
         available_port,
         cleanup,
@@ -223,6 +224,7 @@ def authentic_061_cycle(commit, evidence_path=None):
         scan_backup_plaintext,
     )
     from identity_legacy_restore_cycle import certify_061_credentials, health_version
+    from isolation_profile import runtime_diagnostics
 
     if commit != '6fac26b3648cb4a4b50c094ef12c1e103bc97ddd':
         raise ValueError('La fuente debe ser el commit auténtico 0.6.1 aprobado.')
@@ -285,7 +287,11 @@ def authentic_061_cycle(commit, evidence_path=None):
             bundle.extractall(baseline)
         stage = 'authentic_source_build'
         source_claimed = True
-        run([*source_compose, 'up', '--build', '-d', '--wait', '--wait-timeout', '300'])
+        # Build each distinct image once before starting its services. The three
+        # backend services use the same private image produced by the api build.
+        run([*source_compose, 'build', 'api', 'web'])
+        stage = 'authentic_source_start'
+        run([*source_compose, 'up', '--no-build', '-d', '--wait', '--wait-timeout', '300'])
         if health_version(source_port) != '0.6.1':
             raise ValueError('El runtime fuente no corresponde a la revisión auténtica.')
         stage = 'historical_fixtures'
@@ -383,6 +389,14 @@ with SessionLocal() as db:
             main_inventory='UNCHANGED', historical_fixture='SYNTHETIC_METADATA_CREATED_BY_AUTHENTIC_061_ORM_NO_SMTP_OR_PROVIDER')
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
         result.update(failed_stage=stage, error_type=type(error).__name__)
+        if isinstance(error, RecoveryCommandError):
+            result.update(error_category=error.category, command_exit_code=error.exit_code)
+        try:
+            result['runtime_diagnostics'] = {
+                project: runtime_diagnostics(project, run) for project in (source, target)
+            }
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as diagnostic_error:
+            result['runtime_diagnostic_error_type'] = type(diagnostic_error).__name__
     finally:
         docker_state.compose = old_compose
         for claimed, project in ((target_claimed, target), (source_claimed, source)):

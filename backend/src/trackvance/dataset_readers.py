@@ -44,6 +44,10 @@ class UnsupportedDatasetFormat(ProcessingError):
     """Raised when no registered reader can safely identify a source."""
 
 
+class DatasetCellLimit(ProcessingError):
+    """A scalar exceeds the observed cell budget before normalization."""
+
+
 @dataclass(frozen=True)
 class ReaderOptions:
     """Format-specific options kept outside the quality configuration."""
@@ -226,9 +230,25 @@ def _cell_text(value: Any) -> str | None:
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, Decimal):
+        if value.is_finite():
+            sign, digits, exponent = value.as_tuple()
+            assert isinstance(exponent, int)
+            # Fixed notation may expand a short scientific literal by an
+            # arbitrarily large exponent. Check its exact ASCII size first;
+            # positive-exponent zero is rendered simply as "0" or "-0".
+            if exponent >= 0:
+                size = sign + (1 if value.is_zero() else len(digits) + exponent)
+            else:
+                size = sign + max(len(digits) + 1, 2 - exponent)
+            if size > MAX_CELL_TEXT_BYTES:
+                raise DatasetCellLimit(
+                    "ACQUISITION_CELL_LIMIT: Un valor numérico supera el tamaño máximo permitido."
+                )
         rendered = format(value, "f")
-        if len(rendered.encode("utf-8")) > MAX_CELL_TEXT_BYTES:
-            raise ProcessingError("Un valor numérico supera el tamaño máximo permitido.")
+        if len(rendered) > MAX_CELL_TEXT_BYTES:  # Decimal fixed text is ASCII.
+            raise DatasetCellLimit(
+                "ACQUISITION_CELL_LIMIT: Un valor numérico supera el tamaño máximo permitido."
+            )
         return rendered
     if isinstance(value, float):
         if not math.isfinite(value):
