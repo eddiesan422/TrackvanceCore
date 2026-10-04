@@ -221,10 +221,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Build isolated recovery target images
+        run: |
+          docker build -t trackvance-v070-isolated:backend -f backend/Dockerfile .
+          docker build -t trackvance-v070-isolated:web -f frontend/Dockerfile .
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
       - name: Restore an authentic 0.5.1 backup into 0.7.0
-        run: python scripts/tests/identity_legacy_restore_cycle.py
+        run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.5.1
       - name: Preserve notification history from an authentic 0.6.0 backup
         run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
       - name: Restore the authentic 0.6.1 baseline with strict legacy preservation

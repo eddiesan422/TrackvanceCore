@@ -126,26 +126,51 @@ def main() -> int:
         from v070_recovery import authentic_061_cycle
 
         return authentic_061_cycle(SOURCES["0.6.1"][0], options.evidence_dir)
+    from v070_recovery import compose_adapter, guarded_project, target_override
+
     baseline_commit, expected_migration, expected_state = SOURCES[options.source_version]
     suffix = uuid4().hex[:12]
-    source = f"trackvance-recovery-src-{options.source_version.replace('.', '')}-{suffix}"
-    target = f"trackvance-recovery-dst-061-{suffix}"
+    source = guarded_project(f"trackvance-v070-test-legacy{options.source_version.replace('.', '')}-src-{suffix}")
+    target = guarded_project(f"trackvance-v070-test-legacy{options.source_version.replace('.', '')}-dst-{suffix}")
     evidence = (options.evidence_dir or ROOT / ".codex-local" / "recovery" / f"identity-legacy-{suffix}").resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     baseline = evidence / "baseline"
     baseline.mkdir()
     archive, backup = evidence / "baseline.zip", evidence / "backup"
     port, target_port = available_port(), available_port()
+    while target_port == port:
+        target_port = available_port()
     environment = {
         **os.environ, "PYTHONIOENCODING": "utf-8", "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "POSTGRES_USER": "trackvance", "POSTGRES_DB": "trackvance", "DEMO_ACCESS_ENABLED": "true",
+        "POSTGRES_USER": "tv_v070_test", "POSTGRES_DB": "tv_v070_test", "DEMO_ACCESS_ENABLED": "true",
         "DEMO_SEED_ENABLED": "true", "WEB_PORT": str(port), "TRACKVANCE_SMTP_ENABLED": "false",
+        "TRACKVANCE_SSO_MICROSOFT_ENABLED": "false", "TRACKVANCE_SSO_GOOGLE_ENABLED": "false",
         "TRACKVANCE_WEB_ORIGIN": f"http://127.0.0.1:{port}", "COMPOSE_FILE": "compose.yml",
     }
+    original_environment = dict(os.environ)
     os.environ.update(environment)
     credentials = (environment["POSTGRES_PASSWORD"],)
-    compose = ["docker", "compose", "-p", source, "-f", str(baseline / "compose.yml")]
-    target_compose = ["docker", "compose", "-p", target, "-f", str(ROOT / "compose.yml")]
+    source_env_file, target_env_file = evidence / "source.env", evidence / "restore.env"
+    private_values = {key: environment[key] for key in ("POSTGRES_PASSWORD", "POSTGRES_USER", "POSTGRES_DB",
+        "DEMO_ACCESS_ENABLED", "DEMO_SEED_ENABLED", "WEB_PORT", "TRACKVANCE_SMTP_ENABLED",
+        "TRACKVANCE_SSO_MICROSOFT_ENABLED", "TRACKVANCE_SSO_GOOGLE_ENABLED", "TRACKVANCE_WEB_ORIGIN")}
+    source_env_file.write_text("\n".join(f"{key}={value}" for key, value in private_values.items()) + "\n", encoding="utf-8")
+    restored_values = {**private_values, "WEB_PORT": str(target_port), "DEMO_SEED_ENABLED": "false",
+                       "DEMO_ACCESS_ENABLED": "false", "TRACKVANCE_WEB_ORIGIN": f"http://127.0.0.1:{target_port}"}
+    target_env_file.write_text("\n".join(f"{key}={value}" for key, value in restored_values.items()) + "\n", encoding="utf-8")
+    profile = evidence / "source-compose.json"
+    source_services = {name: {"cpus": 1, "mem_limit": "1g", "pids_limit": 256}
+                       for name in ("postgres", "api", "worker", "delivery-worker")}
+    source_services["web"] = {"cpus": 0.25, "mem_limit": "128m", "pids_limit": 64}
+    for name in ("api", "worker", "delivery-worker", "web"):
+        source_services[name]["image"] = f'{source}:{"web" if name == "web" else "backend"}'
+    profile.write_text(json.dumps({"services": source_services}), encoding="utf-8")
+    override = target_override(evidence, target)
+    compose = ["docker", "compose", "--env-file", str(source_env_file), "-p", source,
+               "-f", str(baseline / "compose.yml"), "-f", str(profile)]
+    target_compose = ["docker", "compose", "--env-file", str(target_env_file), "-p", target,
+                      "-f", str(ROOT / "compose.yml"), "-f", str(override)]
+    old_compose = docker_state.compose
     started = target_claimed = False
     began = time.monotonic()
     result = {"status": "FAIL", "baseline_commit": baseline_commit,
@@ -199,8 +224,12 @@ def main() -> int:
         started = False
         stage = "restore"
         docker_state.ensure_fresh_project(target)
+        docker_state.compose = compose_adapter(target, target_env_file, override, restored_values)
         target_claimed = True
-        receipt = docker_state.restore(backup, target, start=True, web_port=target_port)
+        receipt = docker_state.restore(backup, target, start=False, web_port=target_port)
+        environment.update(restored_values)
+        os.environ.update(environment)
+        run([*target_compose, "up", "-d", "--wait", "api", "web"])
         if health_version(target_port) != TARGET_VERSION:
             raise ValueError("La restauración no ejecuta 0.7.0.")
         restored = docker_state.inventory(target)
@@ -226,7 +255,7 @@ def main() -> int:
                            TRACKVANCE_WEB_ORIGIN=f"http://127.0.0.1:{target_port}",
                            DEMO_SEED_ENABLED="false", DEMO_ACCESS_ENABLED="true")
         os.environ.update(environment)
-        run([*target_compose, "up", "-d", "--wait", "--wait-timeout", "180"])
+        run([*target_compose, "up", "-d", "--wait", "--wait-timeout", "180", "api", "web"])
         stage = "current_credentials"
         report, credentials = certify_061_credentials(
             RecoveryApi(target_port, credentials), target_compose, environment, credentials)
@@ -237,10 +266,12 @@ def main() -> int:
         docker_state.verify_backup(current_backup)
         result["current_backup_scan"] = scan_backup_plaintext(current_backup, target_compose, environment, credentials)
         run([*target_compose, "logs", "--no-color"])
-        result.update(status="PASS", log_secret_scan="PASS", source_destroyed_before_restore=True)
+        result.update(status="PASS", log_secret_scan="PASS", source_destroyed_before_restore=True,
+                      automatic_processes_started=False)
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
         result.update(failed_stage=stage, error_type=type(error).__name__)
     finally:
+        docker_state.compose = old_compose
         cleanup_failed = False
         for claimed, command, directory in ((started, compose, baseline), (target_claimed, target_compose, ROOT)):
             if claimed:
@@ -252,6 +283,8 @@ def main() -> int:
             result.update(status="FAIL", cleanup="FAIL")
         else:
             result["cleanup"] = "PASS"
+        os.environ.clear()
+        os.environ.update(original_environment)
         result["duration_seconds"] = round(time.monotonic() - began, 3)
         serialized = json.dumps(result, indent=2)
         assert_no_secrets(serialized, credentials)
