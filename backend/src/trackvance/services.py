@@ -1270,11 +1270,12 @@ def backfill_artifacts(db: Session) -> dict[str, int]:
         except (OSError, ArtifactIntegrityError):
             counts["unavailable"] += 1
     for run in db.scalars(select(Run)):
-        if run.module.upper() == "DELIVERY":
-            # Delivery was introduced with immutable artifacts and its own
-            # canonical DELIVERY_INPUT graph. Legacy generic backfill would
-            # append unrelated RUN_INPUT edges on restart/restore. Its evidence
-            # is repaired only through the explicit local repair operation.
+        if run.module.upper() in {"DELIVERY", "DELIVERY_PREFLIGHT"}:
+            # Both operations persist their input identity when created. The
+            # preflight binds the canonical SHA and draft in execution_plan;
+            # Delivery has its own canonical DELIVERY_INPUT graph. Generic
+            # legacy backfill must not append RUN_INPUT on restart/restore.
+            # Delivery evidence uses the explicit local repair operation.
             continue
         for identity in [run.dataset_version_id, run.target_version_id]:
             if identity:

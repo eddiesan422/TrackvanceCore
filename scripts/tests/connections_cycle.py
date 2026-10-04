@@ -449,7 +449,7 @@ def main() -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default=f"{PREFIX}{os.getpid()}-{uuid.uuid4().hex[:6]}")
+    parser.add_argument("--project", default=f"{PREFIX}{os.getpid()}-{uuid.uuid4().hex[:12]}")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-playwright", action="store_true")
@@ -513,6 +513,7 @@ def main() -> int:
 
     started = False
     checks = smoke.Checks()
+    streaming = None
     try:
         command(["docker", "info", "--format", "{{.OSType}}"])
         existing = command(["docker", "ps", "-aq", "--filter",
@@ -545,6 +546,16 @@ def main() -> int:
                                capture=True)
         checks.verify(json.loads(migration_result)["roundtrip"] == "PASS",
                       "Migraciones PostgreSQL: ida/vuelta, historial y paridad de modelos")
+        streaming_probe = (ROOT / "scripts/tests/connections_streaming_probe.py").read_text(encoding="utf-8")
+        streaming = json.loads(run(["exec", "-T", "api", "python", "-"],
+            input_text=streaming_probe + "\nprint(json.dumps(certify_sqlserver_streaming("
+                + f"'source-sqlserver', {admin_password!r}, {password!r})))\n",
+            capture=True))
+        assert_no_credentials(streaming, credentials, "Una credencial apareció en la sonda de streaming.")
+        checks.verify(streaming["status"] == "PASS" and streaming["rows"] == 30_000
+                      and streaming["full_scan"]["row_count"] == 30_000
+                      and streaming["cancellation"]["status"] == "PASS",
+                      "SQL Server: FreeTDS incremental, valores completos, memoria acotada y cierre al cancelar")
         api = smoke.Api(base_url, timeout=60)
         application_version = api.get("/api/v1/health")["version"]
         api.request("GET", "/api/v1/connections", expected=(401,))
@@ -578,6 +589,7 @@ def main() -> int:
         assert_no_credentials(audits, credentials, "Secreto filtrado en auditoría")
         checks.verify(True, "Contraseñas ausentes de logs, auditoría y metadata interna")
         result = {"status": "PASS", "version": application_version, "project": project, "sources": results,
+                  "sqlserver_streaming_probe": streaming,
                   "temporal_regressions": temporal_results,
                   "checks": checks.completed, "playwright": "SKIPPED" if args.skip_playwright else "PASS",
                   "regression_smoke": "SKIPPED" if args.skip_regression else "PASS"}
@@ -588,6 +600,7 @@ def main() -> int:
         print("ERROR: " + redact(str(error), credentials), file=sys.stderr, flush=True)
         (evidence / "result.json").write_text(json.dumps({"status": "FAIL", "project": project,
                                                         "checks": checks.completed,
+                                                        "sqlserver_streaming_probe": streaming,
                                                         "error": redact(str(error), credentials)},
                                                        indent=2), encoding="utf-8")
         if started:

@@ -24,7 +24,7 @@ from test_delivery_service_api import (
 
 from trackvance import __version__, delivery_service, worker
 from trackvance.data_sinks import DeliveryError
-from trackvance.db import iso, utcnow
+from trackvance.db import Base, iso, utcnow
 from trackvance.delivery_schemas import DeliveryReviewBody
 from trackvance.models import (
     Artifact,
@@ -548,3 +548,35 @@ def test_startup_legacy_backfill_does_not_add_noncanonical_delivery_edges(
         assert [record_values(artifact) for artifact in db.scalars(
             select(Artifact).order_by(Artifact.id),
         )] == before_artifacts
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "SUCCESS", "CANCELLED"])
+def test_startup_backfill_preserves_all_tables_after_real_preflight(
+    authenticated, database, delivery_case, status,
+):
+    response = authenticated.post("/api/v1/delivery/validations", json=delivery_case.draft)
+    assert response.status_code == 202
+    identity = response.json()["id"]
+    if status == "SUCCESS":
+        assert worker.process_once(lane="DELIVERY")
+    elif status == "CANCELLED":
+        assert authenticated.post(f"/api/v1/delivery/validations/{identity}/cancel").status_code == 200
+
+    def snapshot(db):
+        return {table.name: [deepcopy(dict(row)) for row in db.execute(
+            select(table).order_by(*table.primary_key.columns)).mappings()]
+            for table in Base.metadata.sorted_tables}
+
+    with database() as db:
+        run = db.get(Run, identity)
+        assert run.module == "DELIVERY_PREFLIGHT" and run.status == status
+        assert db.get(Configuration, run.config_id).status == "VALIDATION_PRIVATE"
+        assert run.execution_plan["canonical_sha256"]
+        before = snapshot(db)
+        assert len(before) == 42
+        for _ in range(2):
+            backfill_artifacts(db)
+            db.commit()
+            assert snapshot(db) == before
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
+        assert not any(call[0] == "deliver_prepared" for call in delivery_case.runtime.calls)
