@@ -186,7 +186,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', "from trackvance.dispatcher import component_status; raise SystemExit(0 if component_status('scheduler') == 'RUNNING' else 1)"]
+      test: ['CMD', 'python', '-c', "from trackvance.component_health import component_status; raise SystemExit(0 if component_status('scheduler') == 'RUNNING' else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 20s
@@ -204,7 +204,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', "from trackvance.dispatcher import component_status; raise SystemExit(0 if component_status('events-notifications') == 'RUNNING' else 1)"]
+      test: ['CMD', 'python', '-c', "from trackvance.component_health import component_status; raise SystemExit(0 if component_status('events-notifications') == 'RUNNING' else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 20s
@@ -222,7 +222,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', "from trackvance.dispatcher import component_status; raise SystemExit(0 if component_status('events-chaining') == 'RUNNING' else 1)"]
+      test: ['CMD', 'python', '-c', "from trackvance.component_health import component_status; raise SystemExit(0 if component_status('events-chaining') == 'RUNNING' else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 20s

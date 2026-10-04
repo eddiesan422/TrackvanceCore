@@ -17,6 +17,7 @@ import threading
 import time
 from collections import Counter
 from datetime import UTC, datetime
+from itertools import chain
 from pathlib import Path
 
 import polars as pl
@@ -91,10 +92,12 @@ def logical_result(record, module, ordinal=0):
 
 def expected_intake_errors(rows):
     result = LogicalMultiset()
-    cases = [(index, "NUMERIC", "amount", "invalid", "ERROR", 2) for index in range(0, rows, 10000)]
-    cases += [(index, "NOT_NULL", "label", None, "ERROR", 3) for index in range(0, rows, 20000)]
-    cases += [(index + offset, "UNIQUE", "id", f"{index - 1:012d}", "WARNING", 1)
-              for index in range(50000, rows, 50000) for offset in (-1, 0)]
+    cases = chain(
+        ((index, "NUMERIC", "amount", "invalid", "ERROR", 2) for index in range(0, rows, 10000)),
+        ((index, "NOT_NULL", "label", None, "ERROR", 3) for index in range(0, rows, 20000)),
+        ((index + offset, "UNIQUE", "id", f"{index - 1:012d}", "WARNING", 1)
+         for index in range(50000, rows, 50000) for offset in (-1, 0)),
+    )
     for index, code, column, value, severity, ordinal in cases:
         record = {"original_row_number": index + 2, "rule_code": code, "column": column,
                   "columns": [column], "rule_id": None, "received_value": value, "severity": severity,

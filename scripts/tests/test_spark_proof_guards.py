@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -76,7 +77,9 @@ def test_dedicated_suite_rejects_skips_and_failures(tmp_path, failing_tag):
 def test_population_proof_requires_all_modules_and_real_executors(tmp_path):
     report = tmp_path / "evidence.json"
     fingerprint = {"method": "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1", "rows": 1000000,
-                   "sum_sha256": "1" * 64, "xor_sha256": "2" * 64, "sha256": "3" * 64}
+                   "sum_sha256": "1" * 64, "xor_sha256": "2" * 64,
+                   "sha256": hashlib.sha256((1000000).to_bytes(8, "big")
+                            + bytes.fromhex("1" * 64) + bytes.fromhex("2" * 64)).hexdigest()}
     evidence = {"status": "PASS", "input_population_rows": 1000000, "complete_value_verification": "PASS",
                 "expected_logical_fingerprints": {name: fingerprint for name in ("intake", "recon", "sentinel", "intake_accepted")},
                 "outcomes": {
@@ -94,3 +97,14 @@ def test_population_proof_requires_all_modules_and_real_executors(tmp_path):
     report.write_text(json.dumps(evidence), encoding="utf-8")
     with pytest.raises(RuntimeError, match="values differ"):
         guards.assert_population(report, 1000000, "STANDALONE_CLIENT")
+
+
+def test_null_expected_and_missing_fingerprints_cannot_certify_population(tmp_path):
+    report = tmp_path / "evidence.json"
+    evidence = {"status": "PASS", "input_population_rows": 1000000, "complete_value_verification": "PASS",
+                "expected_logical_fingerprints": {name: None for name in ("intake", "recon", "sentinel", "intake_accepted")},
+                "outcomes": {module: {"status": "PASS", "runtime": {"deployment_mode": "LOCAL"}}
+                             for module in ("intake", "recon", "sentinel")}}
+    report.write_text(json.dumps(evidence), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="valid logical fingerprints"):
+        guards.assert_population(report, 1000000, "LOCAL")

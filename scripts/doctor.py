@@ -262,7 +262,7 @@ def main() -> int:
             "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])[0]
         for component in ("scheduler", "events-notifications", "events-chaining"):
             checks[f"Componente Compose {component}"] = command_check([*prefix, "exec", "-T", component, "python", "-c",
-                f"from trackvance.dispatcher import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])[0]
+                f"from trackvance.component_health import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])[0]
     if options.storage_dir:
         checks.update(local_storage_checks(options.storage_dir))
     if options.recovery_ready:

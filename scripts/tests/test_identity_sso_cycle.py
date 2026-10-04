@@ -1,8 +1,22 @@
 """Persistence probes must work when Compose replaces the API container."""
 import json
+from unittest.mock import Mock
 
 import identity_sso_cycle
 import pytest
+
+
+def test_help_is_read_only_and_unknown_arguments_cannot_start_docker(monkeypatch, capsys):
+    command = Mock(side_effect=AssertionError('Docker must not run while parsing arguments'))
+    monkeypatch.setattr(identity_sso_cycle.subprocess, 'run', command)
+    with pytest.raises(SystemExit) as help_exit:
+        identity_sso_cycle.main(['--help'])
+    assert help_exit.value.code == 0
+    assert 'Certify identity' in capsys.readouterr().out
+    with pytest.raises(SystemExit) as invalid_exit:
+        identity_sso_cycle.main(['--unexpected-option'])
+    assert invalid_exit.value.code == 2
+    command.assert_not_called()
 
 
 @pytest.mark.parametrize('project', ['trackvance-certification', 'trackvance-core', 'trackvance-v070-test-identity-nohex'])

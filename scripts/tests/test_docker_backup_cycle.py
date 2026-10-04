@@ -679,9 +679,10 @@ def test_backup_privacy_scans_decompressed_dump_and_artifacts_without_publishing
     observed = {}
 
     def restore(arguments, **kwargs):
-        observed.update(arguments=arguments, **kwargs)
-        return subprocess.CompletedProcess(arguments, 0,
-            stdout=secret.encode() if leak == "dump" else b"decoded SQL without plaintext", stderr=b"")
+        observed.update(arguments=arguments, input=kwargs['stdin'].read())
+        assert 'input' not in kwargs and 'capture_output' not in kwargs
+        kwargs['stdout'].write(secret.encode() if leak == "dump" else b"decoded SQL without plaintext")
+        return subprocess.CompletedProcess(arguments, 0)
 
     monkeypatch.setattr(runner.subprocess, "run", restore)
     if leak:

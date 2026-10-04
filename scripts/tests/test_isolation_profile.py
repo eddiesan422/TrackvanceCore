@@ -3,7 +3,12 @@
 import json
 
 import pytest
-from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
+from isolation_profile import (
+    assert_main_unchanged,
+    isolate_compose,
+    main_inventory,
+    runtime_diagnostics,
+)
 
 
 @pytest.mark.parametrize('project', ['trackvance-core', 'trackvance-certification', 'trackvance-v070-test-e2e'])
@@ -53,3 +58,29 @@ def test_inventory_comparison_fails_when_main_changes():
         'State': {'Status': 'exited'}, 'HostConfig': {'RestartPolicy': {'Name': 'no'}}, 'Mounts': []}])])
     with pytest.raises(RuntimeError, match='inventario'):
         assert_main_unchanged([], lambda _arguments: next(calls))
+
+
+def test_runtime_diagnostics_retains_probe_facts_and_discards_credentials():
+    project = 'trackvance-v070-test-identity-0123456789ab'
+    secret = 'private-secret-must-never-be-emitted'
+    inspected = [{'Config': {'Env': ['PASSWORD=' + secret], 'Labels': {
+        'com.docker.compose.service': 'scheduler', 'untrusted': secret}},
+        'State': {'Status': 'running', 'ExitCode': 0, 'OOMKilled': False, 'Pid': 321,
+                  'Health': {'Status': 'unhealthy', 'Log': [{
+                      'Start': '2026-10-03T00:00:00Z', 'End': '2026-10-03T00:00:05Z',
+                      'ExitCode': -1, 'Output': 'Health check exceeded timeout: ' + secret}]}},
+        'HostConfig': {'Memory': 268435456, 'PidsLimit': 128, 'NanoCpus': 250000000}}]
+    calls = iter(['scheduler-id', json.dumps(inspected)])
+    result = runtime_diagnostics(project, lambda _arguments: next(calls))
+    assert secret not in json.dumps(result)
+    assert result[0]['probes'] == [{'exit_code': -1, 'duration_seconds': 5.0, 'timed_out': True}]
+    assert result[0]['pids_limit'] == 128
+    assert result[0]['nano_cpus'] == 250000000
+    assert result[0]['oom_killed'] is False
+
+
+def test_runtime_diagnostics_refuses_main_and_unknown_services():
+    with pytest.raises(ValueError, match='desechable'):
+        runtime_diagnostics('trackvance-certification', lambda _arguments: '')
+    calls = iter(['unknown-id', json.dumps([{'Config': {'Labels': {'com.docker.compose.service': 'secret'}}}])])
+    assert runtime_diagnostics('trackvance-v070-test-e2e-0123456789ab', lambda _arguments: next(calls)) == []

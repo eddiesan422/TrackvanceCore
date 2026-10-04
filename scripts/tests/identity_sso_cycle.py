@@ -6,6 +6,7 @@ tokens are neither printed nor published as artifacts.
 """
 from __future__ import annotations
 
+import argparse
 import http.cookiejar
 import json
 import os
@@ -23,7 +24,12 @@ from uuid import uuid4
 
 from browser_evidence import run_browser
 from credential_leak_probe import scan as scan_credentials
-from isolation_profile import assert_main_unchanged, isolate_compose, main_inventory
+from isolation_profile import (
+    assert_main_unchanged,
+    isolate_compose,
+    main_inventory,
+    runtime_diagnostics,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -49,7 +55,8 @@ def storage_snapshot(run, compose: list[str]) -> dict:
     ))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     project = validated_project(f"trackvance-v070-test-identity-{uuid4().hex[:12]}")
     port, oidc_port = (available_port() for _ in range(2))
     while port == oidc_port or port == 3100 or oidc_port == 3100:
@@ -85,6 +92,12 @@ def main() -> int:
         if completed.returncode:
             result["failed_stage"] = stage or arguments[0]
             result["failed_exit_code"] = completed.returncode
+            if arguments[:2] == ['docker', 'compose']:
+                failed_output = (completed.stdout + completed.stderr).lower()
+                result['compose_failure'] = ('CONTAINER_UNHEALTHY' if 'unhealthy' in failed_output else
+                                             'BUILD_FAILED' if 'failed to solve' in failed_output else
+                                             'PORT_BIND_FAILED' if 'port is already allocated' in failed_output else
+                                             'OTHER_COMPOSE_FAILURE')
             if "playwright" in arguments:
                 try:
                     report = json.loads(completed.stdout[completed.stdout.index("{"):])
@@ -219,6 +232,18 @@ def main() -> int:
         outcome = 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         result["error_type"] = type(error).__name__
+        if started:
+            def diagnostic_run(arguments):
+                completed = subprocess.run(arguments, cwd=ROOT, env=environment, text=True,
+                                           encoding='utf-8', errors='replace', capture_output=True,
+                                           check=False, timeout=15)
+                if completed.returncode:
+                    raise RuntimeError('Diagnóstico Docker no disponible.')
+                return completed.stdout
+            try:
+                result['runtime_diagnostics'] = runtime_diagnostics(project, diagnostic_run)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                result['runtime_diagnostics_status'] = 'UNAVAILABLE'
         print('ERROR: falló la certificación Identity/SSO; diagnóstico saneado.', file=sys.stderr)
         outcome = 1
     finally:

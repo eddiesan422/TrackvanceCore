@@ -1049,8 +1049,8 @@ def main() -> int:
     private_profile = evidence / "private-compose.json"
     profile = json.loads(private_profile.read_text(encoding="utf-8"))
     limits = {"postgres": "512m", "api": "768m", "worker": "256m", "acquisition-worker": "256m",
-              "delivery-worker": "768m", "scheduler": "128m", "events-chaining": "128m",
-              "events-notifications": "128m", "web": "128m", "mock-oidc": "256m"}
+              "delivery-worker": "768m", "scheduler": "256m", "events-chaining": "256m",
+              "events-notifications": "256m", "web": "128m", "mock-oidc": "256m"}
     for name, memory in limits.items():
         if name in profile["services"]:
             profile["services"][name]["mem_limit"] = memory
@@ -1220,7 +1220,8 @@ def main() -> int:
         if started:
             try:
                 logs = run(
-                    ["logs", "--no-color", "--tail", "180", "api", "worker", "delivery-worker"],
+                    ["logs", "--no-color", "--tail", "180", "api", "worker", "delivery-worker",
+                     "acquisition-worker", "scheduler", "events-chaining", "events-notifications"],
                     capture=True,
                 )
                 (evidence / "application.log").write_text(

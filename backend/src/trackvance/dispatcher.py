@@ -5,10 +5,12 @@ import logging
 import os
 import signal
 import threading
-from datetime import datetime
 
 from .artifactstore import artifact_store
 from .automation import dispatch_due
+from .component_health import (
+    component_status as component_status,  # noqa: PLC0414 -- compatibility reexport
+)
 from .db import SessionLocal, iso, utcnow
 from .models import uid
 from .scheduler import tick as schedule_tick
@@ -34,18 +36,6 @@ def write_heartbeat(component: str, owner: str):
     temporary.write_text(json.dumps({"component": component, "owner": owner,
                                     "updated_at": iso(utcnow())}), encoding="utf-8")
     os.replace(temporary, path)
-
-
-def component_status(component: str):
-    if component not in {"scheduler", "events-notifications", "events-chaining"}:
-        raise ValueError("Componente desconocido.")
-    try:
-        data = json.loads(artifact_store.location(f"{component}-heartbeat.json").read_text(encoding="utf-8"))
-        instant = datetime.fromisoformat(data["updated_at"])
-        fresh = 0 <= (utcnow() - instant).total_seconds() < 30
-    except (OSError, ValueError, KeyError, TypeError):
-        return "OFFLINE"
-    return "RUNNING" if fresh else "OFFLINE"
 
 
 def dispatch_tick(*, limit=100):

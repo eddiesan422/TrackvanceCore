@@ -487,8 +487,8 @@ def main() -> int:
     private_profile = evidence / "private-compose.json"
     profile = json.loads(private_profile.read_text(encoding="utf-8"))
     limits = {"postgres": "512m", "api": "768m", "worker": "512m", "acquisition-worker": "512m",
-              "delivery-worker": "768m", "scheduler": "128m", "events-chaining": "128m",
-              "events-notifications": "128m", "web": "128m"}
+              "delivery-worker": "768m", "scheduler": "256m", "events-chaining": "256m",
+              "events-notifications": "256m", "web": "128m"}
     for name, memory in limits.items():
         if name in profile["services"]:
             profile["services"][name]["mem_limit"] = memory
@@ -589,7 +589,8 @@ def main() -> int:
             try:
                 logs = run(
                     ["logs", "--no-color", "--tail", "150", "api", "worker",
-                     "delivery-worker"],
+                     "delivery-worker", "acquisition-worker", "scheduler",
+                     "events-chaining", "events-notifications"],
                     capture=True,
                 )
                 local_logs = ROOT / ".codex-local" / "browser-results" / project

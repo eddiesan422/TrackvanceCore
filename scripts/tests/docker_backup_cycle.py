@@ -21,6 +21,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -78,14 +79,20 @@ def assert_stream_no_secrets(stream: BinaryIO, credentials: tuple[str, ...]) -> 
 
 def scan_backup_plaintext(backup: Path, application: list[str], environment: dict[str, str],
                           credentials: tuple[str, ...]) -> dict[str, Any]:
-    """Inspect decompressed backup bytes in memory without publishing database contents."""
-    result = subprocess.run(
-        [*application, "exec", "-T", "postgres", "pg_restore", "--file=-"],
-        cwd=ROOT, env=environment, input=(backup / "postgres.dump").read_bytes(),
-        capture_output=True, timeout=300, check=False,
-    )
-    assert_no_secrets(result.stdout + result.stderr, credentials)
-    ensure(result.returncode == 0, "No se pudo inspeccionar el dump privado del backup.")
+    """Scan private streams with bounded memory, deleting transient decoded SQL."""
+    with (backup / "postgres.dump").open('rb') as raw_dump, \
+            tempfile.TemporaryFile(dir=backup.parent) as decoded, \
+            tempfile.TemporaryFile(dir=backup.parent) as errors:
+        result = subprocess.run(
+            [*application, "exec", "-T", "postgres", "pg_restore", "--file=-"],
+            cwd=ROOT, env=environment, stdin=raw_dump, stdout=decoded, stderr=errors,
+            timeout=300, check=False,
+        )
+        decoded.seek(0)
+        errors.seek(0)
+        assert_stream_no_secrets(decoded, credentials)
+        assert_stream_no_secrets(errors, credentials)
+        ensure(result.returncode == 0, "No se pudo inspeccionar el dump privado del backup.")
     files = 0
     for path in backup.rglob("*"):
         if not path.is_file():

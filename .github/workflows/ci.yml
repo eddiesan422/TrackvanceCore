@@ -143,7 +143,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: identity-sso-evidence
-          path: .codex-local/identity-sso-e2e/**/result.json
+          path: .codex-local/v070/trackvance-v070-test-identity-*/result.json
           include-hidden-files: true
           if-no-files-found: ignore
   connections-e2e:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 SERVICES = ('postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
@@ -96,3 +97,41 @@ def main_inventory(run) -> list[dict]:
 def assert_main_unchanged(before: list[dict], run) -> None:
     if main_inventory(run) != before:
         raise RuntimeError('El inventario de la instalación habitual cambió durante la certificación.')
+
+
+def runtime_diagnostics(project: str, run) -> list[dict]:
+    """Allowlist disposable runtime facts; never retain env, logs or probe output."""
+    validate_project(project)
+    identifiers = run(['docker', 'ps', '-aq', '--filter',
+                       f'label=com.docker.compose.project={project}']).split()
+    if not identifiers:
+        return []
+    inspected = json.loads(run(['docker', 'inspect', *identifiers]))
+    diagnostics = []
+    for row in inspected:
+        service = row.get('Config', {}).get('Labels', {}).get('com.docker.compose.service')
+        if service not in {*SERVICES, 'mock-oidc'}:
+            continue
+        state, limits = row.get('State', {}), row.get('HostConfig', {})
+        health = state.get('Health', {})
+        probes = []
+        for probe in health.get('Log', [])[-3:]:
+            try:
+                duration = round((datetime.fromisoformat(probe['End']) -
+                                  datetime.fromisoformat(probe['Start'])).total_seconds(), 3)
+            except (ValueError, KeyError, TypeError):
+                duration = None
+            output = str(probe.get('Output', '')).lower()
+            probes.append({'exit_code': probe.get('ExitCode'), 'duration_seconds': duration,
+                           'timed_out': 'timed out' in output or 'timeout' in output})
+        status = state.get('Status')
+        health_status = health.get('Status')
+        diagnostics.append({'service': service,
+                            'state': status if status in {'created', 'restarting', 'running', 'removing',
+                                                         'paused', 'exited', 'dead'} else 'UNKNOWN',
+                            'exit_code': state.get('ExitCode'), 'oom_killed': state.get('OOMKilled') is True,
+                            'pid': state.get('Pid'), 'pids_limit': limits.get('PidsLimit'),
+                            'memory_limit_bytes': limits.get('Memory'), 'nano_cpus': limits.get('NanoCpus'),
+                            'health': health_status if health_status in {'starting', 'healthy', 'unhealthy'} else 'UNKNOWN',
+                            'probes': probes})
+    return sorted(diagnostics, key=lambda row: row['service'])

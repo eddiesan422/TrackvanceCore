@@ -720,6 +720,9 @@ def test_archive_streams_to_private_host_file_without_writable_bind(monkeypatch,
     assert "type=volume,src=disposable-volume,dst=/source,readonly" in calls[0]
     assert not any("type=bind" in value for value in calls[0])
     assert "--user" not in calls[0]
+    assert calls[0][calls[0].index('--cpus') + 1] == '1'
+    assert calls[0][calls[0].index('--memory') + 1] == '512m'
+    assert calls[0][calls[0].index('--pids-limit') + 1] == '128'
     if os.name != "nt":
         assert target.stat().st_mode & 0o777 == 0o600
 

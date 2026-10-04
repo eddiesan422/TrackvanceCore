@@ -10,6 +10,7 @@ import shutil
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import UTC, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -846,10 +847,11 @@ def profile(version_id: str, db: Session = Depends(get_db), user: User = Depends
                            [column["name"] for column in version.schema_json],
                            observed_record_bytes_upper_bound=(version.profile or {}).get("observed_record_bytes_upper_bound"))
     sample, sample_bytes, limited = bounded_profile_sample(records)
-    return {**version_dto(version, db), "sample": sample, "sampled_rows": len(sample),
-            "sample_bytes": sample_bytes, "sample_limited": limited,
-            "sample_byte_limit": 8 * 1024 * 1024,
-            "delivery_preflight_synchronous_rows": DeliveryLimits.configured().synchronous_rows}
+    payload = {**version_dto(version, db), "sample": sample, "sampled_rows": len(sample),
+               "sample_bytes": sample_bytes, "sample_limited": limited,
+               "sample_byte_limit": 8 * 1024 * 1024,
+               "delivery_preflight_synchronous_rows": DeliveryLimits.configured().synchronous_rows}
+    return JSONResponse(jsonable_encoder(payload, custom_encoder={Decimal: str}))
 
 
 def bounded_profile_sample(records, *, byte_limit: int = 8 * 1024 * 1024):
@@ -860,7 +862,7 @@ def bounded_profile_sample(records, *, byte_limit: int = 8 * 1024 * 1024):
     sample_bytes = 2  # JSON array delimiters
     rows = records.head(20) if hasattr(records, "head") else records
     for record in islice(rows, 20):
-        encoded = json.dumps(jsonable_encoder(record), ensure_ascii=False,
+        encoded = json.dumps(jsonable_encoder(record, custom_encoder={Decimal: str}), ensure_ascii=False,
                              separators=(",", ":")).encode("utf-8")
         size = len(encoded) + int(bool(sample))
         if sample_bytes + size > byte_limit:

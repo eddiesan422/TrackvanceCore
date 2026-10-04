@@ -131,14 +131,18 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
   await page.getByLabel('Configuración publicada', { exact: true }).selectOption(configuration.id)
   await page.getByLabel('Disparador', { exact: true }).selectOption('CHAINED')
   await page.getByLabel('Contrato Intake disparador', { exact: true }).selectOption(contract.id)
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(Date.now() - 60_000))
+  // The UI has minute precision. Register a valid future minute, then honor its
+  // activation fence before creating the Intake that may trigger this chain.
+  const chainStartsAt = Math.floor((Date.now() + 60_000) / 60_000) * 60_000
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(chainStartsAt))
   const part = (type: string) => parts.find(value => value.type === type)?.value || ''
   await page.getByLabel('Inicio en la zona seleccionada', { exact: true }).fill(`${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`)
   const automationResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/automations' && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Crear automatización', exact: true }).click()
   const publishedAutomation = await automationResponse
-  expect(publishedAutomation.status()).toBe(201)
   const automation = await publishedAutomation.json()
+  expect(publishedAutomation.status(), JSON.stringify({ code: automation.code, message: automation.message, details: automation.details })).toBe(201)
+  await expect.poll(() => Date.now(), { timeout: 70_000, intervals: [1000] }).toBeGreaterThanOrEqual(chainStartsAt)
 
   await page.goto('/intake')
   await page.getByRole('button', { name: 'Nueva ejecución', exact: true }).click()

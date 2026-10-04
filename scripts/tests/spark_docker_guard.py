@@ -100,6 +100,8 @@ def assert_population(evidence: Path, rows: int, deployment_mode: str) -> dict:
     expected = measured.get("expected_logical_fingerprints", {})
     if measured.get("complete_value_verification") != "PASS" or set(expected) != {"intake", "recon", "sentinel", "intake_accepted"}:
         raise RuntimeError("Full-population proof must verify every value and original position")
+    if not all(valid_fingerprint(value) for value in expected.values()):
+        raise RuntimeError("Full-population proof requires present, valid logical fingerprints")
     for module, outcome in outcomes.items():
         if outcome.get("status") != "PASS" or outcome.get("runtime", {}).get("deployment_mode") != deployment_mode:
             raise RuntimeError("Module proof did not pass in the requested deployment mode")
@@ -110,6 +112,20 @@ def assert_population(evidence: Path, rows: int, deployment_mode: str) -> dict:
     if outcomes["intake"].get("accepted", {}).get("logical_fingerprint") != expected["intake_accepted"]:
         raise RuntimeError("Complete accepted values and physical positions differ from the input snapshot")
     return measured
+
+
+def valid_fingerprint(value) -> bool:
+    if (not isinstance(value, dict)
+            or set(value) != {"method", "rows", "sum_sha256", "xor_sha256", "sha256"}
+            or value["method"] != "CANONICAL_JSON_ROW_SHA256_COUNT_SUM_XOR_V1"
+            or type(value["rows"]) is not int or not 0 <= value["rows"] < 2**64):
+        return False
+    if not all(isinstance(value[key], str) and re.fullmatch(r"[0-9a-f]{64}", value[key])
+               for key in ("sum_sha256", "xor_sha256", "sha256")):
+        return False
+    encoded = (value["rows"].to_bytes(8, "big")
+               + bytes.fromhex(value["sum_sha256"]) + bytes.fromhex(value["xor_sha256"]))
+    return hashlib.sha256(encoded).hexdigest() == value["sha256"]
 
 
 def source_fingerprint() -> str:

@@ -436,6 +436,9 @@ def _archive_volume(
             "--network",
             "none",
             "--read-only",
+            "--cpus", "1",
+            "--memory", "512m",
+            "--pids-limit", "128",
             "--mount",
             f"type=volume,src={volume},dst=/source,readonly",
             image_id,
@@ -730,7 +733,9 @@ def verify_backup(source: Path) -> dict[str, Any]:
             and record.get("entries") != inspect_archive(path)
         ):
             raise OperationError("El inventario interno de un volumen no coincide.")
-    if not (root / "postgres.dump").read_bytes().startswith(b"PGDMP"):
+    with (root / "postgres.dump").open('rb') as dump:
+        custom_dump = dump.read(5) == b"PGDMP"
+    if not custom_dump:
         raise OperationError("El dump PostgreSQL no usa el formato custom esperado.")
     try:
         state = json.loads((root / "state.json").read_text(encoding="utf-8"))
@@ -909,6 +914,9 @@ def _extract_volume(
             "--network",
             "none",
             "--read-only",
+            "--cpus", "1",
+            "--memory", "512m",
+            "--pids-limit", "128",
             "--mount",
             f"type=volume,src={volume},dst=/target",
             image_id,
