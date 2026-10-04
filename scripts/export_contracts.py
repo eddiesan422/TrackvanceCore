@@ -29,10 +29,12 @@ def main():
                               for method, path, permission in sorted(ENDPOINT_MATRIX)]}
     save(HERE / f"permission_contract_{__version__}.json", permissions)
     inventory = {"version": __version__, "tables": sorted(Base.metadata.tables), "entities": []}
-    for name in sorted(NEW_TABLES | {"jobs", "monitor_schedules", "monitor_schedule_versions"}):
+    for name in sorted(Base.metadata.tables):
         table = Base.metadata.tables[name]
         inventory["entities"].append({
             "table": name,
+            "evolution": ("NEW" if name in NEW_TABLES else "MODIFIED" if name in
+                          {"jobs", "monitor_schedules", "monitor_schedule_versions"} else "PRESERVED"),
             "columns": [{"name": c.name, "type": str(c.type), "nullable": c.nullable,
                          "primary_key": c.primary_key,
                          "references": sorted(str(f.target_fullname) for f in c.foreign_keys)}
