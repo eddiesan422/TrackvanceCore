@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "scope": "INTERMEDIATE_CHECKPOINT_NOT_FINAL_CERTIFICATION",
+  "head_sha": "393b7e25e413bf641d5483c25c53951642611f51",
+  "run_id": 37226453887,
+  "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887",
+  "status": "completed",
+  "conclusion": "failure",
+  "updated_at": "2026-10-04T19:46:37Z",
+  "jobs": [
+    {
+      "id": 111506991539,
+      "name": "frontend",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111506991539",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T18:58:14Z",
+      "completed_at": "2026-10-04T18:59:23Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111506991693,
+      "name": "backend",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111506991693",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T18:58:14Z",
+      "completed_at": "2026-10-04T19:03:26Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996751,
+      "name": "identity-sso-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996751",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:07:27Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996774,
+      "name": "xlsx-corrections-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996774",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:46:36Z",
+      "failed_steps": [
+        "Certify real XLSX boundaries, 400k and 1M with normal runtime limits"
+      ]
+    },
+    {
+      "id": 111507996786,
+      "name": "delivery-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996786",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:28Z",
+      "completed_at": "2026-10-04T19:08:48Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996819,
+      "name": "backup-restore-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996819",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:05:30Z",
+      "failed_steps": [
+        "Restore PostgreSQL, artifacts and source credentials into a fresh project"
+      ]
+    },
+    {
+      "id": 111507996823,
+      "name": "compose-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996823",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:09:46Z",
+      "failed_steps": [
+        "Verify all browser flows, restart persistence and migration history"
+      ]
+    },
+    {
+      "id": 111507996832,
+      "name": "spark-standalone-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996832",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:28Z",
+      "completed_at": "2026-10-04T19:09:53Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996863,
+      "name": "connections-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996863",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:06:06Z",
+      "failed_steps": [
+        "Real PostgreSQL and SQL Server certification"
+      ]
+    },
+    {
+      "id": 111507996869,
+      "name": "spark-local-e2e",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996869",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:10:08Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996884,
+      "name": "async-volume-e2e (1024)",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996884",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:25:12Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996891,
+      "name": "benchmark-smoke",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996891",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:05:04Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996930,
+      "name": "async-volume-e2e (500)",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996930",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:24:53Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996990,
+      "name": "async-volume-e2e (100)",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996990",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:23:26Z",
+      "failed_steps": []
+    },
+    {
+      "id": 111507996995,
+      "name": "delivery-benchmark-smoke",
+      "url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887/job/111507996995",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T19:03:29Z",
+      "completed_at": "2026-10-04T19:05:54Z",
+      "failed_steps": []
+    }
+  ],
+  "failure_resolution": [
+    {
+      "jobs": [
+        "backup-restore-e2e",
+        "connections-e2e"
+      ],
+      "cause": "stdin migration checker did not transport verify_storage.py and physical_schema_guard.py",
+      "local_evidence": "postgres-migration-transport.json",
+      "fixed_checkpoint": "e75e1038f845979da8cdf7cc38de91bfe359d349"
+    },
+    {
+      "jobs": [
+        "compose-e2e"
+      ],
+      "cause": "legacy browser test filled business area after C03 changed it to the required select",
+      "local_evidence": "host-static-checks.json",
+      "fixed_checkpoint": "e75e1038f845979da8cdf7cc38de91bfe359d349"
+    },
+    {
+      "jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "cause": "browser navigated to inbox before asynchronous demo re-login completed",
+      "observed_failure_location": "frontend/tests-e2e/corrections-volume.spec.ts:278",
+      "local_evidence": "browser-400k-relogin-fixed.json",
+      "fixed_checkpoint": "e75e1038f845979da8cdf7cc38de91bfe359d349"
+    }
+  ],
+  "final_ci": "PENDING_EXACT_FINAL_HEAD"
+}

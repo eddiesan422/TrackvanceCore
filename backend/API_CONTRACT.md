@@ -144,7 +144,9 @@ con 422; el draft UI conserva campos y bloquea guardar antes de convertir fechas
 Editar sólo nombre/configuración/responsable preserva starts_at UTC y next_run_at.
 Una ancla nueva pasada se rechaza; una ancla existente puede conservarse aunque
 haya pasado. Cambiar el calendario calcula el siguiente slot futuro con la
-política DST vigente (gap omitido, fold=0), sin reactivar ONCE consumido. La ocurrencia conserva revisión,
+política DST vigente (gap omitido, fold=0). Conservar el calendario o su ancla
+pasada no vuelve a despachar un ONCE consumido; cambiar deliberadamente el inicio
+a una nueva ancla futura programa una nueva ocurrencia. La ocurrencia conserva revisión,
 trigger_key/origin/planned/dispatched/sourceRun/datasetVersion/Run/status/reason
 y coalesced_intervals. La última versión debe estar ya registrada; no refresca SQL.
 
@@ -171,8 +173,10 @@ histórico, no crea otra Run ni ejecuta DDL/DML. PENDING_REPAIR no autoriza reen
 
 ## Bandeja personal y contratos históricos 0.7.0
 
-GET `/notifications/inbox?module=&origin=&unread=&offset=&limit=` devuelve items
-con id/module/origin/status/decision/description, resource_type/resource_id,
+GET `/notifications/inbox?module=&origin=&status=&read_state=&unread=&offset=&limit=` devuelve items
+filtrados por `read_state=ALL|READ|UNREAD`. Si se indica, `read_state` tiene
+precedencia sobre `unread`; sin él, `unread=true` selecciona UNREAD y el resto ALL.
+Cada item incluye id/module/origin/status/decision/description, resource_type/resource_id,
 detail_url/created_at/read_at y `error` nullable. Un aviso de adquisición nueva
 puede incluir `{code,message,details,reference}` público del mismo evento; los
 históricos sin diagnóstico conservan null y su descripción original. GET `/notifications/unread-count` devuelve el conteo.

@@ -2241,7 +2241,9 @@ APPEND/OVERWRITE si la tabla ya existe: se conserva el bloqueo de estrategia.
 
 Editar campos de negocio conserva el ancla UTC histórica y next_run_at, aun
 si el inicio ya pasó. Una ancla nueva pasada se rechaza; cambios reales del
-calendario calculan el siguiente slot futuro y no rearman ONCE consumido.
+calendario calculan el siguiente slot futuro. Conservar el calendario o su ancla
+pasada no vuelve a despachar un ONCE consumido; cambiar deliberadamente el inicio
+a una nueva ancla futura programa una nueva ocurrencia.
 
 C04 separa la zona editable de la zona válida usada para convertir. Vacía,
 parcial o inválida muestra error de campo y bloquea guardar antes de Intl,
@@ -2344,23 +2346,43 @@ son 1.708 pruebas backend y scripts aprobadas y 17 omitidas en 287,59 s, 223 pru
 aprobadas en 15,38 s y 140 pruebas focales de Delivery aprobadas, incluidas las
 dos ventanas de cancelación anteriores. Los conteos focales forman parte de la
 regresión y no se suman para inventar un total adicional. Estos resultados host
-son evidencia de esa revisión; no sustituyen las ejecuciones reales en curso,
-los jobs GitHub del HEAD final, la inspección visual del PDF ni el upgrade.
+son evidencia de esa revisión; no sustituyen los jobs GitHub del HEAD final,
+la inspección visual del PDF ni el upgrade.
+
+La certificación integrada local terminó PASS sobre
+`e75e1038f845979da8cdf7cc38de91bfe359d349`, con árbol limpio al iniciarse.
+Los árboles de producto backend/src y frontend/src son idénticos a 393b7e2;
+e75e103 corrige únicamente el transporte de scripts de migración y la
+sincronización/selección de pruebas del navegador, además de documentación.
+Las ocho combinaciones de tamaño y strings aprobaron con valores completos,
+perfil global y numeración física. Los recorridos Playwright de 400.000 y
+1.000.000 filas aprobaron en 194,743 y 339,777 s, respectivamente, sin skips,
+fallos ni flaky. Los hashes completos de fuente, aceptados y destino SQL coinciden.
+El reinicio de API conservó no leída y contador; el restore nativo quedó detenido
+y verificado, con las 42 tablas, 4.524 artefactos y cinco secretos fuente y cinco
+destino exactos. Los SHA del estado anterior y restaurado son idénticos.
+
+El primer formal local y la primera CI sobre 393b7e2 permanecen registrados como
+FAIL; no se sustituyen sus bytes ni se heredan sus once jobs verdes. La regresión
+de scripts corregidos aprobó 523 pruebas; la migración PostgreSQL real validó
+0008, 0012 y 0015 hasta 0016, incluida la preservación íntegra de 42 tablas desde
+0015. Los conteos de suites superpuestas no se suman. CI final, PDF y main tienen
+sus propios gates, registrados después en el informe externo.
 
 La matriz siguiente separa causa reproducida, implementación y aceptación. El
-resultado de los gates reales continúa pendiente hasta incorporar sus reportes
-saneados, hashes, recursos y revisión exacta. Los módulos backend indicados
+resultado integrado local se apoya en reportes saneados, hashes, recursos y
+revisión exacta. Los módulos backend indicados
 pertenecen a backend/src/trackvance; las pruebas test_* a backend/tests salvo que
 se indique una ruta frontend o scripts.
 
 | Corrección | Causa comprobada | Archivos de implementación | Pruebas verificables | Resultado de aceptación |
 | --- | --- | --- | --- | --- |
-| C01 — XLSX incremental | El lector anterior rechazaba 100.001 filas antes del primer lote; una dimensión A1:A1 ocultaba registros reales. read_only precargaba shared strings y estilos. | xlsx_streaming.py, batch_readers.py, acquisition.py, acquisition_config.py y dataset_scans.py: SAX acotado, índice privado, inferencia completa, numeración física, recursos y publicación con fence. | test_xlsx_streaming_acquisition.py y test_dataset_readers.py; scripts/xlsx_fixtures.py con oráculo independiente y scripts/tests/test_xlsx_fixtures.py; scripts/tests/corrections_cycle.py y frontend/tests-e2e/corrections-volume.spec.ts. | Regresión host confirmada. Pendientes la certificación formal de 400.000 y 1.000.000 filas inline/shared, huellas completas de fuente, aceptados y SQL, recursos, UI y recuperación. Los originales del usuario no están disponibles; la reproducción es sintética. |
-| C02 — Diagnóstico y límites | El worker perdía causas de ProcessingError y la inspección HTTP exponía INVALID_DATA con texto crudo. La recepción sólo comparaba la cota general; el footer Parquet confundía filas y expansión. | acquisition_errors.py, acquisition_api.py, acquisition_models.py, events.py, notifications_api.py y 0016_acquisition_diagnostics.py; frontend/src/api/client.ts y features/datasets/AcquisitionLimits.tsx. | test_acquisition_http_bounds.py, test_acquisition_diagnostics_migration.py y test_xlsx_streaming_acquisition.py; frontend/src/features/datasets/AcquisitionLimits.test.tsx y Acquisitions.test.tsx. | Regresión host confirmada. Pendientes excesos reales, igualdad de diagnóstico persistido/detalle/historial/aviso y prueba de límites efectivos en el recorrido normal. La compatibilidad NDJSON con extensión .json se conserva. |
-| C03 — Área de negocio | Adquisición y carga rápida usaban controles distintos; reutilizar un dataset podía mostrar Operaciones en vez de su dominio. | frontend/src/features/datasets/BusinessAreaField.tsx, Acquisitions.tsx y Datasets.tsx; se conserva Dataset.domain sin modelo nuevo. | test_dataset_business_areas.py; frontend/src/features/datasets/BusinessAreaField.test.tsx, Acquisitions.test.tsx y Datasets.test.tsx; corrections-volume.spec.ts. | Regresión host confirmada. Pendientes el navegador real y la conservación de dominio al registrar otra versión y restaurar el estado. |
-| C04 — Zona horaria y edición | Una zona vacía, parcial o inválida lanzaba RangeError; reabrir edición cambiaba el inicio. Editar negocio podía alterar el ancla o cursor de calendario. | frontend/src/features/delivery/automationTime.ts y DeliveryAutomation.tsx; automation.py conserva el ancla y diferencia cambios de negocio y calendario. | test_automation_time_edits.py; frontend/src/features/delivery/DeliveryAutomation.test.tsx; corrections-volume.spec.ts. | Regresión host confirmada. Pendientes crear/editar/reabrir en navegador real y comparar zona, instante UTC, ancla y próximo slot persistidos. |
-| C05 — Despacho por metadata | Elegibilidad/planificación verificaban archivos bajo el lock de automatización. Una rama de error en la última verificación podía sobrescribir una cancelación ya confirmada. | automation.py, delivery_service.py, planner.py y services.py: identidades/tamaños persistidos al despachar; verificación completa en worker y fence antes del fallo local. | test_metadata_dispatch.py, test_corrections_dispatch_contract.py y test_delivery_service_api.py; scripts/tests/corrections_dispatch.py y corrections_cycle.py. | Regresión host confirmada, incluidas ambas ventanas de cancelación dentro de las 140 pruebas focales. Pendientes cuatro programaciones sobre dos entradas de un millón de filas con otra entrega activa, relojes separados y verificación real de cero escrituras ante corrupción. |
-| C06 — No leída | Faltaban setter y acción personal para restablecer read_at; la lectura concurrente exigía UPDATE explícito para evitar estado ORM obsoleto. | notifications_api.py; frontend/src/features/notifications/Notifications.tsx y components/ui.tsx: confirmación antes de refrescar lista, filtros y contador. | test_notifications_unread.py; frontend/src/features/notifications/Notifications.test.tsx; corrections-volume.spec.ts y recuperación de corrections_cycle.py. | Regresión host confirmada. Pendientes navegador real, aislamiento por destinatario/permisos, reinicio y backup/restore con no leída persistida, sin nuevas ejecuciones ni avisos duplicados. |
+| C01 — XLSX incremental | El lector anterior rechazaba 100.001 filas antes del primer lote; una dimensión A1:A1 ocultaba registros reales. read_only precargaba shared strings y estilos. | xlsx_streaming.py, batch_readers.py, acquisition.py, acquisition_config.py y dataset_scans.py: SAX acotado, índice privado, inferencia completa, numeración física, recursos y publicación con fence. | test_xlsx_streaming_acquisition.py y test_dataset_readers.py; scripts/xlsx_fixtures.py con oráculo independiente y scripts/tests/test_xlsx_fixtures.py; scripts/tests/corrections_cycle.py y frontend/tests-e2e/corrections-volume.spec.ts. | PROBADO: ocho escalones inline/shared, incluidos 400.000 y 1.000.000; huellas completas, perfil y numeración física PASS. Navegador 400.000/1.000.000, cancelación, crash y restore PASS con límites normales. Los originales del usuario no están disponibles; la reproducción es sintética. |
+| C02 — Diagnóstico y límites | El worker perdía causas de ProcessingError y la inspección HTTP exponía INVALID_DATA con texto crudo. La recepción sólo comparaba la cota general; el footer Parquet confundía filas y expansión. | acquisition_errors.py, acquisition_api.py, acquisition_models.py, events.py, notifications_api.py y 0016_acquisition_diagnostics.py; frontend/src/api/client.ts y features/datasets/AcquisitionLimits.tsx. | test_acquisition_http_bounds.py, test_acquisition_diagnostics_migration.py y test_xlsx_streaming_acquisition.py; frontend/src/features/datasets/AcquisitionLimits.test.tsx y Acquisitions.test.tsx. | PROBADO: exceso real de 1.000.001 falla en la primera fila excedida con ACQUISITION_ROW_LIMIT, máximo 1.000.000, misma referencia y diagnóstico en API/historial/aviso; ninguna versión parcial y huella previa intacta. Límites efectivos UI/API y NDJSON .json conservados. |
+| C03 — Área de negocio | Adquisición y carga rápida usaban controles distintos; reutilizar un dataset podía mostrar Operaciones en vez de su dominio. | frontend/src/features/datasets/BusinessAreaField.tsx, Acquisitions.tsx y Datasets.tsx; se conserva Dataset.domain sin modelo nuevo. | test_dataset_business_areas.py; frontend/src/features/datasets/BusinessAreaField.test.tsx, Acquisitions.test.tsx y Datasets.test.tsx; corrections-volume.spec.ts. | PROBADO: control compartido, catálogo completo de organización, Unicode y selección/agregado en navegador; reutilización del dataset conserva dominio y crea otra versión. Restore conserva áreas/dominios/opciones e historia exactos. |
+| C04 — Zona horaria y edición | Una zona vacía, parcial o inválida lanzaba RangeError; reabrir edición cambiaba el inicio. Editar negocio podía alterar el ancla o cursor de calendario. | frontend/src/features/delivery/automationTime.ts y DeliveryAutomation.tsx; automation.py conserva el ancla y diferencia cambios de negocio y calendario. | test_automation_time_edits.py; frontend/src/features/delivery/DeliveryAutomation.test.tsx; corrections-volume.spec.ts. | PROBADO: crear/editar/reabrir en navegador, zona parcial/inválida sin excepción ni guardado; UTC y campos se preservan. Tests backend cubren DST y edición de negocio/calendario; conservar el ancla no rearma ONCE, una nueva ancla futura sí reprograma. |
+| C05 — Despacho por metadata | Elegibilidad/planificación verificaban archivos bajo el lock de automatización. Una rama de error en la última verificación podía sobrescribir una cancelación ya confirmada. | automation.py, delivery_service.py, planner.py y services.py: identidades/tamaños persistidos al despachar; verificación completa en worker y fence antes del fallo local. | test_metadata_dispatch.py, test_corrections_dispatch_contract.py y test_delivery_service_api.py; scripts/tests/corrections_dispatch.py y corrections_cycle.py. | PROBADO: cuatro programaciones/dos datasets-versiones de un millón con quinta entrega ocupando worker y lease viva; despacho 0,207531 s, 15 rutas I/O con cero llamadas. Cola censurada y preparación separadas; corrupción detectada antes de STARTED, sin DML. Ambas carreras de cancelación PASS. |
+| C06 — No leída | Faltaban setter y acción personal para restablecer read_at; la lectura concurrente exigía UPDATE explícito para evitar estado ORM obsoleto. | notifications_api.py; frontend/src/features/notifications/Notifications.tsx y components/ui.tsx: confirmación antes de refrescar lista, filtros y contador. | test_notifications_unread.py; frontend/src/features/notifications/Notifications.test.tsx; corrections-volume.spec.ts y recuperación de corrections_cycle.py. | PROBADO: navegador 400.000/1.000.000, filtros/contador/recarga/logout y permisos personales; UPDATE idempotente evita caché concurrente obsoleta. Reinicio API y restore nativo conservan read_at NULL/contador y huella de 42 tablas sin duplicar avisos ni ejecuciones. |
 
 Métricas distinguen generación, transferencia, indexación/lectura/materialización,
 perfil/publicación, cola, procesamiento Spark y commit SQL cuando el reloj es
@@ -2376,6 +2398,25 @@ real de un millón más una fila comprueba fallo sin versión parcial, conservac
 de una versión previa y diagnóstico idéntico en detalle, historial y bandeja.
 La transición no leída queda conservada durante reinicio de API y backup/restore
 con comparación íntegra de la huella de las 42 tablas.
+
+En el formal local e75e103, el worker XLSX tardó 55,606/67,601 s para
+400.000 filas inline/shared y 140,779/171,469 s para un millón. Recepción hasta
+verificación completa: 62,525/73,992 y 150,987/181,775 s respectivamente.
+El recorrido integral de un millón inline, hasta SQL e inbox confirmados, fue
+299,554 s. El despacho C05 mide 0,207531 s con commits y excluye preparación
+y cola; la quinta entrega tenía Job RUNNING y lease viva mientras su Run seguía
+QUEUED, durante preparación anterior a STARTED. Terminó COMMITTED con un millón.
+Las cuatro nuevas ocurrencias se cancelaron antes de STARTED, con cero attempts;
+su espera de cola es censurada, no cero ni latencia completa.
+
+En adquisición de un millón, los picos RSS muestreados del worker fueron
+379.621.376/419.602.432 bytes inline/shared; cgroup 986.009.600/1.272.107.008,
+temporal 655.668.709/650.739.429 y CPU 148,650/181,331 s. El mayor cgroup
+simultáneo de los cuatro procesos backend fue 3.401.781.248 bytes, bajo su
+presupuesto de 6.442.450.944. La suma RSS incluye páginas compartidas; el
+muestreo cgroup y su memory.peak vitalicio tienen alcances distintos. Las fases
+de crash/reinicio con reset de CPU se conservan como medición parcial; no se
+extrapolan al perfil principal, que tiene recursos distintos.
 
 @corrections
 
@@ -2435,8 +2476,9 @@ parameters_0.7.0.json son inputs vigentes actualizados para el ciclo C01–C06.
 volume_results_0.7.0.json y validation_results_0.7.0.json conservan, de forma
 explícita, los resultados históricos de la publicación inicial. No se les
 atribuye la certificación del ciclo correctivo. corrections_results_0.7.0.json
-recibirá los resultados de la certificación independiente C01–C06, cuya revisión
-de implementación es `393b7e25e413bf641d5483c25c53951642611f51`.
+contiene los resultados de la certificación independiente C01–C06, cuya revisión
+de implementación es `393b7e25e413bf641d5483c25c53951642611f51` y cuya revisión
+de certificación integrada local es `e75e1038f845979da8cdf7cc38de91bfe359d349`.
 El informe externo registrará el HEAD
 documental final, los resultados GitHub de ese SHA y el upgrade principal cuando
 se ejecuten y verifiquen; esta fuente no anticipa su aprobación. Los resúmenes del ensayo

@@ -13,7 +13,17 @@ Un scheduler separado despacha ocurrencias con cursor transaccional, clave únic
 
 La revisión fija configuración, destino y responsable. Cada despacho y cada inicio de Run revalida la cuenta activa, organización, permisos vigentes y disponibilidad del destino. Las programaciones heredadas sin actor verificable requieren asignación explícita. SYSTEM identifica el origen de una ejecución automática; su responsable real suministra la autorización.
 
-El resultado encadenado debe ser SUCCESS con APPROVED, o APPROVED_WITH_WARNINGS cuando se ha optado expresamente. Se utiliza la DatasetVersion de salida exacta, con perfil publicado, evidencia y artifact verificable. REJECTED, salida vacía por defecto, bytes corruptos, permisos revocados o destino deshabilitado generan una ocurrencia bloqueada sin una escritura remota. Una reclamación por automatización y versión impide repetir entradas; la repetición manual es explícita y auditable.
+El resultado encadenado debe ser SUCCESS con APPROVED, o APPROVED_WITH_WARNINGS
+cuando se ha optado expresamente. Se utiliza la DatasetVersion de salida exacta,
+con perfil publicado, evidencia y artifact verificable. REJECTED y warnings sin
+opt-in producen una ocurrencia SKIPPED con INTAKE_DECISION_NOT_ACCEPTED; una salida
+vacía no autorizada produce SKIPPED con EMPTY_INPUT_BLOCKED. Condiciones de
+metadata como permisos revocados o destino deshabilitado producen BLOCKED.
+El despacho no inspecciona los bytes: si la metadata permite encolar, la
+ocurrencia queda ENQUEUED. Una corrupción física se detecta después en el worker
+y la Run termina FAILED_PRECONDITION antes de STARTED, sin DeliveryAttempt ni
+DDL/DML remoto. Una reclamación por automatización y versión impide repetir
+entradas; la repetición manual es explícita y auditable.
 
 El cambio terminal de Run o adquisición crea outbox en la misma transacción de metadata. Cada evento tiene una deduplicación persistente y dos consumos independientes, NOTIFICATIONS y CHAINING. Los consumidores reclaman mediante compare-and-swap, lease con propietario y límite de cinco intentos. Su heartbeat corre independientemente de la verificación de archivos. La publicación de sus efectos y la confirmación DONE se realizan en una transacción; una lease vencida pierde la autorización para confirmar. Un fallo de consumidor no reescribe la ejecución original.
 

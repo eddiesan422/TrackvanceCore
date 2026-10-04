@@ -10,8 +10,9 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
   generar candidato y revisar renderizado.
 - `build_specification.py`: generador portable reportlab/pypdf, separado de las
   dependencias de ejecución del producto.
-- `validation_results_0.7.0.json`: resultados reales de esta revisión;
-  un archivo o gate pendiente no se presume aprobado.
+- `validation_results_0.7.0.json`: resultados históricos de la publicación inicial.
+- `corrections_results_0.7.0.json`: evidencia propia del ciclo C01–C06;
+  un archivo o gate pendiente no se presume aprobado y un resultado inicial no lo sustituye.
 - `parameters_0.7.0.json` y `volume_results_0.7.0.json`: cotas y mediciones.
 - `model_contract_0.7.0.json` y `permission_contract_0.7.0.json`: inventario completo
   de campos, relaciones, restricciones, índices y permisos exportado del código.
@@ -28,7 +29,10 @@ en el texto; la productización permanece fuera del roadmap local 1–10.
 La implementación 0.7.0 documenta adquisición durable por lotes, Parquet multipart,
 PySpark Local/Standalone con paridad completa, Delivery acotado, programaciones,
 encadenamiento y outbox con bandeja personal. Mantiene los contratos históricos,
-identidad y secretos; añade 0013–0015 sin reescribir migraciones anteriores.
+identidad y secretos. La publicación inicial añade 0013–0015; el ciclo C01–C06
+añade únicamente 0016, sin reescribir migraciones anteriores. Incorpora XLSX
+incremental con límites efectivos, diagnóstico estructurado, áreas compartidas,
+edición segura de zona horaria, despacho sólo por metadata y estado personal no leído.
 El generador admite índice y marcadores de dos niveles, diagramas de arquitectura,
 secuencia y estados, y bloques JSON paginables. La salida es determinista con los mismos inputs;
 permite contrastar el hash del candidato revisado con el PDF publicado.
@@ -41,7 +45,9 @@ python docs/specification/build_specification.py --draft --results docs/specific
 ```
 
 El generador usa esta fuente, `backend/openapi.json`, el logo del repositorio y
-los inventarios de modelos/permisos, parámetros, volumen y resultados explícitos.
+los inventarios de modelos/permisos, parámetros, volumen y resultados explícitos,
+incluido `corrections_results_0.7.0.json`. La evidencia inicial permanece diferenciada
+de los resultados nuevos del ciclo C01–C06.
 Reconoce el repositorio desde su ubicación;
 `--repo`, `--source`, `--results` y `--output-dir` permiten rutas distintas.
 Usa Arial en Windows y DejaVu/Vera cuando Arial no está disponible. No descarga
@@ -69,10 +75,40 @@ sobrescribirlo. La especificación actual no altera ese antecedente.
 La certificación consolidada y el inventario de cambios están en
 [validación](../development/validation.md) y la
 [adquisición/volumen 0.7.0](../development/acquisition-volume-0.7.0.md),
-[Spark/paridad 0.7.0](../development/spark-volume-0.7.0.md) y los cinco ADR 0020–0024.
+[Spark/paridad 0.7.0](../development/spark-volume-0.7.0.md), los cinco ADR 0020–0024
+y el [ADR 0025 del ciclo C01–C06](../adr/0025-corrections-c01-c06.md).
 El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histórico.
 
-## Publicación 0.7.0
+## Publicación C01–C06 de 0.7.0 — en curso
+
+El corte de implementación evaluado por el primer formal es
+`393b7e25e413bf641d5483c25c53951642611f51`. Su informe conserva el FAIL global de
+navegador y los resultados parciales; las correcciones posteriores del harness,
+sus repeticiones y el formal final tienen evidencias y revisiones propias.
+El estado vigente se consulta en [validación C01–C06](../development/validation.md)
+y `corrections_results_0.7.0.json`. El ciclo usa 0016/state 7, conserva las
+42 tablas y no hereda los resultados de la publicación inicial.
+
+El PDF corregido está publicado: **120 páginas, 246 marcadores y 38 secciones
+principales**, SHA-256 `493c0d37fd087c70d667832d896b90ade4202d618e99874e73b23bb90812b476`.
+Las 120 páginas se renderizaron a 120 dpi y se inspeccionaron visualmente en una
+revisión fresca completa, sin hallazgos pendientes. Una segunda generación con
+los once inputs congelados, runtime y fuentes idénticos produjo los mismos bytes.
+La [prueba PDF](../development/evidence/0.7.0-corrections-20261004/pdf-verification.json)
+registra hashes de inputs/extracción/render y los cuatro revisores. El renderizador
+advirtió aliases Symbol/ArialUnicode; los recursos Arial usados están embebidos y
+los glifos, flechas y acentos fueron inspeccionados legibles.
+
+PDF, fuente, generador, once inputs y extracción tienen copias oficiales byte
+idénticas en `ProductOne/Documentación`. El archivo de la publicación inicial
+conserva sus doce archivos verificados y el SHA de su manifiesto. La prueba
+histórica `Trackvance_Core_PDF_Verificacion_0.7.0.json` sigue intacta. Los datos
+históricos siguientes no corresponden al PDF corregido. CI del HEAD final y el
+upgrade principal mantienen sus gates externos hasta su ejecución efectiva.
+El informe externo de cierre identificará el HEAD documental final, todos los
+jobs de su CI y el upgrade efectivo, sin crear una referencia circular en el PDF.
+
+## Publicación inicial 0.7.0 — histórica
 
 La edición publicada contiene **114 páginas, 238 marcadores y 38 secciones
 principales**, con texto seleccionable. Su SHA-256 es

@@ -87,7 +87,12 @@ no modifica etiquetas históricas; persiste `Dataset.domain` sin modelo nuevo.
 La zona horaria editable es un draft validado antes de formatear o convertir.
 Vacía/parcial/inválida muestra error y bloquea guardar, conservando otros campos
 e instante previo. Crear, editar y reabrir usan la zona válida explícita y el
-`starts_at` guardado. Editar campos de negocio conserva el ancla UTC y el cursor next_run_at, incluso si la fecha ya pasó; una ancla nueva pasada se rechaza. Cambiar el calendario calcula el siguiente slot futuro y no rearma ONCE consumido. La política DST no cambia: hora inexistente se omite,
+`starts_at` guardado. Editar campos de negocio conserva el ancla UTC y el cursor
+next_run_at, incluso si la fecha ya pasó; una ancla nueva pasada se rechaza.
+Cambiar el calendario calcula el siguiente slot futuro. Conservar el calendario
+o su ancla pasada no vuelve a despachar un ONCE consumido; cambiar deliberadamente
+el inicio a una nueva ancla futura programa una nueva ocurrencia.
+La política DST no cambia: hora inexistente se omite,
 ambigua usa fold=0; no se inventa UTC ni zona del navegador como fallback.
 
 ## C05: responsabilidades del despacho y worker

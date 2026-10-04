@@ -116,8 +116,7 @@ Los entornos Docker destructivos de prueba deben usar proyectos, bases y volúme
 Los puertos permiten añadir fuentes y adaptadores sin acoplar los módulos
 funcionales a proveedores. Data Delivery implementa la primera frontera de salida
 mediante `DataSink`, exclusivamente para PostgreSQL y SQL Server en el prototipo
-local. S3/Blob/REST y otros destinos, orquestación programada de Delivery,
-secretos administrados, Redis/Celery, object storage,
+local. S3/Blob/REST y otros destinos, secretos administrados, Redis/Celery, object storage,
 observabilidad distribuida y despliegue Kubernetes permanecen como evolución de
 producto. La certificación de cada revisión se publica separada de este estado funcional.
 

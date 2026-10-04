@@ -2,21 +2,73 @@
 
 Baseline `12ca7061696d3581a18237dc7737348a3462e2c4`, rama `feat/local-prototype`. Implementación formal `393b7e25e413bf641d5483c25c53951642611f51`, con árbol limpio al ejecutar. Los [resultados iniciales](validation-0.7.0-initial.md) se conservan como antecedentes. Este ciclo permanece **ABIERTO** hasta pruebas completas, PDF revisado, CI del HEAD final y upgrade real verificado. Ningún verde previo se hereda.
 
-El formal de esa revisión terminó **FAIL en el primer navegador de 400.000 filas**, después de aprobar los ocho tiers, la cadena API/SQL de un millón y los ensayos de control. La causa confirmada fue del harness: navegaba tras re-login antes de completar la autenticación. El informe completo se conserva como [evidencia intermedia saneada](evidence/0.7.0-corrections-20261004/formal-393b7e2-browser-fail.json), sin convertir su FAIL global en PASS. Las repeticiones de navegador y el backup/restore posterior tendrán informes propios.
+El formal de esa revisión terminó **FAIL en el primer navegador de 400.000 filas**, después de aprobar los ocho tiers, la cadena API/SQL de un millón y los ensayos de control. La causa confirmada fue del harness: navegaba tras re-login antes de completar la autenticación. El informe completo se conserva como [evidencia intermedia saneada](evidence/0.7.0-corrections-20261004/formal-393b7e2-browser-fail.json), sin convertir su FAIL global en PASS. La repetición e75 y su backup/restore se documentan más abajo con un informe independiente.
+
+## Formal e75e1038: repetición completa y procedencia
+
+La nueva ejecución formal terminó **PASS**, con certificación `e75e1038f845979da8cdf7cc38de91bfe359d349` y árbol limpio. La implementación de producto sigue siendo `393b7e25e413bf641d5483c25c53951642611f51`: los árboles `backend/src` y `frontend/src` son idénticos entre ambas revisiones. El SHA e75 añade fixes del harness/transporte y documentación; los tiempos y recursos siguientes provienen exclusivamente de esta nueva ejecución. El ciclo continúa **ABIERTO** hasta CI del HEAD final y upgrade principal verificado; el PDF corregido ya tiene revisión fresca completa PASS.
+
+La [evidencia formal saneada](evidence/0.7.0-corrections-20261004/formal-e75e1038-pass.json) tiene SHA-256 `03a7f6bd9c2533b0237e1e83b5216b8350a95f1c344f6b8ad59201d13a4a0eff`. Conserva valores null, etapas muestreadas, presión de memoria, contadores incompletos y esperas censuradas. El formal 393 permanece FAIL y los focales quedan separados; ningún resultado antiguo sustituye una medición nueva. Las fixtures son sintéticas con oráculo independiente, no originales del usuario.
+
+| Registros | Variante | ZIP físico (bytes) | Expansión declarada (bytes) | Worker (s) | Adquisición y verificación completa (s) |
+| --- | --- | --- | --- | --- | --- |
+| 100.000 | inline | 12.712.418 | 57.545.861 | 13,674062 | 18,381 |
+| 100.000 | shared | 12.458.465 | 54.985.067 | 16,474737 | 21,911 |
+| 100.001 | inline | 12.712.556 | 57.546.478 | 13,677396 | 18,398 |
+| 100.001 | shared | 12.458.607 | 54.985.623 | 16,099988 | 21,704 |
+| 400.000 | inline | 51.594.508 | 250.635.773 | 55,606279 | 62,525 |
+| 400.000 | shared | 50.450.321 | 242.714.008 | 67,601451 | 73,992 |
+| 1.000.000 | inline | 129.356.448 | 636.815.736 | 140,779197 | 150,987 |
+| 1.000.000 | shared | 126.421.197 | 619.575.971 | 171,468868 | 181,775 |
+
+Los ocho tiers nuevos verificaron toda la población, perfil exacto, inferencia posterior a 100.000 y filas físicas 5..N+4. Los límites efectivos normales fueron upload XLSX 1.073.741.824 bytes, 1.000.000 filas de datos, expansión 4.294.967.296 bytes, observados 2.147.483.648 bytes y analítica DuckDB 268.435.456 bytes, sin overrides XLSX.
+
+La última columna es un reloj de adquisición y verificación, no el E2E de calidad/SQL. Transferencia, inspección y registro permanecen separados en el JSON. Polling nominal de 1 s y sondas nominales de 2 s tienen intervalos reales variables; las ventanas de stage no se presentan como tiempos internos exactos. READING incluye XML/SST; las etapas no observadas y los recursos sin muestra siguen desconocidos/null.
+
+| Tiers grandes | PROFILING observado (s) | RSS worker (bytes) | Cgroup worker muestreado (bytes) | Temporales worker muestreados (bytes) | Delta CPU worker (s) |
+| --- | --- | --- | --- | --- | --- |
+| 400.000 inline | 5,063 | 311.410.688 | 697.643.008 | 530.410.490 | 59,056554 |
+| 400.000 shared | 5,106 | 341.590.016 | 848.224.256 | 602.096.549 | 72,360197 |
+| 1.000.000 inline | 14,317 | 379.621.376 | 986.009.600 | 655.668.709 | 148,650163 |
+| 1.000.000 shared | 14,301 | 419.602.432 | 1.272.107.008 | 650.739.429 | 181,331285 |
+
+El pico conjunto cgroup muestreado fue **3.401.781.248 bytes**, máximo de sumas simultáneas de los cuatro servicios instrumentados del backend (API, DEFAULT, Delivery y adquisición), bajo el presupuesto 6.442.450.944 bytes. No suma los máximos individuales ni representa el total de los nueve servicios del contexto. Docker disponía de 16.326.524.928 bytes; la comprobación inicial exigía reserva host 21.474.836.480 bytes. Cada fase conserva su propia reserva/guard y mínimo de disco libre. Los temporales incluyen archivos del proceso y no equivalen exclusivamente a spill DuckDB. `memory.peak` es máximo de vida del contenedor, separado del pico por fase.
+
+Presión/eventos observados en `1000000_inline/xlsx_acquisition_whole`/`api`: `{"max": 466}`. El contador `max` no se sustituye por OOM; se conserva su causa reportada sin atribución adicional.
+Presión/eventos observados en `1000000_inline/intake_pyspark`/`api`: `{"max": 88}`. El contador `max` no se sustituye por OOM; se conserva su causa reportada sin atribución adicional.
+Presión/eventos observados en `1000000_shared/xlsx_acquisition_whole`/`api`: `{"max": 971}`. El contador `max` no se sustituye por OOM; se conserva su causa reportada sin atribución adicional.
+Contabilidad incompleta registrada en `xlsx_crash_lease_recovery`/`acquisition-worker`: CPU 219,560104 s, reinicios de contador 1, `cpu_measurement_complete=false` y `memory_events_measurement_complete=false`. Son deltas parciales; no se inventa contabilidad tras el reinicio.
+Presión/eventos observados en `xlsx_crash_lease_recovery`/`api`: `{"max": 1145}`. El contador `max` no se sustituye por OOM; se conserva su causa reportada sin atribución adicional.
+Presión/eventos observados en `xlsx_row_limit_failure_preserves_previous_version`/`api`: `{"max": 1167}`. El contador `max` no se sustituye por OOM; se conserva su causa reportada sin atribución adicional.
+Contabilidad incompleta registrada en `personal_unread_api_restart`/`api`: CPU 0,355001 s, reinicios de contador 1, `cpu_measurement_complete=false` y `memory_events_measurement_complete=false`. Son deltas parciales; no se inventa contabilidad tras el reinicio.
+
+El perfil propio asignó 2 CPU/1.536 MiB a adquisición y Delivery; main conserva 1 CPU/1.536 MiB en ambos. DEFAULT tiene 2 CPU/3 GiB en ambos. No se extrapolan tiempos a main. El parámetro de perfil de 268435456 bytes acota DuckDB, no el RSS de todo el worker con lector, Python, writers, índice y file cache.
+
+La cadena nueva de **un millón inline** completó Intake PySpark APPROVED, accepted exacto, Delivery SQL e inbox. Fuente, accepted y SQL comparten huella completa `90c27748be21d71481a567a5ab209f021a462c3f6626a72ee3b97248bc7750d2`. El reloj real upload→Delivery e inbox confirmados fue **299,554 s**; no procede de sumar fases. Sus fases de preflight, Intake, Delivery e inbox se conservan separadas en el JSON.
+
+C05 volvió a probar cuatro programaciones sobre dos datasets/versiones distintas de un millón y quinto Job con lease vivo. Dispatch, incluido commit de metadata: **0,207531 s**; excluye setup, espera de cola y commit SQL. Los 15 puntos instrumentados de población tuvieron cero llamadas. Las observaciones de cola originales quedan censuradas cuando `started_at=null`; no se afirman cuatro commits SQL terminados.
+
+Cancelación terminó CANCELLED sin versión tras 10.000 registros observados. Crash/lease tuvo 2 intentos y una sola versión íntegra. El negativo de 1.000.001 terminó FAILED con ACQUISITION_ROW_LIMIT, sin versión parcial, diagnóstico idéntico en historial/aviso y versión previa íntegra: gate esperado PASS.
+
+Los dos navegadores reales de 400.000/1.000.000 terminaron PASS. Registraron dominio, validación de zona y conservación del instante UTC, recorrido Intake→Delivery, filtro personal y transición no leída persistente tras reload/logout. El runner verificó fuente y accepted contra toda la población/numeración física y destino SQL contra la huella completa. Los relojes del reporter de esta ejecución fueron **194,743311 s para 400.000** y **339,777340 s para 1.000.000**, ambos 1 PASS/0 SKIP. Se registran como evidencia suplementaria: el primero fue verificado por root en la salida del proceso 17494; su resumen standalone fue reemplazado por el último de un millón. El segundo conserva SHA y startTime de browser-summary.json en la evidencia pública. Son relojes completos de Playwright, no tiempos internos de adquisición ni medidas del focal anterior.
+
+Backup/restore nativo nuevo PASS: 42 tablas, state 7/0016_acquisition_diagnostics, estado fuente/restaurado exactamente igual, multipart y bytes históricos intactos, destino STOPPED_VERIFIED y procesos automáticos sin activar. La no leída se conservó tras reinicio de API y comparación nativa. Main permaneció UNCHANGED. Esta recuperación aislada no sustituye el upgrade final de main.
+
+El [CI 393 completado](https://github.com/eddiesan422/TrackvanceCore/actions/runs/37226453887) conserva **11 SUCCESS y 4 FAIL** de 15 jobs: dos fallos de transporte, selector legacy y carrera de re-login XLSX. Su [registro público](evidence/0.7.0-corrections-20261004/ci-393b7e2-failures.json) contiene conclusiones/URLs reales; los fixes e75 no convierten retrospectivamente esos FAIL en SUCCESS. **CI del HEAD final y main siguen pendientes.** La [revisión PDF](evidence/0.7.0-corrections-20261004/pdf-verification.json) certifica las 120 páginas finales y copias byte idénticas.
 
 ## Gates de esta corrección
 
 | Alcance | Estado actual y condición |
 | --- | --- |
-| C01 adquisición XLSX | Ocho tiers reales PASS con defaults normales: inline/shared de 100.000, 100.001, 400.000 y 1.000.000 filas. Huella completa, numeración física, inferencia tardía, cancelación y crash/lease PASS. Navegadores 400.000/1.000.000 pendientes tras FAIL intermedio. |
-| C02 diagnóstico y límites | Host PASS; exceso real de 1.000.001 filas → ACQUISITION_ROW_LIMIT con detalle/referencia coherentes en adquisición, historial y aviso, sin versión parcial. Validación completa del recorrido de navegador pendiente. Errores históricos intactos. |
-| C03 áreas | Host PASS, incluidos 151 datasets propios y exclusión de otra organización. Ambos formularios y conservación por navegador/restore todavía pendientes. |
-| C04 timezone | Host PASS: fechas inválidas bloqueadas, ancla UTC/cursor preservados y DST existente. Crear, editar y reabrir en navegador real pendientes. |
-| C05 despacho | PostgreSQL real PASS: cuatro programaciones sobre dos datasets/versiones distintos de un millón, targets distintos y quinto Job con lease vivo. Dispatch 0,204167 s; 15 puntos de I/O instrumentados sin llamadas. Esperas de cola censuradas; no se afirman cuatro commits SQL. |
-| C06 bandeja | Host y transición read/unread idempotente por API PASS en la cadena real, con delta de contador de uno. Recarga/logout/reinicio, navegador y preservación por backup/restore pendientes. |
+| C01 adquisición XLSX | Formal e75 PASS: ocho tiers nuevos con defaults normales, huella/perfil completos, numeración física, inferencia tardía, cancelación, crash/lease y navegadores de 400.000/1.000.000. |
+| C02 diagnóstico y límites | Formal e75 PASS: negativo de 1.000.001 ACQUISITION_ROW_LIMIT sin versión parcial, historial/aviso coherentes y recorrido de navegador. Histórico intacto por comparación nativa; no se atribuyen causas a originales ausentes. |
+| C03 áreas | Host 393 PASS; los dos navegadores e75 registraron y conservaron su dominio en ambos formularios. Estado completo preservado en restore aislado; main pendiente. |
+| C04 timezone | Host 393 y ambos navegadores e75 PASS: invalidaciones, creación/revisión/reload y conservación del instante UTC. La cobertura DST host conserva su procedencia propia. |
+| C05 despacho | Nuevo PostgreSQL real PASS: cuatro programaciones, dos datasets/versiones de un millón, quinto Job con lease vivo y 15 puntos I/O en cero. Dispatch 0,207531 s; esperas censuradas, sin afirmar cuatro commits SQL. |
+| C06 bandeja | Formal e75 PASS: transición idempotente/delta 1, filtros, reload/logout, reinicio de API y preservación exacta por backup/restore. Estado personal y notificaciones históricas intactos; main pendiente. |
 | Regresión | Backend/frontend/scripts host PASS del alcance indicado abajo. CI exacto final y sus suites PostgreSQL/Spark/Docker/SQL/E2E pendientes; no se heredan jobs de otros SHA. |
-| Recuperación | Huella actual state 7/0016 de 42 tablas; state 6/0015 soportado mediante proyección estricta de sólo los dos diagnósticos NULL. Backup/restore real nuevo pendiente. |
-| Documento v1.1 | Fuente, generador e inputs corregidos; PDF candidato, extracción y revisión visual de todas las páginas pendientes. |
+| Recuperación | Nuevo backup/restore aislado e75 PASS, state 7/0016, 42 tablas y todos los artefactos/relaciones; comparación exacta antes de procesos automáticos. No sustituye upgrade main. |
+| Documento v1.1 | PROBADO: PDF corregido de 120 páginas, 246 marcadores, 38 secciones; render y revisión visual fresca completa PASS, reproducción byte idéntica y once inputs/copia oficial/archivo histórico verificados. |
 | Publicación | Sólo feat/local-prototype; todos los jobs del SHA final deben finalizar SUCCESS sin omitir gates. |
 | Main | Sigue intacto durante certificación; upgrade final autorizado con backup nuevo verificado, mismos seis volúmenes/puertos/secretos y sólo migración 0016. |
 
@@ -36,7 +88,7 @@ La ejecución completa de desarrollo del 4 de octubre reunió 1696 PASS, 17 SKIP
 
 Tras corregir el fence de cancelación, la revisión de implementación `393b7e2` produjo **1.708 PASS, 17 SKIP en 287,59 s** en backend, incluidas las pruebas previas de scripts. Frontend produjo **223 PASS en 27 archivos, 15,38 s**. Las **140 pruebas focales de Delivery** incluyen las dos ventanas de cancelación controladas: antes pasaba una y fallaba la otra; después ambas preservan CANCELLED, sin intento remoto. Son subconjuntos de la regresión, no conteos adicionales. El superset de scripts posterior al fix local de transporte produjo **523 PASS en 8,35 s**; también se conserva por separado, sin sumarlo a otros conteos solapados.
 
-El checkpoint GitHub de `393b7e2` conserva **once jobs SUCCESS, dos FAIL de transporte, un FAIL del selector Playwright legacy y un job XLSX todavía RUNNING**, quince en total. Las tres causas de FAIL tienen fixes locales verificados; **CI del SHA final sigue pendiente**. La aprobación local no cambia retroactivamente el resultado de esos jobs ni del formal que falló en navegador. Las URLs y conclusiones completas del run final se registrarán cuando termine.
+El checkpoint GitHub de `393b7e2` terminó con **once jobs SUCCESS y cuatro FAIL**, quince en total: dos de transporte, uno del selector Playwright legacy y otro de la carrera de re-login XLSX. El [registro completo](evidence/0.7.0-corrections-20261004/ci-393b7e2-failures.json) conserva los jobs y sus URLs. Los fixes e75 y su repetición local no cambian esos resultados; **CI del HEAD final sigue pendiente**.
 
 El focal de navegador de 400.000 filas con la espera explícita de autenticación produjo **1 PASS, 0 SKIP en 160,802 s**; se verificaron después todas las filas y valores de fuente, salida Intake y destino PostgreSQL, además de numeración física. Su [evidencia integral](evidence/0.7.0-corrections-20261004/browser-400k-relogin-fixed.json) conserva la huella completa, la zona y el instante UTC, el dominio y la persistencia personal de no leída. El focal de áreas produjo **1 PASS, 0 SKIP en 46,890341 s**. Son comprobaciones locales y no cierran el formal completo, el navegador de un millón ni su CI.
 
@@ -76,4 +128,4 @@ La cadena API/worker de **un millón inline** completó Intake PySpark APPROVED 
 
 C05 real preparó cinco preflights completos de entradas de un millón, separados del dispatch. Las cuatro programaciones seleccionaron dos datasets/versiones diferentes, con un quinto Job propio RUNNING y lease vivo antes/después del despacho. El dispatch medido, incluidos sus commits de metadata, fue **0,204167 s**; excluye setup, espera de cola y commit SQL. Las quince sondas de hashes, descriptor, footer, filas, escaneo, preparación y DataSink tuvieron cero llamadas. Las cuatro ocurrencias quedaron ENQUEUED con `started_at=null`, `queue_to_started_seconds=null` y `wait_censored=true`; los tiempos de cola son censurados y las ocurrencias propias se cancelaron en cleanup. No se presentan como cuatro escrituras remotas terminadas.
 
-La cancelación real se pidió tras 10.000 registros observados y terminó CANCELLED sin versión. El crash/lease de un millón produjo dos intentos y una sola versión íntegra, con huella y numeración físicas correctas. La fixture de **1.000.001 filas** falló con `ACQUISITION_ROW_LIMIT`, máximo 1.000.000 y observado 1.000.001, mantuvo la versión previa íntegra y no publicó otra parcial. El diagnóstico nuevo quedó registrado y visible en su aviso; es un caso negativo esperado PASS aunque la adquisición termine FAILED. Backup/restore nativo de estos diagnósticos/read_at, navegadores finales y upgrade permanecen pendientes porque el formal se detuvo antes de ese gate.
+La cancelación real se pidió tras 10.000 registros observados y terminó CANCELLED sin versión. El crash/lease de un millón produjo dos intentos y una sola versión íntegra, con huella y numeración físicas correctas. La fixture de **1.000.001 filas** falló con `ACQUISITION_ROW_LIMIT`, máximo 1.000.000 y observado 1.000.001, mantuvo la versión previa íntegra y no publicó otra parcial. El diagnóstico nuevo quedó registrado y visible en su aviso; es un caso negativo esperado PASS aunque la adquisición termine FAILED. Backup/restore nativo de esos diagnósticos/read_at y navegadores quedaron pendientes en este intento 393 porque se detuvo antes de ese gate; la repetición e75 se registra por separado y el upgrade final sigue pendiente.
