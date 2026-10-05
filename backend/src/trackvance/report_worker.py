@@ -238,7 +238,8 @@ def materialize(identity, owner):
         overrides = _logical_columns(columns)
         profiling_started = time.monotonic()
         profiled = profile_paths(parts, column_overrides=overrides, limits=profile_limits,
-                                 check=checkpoint, temp_byte_limit=limits.temp_bytes)
+                                 check=checkpoint, temp_byte_limit=limits.temp_bytes,
+                                 temporary_parent=staging)
         metrics.update(query_seconds=query_seconds, profiling_seconds=time.monotonic() - profiling_started,
                        disk_free_bytes_at_start=disk_free_at_start,
                        disk_free_bytes_min_observed=min_disk_free_observed,

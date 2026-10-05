@@ -15,6 +15,7 @@ import sys
 import time
 import traceback
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,6 +33,7 @@ from docker_backup_cycle import (
 AUTHENTIC_070 = "d9b6856e757a2a1fcab3913209146f3b7b79d70c"
 AUTOMATIC = ("worker", "acquisition-worker", "delivery-worker", "report-worker", "scheduler",
              "events-notifications", "events-chaining")
+NATIVE_FIXTURE_SERVICES = ("postgres", "api", "worker", "acquisition-worker", "report-worker", "web")
 
 
 def available_port():
@@ -169,6 +171,12 @@ def acquire_fixture(api, label, *, native=False):
     return dataset, acquired, contract, approved
 
 
+def diagnostic_fixture_payload():
+    # The authentic 0.7 staging endpoint inspects at most 100 data rows. A
+    # malformed later record reaches the real worker's complete reader.
+    return b"id,value\n" + b"001,valid\n" * 100 + b"101,invalid,extra\n"
+
+
 def prepare_native(context, environment):
     api = RecoveryApi(context["port"], (environment["POSTGRES_PASSWORD"],))
     label = "Recovery080 " + uuid4().hex[:8]
@@ -191,6 +199,7 @@ def prepare_native(context, environment):
         raise ValueError("La publicación nativa no contiene la población real esperada.")
     block = api.json("POST", "/catalog/datasets/" + dataset["id"] + "/blocks", {"scope": "REPORT", "reason": "Synthetic current recovery restriction"}, expected=201)
     return {"dataset_id": dataset["id"], "definition_id": definition["id"], "context_id": context_result["context_id"],
+            "context_expires_at": context_result["expires_at"],
             "execution_id": completed["id"], "output_dataset_id": completed["output_dataset_id"],
             "output_version_id": completed["output_version_id"], "approval_run_id": approved["id"], "block_id": block["id"]}
 
@@ -200,6 +209,46 @@ def assert_native_state(state):
         raise ValueError("La huella no corresponde a un runtime nativo 0.8.0 completo.")
     if any(not state["tables"].get(table) for table in docker_state.CATALOG_STATE_TABLES):
         raise ValueError("La recuperación nativa exige fixtures reales en las trece entidades nuevas.")
+
+
+def verify_restored_restriction(api, definition, fixture):
+    revision = definition["selected_revision"]
+    refused = api.json("POST", "/reports/resolve", {"draft": revision["draft"], "revision_id": revision["id"]}, expected=422)
+    error = refused.get("error", {})
+    if error.get("code") != "REPORT_SOURCE_INELIGIBLE" or not any(
+            reason.get("code") == "DATASET_BLOCKED" for reason in error.get("details", {}).get("reasons", [])):
+        raise ValueError("La resolución nueva no aplicó el bloqueo vigente restaurado.")
+    expires = datetime.fromisoformat(fixture["context_expires_at"])
+    now = datetime.now(UTC)
+    frozen = "NOT_RUN_EXPIRED" if expires <= now else "NOT_RUN_NEAR_EXPIRY"
+    if expires > now + timedelta(seconds=5):
+        refused = api.json("POST", "/reports/preview", {"context_id": fixture["context_id"]}, expected=403)
+        if refused.get("error", {}).get("code") != "DATASET_BLOCKED":
+            raise ValueError("El contexto congelado vigente no revalidó el bloqueo restaurado.")
+        frozen = "PASS_CURRENT_BLOCK"
+    return {"current_block_new_resolution": "PASS", "frozen_context_preview": frozen,
+            "context_expires_at_preserved": fixture["context_expires_at"]}
+
+
+def stop_quiescent_population(directory, context, environment):
+    """Release the owned source budget without hiding queued or active work."""
+    preflight(directory, context, environment)
+    state = docker_state.inventory(context["project"])
+    postgres = next((item for item in state["containers"] if item["service"] == "postgres"), None)
+    if postgres is None or not postgres["running"]:
+        if any(item["running"] for item in state["containers"]):
+            raise ValueError("No se puede demostrar quiescencia sin PostgreSQL activo.")
+        return "ALREADY_STOPPED"
+    active = run(["docker", "exec", str(postgres["id"]), "psql", "--no-psqlrc", "--username", environment["POSTGRES_USER"],
+        "--dbname", environment["POSTGRES_DB"], "--no-align", "--tuples-only", "--quiet", "--set", "ON_ERROR_STOP=1",
+        "--command", "BEGIN READ ONLY; SELECT count(*) FROM jobs WHERE status IN ('QUEUED', 'RUNNING'); COMMIT;"], environment)
+    if str(active).strip() != "0":
+        raise ValueError("La población aislada conserva Jobs activos; no se oculta trabajo pendiente con stop.")
+    docker_state.compose(context["project"], "stop", "--timeout", "30")
+    if any(item["running"] for item in docker_state.inventory(context["project"])["containers"]):
+        raise ValueError("El contexto propio no quedó detenido tras liberar el presupuesto.")
+    assert_main(context)
+    return "STOPPED_QUIESCENT"
 
 
 def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixture=None):
@@ -221,6 +270,7 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
         if legacy and any(after["tables"][table] for table in docker_state.CATALOG_STATE_TABLES):
             raise ValueError("La actualización fabricó gobierno, aprobaciones o ejecuciones nuevas.")
         functional = None
+        restriction = None
         if fixture:
             # Authenticate only after comparing snapshots: sessions and audits
             # are new intentional actions, never hidden historical differences.
@@ -231,7 +281,7 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
             execution = api.json("GET", "/reports/executions/" + fixture["execution_id"])
             profile = api.json("GET", "/dataset-versions/" + fixture["output_version_id"] + "/profile")
             lineage = api.json("GET", "/catalog/datasets/" + fixture["output_dataset_id"] + "?section=lineage")
-            api.json("POST", "/reports/preview", {"context_id": fixture["context_id"]}, expected=403)
+            restriction = verify_restored_restriction(api, definition, fixture)
             if definition["version"] != 2 or len(definition["revisions"]) != 2 or execution["status"] != "SUCCESS" or profile["row_count"] != 3:
                 raise ValueError("Las rutas restauradas no conservan la definición, publicación o perfil esperado.")
             if not {"REPORT_OUTPUT", "REPORT_REVISION", "DERIVED_FROM"}.issubset({row["relation"] for row in lineage["items"]}):
@@ -245,7 +295,7 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
                 "verified_source_secrets": after["verified_source_secrets"], "verified_delivery_secrets": after["verified_delivery_secrets"],
                 "automatic_processes_started": False, "new_tables_empty": True if legacy else None,
                 "no_automatic_classification": True if legacy else None, "target_project": target["project"],
-                "functional_restored_bindings": functional}
+                "functional_restored_bindings": functional, "restored_restrictions": restriction}
     finally:
         docker_state.compose = old_compose
         if claimed:
@@ -256,20 +306,30 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
 def native_cycle(directory, context, evidence):
     environment = private_environment(directory)
     preflight(directory, context, environment)
-    old_compose = docker_state.compose
+    old_compose, started = docker_state.compose, False
+    result = None
     try:
         docker_state.compose = compose_adapter(directory, context, environment)
+        started = True
+        docker_state.compose(context["project"], "up", "--no-build", "-d", "--wait", "--wait-timeout", "300", *NATIVE_FIXTURE_SERVICES)
         fixture = prepare_native(context, environment)
         backup = evidence / "backup"
         docker_state.backup(context["project"], backup)
         docker_state.verify_backup(backup)
         assert_native_state(json.loads((backup / "state.json").read_text(encoding="utf-8")))
         privacy = scan_backup_plaintext(backup, args_for(directory, context), {**os.environ, **environment}, (environment["POSTGRES_PASSWORD"],))
-        result = restore_compare(context, environment, backup, evidence, fixture=fixture)
-        return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.8.0", "fixture": fixture,
-                "backup_privacy": privacy, "all_thirteen_new_entities_populated": True, **result}
+        restored = restore_compare(context, environment, backup, evidence, fixture=fixture)
+        result = {"status": "PASS", "source_version": "0.8.0", "target_version": "0.8.0", "fixture": fixture,
+                  "backup_privacy": privacy, "all_thirteen_new_entities_populated": True, **restored}
+        return result
     finally:
-        docker_state.compose = old_compose
+        try:
+            if started:
+                source_state = stop_quiescent_population(directory, context, environment)
+                if result is not None:
+                    result["source_final_state"] = source_state
+        finally:
+            docker_state.compose = old_compose
 
 
 def legacy_cycle(parent, evidence):
@@ -317,7 +377,7 @@ def legacy_cycle(parent, evidence):
                 "options": {"sslmode": "disable", "connect_timeout": 5, "query_timeout": 30}}, expected=201)
         # The historical worker records real parse diagnostics, rather than this
         # harness manufacturing an error_details object directly in persistence.
-        staged = json.loads(api.request("POST", "/datasets/uploads/stage?filename=invalid.csv", raw=b"id\n\xff\n",
+        staged = json.loads(api.request("POST", "/datasets/uploads/stage?filename=invalid.csv", raw=diagnostic_fixture_payload(),
             content_type="application/octet-stream", expected=201))
         failed = api.json("POST", "/datasets/" + dataset["id"] + "/acquisitions", {"upload_id": staged["upload"]["id"]}, expected=202)
         deadline = time.monotonic() + 60

@@ -105,9 +105,17 @@ clone3 retorna ENOSYS para que [glibc pueda usar su fallback a clone](https://so
 cuyos flags siguen filtrados por CLONE_THREAD. clone3 permanece indisponible y
 fork sigue denegado; EPERM en clone3 impediría crear threads legítimos en runtimes
 glibc recientes que no hayan almacenado previamente ese fallback.
-El proceso debe tener un único thread al instalar la política; DuckDB se importa
-después, porque su conexión por defecto puede crear threads. Así todos heredan el
-dominio Landlock incluso en ABI3 sin TSYNC. Se aplican RLIMIT_AS, CPU y descriptores,
+El proceso debe tener un único thread al instalar la política. Después importa
+únicamente la extensión nativa `_duckdb` y crea su primera conexión con los límites
+explícitos. El paquete público construye una conexión por defecto al inicializar
+[los tipos DB-API](https://github.com/duckdb/duckdb-python/blob/v1.5.5/duckdb/_dbapi_type_object.py);
+[esa conexión](https://github.com/duckdb/duckdb-python/blob/v1.5.5/src/duckdb_py/pyconnection.cpp)
+no recibe la configuración del Reporte y puede agotar AS antes de ejecutar SQL.
+El diagnóstico sintético Ubuntu24.04/Python3.12.14 con 192 CPUs anunciadas reproduce
+el fallo con el paquete público y éxito con la extensión nativa bajo idénticos
+presupuestos AS512/1024MiB. Así todos los threads heredan el dominio Landlock incluso
+en ABI3 sin TSYNC y no existe un pool inicial fuera de los límites elegidos.
+Se aplican RLIMIT_AS, CPU y descriptores,
 core=0 y señal de muerte del padre. Cualquier fallo de instalación termina sin
 ejecutar la consulta. Windows no activa una ejecución con menor aislamiento.
 

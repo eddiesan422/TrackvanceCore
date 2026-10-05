@@ -259,13 +259,27 @@ cgroup de memoria/CPU/pids finito, cap-drop ALL y no-new-privileges. No habilita
 privileged o SYS_ADMIN para hacer funcionar el ejecutor. Un kernel sin controles
 devuelve REPORT_SANDBOX_UNAVAILABLE; un proceso ya multithread antes de aislarse
 devuelve REPORT_SANDBOX_THREADS. Ambos casos fallan sin ejecutar una consulta.
+El hijo importa `_duckdb` después de instalar las políticas; su primera conexión
+recibe threads/memoria explícitos. No inicializa los tipos DB-API del paquete
+público, que crean una conexión por defecto sin esos límites. El cargador usa
+exclusivamente `sys.base_prefix/lib`, derivado del runtime, sin heredar su valor
+del proceso coordinador.
 
 Métricas `rows`, `bytes`, `elapsed_seconds`, `max_rss_bytes` pertenecen al motor
 y canal. RSS máximo es del hijo, no pico agregado; tiempo comienza tras conexión.
+`cpu_user_seconds` y `cpu_system_seconds` son deltas del hijo desde ese mismo
+punto; no incluyen startup ni CPU del coordinador. `cgroup_memory_current_bytes`
+es una lectura al terminar y `cgroup_memory_lifetime_peak_bytes` es el máximo de
+vida del contenedor, que puede incluir otras ejecuciones. Un contador no
+disponible se omite, no se convierte en cero ni se atribuye a una fase.
 DATASET añade parts, canonical_size_bytes y cardinality; el progreso observa
 rows_generated/bytes_prepared/parts_prepared/temporary_bytes_observed. Conteo
 muestreado de staging no es un pico absoluto de disco. Los límites del contenedor
-y evidencia de observación externa completan la medición.
+y evidencia de observación externa completan la medición. DATASET conserva
+`query_seconds` (ejecutor, canal y escritura de partes) y `profiling_seconds`
+separados, además de `disk_free_bytes_at_start`,
+`disk_free_bytes_min_observed` y `temporary_bytes_sampled_max`. Las muestras
+durante materialización no son un pico continuo de todas las fases.
 
 ## Pruebas y diagnóstico seguro
 
@@ -278,6 +292,28 @@ para PREVIEW, CSV, XLSX y fallo de recursos, sin mutaciones ni archivos resultad
 `test_reports_lifecycle.py` usa Intake y JobQueue reales hasta publicación y nueva
 aprobación. Windows marca explícitamente las pruebas del aislador como no aplicables;
 el gate Linux y la certificación aislada deben ejecutarlas.
+La recuperación incluye caída real `os._exit` durante materialización y profiling:
+el spill de profiling pertenece a `report-staging/<execution>/<attempt>-<owner>`.
+La limpieza elimina únicamente el intento abandonado y conserva otro intento
+activo; los callers de profiling ajenos a Reportes conservan su ubicación previa.
+
+`scripts/tests/reports_runtime_probe.py` permite observar el runtime confinado en
+CI con datos sintéticos, sin revelar stderr o trazas. Reporta salida/señal, errno,
+categorías de rutas y hashes; retorna cero para que pytest ejecute todos los gates.
+La comparación reproducible `--force-default-cpu-count 192 --public-wrapper-baseline`
+usa una copia privada del child para reproducir la antigua importación. Comparar
+con `--force-default-cpu-count 192` bajo idénticos presupuestos AS512/1024MiB y
+memoria del motor128/256MiB, sin alterar políticas ni código productivo.
+
+`scripts/tests/reports_ephemeral_http.py` observa procesos reales de API/Nginx y
+sus hijos durante resolve, PREVIEW y DOWNLOAD CSV/XLSX. Incluye éxito, límite de
+recursos y desconexión; compara oráculos completos y el almacenamiento antes y
+después. Rechaza intentos de escritura a archivos regulares, aunque se denieguen
+o después se eliminen. Las imágenes de diagnóstico tienen strace y conservan
+cap-drop ALL/no-new-privileges; no se usan como imágenes de instalación. Las
+trazas privadas nunca se publican: sólo casos, códigos, contadores y hashes.
+El proxy de `/api/v1/reports/` desactiva buffering de solicitudes/respuestas y
+temporales de proxy; el gate comprueba esa configuración exacta.
 
 `scripts/tests/reports_postgres_snapshot.py` verifica la resolución conjunta real
 contra dos nuevas aprobaciones Intake confirmadas en otra conexión entre la

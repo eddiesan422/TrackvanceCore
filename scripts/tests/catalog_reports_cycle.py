@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--with-browser", action="store_true")
     parser.add_argument("--with-recovery", action="store_true")
+    parser.add_argument("--with-ephemeral-observation", action="store_true")
     args = parser.parse_args()
     directory = guard.init("catalog-reports", args.port, args.main_project)
     directory, context = guard.load_context(directory)
@@ -102,6 +103,30 @@ def main():
             if args.with_browser and rows == 120 and not browser_done:
                 summary["browser"] = browser_gate(directory, context)
                 browser_done = True
+        if args.with_recovery or args.with_ephemeral_observation:
+            # The population fixture has finished. Keep its owned volumes for
+            # recovery, but release all running services before another bounded
+            # certification project starts on the same host.
+            guard.preflight(directory, context)
+            run([*guard.compose_args(directory, context), "stop"], directory, "stop-population-services")
+        if args.with_ephemeral_observation:
+            observation_error = None
+            try:
+                run([sys.executable, str(ROOT / "scripts/tests/reports_ephemeral_http.py"),
+                     "--main-project", context["main_project"]], directory, "ephemeral-observation")
+            except RuntimeError as exc:
+                observation_error = exc
+            output = (directory / "ephemeral-observation.private.log").read_text(encoding="utf-8").splitlines()
+            record = json.loads(output[-1])
+            evidence_path = Path(record["evidence"]).resolve()
+            if not evidence_path.is_relative_to((ROOT / ".codex-local/v080").resolve()):
+                raise RuntimeError("La observación HTTP publicó una ruta fuera del ensayo aislado.")
+            observation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            summary["ephemeral_http_observation"] = observation
+            (directory / "reports-ephemeral-http.json").write_text(
+                json.dumps(observation, ensure_ascii=False, indent=2), encoding="utf-8")
+            if observation_error or observation.get("status") != "PASS" or not observation.get("main_unchanged"):
+                raise RuntimeError("La observación real de API, proxy y ejecutores no pasó.") from observation_error
         if args.with_recovery:
             run([sys.executable, str(ROOT / "scripts/tests/catalog_reports_recovery.py"),
                  "--context", str(directory), "--mode", "both"], directory, "recovery")

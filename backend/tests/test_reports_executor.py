@@ -102,6 +102,20 @@ def test_preview_is_real_join_but_at_most_ten_rows(tmp_path):
     assert next(m for m in messages if m["kind"] == "complete")["sample"] is True
 
 
+def test_native_connection_honors_small_process_budget_before_first_query(tmp_path, monkeypatch):
+    """The public DuckDB import previously exhausted this budget before connect.
+
+    Run the real child with 512MiB AS and 128MiB engine memory. The configured
+    connection must produce the exact full join without an unconfigured pool.
+    """
+    monkeypatch.setenv("REPORT_PROCESS_MEMORY_MB", "512")
+    monkeypatch.setenv("REPORT_MEMORY_MB", "128")
+    sources, schemas, _, _ = fixture_sources(tmp_path)
+    messages = list(execute_messages(sources, plan_for(schemas, "FULL"), "DOWNLOAD"))
+    assert len(_rows(messages)) == 8
+    assert next(m for m in messages if m["kind"] == "complete")["rows"] == 8
+
+
 def test_executor_confines_files_network_environment_and_during_write(tmp_path, monkeypatch):
     sources, schemas, _, _ = fixture_sources(tmp_path)
     secret = tmp_path / "unselected-secret"

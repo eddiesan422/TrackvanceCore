@@ -1,6 +1,7 @@
 """Recovery refuses incomplete native state and unguarded Docker scopes."""
 
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import catalog_reports_recovery as recovery
@@ -9,6 +10,17 @@ import pytest
 
 def test_authentic_source_is_fixed_070_commit():
     assert recovery.AUTHENTIC_070 == "d9b6856e757a2a1fcab3913209146f3b7b79d70c"
+
+
+def test_diagnostic_fixture_passes_bounded_inspection_and_fails_complete_reader(tmp_path):
+    from trackvance.batch_readers import FileBatchReader, inspect_file
+    from trackvance.processing import ProcessingError
+
+    path = tmp_path / "invalid.csv"
+    path.write_bytes(recovery.diagnostic_fixture_payload())
+    assert inspect_file(path, path.name)["sampled_rows"] == 100
+    with pytest.raises(ProcessingError, match="ACQUISITION_SCHEMA_MISMATCH"):
+        list(FileBatchReader(path, path.name))
 
 
 def test_native_recovery_requires_populated_new_entities():
@@ -57,6 +69,8 @@ def test_native_backup_pins_source_adapter_and_restores_it_on_failure(monkeypatc
     monkeypatch.setattr(recovery, "preflight", lambda *_args: None)
     monkeypatch.setattr(recovery, "compose_adapter", lambda *_args: adapter)
     monkeypatch.setattr(recovery, "prepare_native", lambda *_args: {})
+    stopped = []
+    monkeypatch.setattr(recovery, "stop_quiescent_population", lambda *_args: stopped.append(project) or "STOPPED_QUIESCENT")
 
     def failed_backup(identity, _destination):
         assert identity == project and recovery.docker_state.compose is adapter
@@ -66,3 +80,87 @@ def test_native_backup_pins_source_adapter_and_restores_it_on_failure(monkeypatc
     with pytest.raises(ValueError, match="controlled backup failure"):
         recovery.native_cycle(tmp_path, {"project": project}, tmp_path)
     assert recovery.docker_state.compose is original
+    assert stopped == [project]
+
+
+def test_native_sequence_starts_fixture_services_then_stops_source_after_restore(monkeypatch, tmp_path):
+    project = "trackvance-v080-test-own-012345abcdef"
+    environment = {"POSTGRES_PASSWORD": "synthetic"}
+    events = []
+    original = recovery.docker_state.compose
+
+    def compose(identity, *arguments):
+        assert identity == project and arguments[:2] == ("up", "--no-build")
+        assert arguments[-6:] == recovery.NATIVE_FIXTURE_SERVICES
+        events.append("start")
+
+    def backup(identity, target):
+        assert identity == project
+        target.mkdir()
+        (target / "state.json").write_text("{}")
+        events.append("backup")
+
+    monkeypatch.setattr(recovery, "private_environment", lambda *_args: environment)
+    monkeypatch.setattr(recovery, "preflight", lambda *_args: None)
+    monkeypatch.setattr(recovery, "compose_adapter", lambda *_args: compose)
+    monkeypatch.setattr(recovery, "prepare_native", lambda *_args: events.append("fixture") or {})
+    monkeypatch.setattr(recovery.docker_state, "backup", backup)
+    monkeypatch.setattr(recovery.docker_state, "verify_backup", lambda *_args: events.append("verify"))
+    monkeypatch.setattr(recovery, "assert_native_state", lambda *_args: events.append("state"))
+    monkeypatch.setattr(recovery, "scan_backup_plaintext", lambda *_args: events.append("privacy") or {})
+    monkeypatch.setattr(recovery, "restore_compare", lambda *_args, **_kwargs: events.append("restore") or {})
+    monkeypatch.setattr(recovery, "stop_quiescent_population", lambda *_args: events.append("stop") or "STOPPED_QUIESCENT")
+    result = recovery.native_cycle(tmp_path, {"project": project}, tmp_path)
+    assert events == ["start", "fixture", "backup", "verify", "state", "privacy", "restore", "stop"]
+    assert result["source_final_state"] == "STOPPED_QUIESCENT"
+    assert recovery.docker_state.compose is original
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_source_population_stop_requires_zero_active_jobs(monkeypatch, tmp_path, active):
+    project = "trackvance-v080-test-own-012345abcdef"
+    state = {"containers": [{"id": "own-pg", "service": "postgres", "running": True}]}
+    calls = []
+    monkeypatch.setattr(recovery, "preflight", lambda *_args: None)
+    monkeypatch.setattr(recovery.docker_state, "inventory", lambda _project: state)
+    monkeypatch.setattr(recovery, "assert_main", lambda *_args: None)
+
+    def query(arguments, _environment):
+        assert arguments[:3] == ["docker", "exec", "own-pg"]
+        assert "BEGIN READ ONLY" in arguments[-1]
+        calls.append("read")
+        return "1" if active else "0"
+
+    def stop(identity, *arguments):
+        assert identity == project and arguments == ("stop", "--timeout", "30")
+        calls.append("stop")
+        state["containers"][0]["running"] = False
+
+    monkeypatch.setattr(recovery, "run", query)
+    monkeypatch.setattr(recovery.docker_state, "compose", stop)
+    environment = {"POSTGRES_USER": "tv_v080_test", "POSTGRES_DB": "tv_v080_test"}
+    if active:
+        with pytest.raises(ValueError, match="Jobs activos"):
+            recovery.stop_quiescent_population(tmp_path, {"project": project}, environment)
+        assert calls == ["read"]
+    else:
+        assert recovery.stop_quiescent_population(tmp_path, {"project": project}, environment) == "STOPPED_QUIESCENT"
+        assert calls == ["read", "stop"]
+
+
+@pytest.mark.parametrize("expired", [True, False])
+def test_restored_block_is_checked_independently_of_context_expiry(expired):
+    calls = []
+
+    def response(_method, path, _payload, *, expected):
+        calls.append((path, expected))
+        if path == "/reports/resolve":
+            return {"error": {"code": "REPORT_SOURCE_INELIGIBLE", "details": {"reasons": [{"code": "DATASET_BLOCKED"}]}}}
+        return {"error": {"code": "DATASET_BLOCKED"}}
+
+    expires = datetime.now(UTC) + timedelta(minutes=-1 if expired else 1)
+    fixture = {"context_id": "persisted-context", "context_expires_at": expires.isoformat()}
+    result = recovery.verify_restored_restriction(SimpleNamespace(json=response), {"selected_revision": {"id": "revision", "draft": {}}}, fixture)
+    assert calls[0] == ("/reports/resolve", 422) and result["current_block_new_resolution"] == "PASS"
+    assert result["frozen_context_preview"] == ("NOT_RUN_EXPIRED" if expired else "PASS_CURRENT_BLOCK")
+    assert calls == [("/reports/resolve", 422)] + ([] if expired else [("/reports/preview", 403)])

@@ -404,11 +404,14 @@ def test_worker_recovery_reclaims_old_prepared_attempt_and_publishes_once(databa
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Real isolated executor runs in Docker")
-def test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup(database, report_draft):
+@pytest.mark.parametrize("crash_stage", ["MATERIALIZATION", "PROFILING"])
+def test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup(database, report_draft, crash_stage):
     from trackvance import report_worker
     from trackvance.artifactstore import artifact_store
     from trackvance.config import DATABASE_URL, STORAGE_DIR
     identity = _queue(database, report_draft, "Process crash recovery", "process-crash-recovery")
+    global_tmp = artifact_store.location("tmp")
+    before_global_tmp = {str(path) for path in global_tmp.rglob("*")}
     script = '''
 import os, sys
 sys.path.insert(0, sys.argv[1])
@@ -421,6 +424,19 @@ def crash_after_part(messages, staging, limits, checkpoint, progress):
             os._exit(77)
     return original(messages, staging, limits, crash_checkpoint, progress)
 report_worker._write_parts = crash_after_part
+if sys.argv[2] == "PROFILING":
+    from trackvance import dataset_scans
+    report_worker._write_parts = original
+    original_profile = dataset_scans.profile_paths
+    def crash_during_profile(*args, **kwargs):
+        checkpoint = kwargs["check"]
+        def crash_checkpoint():
+            checkpoint()
+            assert list(kwargs["temporary_parent"].glob("profiling-*.spill"))
+            os._exit(77)
+        kwargs["check"] = crash_checkpoint
+        return original_profile(*args, **kwargs)
+    dataset_scans.profile_paths = crash_during_profile
 report_worker.process_once("crashed-process")
 sys.exit(1)
 '''
@@ -429,12 +445,15 @@ sys.exit(1)
                    "DATABASE_URL": DATABASE_URL, "TRACKVANCE_STORAGE_DIR": str(STORAGE_DIR),
                    "LD_LIBRARY_PATH": str(Path(sys.base_prefix) / "lib")}
     crashed = subprocess.run([sys.executable, "-I", "-B", "-c", script,
-                              str(Path(__file__).resolve().parents[1] / "src")],
+                              str(Path(__file__).resolve().parents[1] / "src"), crash_stage],
                               env=environment, capture_output=True, text=True, timeout=60, check=False)
     assert crashed.returncode == 77, crashed.stderr
     staging = artifact_store.location("report-staging", identity)
     abandoned = staging / "1-crashed-process"
     assert list(abandoned.glob("part-*.parquet"))
+    assert {str(path) for path in global_tmp.rglob("*")} == before_global_tmp
+    if crash_stage == "PROFILING":
+        assert list(abandoned.glob("profiling-*.spill"))
     with database() as db:
         job = db.scalar(select(Job).where(Job.report_execution_id == identity))
         assert job.status == "RUNNING" and job.attempts == 1
@@ -448,9 +467,20 @@ sys.exit(1)
         assert db.scalar(select(Job).where(Job.report_execution_id == identity)).attempts == 2
     old = (utcnow() - timedelta(hours=2)).timestamp()
     os.utime(abandoned, (old, old))
+    other_identity = _queue(database, report_draft, "Protected active attempt", "protected-active-attempt")
+    protected = artifact_store.location("report-staging", other_identity, "1-live-process")
+    protected.mkdir(parents=True)
+    marker = protected / "owned-by-live-worker"
+    marker.write_text("synthetic-marker")
+    os.utime(protected, (old, old))
     with database() as db:
+        active_job = db.scalar(select(Job).where(Job.report_execution_id == other_identity))
+        active_job.status, active_job.attempts, active_job.lease_owner = "RUNNING", 1, "live-process"
+        active_job.lease_until = utcnow() + timedelta(minutes=1)
+        db.commit()
         assert report_worker.cleanup_abandoned(db) >= 1
     assert not abandoned.exists()
+    assert marker.read_text() == "synthetic-marker"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Real isolated executor runs in Docker")

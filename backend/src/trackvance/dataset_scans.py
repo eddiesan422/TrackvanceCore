@@ -82,10 +82,18 @@ def sample_paths(paths: list[Path], columns: list[str], limit: int = 20, *,
 
 
 @contextmanager
-def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None, *, temp_byte_limit: int | None = None):
+def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None, *,
+                 temp_byte_limit: int | None = None, temporary_parent: Path | None = None):
     effective = limits or AcquisitionLimits.configured()
-    temporary = storage_provider.temporary_path(".spill")
-    temporary.mkdir()
+    if temporary_parent is None:
+        temporary = storage_provider.temporary_path(".spill")
+    else:
+        parent = temporary_parent.resolve(strict=True)
+        if not parent.is_dir():
+            raise ValueError("El staging temporal debe ser un directorio existente.")
+        temporary = parent / f"profiling-{uid()}.spill"
+    temporary.mkdir(mode=0o700)
+    allocated = temporary.resolve(strict=True)
     try:
         connection = duckdb.connect(":memory:", config={
             "memory_limit": f"{effective.memory_bytes}B", "threads": "1",
@@ -101,7 +109,8 @@ def bounded_scan(paths: list[Path], limits: AcquisitionLimits | None = None, *, 
     finally:
         # Exactly the provider-allocated private spill directory, never a root,
         # business artifact, shared staging directory or another job's files.
-        shutil.rmtree(temporary, ignore_errors=True)
+        if not temporary.is_symlink() and temporary.resolve() == allocated:
+            shutil.rmtree(temporary, ignore_errors=True)
 
 
 def iter_parquet_batches(paths: list[Path], batch_rows: int = 5_000,
@@ -169,7 +178,8 @@ def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
                   native_types: dict[str, str] | None = None,
                   limits: AcquisitionLimits | None = None,
                   check: Callable[[], None] | None = None,
-                  temp_byte_limit: int | None = None) -> tuple[list, dict, str]:
+                  temp_byte_limit: int | None = None,
+                  temporary_parent: Path | None = None) -> tuple[list, dict, str]:
     """Full-population counts and uniqueness spill to disk; Decimal remains exact.
 
     One column's scalar statistics are accumulated with constant state. Distinct
@@ -185,7 +195,8 @@ def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
     native = native_types or {}
     schema, profiles = [], []
     observed_record_bytes_upper_bound = 0
-    with bounded_scan(paths, effective, temp_byte_limit=temp_byte_limit) as connection:
+    with bounded_scan(paths, effective, temp_byte_limit=temp_byte_limit,
+                      temporary_parent=temporary_parent) as connection:
         record = connection.execute("SELECT COUNT(*) FROM population").fetchone()
         assert record is not None
         count = int(record[0])

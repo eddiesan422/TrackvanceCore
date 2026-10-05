@@ -353,10 +353,11 @@ def run(payload):
             checks["process_creation_denied"] = False
         emit("probe", checks=checks)
         return
-    # DuckDB's module import may create its default connection's scheduler
-    # threads. Import it only after both OS policies, so every thread inherits
-    # the Landlock domain even on kernels without Landlock TSYNC.
-    import duckdb as engine
+    # The public duckdb package constructs an unconfigured default connection
+    # while importing its DB-API types. Import the native extension directly:
+    # the first connection below receives the explicit memory/thread limits.
+    # Import after both OS policies so every native thread inherits confinement.
+    import _duckdb as engine
     duckdb = engine
     params = {key: parameter(value) for key, value in plan["parameters"].items()}
     connection = duckdb.connect(":memory:", config={

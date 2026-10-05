@@ -71,7 +71,42 @@
       "backend_passed": 1846,
       "backend_failed": 21,
       "backend_skipped": 16,
-      "reason": "Loader correction did not resolve every hosted Linux failure. Confinement probe passed, DuckDB execution interrupted; glibc clone3 fallback diagnosis and repeat remain open. Dependent jobs SKIPPED do not pass."
+      "reason": "Loader correction did not resolve every hosted Linux failure. Confinement probe passed, DuckDB execution interrupted; glibc clone3 fallback corrected and checked separately. Dependent jobs SKIPPED do not pass."
+    },
+    {
+      "check": "GitHub third 0.8 workflow",
+      "status": "FAIL",
+      "category": "RUNTIME_COMPATIBILITY",
+      "sha": "426dd6fee9a69dce6e8e5692593b73d1adce3155",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37350585119",
+      "backend_passed": 1846,
+      "backend_failed": 21,
+      "backend_skipped": 16,
+      "reason": "Expanded confinement/thread/fork probe passed, but real DuckDB executions still interrupted on hosted Linux. Exit/signal diagnostics and exact runner reproduction remain required; dependent jobs SKIPPED do not pass."
+    },
+    {
+      "check": "Integrated API1M development checkpoint",
+      "status": "PASS",
+      "seconds": 1870.625,
+      "details": "Three complete 1M sources; INNER500k/LEFT1M/RIGHT1M/FULL1.5M/triple1M; exact CSV100k/XLSX50k and both above-limit failures; parent block.",
+      "source_changed_during_run": true,
+      "certifies_final_sha": false
+    },
+    {
+      "check": "Exact Ubuntu report suite initial diagnostic image",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "passed": 63,
+      "setup_errors": 3,
+      "reason": "Diagnostic image omitted alembic.ini required by lifecycle setup. File mount corrected; product policies unchanged."
+    },
+    {
+      "check": "Exact Ubuntu native import and owned profiling crash suite",
+      "status": "PASS",
+      "passed": 67,
+      "skipped": 0,
+      "seconds": 33.48,
+      "details": "Ubuntu24.04/glibc2.39/PythonActions3.12.14. Native connection budgets applied before implicit global connection; crash during materialization/profiling cleans only owned abandoned attempt. Separate public-wrapper/native AS512/1024 comparison retained."
     }
   ],
   "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."

@@ -1,0 +1,355 @@
+{
+  "native_import_only_product_change": true,
+  "check": "REPORT_EXACT_UBUNTU_NATIVE_IMPORT_COMPARISON",
+  "confinement_and_kernel_budgets_unchanged": true,
+  "raw_stderr_published": false,
+  "raw_trace_published": false,
+  "status": "PASS",
+  "cases": [
+    {
+      "affinity_cpu_count": 16,
+      "check": "REPORT_NATIVE_RUNTIME_DIAGNOSTIC",
+      "denied_syscalls": {
+        "access:ENOENT": 2,
+        "clone3:ENOSYS": 1,
+        "mmap:ENOMEM": 408,
+        "newfstatat:ENOENT": 83,
+        "openat:ENOENT": 28,
+        "readlink:EINVAL": 2,
+        "readlink:ENOENT": 1
+      },
+      "host_cpu_count": 16,
+      "libc": [
+        "glibc",
+        "2.39"
+      ],
+      "message_kinds": [],
+      "process_memory_bytes": 536870912,
+      "profile_threads": 2,
+      "python": "3.12.14",
+      "raw_stderr_published": false,
+      "raw_trace_published": false,
+      "recent_denials": [
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        }
+      ],
+      "runtime_exit_code": 127,
+      "runtime_module": "duckdb",
+      "signals": {
+        "SIGSEGV": 58
+      },
+      "status": "FAIL",
+      "stderr_bytes": 260,
+      "stderr_categories": [
+        "MEMORY",
+        "THREAD"
+      ],
+      "stderr_sha256": "730f0dedcddac454b701d3e5621d59a6db5045aad503b02a471a71f8f0b01f3f",
+      "synthetic_default_cpu_count": 192,
+      "trace_sha256": "b58d58aa8f5d2c7a1b8a5e5dd61a083a1174520c0a0795606814f29a8c9c3261",
+      "traced_exit_code": -11,
+      "profile_memory_bytes": 134217728
+    },
+    {
+      "affinity_cpu_count": 16,
+      "check": "REPORT_NATIVE_RUNTIME_DIAGNOSTIC",
+      "host_cpu_count": 16,
+      "libc": [
+        "glibc",
+        "2.39"
+      ],
+      "message_kinds": [
+        "cardinality",
+        "schema",
+        "batch",
+        "complete"
+      ],
+      "process_memory_bytes": 536870912,
+      "profile_threads": 2,
+      "python": "3.12.14",
+      "raw_stderr_published": false,
+      "raw_trace_published": false,
+      "runtime_exit_code": 0,
+      "runtime_module": "_duckdb",
+      "status": "PASS",
+      "stderr_bytes": 0,
+      "stderr_categories": [],
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "synthetic_default_cpu_count": 192,
+      "profile_memory_bytes": 134217728
+    },
+    {
+      "affinity_cpu_count": 16,
+      "check": "REPORT_NATIVE_RUNTIME_DIAGNOSTIC",
+      "denied_syscalls": {
+        "access:ENOENT": 2,
+        "clone3:ENOSYS": 1,
+        "mmap:ENOMEM": 125,
+        "newfstatat:ENOENT": 83,
+        "openat:ENOENT": 28,
+        "readlink:EINVAL": 2,
+        "readlink:ENOENT": 1
+      },
+      "host_cpu_count": 16,
+      "libc": [
+        "glibc",
+        "2.39"
+      ],
+      "message_kinds": [],
+      "process_memory_bytes": 1073741824,
+      "profile_threads": 2,
+      "python": "3.12.14",
+      "raw_stderr_published": false,
+      "raw_trace_published": false,
+      "recent_denials": [
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        },
+        {
+          "errno": "ENOMEM",
+          "path_category": "OTHER",
+          "syscall": "mmap"
+        }
+      ],
+      "runtime_exit_code": 127,
+      "runtime_module": "duckdb",
+      "signals": {
+        "SIGSEGV": 6
+      },
+      "status": "FAIL",
+      "stderr_bytes": 208,
+      "stderr_categories": [
+        "MEMORY",
+        "THREAD"
+      ],
+      "stderr_sha256": "cce6dd0cfbd726762f2c30a40674ead2a62d7ce95c880954c1bffc1196c521a7",
+      "synthetic_default_cpu_count": 192,
+      "trace_sha256": "a5f213eaffeeae98044a72f904f8dbdcc27e8b9b94641b740133bb6750d85b93",
+      "traced_exit_code": 127,
+      "profile_memory_bytes": 268435456
+    },
+    {
+      "affinity_cpu_count": 16,
+      "check": "REPORT_NATIVE_RUNTIME_DIAGNOSTIC",
+      "host_cpu_count": 16,
+      "libc": [
+        "glibc",
+        "2.39"
+      ],
+      "message_kinds": [
+        "cardinality",
+        "schema",
+        "batch",
+        "complete"
+      ],
+      "process_memory_bytes": 1073741824,
+      "profile_threads": 2,
+      "python": "3.12.14",
+      "raw_stderr_published": false,
+      "raw_trace_published": false,
+      "runtime_exit_code": 0,
+      "runtime_module": "_duckdb",
+      "status": "PASS",
+      "stderr_bytes": 0,
+      "stderr_categories": [],
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "synthetic_default_cpu_count": 192,
+      "profile_memory_bytes": 268435456
+    }
+  ],
+  "kernel_container_memory_bytes": 2147483648,
+  "kernel_container_cpus": 2,
+  "kernel_container_pids_limit": 128,
+  "confinement": "LANDLOCK_SECCOMP_CAP_DROP_ALL_NO_NEW_PRIVILEGES_NETWORK_NONE",
+  "scope": "Supported 512/1024 MiB process profiles with synthetic default CPU override192; final hosted CI remains a separate gate"
+}
