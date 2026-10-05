@@ -166,7 +166,12 @@ def _seccomp():
                         "setns", "open_by_handle_at", "name_to_handle_at", "bpf", "keyctl",
                         "io_uring_setup", "io_uring_enter", "io_uring_register", "userfaultfd"):
             number = lib.seccomp_syscall_resolve_name(syscall.encode())
-            if number >= 0 and lib.seccomp_rule_add(context, deny, number, 0) != 0:
+            # clone3's pointer argument cannot be filtered for CLONE_THREAD.
+            # Keep it unavailable, but return ENOSYS so modern glibc falls back
+            # to clone, whose flags are checked below. EPERM aborts pthread
+            # creation on bare-host glibc even though safe threads are allowed.
+            action = (0x00050000 | errno.ENOSYS) if syscall == "clone3" else deny
+            if number >= 0 and lib.seccomp_rule_add(context, action, number, 0) != 0:
                 raise SandboxError("REPORT_SANDBOX_UNAVAILABLE", "No se pudo denegar un syscall.")
 
         class Argument(ctypes.Structure):
@@ -311,6 +316,7 @@ def run(payload):
     sandbox(sources, limits, staging)
     if payload.get("probe"):
         import socket
+        import threading
         checks = {}
         for key, action in {
             "network_denied": lambda: socket.socket(),
@@ -323,6 +329,28 @@ def run(payload):
             except OSError:
                 checks[key] = True
         checks["sensitive_environment_absent"] = not any("PASSWORD" in k or "SECRET" in k or k == "DATABASE_URL" for k in os.environ)
+        inherited = []
+        def inherited_policy():
+            try:
+                Path(payload["probe"]["forbidden"]).read_bytes()
+                inherited.append(False)
+            except OSError:
+                inherited.append(True)
+        thread = threading.Thread(target=inherited_policy)
+        thread.start()
+        thread.join(timeout=2)
+        checks["confined_threads_available"] = inherited == [True] and not thread.is_alive()
+        libc = ctypes.CDLL(None, use_errno=True)
+        checks["clone3_unavailable"] = libc.syscall(435, 0, 0) == -1 and ctypes.get_errno() == errno.ENOSYS
+        try:
+            child = cast(Any, os).fork()
+        except OSError as exc:
+            checks["process_creation_denied"] = exc.errno == errno.EPERM
+        else:
+            if child == 0:
+                os._exit(0)
+            os.waitpid(child, 0)
+            checks["process_creation_denied"] = False
         emit("probe", checks=checks)
         return
     # DuckDB's module import may create its default connection's scheduler

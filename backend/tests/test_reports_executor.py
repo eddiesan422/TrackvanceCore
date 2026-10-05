@@ -111,6 +111,7 @@ def test_executor_confines_files_network_environment_and_during_write(tmp_path, 
     monkeypatch.setenv("UNRELATED_SECRET", "synthetic-sensitive-token")
     messages = list(execute_messages(sources, plan_for(schemas), "DOWNLOAD",
                     probe={"forbidden": str(secret), "write_target": str(target)}))
+    assert {"confined_threads_available", "clone3_unavailable", "process_creation_denied"} <= messages[0]["checks"].keys()
     assert all(messages[0]["checks"].values())
     assert not target.exists()
 

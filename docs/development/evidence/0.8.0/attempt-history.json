@@ -54,7 +54,24 @@
       "backend_passed": 1845,
       "backend_failed": 21,
       "backend_skipped": 16,
-      "reason": "Report child interrupted only in hosted Python layout; diagnosis and repeat pending. Dependent jobs SKIPPED do not pass."
+      "reason": "Report child interrupted in hosted Linux; the relocated-runtime loader issue was corrected and verified separately. Dependent jobs SKIPPED do not pass."
+    },
+    {
+      "check": "Relocated CPython Linux full report suite",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "reason": "Four metric assertions used peak_rss_bytes instead of the existing max_rss_bytes field. Assertions corrected; 65 report tests then passed without skips."
+    },
+    {
+      "check": "GitHub second 0.8 workflow",
+      "status": "FAIL",
+      "category": "RUNTIME_COMPATIBILITY",
+      "sha": "a190420fd5a2dd0361a56aeb3d02cedc5388b341",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37348544124",
+      "backend_passed": 1846,
+      "backend_failed": 21,
+      "backend_skipped": 16,
+      "reason": "Loader correction did not resolve every hosted Linux failure. Confinement probe passed, DuckDB execution interrupted; glibc clone3 fallback diagnosis and repeat remain open. Dependent jobs SKIPPED do not pass."
     }
   ],
   "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."

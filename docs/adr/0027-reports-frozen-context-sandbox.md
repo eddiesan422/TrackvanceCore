@@ -101,6 +101,10 @@ relocalizados como GitHub setup-python sin heredar `LD_LIBRARY_PATH` del proceso
 
 libseccomp deniega socket/red, exec, fork/vfork, clone3, namespaces, mount, ptrace,
 process_vm, keyring, bpf, io_uring y otros escapes. clone sólo puede crear threads.
+clone3 retorna ENOSYS para que [glibc pueda usar su fallback a clone](https://sourceware.org/pipermail/glibc-cvs/2021q3/073721.html),
+cuyos flags siguen filtrados por CLONE_THREAD. clone3 permanece indisponible y
+fork sigue denegado; EPERM en clone3 impediría crear threads legítimos en runtimes
+glibc recientes que no hayan almacenado previamente ese fallback.
 El proceso debe tener un único thread al instalar la política; DuckDB se importa
 después, porque su conexión por defecto puede crear threads. Así todos heredan el
 dominio Landlock incluso en ABI3 sin TSYNC. Se aplican RLIMIT_AS, CPU y descriptores,
