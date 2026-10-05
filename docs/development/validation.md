@@ -62,6 +62,16 @@ y Reportes seguía ejecutándose al corte. Las correcciones conservan la cobertu
 y los tiers obligatorios. El siguiente HEAD documental necesita todos los jobs
 SUCCESS de una ejecución completa.
 
+Ese workflow terminó después con **16 jobs: diez SUCCESS y seis FAIL**. El
+sexto fallo ocurrió en la recuperación histórica de Catálogo/Reportes: el
+checkout superficial no contenía el commit auténtico `d9b6856` que necesita
+`git archive`. La reproducción aislada conserva el mismo HEAD y pasa de exit
+128 a exit 0 al descargar el historial completo; no atribuye su stderr al runner
+original. El job descarga ahora todo el historial, manteniendo sus gates.
+El [resultado completado](evidence/0.8.0/ci-3832596-completed-failure.json) conserva
+los seis fallos y los PASS reales de navegador, tres tiers, diez casos HTTP y
+recuperación nativa. El CI íntegro del nuevo SHA continúa siendo obligatorio.
+
 La revisión posterior del descriptor produjo **87 PASS / cero FAIL o SKIP** en
 41,48 s en Linux: 71 Reportes y 16 almacenamiento/puertos. Incluye una caída real
 `os._exit(77)` después de escribir el JSON del descriptor dentro del staging

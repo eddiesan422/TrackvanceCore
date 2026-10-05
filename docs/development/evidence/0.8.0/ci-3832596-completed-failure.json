@@ -1,0 +1,801 @@
+{
+  "schema_version": 1,
+  "version": "0.8.0",
+  "scope": "Completed historical CI6 result; not final release approval",
+  "workflow_run_id": 37359580093,
+  "workflow_name": "Trackvance local checks",
+  "workflow_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093",
+  "run_attempt": 1,
+  "head_sha": "38325965a94604913d6e96a88528331c668394ca",
+  "observed_at": "2026-10-05 20:04:52 UTC",
+  "workflow_status": "completed",
+  "workflow_conclusion": "failure",
+  "completed_at": "2026-10-05T19:50:53Z",
+  "overall_status": "COMPLETED_FAILURE",
+  "global_approval": false,
+  "rerun_requested": false,
+  "counts": {
+    "jobs": 16,
+    "success": 10,
+    "failure": 6,
+    "queued": 0,
+    "in_progress": 0
+  },
+  "previous_checkpoint": {
+    "path": "ci-3832596-failure.json",
+    "sha256": "b830d0c2bd3f03b6e5884c851a59976542fb519199b8428f6d7e905b2d833ab7",
+    "preserved_unchanged": true
+  },
+  "backend": {
+    "job_id": 111930508393,
+    "status": "SUCCESS",
+    "native_probe": {
+      "status": "PASS",
+      "engine_module": "_duckdb",
+      "exit_code": 0,
+      "stderr_bytes": 0,
+      "cpu_count": 4,
+      "affinity_cpu_count": 4,
+      "python": "3.12.14",
+      "libc": "glibc2.39",
+      "address_space_limit_bytes": 2147483648,
+      "engine_memory_limit_bytes": 536870912,
+      "threads": 2,
+      "message_kinds": [
+        "cardinality",
+        "schema",
+        "batch",
+        "complete"
+      ]
+    },
+    "pytest": {
+      "collected": 1903,
+      "passed": 1887,
+      "failed": 0,
+      "skipped": 16,
+      "warnings": 13,
+      "duration_seconds": 306.08
+    },
+    "ruff": "PASS",
+    "mypy": {
+      "status": "PASS",
+      "source_files": 75
+    },
+    "contracts": "PASS",
+    "postgresql_migrations": "PASS"
+  },
+  "failure_history": [
+    {
+      "job_id": 111933287512,
+      "name": "xlsx-corrections-e2e",
+      "conclusion": "FAIL",
+      "stage": "COMPOSE_STARTUP",
+      "source": "scripts/tests/corrections_cycle.py:385",
+      "error_type": "RuntimeError",
+      "exit_code": 1
+    },
+    {
+      "job_id": 111933287882,
+      "name": "async-volume-e2e (100)",
+      "conclusion": "FAIL",
+      "stage": "COMPOSE_STARTUP",
+      "source": "scripts/tests/v070_cycle.py:57",
+      "error_type": "RuntimeError",
+      "exit_code": 1
+    },
+    {
+      "job_id": 111933287986,
+      "name": "async-volume-e2e (500)",
+      "conclusion": "FAIL",
+      "stage": "COMPOSE_STARTUP",
+      "source": "scripts/tests/v070_cycle.py:57",
+      "error_type": "RuntimeError",
+      "exit_code": 1
+    },
+    {
+      "job_id": 111933288005,
+      "name": "async-volume-e2e (1024)",
+      "conclusion": "FAIL",
+      "stage": "COMPOSE_STARTUP",
+      "source": "scripts/tests/v070_cycle.py:57",
+      "error_type": "RuntimeError",
+      "exit_code": 1
+    },
+    {
+      "job_id": 111933287933,
+      "name": "backup-restore-e2e",
+      "conclusion": "FAIL",
+      "stage": "restore_070_stopped",
+      "error_type": "ValueError",
+      "runtime_diagnostic_error_type": "RuntimeError",
+      "diagnosis": "Independent restore failure under investigation; historical0.5.1 and0.6.0 reached STOPPED_VERIFIED."
+    },
+    {
+      "job_id": 111933288092,
+      "name": "catalog-reports-e2e",
+      "conclusion": "FAIL",
+      "stage": "recovery",
+      "artifact_failed_stage": "legacy",
+      "error_type": "RecoveryCommandError",
+      "exit_code": 1,
+      "classification": "HARNESS_SHALLOW_CHECKOUT",
+      "source": "scripts/tests/catalog_reports_recovery.py:350",
+      "evidence": "The recovery artifact reports native PASS and RecoveryCommandError in legacy. The CI6 catalog checkout used the default depth 1; legacy requires git archive of the authentic historical baseline.",
+      "diagnosis": "A separate, non-executing Git fixture at the exact CI6 source cut reproduces missing historical object and archive exit 128; fetching the full history keeps FETCH_HEAD unchanged and makes the same archive pass.",
+      "private_ci_trace_available": false,
+      "trace_limitation": "The sanitized CI artifact excludes diagnostic.private.log. No unretained Git stderr is asserted as captured CI output."
+    }
+  ],
+  "startup_diagnosis": {
+    "classification": "HARNESS_SERVICE_SELECTION",
+    "evidence": "All four jobs completed private image builds, then failed on unscoped compose up --no-build before population. certification.SERVICES prepares only the original nine services; the merged0.8 base adds build-only report-worker with no private override image.",
+    "inference": "The unscoped startup tries an unprepared report-worker image with --no-build. Exact Docker stderr was not retained by the historical harness, so no fabricated raw daemon message is asserted.",
+    "correction": "Append *certification.SERVICES to both historical startup calls. Preserve --wait and cleanup of the complete owned project.",
+    "product_tests_removed": false,
+    "service_budget_changed": false,
+    "validation": {
+      "status": "PASS",
+      "passed": 45,
+      "failed": 0,
+      "duration_seconds": 1,
+      "ruff": "PASS",
+      "diff_check": "PASS",
+      "files": [
+        "scripts/tests/test_historical_cycle_startup.py",
+        "scripts/tests/test_corrections_dispatch.py",
+        "scripts/tests/test_v070_recovery.py",
+        "scripts/tests/test_isolation_profile.py"
+      ],
+      "regression_guard": "A merged service without a prepared private image cannot be selected by either suite."
+    }
+  },
+  "catalog_reports_artifact": {
+    "artifact_id": 11367973258,
+    "name": "catalog-reports-results",
+    "archive_sha256": "6e34ab7c21ed7faff1e1b04047926d0f5369a33114cb689c0db0fadef101056b",
+    "archive_bytes": 514063,
+    "read_method": "ZIP entries read as JSON only; no extracted artifact code executed",
+    "private_job_log_sha256": "22c0b0aee6055187765b3fbbbfef8b1d54200c90f3a45c84e3b1de768716b93a",
+    "catalog_cycle": {
+      "status": "FAIL",
+      "source_sha": "38325965a94604913d6e96a88528331c668394ca",
+      "source_tree_dirty": false,
+      "main_unchanged": true,
+      "isolation": "RESOLVED_PREFLIGHT",
+      "duration_seconds": 2905.949
+    },
+    "browser": {
+      "status": "PASS",
+      "startTime": "2026-10-05T19:04:42.363Z",
+      "duration": 27633.635,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0,
+      "artifact_credentials_scan": "PASS",
+      "raw_artifacts_published": false
+    },
+    "postgres_joint_snapshot": {
+      "status": "PASS",
+      "source_count": 2,
+      "existing_application_tables_and_artifacts_touched": false,
+      "frozen_context_has_no_mixed_snapshot": true,
+      "isolated_schema_and_storage_cleaned": true,
+      "new_approvals_committed_before_second_source_read": true,
+      "next_context_selects_both_new_outputs": true,
+      "read_isolation": "REPEATABLE READ",
+      "real_new_intake_approvals": 2
+    },
+    "population_tiers": [
+      {
+        "rows_per_source": 120,
+        "status": "PASS",
+        "duration_seconds": 31.924,
+        "joins": [
+          {
+            "type": "INNER",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 60,
+              "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+              "parts": 1
+            },
+            "seconds": 3.373
+          },
+          {
+            "type": "LEFT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 120,
+              "sha256": "935bc46ee12338bbaaf0b30eb09ba69bdbb04c38e540eefa3d1ac557506172ca",
+              "parts": 1
+            },
+            "seconds": 3.083
+          },
+          {
+            "type": "RIGHT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 120,
+              "sha256": "503fa816ab720c3a0b103fb3d5049e13a5c85aae165f4fa25df9b98f1dcbd740",
+              "parts": 1
+            },
+            "seconds": 4.122
+          },
+          {
+            "type": "FULL",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 180,
+              "sha256": "256c61df0896ba01b910265eac4297680ee7ea93783e62a7b9e499e9ff7e602e",
+              "parts": 1
+            },
+            "seconds": 3.565
+          }
+        ],
+        "csv": {
+          "status": "PASS",
+          "rows": 60,
+          "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+          "max_rows": 100000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "xlsx": {
+          "status": "PASS",
+          "rows": 60,
+          "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+          "bytes": 3037,
+          "max_rows": 50000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "csv_above_limit": null,
+        "xlsx_above_limit": null,
+        "three_sources": {
+          "status": "PASS",
+          "rows": 120,
+          "sha256": "ef9d6e28a0c75a770e768ceaa38198bf36192145a7afdfdf8041135485da56dc",
+          "parts": 1
+        },
+        "bounded_many_to_many": {
+          "status": "PASS",
+          "rows": 2057,
+          "sha256": "02f0f164a2c077dc52d48d74c30e6e756638d56b158617f935ce3f6b97f4dcae",
+          "parts": 1
+        },
+        "many_to_many_expansion_rejected": null,
+        "parent_block_propagation": "PASS"
+      },
+      {
+        "rows_per_source": 400000,
+        "status": "PASS",
+        "duration_seconds": 807.144,
+        "joins": [
+          {
+            "type": "INNER",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 200000,
+              "sha256": "aa3e3503d08cf123205687811a581e58edab02c737257b32edc18761c42436c5",
+              "parts": 5
+            },
+            "seconds": 58.556
+          },
+          {
+            "type": "LEFT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 400000,
+              "sha256": "e1eb399659cc3d12b9555e9d48fe6a789bfcedec9e2819d7f8b4e84051278085",
+              "parts": 9
+            },
+            "seconds": 108.713
+          },
+          {
+            "type": "RIGHT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 400000,
+              "sha256": "dedeb38301d58d2d4ab49a30942e9e16f9b4640f0eaf9c41b3de192929e9a9a3",
+              "parts": 9
+            },
+            "seconds": 108.806
+          },
+          {
+            "type": "FULL",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 600000,
+              "sha256": "b654c84a28b3a2fe5af714ab9083c10433438d3e8ddf7ea6fd3e100ce693976e",
+              "parts": 13
+            },
+            "seconds": 163.363
+          }
+        ],
+        "csv": {
+          "status": "PASS",
+          "rows": 100000,
+          "sha256": "512dc11e95c2725bb4bc634b83e0a872d6777e01240eddbd7d583e0a86a97f74",
+          "max_rows": 100000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "xlsx": {
+          "status": "PASS",
+          "rows": 50000,
+          "sha256": "3057db5d4fdbf33c95b3c1d4184437b082787c33473a5555610004a386ce8eb3",
+          "bytes": 1107130,
+          "max_rows": 50000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "csv_above_limit": {
+          "status": "PASS",
+          "requested_rows": 100001,
+          "execution_status": "FAILED",
+          "error_code": "REPORT_RESULT_LIMIT"
+        },
+        "xlsx_above_limit": {
+          "status": "PASS",
+          "requested_rows": 50001,
+          "execution_status": "FAILED",
+          "error_code": "REPORT_RESULT_LIMIT"
+        },
+        "three_sources": {
+          "status": "PASS",
+          "rows": 400000,
+          "sha256": "4d5f168b39d70c2e0bb0c1f375b6b91579e98a36c549c667d40f98819f95e164",
+          "parts": 9
+        },
+        "bounded_many_to_many": null,
+        "many_to_many_expansion_rejected": {
+          "status": "PASS",
+          "error_code": "REPORT_JOIN_EXPANSION"
+        },
+        "parent_block_propagation": "PASS"
+      },
+      {
+        "rows_per_source": 1000000,
+        "status": "PASS",
+        "duration_seconds": 1714.632,
+        "joins": [
+          {
+            "type": "INNER",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 500000,
+              "sha256": "1f388d63bcb8daafa54f8dcbe697e1694890fc05431e636aaf70c9b704901caf",
+              "parts": 11
+            },
+            "seconds": 138.374
+          },
+          {
+            "type": "LEFT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 1000000,
+              "sha256": "00e10cb01d1d6161a768f7c2c396baa230009917b2bb9d6ce8451895e69dd864",
+              "parts": 21
+            },
+            "seconds": 262.1
+          },
+          {
+            "type": "RIGHT",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 1000000,
+              "sha256": "898d11949537bff4c7b3598ce7fb42892dcee176d252454a6bfcb643a017aea3",
+              "parts": 21
+            },
+            "seconds": 258.482
+          },
+          {
+            "type": "FULL",
+            "status": "PASS",
+            "preview_rows": 10,
+            "materialized": {
+              "status": "PASS",
+              "rows": 1500000,
+              "sha256": "e1d2d2e0d27790ad156194e1dc97e9267d66447bae6111e13453d08b489a5d91",
+              "parts": 31
+            },
+            "seconds": 382.237
+          }
+        ],
+        "csv": {
+          "status": "PASS",
+          "rows": 100000,
+          "sha256": "02a01b5b9333f0f112c022d828c877f7fb1d6c163d1d32fb6dff33c451f17af1",
+          "max_rows": 100000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "xlsx": {
+          "status": "PASS",
+          "rows": 50000,
+          "sha256": "925e4be8c46fca57458e21cc6e14bee423d023f2aedade053aa8eefd8ddf934e",
+          "bytes": 1107130,
+          "max_rows": 50000,
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE"
+        },
+        "csv_above_limit": {
+          "status": "PASS",
+          "requested_rows": 100001,
+          "execution_status": "FAILED",
+          "error_code": "REPORT_RESULT_LIMIT"
+        },
+        "xlsx_above_limit": {
+          "status": "PASS",
+          "requested_rows": 50001,
+          "execution_status": "FAILED",
+          "error_code": "REPORT_RESULT_LIMIT"
+        },
+        "three_sources": {
+          "status": "PASS",
+          "rows": 1000000,
+          "sha256": "1ee113899f25ed4d0d1a8ebc3791ca779e834db7f051a7b59b3ea38b1daa25e7",
+          "parts": 21
+        },
+        "bounded_many_to_many": null,
+        "many_to_many_expansion_rejected": {
+          "status": "PASS",
+          "error_code": "REPORT_JOIN_EXPANSION"
+        },
+        "parent_block_propagation": "PASS"
+      }
+    ],
+    "http": {
+      "status": "PASS",
+      "check": "REPORT_EPHEMERAL_HTTP",
+      "cases_count": 10,
+      "duration_seconds": 77.144,
+      "trace_scope": "REAL_NGINX_API_AND_CONFINED_CHILDREN",
+      "privileges_added": false,
+      "raw_traces_published": false,
+      "main_unchanged": true,
+      "cases": [
+        {
+          "name": "PREVIEW_SUCCESS",
+          "status": "PASS",
+          "execution_status": "SUCCESS",
+          "generation": "COMPLETE",
+          "transmission": "NOT_APPLICABLE",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "PREVIEW_LARGE_CONTEXT_REQUEST",
+          "status": "PASS",
+          "execution_status": "SUCCESS",
+          "generation": "COMPLETE",
+          "transmission": "NOT_APPLICABLE",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "PREVIEW_RESOURCE_FAILURE",
+          "status": "PASS",
+          "execution_status": "FAILED",
+          "generation": "FAILED",
+          "transmission": "NOT_APPLICABLE",
+          "error_code": "REPORT_RESULT_LIMIT",
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "PREVIEW_CONSUMER_DISCONNECT",
+          "status": "PASS",
+          "execution_status": "SUCCESS",
+          "generation": "COMPLETE",
+          "transmission": "NOT_APPLICABLE",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "CSV_SUCCESS",
+          "status": "PASS",
+          "execution_status": "SUCCESS",
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "CSV_RESOURCE_FAILURE",
+          "status": "PASS",
+          "execution_status": "FAILED",
+          "generation": "FAILED",
+          "transmission": "INTERRUPTED",
+          "error_code": "REPORT_RESULT_LIMIT",
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "CSV_CONSUMER_DISCONNECT",
+          "status": "PASS",
+          "execution_status": "INTERRUPTED",
+          "generation": "RUNNING",
+          "transmission": "INTERRUPTED",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "XLSX_SUCCESS",
+          "status": "PASS",
+          "execution_status": "SUCCESS",
+          "generation": "COMPLETE",
+          "transmission": "COMPLETE",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "XLSX_RESOURCE_FAILURE",
+          "status": "PASS",
+          "execution_status": "FAILED",
+          "generation": "FAILED",
+          "transmission": "INTERRUPTED",
+          "error_code": "REPORT_RESULT_LIMIT",
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        },
+        {
+          "name": "XLSX_CONSUMER_DISCONNECT",
+          "status": "PASS",
+          "execution_status": "INTERRUPTED",
+          "generation": "RUNNING",
+          "transmission": "INTERRUPTED",
+          "error_code": null,
+          "storage_and_artifact_metadata_unchanged": true,
+          "active_report_children_after": 0
+        }
+      ]
+    },
+    "recovery": {
+      "status": "FAIL",
+      "mode": "both",
+      "main_inventory": "UNCHANGED",
+      "error_type": "RecoveryCommandError",
+      "failed_stage": "legacy",
+      "duration_seconds": 115.905,
+      "native": {
+        "status": "PASS",
+        "source_version": "0.8.0",
+        "target_version": "0.8.0",
+        "all_thirteen_new_entities_populated": true,
+        "restore": "STOPPED_VERIFIED",
+        "tables_before": 55,
+        "tables_after": 55,
+        "source_state_sha256": "14f7110070864438c54b1d93f3941053bfdce060e85cdb3defb85abae08dc5c6",
+        "restored_projection_sha256": "14f7110070864438c54b1d93f3941053bfdce060e85cdb3defb85abae08dc5c6",
+        "exact_state_comparison": "PASS",
+        "verified_artifacts": 3155,
+        "verified_source_secrets": 0,
+        "verified_delivery_secrets": 0,
+        "automatic_processes_started": false,
+        "functional_restored_bindings": "DEFINITION_REVISIONS_EXECUTION_PROFILE_LINEAGE_CURRENT_BLOCK_PASS",
+        "source_final_state": "STOPPED_QUIESCENT"
+      },
+      "backup_privacy": {
+        "status": "PASS",
+        "postgres_dump_decompressed": "PASS",
+        "archive_files_scanned": 3158,
+        "known_credentials_scanned": 1,
+        "raw_contents_published": false
+      },
+      "restored_restrictions": {
+        "current_block_new_resolution": "PASS",
+        "frozen_context_preview": "PASS_CURRENT_BLOCK"
+      }
+    }
+  },
+  "shallow_checkout_reproduction": {
+    "status": "PASS_CAUSAL_REPRODUCTION",
+    "observed_at": "2026-10-05T20:00:10.816797Z",
+    "source_cut": "38325965a94604913d6e96a88528331c668394ca",
+    "historical_commit": "d9b6856e757a2a1fcab3913209146f3b7b79d70c",
+    "no_repository_code_executed": true,
+    "real_repository_unchanged": true,
+    "before": {
+      "fetch_head": "38325965a94604913d6e96a88528331c668394ca",
+      "is_shallow": true,
+      "historical_object_exists": false,
+      "object_exit": 128,
+      "archive_exit": 128,
+      "diagnostic": "GIT_HISTORICAL_OBJECT_UNAVAILABLE"
+    },
+    "after": {
+      "fetch_head": "38325965a94604913d6e96a88528331c668394ca",
+      "is_shallow": false,
+      "historical_object_exists": true,
+      "object_exit": 0,
+      "archive_exit": 0,
+      "archive_sha256": "f359ca37194f14e48c2b9215dc87ab2c4812dc9f857f2cc63a808058664bf039"
+    }
+  },
+  "workflow_correction": {
+    "scope": "catalog-reports-e2e actions/checkout only",
+    "required_change": "fetch-depth: 0, matching backup-restore-e2e",
+    "source": "The missing historical Git object is a checkout problem; source and migrations are unchanged by this correction.",
+    "validation": "A new exact-HEAD workflow with all 16 jobs completed successfully is still required.",
+    "tests_removed": false,
+    "service_budget_changed": false,
+    "raw_trace_published": false
+  },
+  "jobs": [
+    {
+      "id": 111930508123,
+      "name": "frontend",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111930508123",
+      "started_at": "2026-10-05T18:55:14Z",
+      "completed_at": "2026-10-05T18:56:01Z"
+    },
+    {
+      "id": 111930508393,
+      "name": "backend",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111930508393",
+      "started_at": "2026-10-05T18:55:15Z",
+      "completed_at": "2026-10-05T19:01:48Z"
+    },
+    {
+      "id": 111933287323,
+      "name": "compose-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287323",
+      "started_at": "2026-10-05T19:01:55Z",
+      "completed_at": "2026-10-05T19:09:38Z"
+    },
+    {
+      "id": 111933287371,
+      "name": "delivery-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287371",
+      "started_at": "2026-10-05T19:02:03Z",
+      "completed_at": "2026-10-05T19:07:40Z"
+    },
+    {
+      "id": 111933287512,
+      "name": "xlsx-corrections-e2e",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287512",
+      "started_at": "2026-10-05T19:01:53Z",
+      "completed_at": "2026-10-05T19:04:05Z"
+    },
+    {
+      "id": 111933287578,
+      "name": "benchmark-smoke",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287578",
+      "started_at": "2026-10-05T19:01:53Z",
+      "completed_at": "2026-10-05T19:03:33Z"
+    },
+    {
+      "id": 111933287685,
+      "name": "connections-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287685",
+      "started_at": "2026-10-05T19:01:51Z",
+      "completed_at": "2026-10-05T19:11:12Z"
+    },
+    {
+      "id": 111933287717,
+      "name": "spark-local-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287717",
+      "started_at": "2026-10-05T19:01:56Z",
+      "completed_at": "2026-10-05T19:08:07Z"
+    },
+    {
+      "id": 111933287758,
+      "name": "spark-standalone-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287758",
+      "started_at": "2026-10-05T19:01:53Z",
+      "completed_at": "2026-10-05T19:12:29Z"
+    },
+    {
+      "id": 111933287783,
+      "name": "identity-sso-e2e",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287783",
+      "started_at": "2026-10-05T19:01:56Z",
+      "completed_at": "2026-10-05T19:06:38Z"
+    },
+    {
+      "id": 111933287882,
+      "name": "async-volume-e2e (100)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287882",
+      "started_at": "2026-10-05T19:01:57Z",
+      "completed_at": "2026-10-05T19:04:18Z"
+    },
+    {
+      "id": 111933287910,
+      "name": "delivery-benchmark-smoke",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287910",
+      "started_at": "2026-10-05T19:01:52Z",
+      "completed_at": "2026-10-05T19:04:22Z"
+    },
+    {
+      "id": 111933287933,
+      "name": "backup-restore-e2e",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287933",
+      "started_at": "2026-10-05T19:01:53Z",
+      "completed_at": "2026-10-05T19:12:36Z"
+    },
+    {
+      "id": 111933287986,
+      "name": "async-volume-e2e (500)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933287986",
+      "started_at": "2026-10-05T19:01:54Z",
+      "completed_at": "2026-10-05T19:04:37Z"
+    },
+    {
+      "id": 111933288005,
+      "name": "async-volume-e2e (1024)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933288005",
+      "started_at": "2026-10-05T19:01:54Z",
+      "completed_at": "2026-10-05T19:04:08Z"
+    },
+    {
+      "id": 111933288092,
+      "name": "catalog-reports-e2e",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093/job/111933288092",
+      "started_at": "2026-10-05T19:01:51Z",
+      "completed_at": "2026-10-05T19:50:53Z"
+    }
+  ],
+  "safe_evidence_policy": "Only statuses, counts, durations, error classifications, hashes, safe source locations and public run/job identities. No raw traces, SQL, rows, query text, secrets, private paths, temporary download URLs or daemon stderr."
+}

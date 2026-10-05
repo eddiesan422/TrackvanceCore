@@ -254,6 +254,20 @@
       "owned_remaining": 0,
       "certifies_final_sha": false,
       "details": "Genuine0.6.1 image/ORM created historical fixture; current target source mounted read-only and byte verified. CI383 original failure preserved separately."
+    },
+    {
+      "check": "GitHub sixth 0.8 workflow completed",
+      "status": "FAIL",
+      "category": "CI_CHECKOUT_HISTORY",
+      "sha": "38325965a94604913d6e96a88528331c668394ca",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093",
+      "completed_at": "2026-10-05T19:50:53Z",
+      "jobs": 16,
+      "success": 10,
+      "failure": 6,
+      "evidence": "ci-3832596-completed-failure.json",
+      "details": "The previously active catalog job failed historical recovery after native recovery PASS. Its shallow checkout lacked authentic d9. An isolated reproduction kept the same HEAD: git archive exit128 before full-history fetch, exit0 afterwards. Local diagnostic stderr is not attributed to original CI. Browser, all three full-oracle tiers, ten HTTP cases and native 55-table recovery passed; these partial results do not approve the workflow or final SHA.",
+      "certifies_final_sha": false
     }
   ],
   "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."
