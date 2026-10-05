@@ -1,7 +1,10 @@
 {
-  "Version": "0.8.0",
-  "Ensayo pequeño": "120filas por3fuentes, completoPASS, árbol de desarrollo.",
-  "400k por fuente": "PENDIENTE",
+  "Versión": "0.8.0",
+  "Ensayo pequeño": "120 filas por cada una de tres fuentes; PASS con todos los joins, triple/N:M acotado, CSV/XLSX y bloqueo heredado; 33,335 s.",
+  "400k por fuente": "PASS 862,487 s; tres fuentes estrictamente aprobadas completas. INNER200000/LEFT400000/RIGHT400000/FULL600000 y triple400000; valores y multiplicidad completos verificados con oráculo independiente.",
   "1M por fuente": "PENDIENTE",
-  "Antecedentes": "Las mediciones0.7 están conservadas en volume_results_0.7.0.json y no certifican Reportes0.8."
+  "Descarga CSV": "100.000 filas íntegras PASS; 100.001 FAILED / REPORT_RESULT_LIMIT, sin versión publicada.",
+  "Descarga XLSX": "50.000 filas íntegras PASS, 1.107.130 bytes; 50.001 FAILED / REPORT_RESULT_LIMIT, sin versión publicada.",
+  "Recursos observados400k": "SQL DATASET: FULL600000 filas en142,707 s, máximo RSS del proceso300.867.584 bytes,13partes. RSS no se suma con picos de otros procesos. Perfil final añade counters CPU/cgroup y muestras de staging/disco, cuya evidencia final es independiente.",
+  "Antecedentes": "Las mediciones 0.7.0 se conservan en sus archivos y no certifican Reportes0.8.0."
 }

@@ -65,6 +65,12 @@ def test_real_join_complete_population_matches_independent_oracle(tmp_path, kind
     check = next(m for m in messages if m["kind"] == "cardinality")["items"][0]
     assert check["joined_rows"] == len(expected)
     assert check["observed"] == "N:1"
+    metrics = next(message for message in messages if message["kind"] == "complete")
+    assert metrics["cpu_user_seconds"] >= 0 and metrics["cpu_system_seconds"] >= 0
+    assert metrics["max_rss_bytes"] > 0
+    for name in ("cgroup_memory_current_bytes", "cgroup_memory_lifetime_peak_bytes"):
+        if name in metrics:
+            assert metrics[name] > 0
 
 
 def test_many_to_many_is_detected_over_full_source_and_authorized_explicitly(tmp_path):
@@ -179,7 +185,8 @@ finally:
 '''
     environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent",
                    "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
-                   "TRACKVANCE_STORAGE_DIR": str(tmp_path), "DATABASE_URL": "sqlite:///:memory:"}
+                   "TRACKVANCE_STORAGE_DIR": str(tmp_path), "DATABASE_URL": "sqlite:///:memory:",
+                   "LD_LIBRARY_PATH": str(Path(sys.base_prefix) / "lib")}
     if fail:
         environment["REPORT_DOWNLOAD_MAX_ROWS"] = "1"
     observed = subprocess.run(["strace", "-f", "-e", "trace=%file,mmap,write", "-o", str(trace),

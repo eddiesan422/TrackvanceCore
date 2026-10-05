@@ -95,6 +95,10 @@ de archivos públicos de CPU/cgroup/zona horaria. No recibe acceso general al
 almacén, /tmp, aplicación o /proc: environ queda fuera. Sólo DATASET obtiene
 escritura en el directorio spill de su propio intento.
 
+La ruta del cargador de CPython se deriva exclusivamente de `sys.base_prefix/lib`,
+también admitida en Landlock junto con `sys.prefix/lib`; esto permite runtimes
+relocalizados como GitHub setup-python sin heredar `LD_LIBRARY_PATH` del proceso padre.
+
 libseccomp deniega socket/red, exec, fork/vfork, clone3, namespaces, mount, ptrace,
 process_vm, keyring, bpf, io_uring y otros escapes. clone sólo puede crear threads.
 El proceso debe tener un único thread al instalar la política; DuckDB se importa

@@ -32,6 +32,13 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
                        "PYTHONDONTWRITEBYTECODE": "1", "HOME": "/nonexistent",
                        "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
                        "TZ": "UTC"}
+        # setup-python and other relocated CPython distributions link their
+        # interpreter against a library in the base installation. Derive this
+        # single trusted runtime directory; never inherit the caller's loader
+        # path, which could contain untrusted libraries or secret locations.
+        runtime_library = Path(sys.base_prefix) / "lib"
+        if runtime_library.is_dir():
+            environment["LD_LIBRARY_PATH"] = str(runtime_library.resolve())
         process = subprocess.Popen([sys.executable, "-I", "-B", str(script)], env=environment,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, close_fds=True, bufsize=65536)

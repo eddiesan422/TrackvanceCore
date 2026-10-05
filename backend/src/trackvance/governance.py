@@ -423,11 +423,14 @@ def update_governance(db: Session, dataset: Dataset, user: User, expected_versio
         raise OperationError(409, "GOVERNANCE_INHERITED", "Edita el gobierno en el dataset de entrada; esta salida lo hereda.")
     macro = changes.get("macro_domain_id", dataset.macro_domain_id)
     domain = changes.get("domain_id", dataset.domain_id)
-    validate_classification(db, user.organization_id, macro, domain)
+    classification_changed = (macro, domain) != (dataset.macro_domain_id, dataset.domain_id)
+    validate_classification(db, user.organization_id, macro, domain, require_active=classification_changed)
     for field in ("business_owner_id", "steward_id", "technical_custodian_id"):
-        if changes.get(field):
-            identity = db.get(User, changes[field])
-            if not identity or identity.organization_id != user.organization_id or not identity.active or identity.deleted:
+        identity_id = changes.get(field, getattr(dataset, field))
+        if identity_id:
+            identity = db.get(User, identity_id)
+            changed = identity_id != getattr(dataset, field)
+            if not identity or identity.organization_id != user.organization_id or changed and (not identity.active or identity.deleted):
                 raise OperationError(422, "RESPONSIBLE_INVALID", "Selecciona una identidad activa de la organización.")
     result = db.execute(update(Dataset).where(Dataset.id == dataset.id, Dataset.organization_id == user.organization_id,
         Dataset.governance_version == expected_version).values(**changes, governance_version=expected_version + 1)

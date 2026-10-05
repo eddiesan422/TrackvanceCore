@@ -14,6 +14,12 @@ Desactivar un término conserva asociaciones históricas, pero impide asociarlo
 de nuevo. Los roles personalizados conservan sus grants anteriores; los nuevos
 códigos y sus dependencias pertenecen a la autoridad RBAC persistida.
 
+Editar otra metadata puede conservar los mismos IDs de clasificación y
+responsables ya persistidos aunque se hayan desactivado. Se siguen comprobando
+organización e identidad; una asignación diferente requiere entidades activas.
+Retener esos valores no convierte un dominio inactivo en clasificación completa
+para Reportes y no cambia sus permisos ni la aprobación histórica.
+
 La visibilidad de metadatos del Catálogo se distingue del acceso al contenido.
 Vista previa, descarga, perfiles con valores, artefactos de ejecuciones, hallazgos,
 exports y consumo por módulos comprueban las fuentes de un derivado. El grafo

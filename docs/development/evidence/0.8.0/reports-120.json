@@ -1,0 +1,186 @@
+{
+  "version": "0.8.0",
+  "status": "PASS",
+  "project": "trackvance-v080-test-integrated-ebedb360f9e4",
+  "rows_per_source": 120,
+  "sources": [
+    {
+      "alias": "a",
+      "rows": 120,
+      "approval_id": "02063d54-b037-46f4-ac72-501f50894a78",
+      "status": "PASS"
+    },
+    {
+      "alias": "b",
+      "rows": 120,
+      "approval_id": "0227f3a7-573f-4fcd-ab34-41e165a40c6a",
+      "status": "PASS"
+    },
+    {
+      "alias": "c",
+      "rows": 120,
+      "approval_id": "b415a126-2da2-490a-a34e-ee296b22277c",
+      "status": "PASS"
+    }
+  ],
+  "joins": [
+    {
+      "type": "INNER",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 60,
+        "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+        "parts": 1
+      },
+      "seconds": 4.321,
+      "status": "PASS"
+    },
+    {
+      "type": "LEFT",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 120,
+        "sha256": "935bc46ee12338bbaaf0b30eb09ba69bdbb04c38e540eefa3d1ac557506172ca",
+        "parts": 1
+      },
+      "seconds": 2.936,
+      "status": "PASS"
+    },
+    {
+      "type": "RIGHT",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 120,
+        "sha256": "503fa816ab720c3a0b103fb3d5049e13a5c85aae165f4fa25df9b98f1dcbd740",
+        "parts": 1
+      },
+      "seconds": 3.95,
+      "status": "PASS"
+    },
+    {
+      "type": "FULL",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 180,
+        "sha256": "256c61df0896ba01b910265eac4297680ee7ea93783e62a7b9e499e9ff7e602e",
+        "parts": 1
+      },
+      "seconds": 3.441,
+      "status": "PASS"
+    }
+  ],
+  "resource_metrics": [
+    {
+      "join": "INNER",
+      "dataset": {
+        "rows": 60,
+        "bytes": 4121,
+        "elapsed_seconds": 0.035477626999636414,
+        "max_rss_bytes": 188121088,
+        "sample": false,
+        "parts": 1,
+        "canonical_size_bytes": 2957
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 681,
+        "elapsed_seconds": 0.05725159999929019,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "LEFT",
+      "dataset": {
+        "rows": 120,
+        "bytes": 6811,
+        "elapsed_seconds": 0.03948305599988089,
+        "max_rss_bytes": 208916480,
+        "sample": false,
+        "parts": 1,
+        "canonical_size_bytes": 3270
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 441,
+        "elapsed_seconds": 0.03681236899956275,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "RIGHT",
+      "dataset": {
+        "rows": 120,
+        "bytes": 6881,
+        "elapsed_seconds": 0.03812838700014254,
+        "max_rss_bytes": 214552576,
+        "sample": false,
+        "parts": 1,
+        "canonical_size_bytes": 3264
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 681,
+        "elapsed_seconds": 0.05515374599963252,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "FULL",
+      "dataset": {
+        "rows": 180,
+        "bytes": 9571,
+        "elapsed_seconds": 0.03503891099990142,
+        "max_rss_bytes": 216084480,
+        "sample": false,
+        "parts": 1,
+        "canonical_size_bytes": 3611
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 441,
+        "elapsed_seconds": 0.03220587399937358,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    }
+  ],
+  "csv": {
+    "status": "PASS",
+    "rows": 60,
+    "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+    "max_rows": 100000,
+    "generation": "COMPLETE",
+    "transmission": "COMPLETE"
+  },
+  "xlsx": {
+    "status": "PASS",
+    "rows": 60,
+    "sha256": "9c58f76ed11e84547e45cb209b0e03376ef5e41fc7d954c37261ba110e9dad55",
+    "bytes": 3037,
+    "max_rows": 50000,
+    "generation": "COMPLETE",
+    "transmission": "COMPLETE"
+  },
+  "three_sources": {
+    "status": "PASS",
+    "rows": 120,
+    "sha256": "ef9d6e28a0c75a770e768ceaa38198bf36192145a7afdfdf8041135485da56dc",
+    "parts": 1
+  },
+  "bounded_many_to_many": {
+    "status": "PASS",
+    "rows": 2057,
+    "sha256": "02f0f164a2c077dc52d48d74c30e6e756638d56b158617f935ce3f6b97f4dcae",
+    "parts": 1
+  },
+  "parent_block_propagation": "PASS",
+  "duration_seconds": 33.335,
+  "provenance": "SYNTHETIC_REAL_API_POSTGRES_WORKERS; development checkpoint, final-SHA CI is separate"
+}

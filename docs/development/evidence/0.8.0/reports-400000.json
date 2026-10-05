@@ -1,0 +1,196 @@
+{
+  "version": "0.8.0",
+  "status": "PASS",
+  "project": "trackvance-v080-test-integrated-ebedb360f9e4",
+  "rows_per_source": 400000,
+  "sources": [
+    {
+      "alias": "a",
+      "rows": 400000,
+      "approval_id": "b3700d62-bd12-4bbd-ae47-042ced451482",
+      "status": "PASS"
+    },
+    {
+      "alias": "b",
+      "rows": 400000,
+      "approval_id": "dd819a1e-92d1-47af-b1b9-5b8604c0ec3b",
+      "status": "PASS"
+    },
+    {
+      "alias": "c",
+      "rows": 400000,
+      "approval_id": "4f42aae2-3b1f-410d-b631-055de1bc2db8",
+      "status": "PASS"
+    }
+  ],
+  "joins": [
+    {
+      "type": "INNER",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 200000,
+        "sha256": "aa3e3503d08cf123205687811a581e58edab02c737257b32edc18761c42436c5",
+        "parts": 5
+      },
+      "seconds": 71.042,
+      "status": "PASS"
+    },
+    {
+      "type": "LEFT",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 400000,
+        "sha256": "e1eb399659cc3d12b9555e9d48fe6a789bfcedec9e2819d7f8b4e84051278085",
+        "parts": 9
+      },
+      "seconds": 131.76,
+      "status": "PASS"
+    },
+    {
+      "type": "RIGHT",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 400000,
+        "sha256": "dedeb38301d58d2d4ab49a30942e9e16f9b4640f0eaf9c41b3de192929e9a9a3",
+        "parts": 9
+      },
+      "seconds": 121.268,
+      "status": "PASS"
+    },
+    {
+      "type": "FULL",
+      "preview_rows": 10,
+      "materialized": {
+        "status": "PASS",
+        "rows": 600000,
+        "sha256": "b654c84a28b3a2fe5af714ab9083c10433438d3e8ddf7ea6fd3e100ce693976e",
+        "parts": 13
+      },
+      "seconds": 180.018,
+      "status": "PASS"
+    }
+  ],
+  "resource_metrics": [
+    {
+      "join": "INNER",
+      "dataset": {
+        "rows": 200000,
+        "bytes": 15200391,
+        "elapsed_seconds": 52.586109734000274,
+        "max_rss_bytes": 218603520,
+        "sample": false,
+        "parts": 5,
+        "canonical_size_bytes": 1558202
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 761,
+        "elapsed_seconds": 0.618817632000173,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "LEFT",
+      "dataset": {
+        "rows": 400000,
+        "bytes": 24889672,
+        "elapsed_seconds": 99.79435178699987,
+        "max_rss_bytes": 272076800,
+        "sample": false,
+        "parts": 9,
+        "canonical_size_bytes": 2768242
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 441,
+        "elapsed_seconds": 1.2903308879995166,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "RIGHT",
+      "dataset": {
+        "rows": 400000,
+        "bytes": 25000782,
+        "elapsed_seconds": 94.32793039799981,
+        "max_rss_bytes": 288976896,
+        "sample": false,
+        "parts": 9,
+        "canonical_size_bytes": 2769241
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 761,
+        "elapsed_seconds": 0.6597063999997772,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    },
+    {
+      "join": "FULL",
+      "dataset": {
+        "rows": 600000,
+        "bytes": 34690062,
+        "elapsed_seconds": 142.7068693760002,
+        "max_rss_bytes": 300867584,
+        "sample": false,
+        "parts": 13,
+        "canonical_size_bytes": 3975528
+      },
+      "preview": {
+        "rows": 10,
+        "bytes": 441,
+        "elapsed_seconds": 0.797899836000397,
+        "max_rss_bytes": 270372864,
+        "sample": true
+      }
+    }
+  ],
+  "csv": {
+    "status": "PASS",
+    "rows": 100000,
+    "sha256": "512dc11e95c2725bb4bc634b83e0a872d6777e01240eddbd7d583e0a86a97f74",
+    "max_rows": 100000,
+    "generation": "COMPLETE",
+    "transmission": "COMPLETE"
+  },
+  "xlsx": {
+    "status": "PASS",
+    "rows": 50000,
+    "sha256": "3057db5d4fdbf33c95b3c1d4184437b082787c33473a5555610004a386ce8eb3",
+    "bytes": 1107130,
+    "max_rows": 50000,
+    "generation": "COMPLETE",
+    "transmission": "COMPLETE"
+  },
+  "csv_above_limit": {
+    "status": "PASS",
+    "requested_rows": 100001,
+    "execution_status": "FAILED",
+    "error_code": "REPORT_RESULT_LIMIT"
+  },
+  "xlsx_above_limit": {
+    "status": "PASS",
+    "requested_rows": 50001,
+    "execution_status": "FAILED",
+    "error_code": "REPORT_RESULT_LIMIT"
+  },
+  "three_sources": {
+    "status": "PASS",
+    "rows": 400000,
+    "sha256": "4d5f168b39d70c2e0bb0c1f375b6b91579e98a36c549c667d40f98819f95e164",
+    "parts": 9
+  },
+  "many_to_many_expansion_rejected": {
+    "status": "PASS",
+    "error_code": "REPORT_JOIN_EXPANSION"
+  },
+  "parent_block_propagation": "PASS",
+  "duration_seconds": 862.487,
+  "provenance": "SYNTHETIC_REAL_API_POSTGRES_WORKERS; development checkpoint, final-SHA CI is separate"
+}

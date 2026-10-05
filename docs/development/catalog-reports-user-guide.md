@@ -8,7 +8,7 @@ En **Datasets → Cargar dataset**, una carga por archivo puede dejar vacíos **
 
 Una nueva versión de un dataset existente conserva la clasificación vigente de ese activo. El área histórica aparece como dato de solo lectura. Para clasificar posteriormente una carga pendiente, abra **Catálogo → ficha del dataset → Resumen y gobierno → Editar gobierno**. Guarde macrodominio, dominio, descripción funcional, responsables, clasificación de información y criticidad. Esta operación modifica la metadata y registra su historia; conserva los identificadores de las versiones y las aprobaciones anteriores. Un conflicto de revisión exige actualizar la ficha antes de volver a guardar.
 
-Una clasificación completa necesita macrodominio y dominio activos y relacionados. Desactivar una entidad conserva su asociación histórica, pero impide su selección nueva y afecta la habilitación actual del recurso.
+Una clasificación completa necesita macrodominio y dominio activos y relacionados. Desactivar una entidad conserva su asociación histórica, pero impide su selección nueva y afecta la habilitación actual del recurso. El editor identifica los valores inactivos conservados; puede actualizar otras propiedades sin reclasificar ni retirar responsables históricos. Las asignaciones nuevas requieren identidades activas. Los términos de glosario ya asociados también se conservan si se desactivan y pueden retirarse explícitamente.
 
 ## Explorar evidencia en el Catálogo
 
@@ -62,6 +62,20 @@ Las tarjetas de fuente ofrecen páginas de revisiones del contrato y de versione
 
 ## Evidencia de navegador
 
-El recorrido automatizado `frontend/tests-e2e/catalog-reports.spec.ts` usa API, PostgreSQL, trabajadores y navegador reales. Verifica dos cargas sin clasificación, clasificación posterior sin nueva versión, dos aprobaciones estrictas, un `LEFT JOIN`, valores textuales `001` y `003`, nulos, descarga CSV, generación completa, linaje, nueva aprobación y reutilización posterior. Las capturas se generan con datos sintéticos de ese recorrido. El gate publica únicamente un resumen saneado y tres PNG; las trazas y archivos de diagnóstico permanecen privados.
+El recorrido automatizado `frontend/tests-e2e/catalog-reports.spec.ts` usa API, PostgreSQL, trabajadores y navegador reales. Verifica dos cargas sin clasificación, clasificación posterior sin nueva versión, dos aprobaciones estrictas, un `LEFT JOIN`, valores textuales `001` y `003`, nulos, descarga CSV, generación completa, linaje, nueva aprobación y reutilización posterior. También verifica navegación por teclado, métricas de publicación, selección de la revisión histórica exacta, preferencias de descarga, concurrencia al guardar una nueva revisión y edición de metadata que conserva un dominio inactivo. Las capturas se generan con datos sintéticos de ese recorrido. El gate publica únicamente un resumen saneado y tres PNG; las trazas y archivos de diagnóstico permanecen privados.
+
+La [validación local del frontend](evidence/0.8.0/frontend/validation.json) registra 252 pruebas aprobadas, TypeScript, lint, compilación y un recorrido real aprobado sin omisiones ni reintentos. El [resumen de navegador](evidence/0.8.0/frontend/browser-summary.json) conserva fecha, duración y hashes; el [historial saneado](evidence/0.8.0/frontend/attempt-history.json) distingue fallos anteriores corregidos del resultado final.
+
+La ficha de calidad muestra la ejecución, el contrato y las versiones exactas de entrada y salida:
+
+![Ficha real de calidad y contratos con datos sintéticos](evidence/0.8.0/frontend/catalog-quality.png)
+
+La vista previa mantiene `001`, `002`, `003`, decimales exactos y un nulo; descarga y publicación son acciones separadas:
+
+![Vista previa real de un LEFT JOIN y acciones de salida](evidence/0.8.0/frontend/report-preview.png)
+
+El dataset publicado conserva relaciones de fuente, aprobación, versión y ejecución; la pantalla identifica el alcance del linaje:
+
+![Linaje real del dataset publicado por Reportes](evidence/0.8.0/frontend/report-lineage.png)
 
 El resultado de una ejecución se acredita en su evidencia de certificación. Esta guía por sí sola no acredita que el recorrido ni GitHub Actions hayan finalizado correctamente.

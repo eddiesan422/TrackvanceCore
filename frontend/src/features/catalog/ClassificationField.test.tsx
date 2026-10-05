@@ -48,3 +48,16 @@ it('does not offer creation without permission and preserves legacy area as read
   expect(screen.getByText(/Área heredada: Operaciones históricas/)).toBeVisible()
   expect(api).not.toHaveBeenCalled()
 })
+
+it('shows the persisted inactive classification without silently clearing or replacing it', async () => {
+  const onChange = vi.fn()
+  renderApp(<ClassificationField value={{ macro_domain_id: 'old-macro', domain_id: 'old-domain' }} onChange={onChange} knownMacro={{ id: 'old-macro', name: 'Archivo', active: false }} knownDomain={{ id: 'old-domain', name: 'Histórico', active: false }}/>)
+  await screen.findByRole('option', { name: 'Finanzas' })
+  expect(screen.getByLabelText('Macrodominio (opcional)')).toHaveValue('old-macro')
+  expect(screen.getByRole('option', { name: 'Archivo (inactivo; clasificación conservada)' })).toBeInTheDocument()
+  expect(screen.getByLabelText('Dominio (opcional)')).toHaveValue('old-domain')
+  expect(screen.getByRole('option', { name: 'Histórico (inactivo; clasificación conservada)' })).toBeInTheDocument()
+  expect(onChange).not.toHaveBeenCalled()
+  await userEvent.setup().selectOptions(screen.getByLabelText('Macrodominio (opcional)'), 'finance')
+  expect(onChange).toHaveBeenCalledWith({ macro_domain_id: 'finance', domain_id: null })
+})

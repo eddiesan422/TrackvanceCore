@@ -122,14 +122,15 @@ def _landlock(read_files: list[str], writable_dir: str | None):
     try:
         # Only public runtime directories. No /app, /data, /home, /etc, /proc
         # directory grants; source paths and loader cache are exact file grants.
-        for location in ("/usr/lib", "/usr/local/lib", "/lib", "/lib64", str(Path(sys.prefix) / "lib")):
+        for location in ("/usr/lib", "/usr/local/lib", "/lib", "/lib64",
+                         str(Path(sys.prefix) / "lib"), str(Path(sys.base_prefix) / "lib")):
             if Path(location).is_dir():
                 allow(location, 1 | 4 | 8)
         for location in ("/etc/ld.so.cache", "/usr/share/zoneinfo/UTC", "/proc/self/cgroup",
                          "/proc/stat", "/sys/devices/system/cpu/online",
                          "/proc/sys/vm/overcommit_memory", "/sys/fs/cgroup/cpu.max",
                          "/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
-                         "/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current",
+                         "/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.peak",
                          "/sys/fs/cgroup/memory/memory.limit_in_bytes",
                          "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
             if Path(location).is_file():
@@ -338,6 +339,7 @@ def run(payload):
         "preserve_insertion_order": True,
     })
     started = time.monotonic()
+    initial_usage = linux_resource.getrusage(linux_resource.RUSAGE_SELF)
     try:
         connection.execute("SET allowed_paths = ?", [[path for source in sources for path in source["paths"]]])
         if staging:
@@ -369,9 +371,19 @@ def run(payload):
             emit("batch", rows=encoded)
             if payload["profile"] == "PREVIEW":
                 break
+        usage = linux_resource.getrusage(linux_resource.RUSAGE_SELF)
+        observed = {}
+        for path, metric in (("/sys/fs/cgroup/memory.current", "cgroup_memory_current_bytes"),
+                             ("/sys/fs/cgroup/memory.peak", "cgroup_memory_lifetime_peak_bytes")):
+            try:
+                observed[metric] = int(Path(path).read_text().strip())
+            except (OSError, ValueError):
+                pass  # Optional counter; never report an unavailable measure as zero.
         emit("complete", rows=rows, bytes=bytes_out, elapsed_seconds=time.monotonic() - started,
-             max_rss_bytes=linux_resource.getrusage(linux_resource.RUSAGE_SELF).ru_maxrss * 1024,
-             sample=payload["profile"] == "PREVIEW")
+             max_rss_bytes=usage.ru_maxrss * 1024,
+             cpu_user_seconds=usage.ru_utime - initial_usage.ru_utime,
+             cpu_system_seconds=usage.ru_stime - initial_usage.ru_stime,
+             sample=payload["profile"] == "PREVIEW", **observed)
     finally:
         connection.close()
 

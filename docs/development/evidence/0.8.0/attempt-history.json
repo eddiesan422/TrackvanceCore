@@ -1,0 +1,61 @@
+{
+  "version": "0.8.0",
+  "status": "CERTIFICATION_OPEN",
+  "raw_private_logs_published": false,
+  "attempts": [
+    {
+      "check": "Initial integrated API120",
+      "status": "FAIL",
+      "category": "PRODUCT",
+      "reason": "Detached ORM user during report revalidation; fresh Session user lookup corrected."
+    },
+    {
+      "check": "Initial Linux DuckDB confinement",
+      "status": "FAIL",
+      "category": "PRODUCT",
+      "reason": "DuckDB import started threads before confinement. Import moved after Landlock/seccomp; every new thread inherits policy."
+    },
+    {
+      "check": "Independent multipart oracle120",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "reason": "Oracle assumed record_number name instead of registered DERIVED_RECORD_NUMBER metadata."
+    },
+    {
+      "check": "Release synthetic content block120",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "reason": "Release request omitted its required reason; corrected request, authorization unchanged."
+    },
+    {
+      "check": "Integrated API120 expanded",
+      "status": "PASS",
+      "seconds": 33.335,
+      "details": "Four joins, triple source, bounded N:M, CSV/XLSX, complete oracle and parent restriction."
+    },
+    {
+      "check": "Intake400k forced Polars",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "reason": "Explicit POLARS exceeded its existing soft memory preflight; FAILED_PRECONDITION / RESOURCE_MEMORY_INSUFFICIENT. No partial approval. Harness now selects AUTO."
+    },
+    {
+      "check": "Integrated API400k AUTO",
+      "status": "PASS",
+      "seconds": 862.487,
+      "details": "All joins and full-population hashes; CSV100000/XLSX50000 exact; both above-limit requests FAILED without published output."
+    },
+    {
+      "check": "GitHub initial 0.8 workflow",
+      "status": "FAIL",
+      "category": "RUNTIME_COMPATIBILITY",
+      "sha": "d379d23848a5dd67fc25850d9e571eb1fb8d8f2c",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37345607091",
+      "backend_passed": 1845,
+      "backend_failed": 21,
+      "backend_skipped": 16,
+      "reason": "Report child interrupted only in hosted Python layout; diagnosis and repeat pending. Dependent jobs SKIPPED do not pass."
+    }
+  ],
+  "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."
+}

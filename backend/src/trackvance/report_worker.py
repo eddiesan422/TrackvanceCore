@@ -196,17 +196,23 @@ def materialize(identity, owner):
     checkpoint = lambda: _checkpoint(identity, owner)
     last_progress = 0.0
     part_count = 0
+    disk_free_at_start = shutil.disk_usage(staging).free
+    min_disk_free_observed = disk_free_at_start
+    max_temporary_bytes_sampled = 0
 
     def progress(rows, byte_count, parts):
-        nonlocal last_progress
+        nonlocal last_progress, min_disk_free_observed, max_temporary_bytes_sampled
         now = time.monotonic()
         if now - last_progress < 1:
             return
         last_progress = now
-        if shutil.disk_usage(staging).free < 512 * 1024**2:
+        disk_free = shutil.disk_usage(staging).free
+        min_disk_free_observed = min(min_disk_free_observed, disk_free)
+        if disk_free < 512 * 1024**2:
             raise OperationError(422, "REPORT_DISK_LIMIT", "No hay reserva de disco suficiente para continuar.")
         # Includes DuckDB spill while running, not only leftovers after exit.
         observed = sum(p.stat().st_size for p in staging.rglob("*") if p.is_file())
+        max_temporary_bytes_sampled = max(max_temporary_bytes_sampled, observed)
         if observed > limits.temp_bytes + limits.max_bytes:
             raise OperationError(422, "REPORT_TEMP_LIMIT", "El staging excedió el límite del trabajo.")
         with SessionLocal() as db:
@@ -217,19 +223,26 @@ def materialize(identity, owner):
                             "temporary_bytes_observed": observed}
             db.commit()
     try:
+        query_started = time.monotonic()
         messages = execute_messages(inputs, plan, "DATASET", staging=spill, check=checkpoint)
         try:
             parts, columns, metrics = _write_parts(messages, staging, limits, checkpoint, progress)
             part_count = len(parts)
         finally:
             messages.close()
+        query_seconds = time.monotonic() - query_started
         checkpoint()
         from .dataset_scans import profile_paths
         profile_limits = replace(AcquisitionLimits.configured(), max_rows=limits.max_rows,
                                  timeout_seconds=limits.timeout_seconds, memory_bytes=limits.memory_bytes)
         overrides = _logical_columns(columns)
+        profiling_started = time.monotonic()
         profiled = profile_paths(parts, column_overrides=overrides, limits=profile_limits,
                                  check=checkpoint, temp_byte_limit=limits.temp_bytes)
+        metrics.update(query_seconds=query_seconds, profiling_seconds=time.monotonic() - profiling_started,
+                       disk_free_bytes_at_start=disk_free_at_start,
+                       disk_free_bytes_min_observed=min_disk_free_observed,
+                       temporary_bytes_sampled_max=max_temporary_bytes_sampled)
         checkpoint()
         # File preparation and verification precede the short publication fence.
         # New artifact rows remain uncommitted until version + lineage + job do.

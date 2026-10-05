@@ -272,6 +272,43 @@ def test_inactive_term_can_be_retained_without_a_new_association(approved, authe
     assert new_association.status_code == 422 and new_association.json()["error"]["code"] == "TERM_INACTIVE"
 
 
+def test_inactive_governance_can_be_retained_but_not_newly_assigned(approved, authenticated, database):
+    macro, domain = classify(authenticated, approved["dataset"])
+    with database() as db:
+        password_hash = db.get(User, "test-user").password_hash
+        owner = User(name="Historical owner", email="historical-owner@test.local", password_hash=password_hash)
+        other = User(name="Other inactive owner", email="inactive-other@test.local", active=False, password_hash=password_hash)
+        foreign = User(name="Foreign owner", email="foreign-owner@test.local", organization_id="foreign-org", password_hash=password_hash)
+        db.add_all([owner, other, foreign])
+        db.commit()
+        owner_id, other_id, foreign_id = owner.id, other.id, foreign.id
+    path = f"/api/v1/datasets/{approved['dataset']}/governance"
+    assert authenticated.patch(path, json={"expected_version": 2, "business_owner_id": owner_id}).status_code == 200
+    with database() as db:
+        db.get(User, owner_id).active = False
+        db.commit()
+    assert authenticated.patch(f"/api/v1/governance/macrodomains/{macro['id']}", json={"expected_version": 1, "active": False}).status_code == 200
+    assert authenticated.patch(f"/api/v1/governance/domains/{domain['id']}", json={"expected_version": 1, "active": False}).status_code == 200
+    retained = {"expected_version": 3, "macro_domain_id": macro["id"], "domain_id": domain["id"],
+                "business_owner_id": owner_id, "description": "Updated while retaining history"}
+    response = authenticated.patch(path, json=retained)
+    assert response.status_code == 200, response.text
+    assert authenticated.patch(path, json=retained).status_code == 409
+    for identity in (other_id, foreign_id):
+        refused = authenticated.patch(path, json={"expected_version": 4, "business_owner_id": identity})
+        assert refused.status_code == 422 and refused.json()["error"]["code"] == "RESPONSIBLE_INVALID"
+    unclassified = authenticated.post("/api/v1/datasets", json={"name": "New classification attempt"}).json()
+    refused = authenticated.patch(f"/api/v1/datasets/{unclassified['id']}/governance", json={
+        "expected_version": 1, "macro_domain_id": macro["id"], "domain_id": domain["id"]})
+    assert refused.status_code == 422 and refused.json()["error"]["code"] == "MACRODOMAIN_INVALID"
+    with database() as db:
+        persisted = db.get(Dataset, approved["dataset"])
+        assert persisted.business_owner_id == owner_id and persisted.governance_version == 4
+        eligibility = dataset_eligibility(db, db.get(User, "test-user"), db.get(DatasetVersion, approved["output"]))
+        assert eligibility["strict_approval"]["approved"] and not eligibility["eligible"]
+        assert any(reason["code"] == "CLASSIFICATION_INCOMPLETE" for reason in eligibility["reasons"])
+
+
 def test_native_content_paths_revalidate_transitive_restrictions(approved, authenticated, database, tmp_path):
     with database() as db:
         derived = Dataset(name="Report derived")

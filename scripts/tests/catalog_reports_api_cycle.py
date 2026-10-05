@@ -229,10 +229,15 @@ def certify(rows, directory):
     result = {"version": "0.8.0", "status": "FAIL", "project": project, "rows_per_source": rows, "sources": [], "joins": []}
     began = time.monotonic()
     for alias in ("a", "b", "c"):
+        source_started = time.monotonic()
         source, approval = acquire(client, directory, alias, rows, macro["id"], domain["id"])
         sources.append(source)
         approvals.append(approval)
-        result["sources"].append({"alias": alias, "rows": rows, "approval_id": approval["id"], "status": "PASS"})
+        result["sources"].append({"alias": alias, "rows": rows, "approval_id": approval["id"], "status": "PASS",
+                                  "acquire_and_intake_seconds": round(time.monotonic() - source_started, 3),
+                                  "intake_counts": {k: v for k, v in approval["metrics"].items() if isinstance(v, (int, float, bool))},
+                                  "engine": approval.get("execution_plan", {}).get("engine")})
+        print(json.dumps({"stage": "SOURCE_APPROVED", "alias": alias, "rows": rows}), flush=True)
     for kind in ("INNER", "LEFT", "RIGHT", "FULL"):
         started = time.monotonic()
         query = draft(sources[:2], kind)
@@ -262,6 +267,7 @@ def certify(rows, directory):
             "preview": {key: value for key, value in sample_execution["metrics"].items() if isinstance(value, (int, float, bool))}})
         result["joins"].append({"type": kind, "preview_rows": len(preview["rows"]), "materialized": integrity,
                                 "seconds": round(time.monotonic() - started, 3), "status": "PASS"})
+        print(json.dumps({"stage": "JOIN_VERIFIED", "join": kind, "rows": integrity["rows"]}), flush=True)
         if kind == "INNER":
             # SQL and guided mode share the same frozen inputs and join policy.
             sql = {**query, "mode": "SQL", "sql": 'SELECT a.key AS a_key,a.value AS a_value,b.key AS b_key,b.value AS b_value FROM a INNER JOIN b ON a.key=b.key AND a.zone=b.zone ORDER BY a.key,b.key'}

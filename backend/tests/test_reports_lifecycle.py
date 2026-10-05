@@ -426,7 +426,8 @@ sys.exit(1)
 '''
     environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent",
                    "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1",
-                   "DATABASE_URL": DATABASE_URL, "TRACKVANCE_STORAGE_DIR": str(STORAGE_DIR)}
+                   "DATABASE_URL": DATABASE_URL, "TRACKVANCE_STORAGE_DIR": str(STORAGE_DIR),
+                   "LD_LIBRARY_PATH": str(Path(sys.base_prefix) / "lib")}
     crashed = subprocess.run([sys.executable, "-I", "-B", "-c", script,
                               str(Path(__file__).resolve().parents[1] / "src")],
                               env=environment, capture_output=True, text=True, timeout=60, check=False)

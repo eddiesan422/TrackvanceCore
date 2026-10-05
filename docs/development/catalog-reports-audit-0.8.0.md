@@ -49,6 +49,13 @@ terminó con 15 jobs SUCCESS. Es evidencia de 0.7.0, no certificación de 0.8.0.
 La revisión aplicada, la igualdad de metadata/archivos y el estado operativo
 habitual se comprobarán en copia protegida y otra vez antes/después de promover.
 
+La inspección posterior sobre copia fría completa confirmó aplicación **0.7.0**
+y Alembic **0016_acquisition_diagnostics**, sin trabajos QUEUED/RUNNING. La copia
+incluyó WAL y pasó comparación binaria antes de recuperar PostgreSQL sólo en el
+clon. Los helpers montaron la fuente en solo lectura; el clon no tuvo red,
+puertos ni workers. El inventario habitual permaneció idéntico. Esta inspección
+no sustituye el respaldo fresco y su restore previo a la actualización final.
+
 ## Dependencias, riesgos y decisiones
 
 Se conserva el monolito modular FastAPI/React/PostgreSQL. El parser nuevo es

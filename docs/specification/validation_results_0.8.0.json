@@ -2,14 +2,15 @@
   "Corte": "Implementación 0.8.0; certificación en curso. Los resultados 0.7.0 se conservan como antecedentes independientes.",
   "Migración PostgreSQL": "PASS 0016→0017→0016→0017; 55 tablas, 645 columnas, 109 FK y proyección histórica exacta.",
   "Aislamiento y recuperación unitarios": "PASS 206 pruebas de snapshot/archivo/preflight; guardas nuevas adicionales verificadas. No sustituye restore real.",
-  "Frontend": "PASS 251 pruebas sin omitidos; lint, tipos y build. Navegador final con historial exacto pendiente.",
-  "Reportes Linux": "PASS 33 pruebas SQL/exportación, 14 de ejecutor (cuatro observaciones strace) y 18 de ciclo. Las últimas repeticiones cubren cambios de locks/leases.",
+  "Frontend": "PASS 252 pruebas sin omitidos; lint, tipos y build. Navegador final real PASS 34,88 s, un recorrido sin omisiones/reintentos: cadena completa, teclado, métricas, revisiones exactas, preferencias y retención de clasificación inactiva.",
+  "Reportes Linux": "PASS 65 pruebas completas sin omisiones en CPython relocalizado /opt/hostedtoolcache: 33 SQL/exportación, 14 ejecutor (cuatro observaciones strace) y 18 lifecycle. Biblioteca del runtime derivada sin heredar entorno del coordinador; Landlock permanece activo.",
   "Resolución PostgreSQL concurrente": "PASS real: dos aprobaciones se publican entre lecturas; contexto congelado [1,1], siguiente [2,2], sin mezcla; schema/archivos exclusivos eliminados.",
   "API integrada pequeña": "PASS 120 filas por cada una de tres fuentes; INNER/LEFT/RIGHT/FULL, triple join, N:M acotado, publicación/oráculo completo, CSV/XLSX y bloqueo padre; 33,335 s.",
-  "Regresión backend completa": "Último corte anterior PASS 1.825 pruebas, 32 omitidas por plataforma/JVM. Repetición tras últimos cambios en curso.",
-  "400k/1M por fuente": "PENDIENTE final con oráculo completo. Ensayo 400k en curso; un rechazo previo del arnés que forzaba Polars quedó preservado como fallo.",
+  "Regresión backend completa": "PASS 1.841 pruebas, 40 omitidas por plataforma/JVM, 13 avisos, 350,92 s; Ruff y mypy de 75 módulos pasan. Los cambios posteriores de retención/métricas se prueban específicamente y CI vuelve a ejecutar todo.",
+  "400k/1M por fuente": "400k PASS completo en 862,487 s, con tres fuentes; 1M pendiente. CSV100000/XLSX50000 íntegros y rechazo al exceder ambos límites.",
   "Recuperación nativa/histórica": "PENDIENTE restore real 0.8.0 y backup auténtico 0.7.0→0.8.0.",
-  "GitHub Actions final": "PENDIENTE commit final: todos los trabajos deben terminar SUCCESS.",
-  "Instalación habitual": "PENDIENTE actualización autorizada después de los gates; durante ensayos el inventario protegido sigue intacto.",
-  "PDF": "Borrador de 138 páginas revisado visualmente; corregido wrap de CLI. Candidato final requiere nueva revisión completa."
+  "GitHub Actions final": "Primer commit d379d23 FAIL: frontend SUCCESS; backend 1.845 PASS/21 FAIL/16 SKIP por ejecución en Python hosted; dependientes SKIPPED. Corrección y SHA final pendiente, sin cierre.",
+  "Instalación habitual": "Inspección aislada PASS: aplicación 0.7.0, migración 0016_acquisition_diagnostics, cero trabajos en cola o activos. Copia fría completa/WAL y recuperación sólo en clone, inventario real intacto. Promoción pendiente.",
+  "PDF": "Borrador de 138 páginas revisado visualmente; corregido wrap de CLI. Candidato final requiere nueva revisión completa.",
+  "Gobierno histórico": "PASS 34 pruebas de gobierno; retención de identidades ya inactivas sin nuevas asignaciones inválidas. Selección conjunta gobierno/SQL/exportación: 67 PASS en 15,49 s."
 }
