@@ -253,7 +253,8 @@ def materialize(identity, owner):
             context = resolved_context(db, item.context_id, user, expired_ok=True)
             canonical = storage_provider.put_dataset(db, parts, "REPORT_CANONICAL", organization_id,
                 artifact_id=digest({"execution": identity, "attempt": attempt, "owner": owner})[:64],
-                metadata={"report_execution_id": identity, "query_hash": plan["query_hash"]})
+                metadata={"report_execution_id": identity, "query_hash": plan["query_hash"]},
+                temporary_parent=staging)
             prepared = storage_provider.dataset_paths(canonical)
             if sum(pl.scan_parquet(p).select(pl.len()).collect().item() for p in prepared) != metrics["rows"]:
                 raise OperationError(422, "REPORT_PUBLICATION_INTEGRITY", "Las partes preparadas no coinciden con el conteo completo.")

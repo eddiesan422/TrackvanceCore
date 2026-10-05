@@ -51,7 +51,8 @@ class StorageProvider(Protocol):
 
     def put_dataset(self, db: Session, parts: list[Path], kind: str,
                     organization_id: str, *, name: str = "canonical.dataset.json",
-                    artifact_id: str | None = None, metadata: dict | None = None) -> Artifact: ...
+                    artifact_id: str | None = None, metadata: dict | None = None,
+                    temporary_parent: Path | None = None) -> Artifact: ...
 
     def put_file(
         self,
@@ -209,18 +210,26 @@ class FileArtifactStore:
 
     def put_dataset(self, db: Session, parts: list[Path], kind: str,
                     organization_id: str, *, name: str = "canonical.dataset.json",
-                    artifact_id: str | None = None, metadata: dict | None = None) -> Artifact:
+                    artifact_id: str | None = None, metadata: dict | None = None,
+                    temporary_parent: Path | None = None) -> Artifact:
         """Publish parts first and a complete verified descriptor last, in one DB tx.
 
         The caller owns the publication lease and transaction. A rollback can
         leave unreferenced immutable bytes; it cannot expose a DatasetVersion or
         overwrite the result of another attempt.
+
+        A caller with recoverable attempt staging supplies ``temporary_parent``
+        so a process crash cannot strand the descriptor in the shared tmp area.
+        The local adapter requires an existing directory inside its storage.
         """
         import polars as pl
         import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
         if not parts or len(parts) > 100_000:
             raise ArtifactIntegrityError("DATASET_DESCRIPTOR_INVALID: Se requiere al menos una parte.")
+        temporary_directory = self.checked_path(temporary_parent) if temporary_parent is not None else None
+        if temporary_directory is not None and not temporary_directory.is_dir():
+            raise ArtifactIntegrityError("DATASET_STAGING_INVALID: El staging debe ser un directorio existente.")
         identity = artifact_id or uid()
         descriptions: list[dict] = []
         schema = None
@@ -245,7 +254,8 @@ class FileArtifactStore:
                           "parts": descriptions, "row_count": sum(p["row_count"] for p in descriptions),
                           "data_size_bytes": sum(p["size_bytes"] for p in descriptions),
                           "metadata": metadata or {}}
-            staged = self.temporary_path(".json")
+            staged = (temporary_directory / f"descriptor-{uid()}.json"
+                      if temporary_directory is not None else self.temporary_path(".json"))
             try:
                 staged.write_text(json.dumps(descriptor, ensure_ascii=False, sort_keys=True,
                                              separators=(",", ":")), encoding="utf-8")

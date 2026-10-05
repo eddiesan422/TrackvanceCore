@@ -3,6 +3,7 @@
 import json
 import os
 import zipfile
+from copy import deepcopy
 
 import docker_backup_cycle
 import pytest
@@ -68,12 +69,53 @@ def test_restored_services_use_only_private_images_and_read_only_working_source(
     source = path.read_text()
     assert 'build: !reset null' in source
     services = yaml.safe_load(source.replace('!reset null', 'null'))['services']
-    assert len(services) == 9
+    assert set(services) == set(recovery.RESTORED_SERVICES)
+    assert len(services) == 10
     assert all(service.get('build') is None for service in services.values())
     for name, service in services.items():
         if name != 'postgres':
             assert service['image'].startswith('trackvance-v070-isolated:')
         assert all(mount['read_only'] for mount in service.get('volumes', []))
+    assert services['report-worker']['mem_limit'] == '256m'
+    assert services['report-worker']['cpus'] == 0.5
+    assert services['report-worker']['pids_limit'] == 128
+
+
+def current_snapshot():
+    return {'schema_version': recovery.docker_state.VERIFY_SCHEMA_VERSION,
+            'migration': recovery.docker_state.CURRENT_MIGRATION,
+            'tables': {name: {} for name in recovery.docker_state.CURRENT_STATE_TABLES}}
+
+
+@pytest.mark.parametrize('damage', ['old_schema', 'old_migration', 'missing', 'unknown'])
+def test_native_snapshot_rejects_stale_or_incomplete_current_inventory(damage):
+    snapshot = current_snapshot()
+    if damage == 'old_schema':
+        snapshot['schema_version'] = 7
+    elif damage == 'old_migration':
+        snapshot['migration'] = '0016_acquisition_diagnostics'
+    elif damage == 'missing':
+        snapshot['tables'].pop('report_definitions')
+    else:
+        snapshot['tables']['unknown_table'] = {}
+    with pytest.raises(ValueError, match='estado completo'):
+        recovery.require_current_snapshot(snapshot)
+
+
+def test_restored_061_keeps_exact_history_and_rejects_new_activity_or_classification():
+    before = {'schema_version': 5, 'tables': {'users': {'legacy-user': 'hash'}}}
+    after = current_snapshot()
+    recovery.require_preserved_061_history(before, after, deepcopy(before))
+    assert len(after['tables']) == 55
+    changed = deepcopy(before)
+    changed['tables']['users']['legacy-user'] = 'different-hash'
+    with pytest.raises(ValueError, match='exactamente'):
+        recovery.require_preserved_061_history(before, after, changed)
+    for table in ('acquisition_runs', 'strict_approvals', 'macro_domains', 'report_contexts'):
+        damaged = deepcopy(after)
+        damaged['tables'][table]['invented-row'] = 'hash'
+        with pytest.raises(ValueError, match='actividad nueva'):
+            recovery.require_preserved_061_history(before, damaged, before)
 
 
 def test_native_restore_reuses_source_uuid_images_and_rejects_main_alias(tmp_path):

@@ -54,7 +54,8 @@ def main():
             run(["docker", "build", "-t", "trackvance-v070-isolated:web", "-f",
                  "deploy/docker/frontend.Dockerfile", "."], directory, "web-build")
         started = True
-        certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240"])
+        certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
+                                                   *certification.SERVICES])
         run([sys.executable, "scripts/tests/volume_cycle.py", "--context", str(directory),
              "--sizes", str(args.tier_mib)], directory, "volume")
         volume = json.loads((directory / "volume-evidence.json").read_text(encoding="utf-8"))

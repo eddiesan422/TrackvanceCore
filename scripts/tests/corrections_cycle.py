@@ -382,7 +382,8 @@ def main():
             run(["docker", "build", "-t", context["image"], "-f", "backend/Dockerfile", "."], directory, "backend-build")
             run(["docker", "build", "-t", "trackvance-v070-isolated:web", "-f", "deploy/docker/frontend.Dockerfile", "."], directory, "web-build")
             started = True
-            certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240"])
+            certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
+                                                        *certification.SERVICES])
         certify(directory, context, args)
     finally:
         if started:

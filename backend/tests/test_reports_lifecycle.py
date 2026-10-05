@@ -404,7 +404,7 @@ def test_worker_recovery_reclaims_old_prepared_attempt_and_publishes_once(databa
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Real isolated executor runs in Docker")
-@pytest.mark.parametrize("crash_stage", ["MATERIALIZATION", "PROFILING"])
+@pytest.mark.parametrize("crash_stage", ["MATERIALIZATION", "PROFILING", "DESCRIPTOR"])
 def test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup(database, report_draft, crash_stage):
     from trackvance import report_worker
     from trackvance.artifactstore import artifact_store
@@ -412,6 +412,8 @@ def test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup(datab
     identity = _queue(database, report_draft, "Process crash recovery", "process-crash-recovery")
     global_tmp = artifact_store.location("tmp")
     before_global_tmp = {str(path) for path in global_tmp.rglob("*")}
+    artifact_root = artifact_store.location("artifacts")
+    before_artifact_folders = {folder.name for folder in artifact_root.iterdir() if folder.is_dir()}
     script = '''
 import os, sys
 sys.path.insert(0, sys.argv[1])
@@ -437,6 +439,16 @@ if sys.argv[2] == "PROFILING":
         kwargs["check"] = crash_checkpoint
         return original_profile(*args, **kwargs)
     dataset_scans.profile_paths = crash_during_profile
+elif sys.argv[2] == "DESCRIPTOR":
+    report_worker._write_parts = original
+    original_put_file = report_worker.storage_provider.put_file
+    def crash_before_descriptor_promotion(db, source, kind, *args, **kwargs):
+        if kind == "REPORT_CANONICAL":
+            assert source.name.startswith("descriptor-") and source.parent.parent.name == sys.argv[3]
+            assert source.is_file() and source.read_text().startswith('{"data_size_bytes":')
+            os._exit(77)
+        return original_put_file(db, source, kind, *args, **kwargs)
+    report_worker.storage_provider.put_file = crash_before_descriptor_promotion
 report_worker.process_once("crashed-process")
 sys.exit(1)
 '''
@@ -445,7 +457,7 @@ sys.exit(1)
                    "DATABASE_URL": DATABASE_URL, "TRACKVANCE_STORAGE_DIR": str(STORAGE_DIR),
                    "LD_LIBRARY_PATH": str(Path(sys.base_prefix) / "lib")}
     crashed = subprocess.run([sys.executable, "-I", "-B", "-c", script,
-                              str(Path(__file__).resolve().parents[1] / "src"), crash_stage],
+                              str(Path(__file__).resolve().parents[1] / "src"), crash_stage, identity],
                               env=environment, capture_output=True, text=True, timeout=60, check=False)
     assert crashed.returncode == 77, crashed.stderr
     staging = artifact_store.location("report-staging", identity)
@@ -454,6 +466,14 @@ sys.exit(1)
     assert {str(path) for path in global_tmp.rglob("*")} == before_global_tmp
     if crash_stage == "PROFILING":
         assert list(abandoned.glob("profiling-*.spill"))
+    if crash_stage == "DESCRIPTOR":
+        assert len(list(abandoned.glob("descriptor-*.json"))) == 1
+        with database() as db:
+            referenced_before_retry = set(db.scalars(select(Artifact.id)))
+        uncommitted_candidates = {folder.name for folder in artifact_root.iterdir()
+                                  if folder.is_dir() and folder.name not in before_artifact_folders}
+        assert uncommitted_candidates
+        assert not uncommitted_candidates.intersection(referenced_before_retry)
     with database() as db:
         job = db.scalar(select(Job).where(Job.report_execution_id == identity))
         assert job.status == "RUNNING" and job.attempts == 1
@@ -481,6 +501,9 @@ sys.exit(1)
         assert report_worker.cleanup_abandoned(db) >= 1
     assert not abandoned.exists()
     assert marker.read_text() == "synthetic-marker"
+    assert {str(path) for path in global_tmp.rglob("*")} == before_global_tmp
+    if crash_stage == "DESCRIPTOR":
+        assert all(not (artifact_root / candidate).exists() for candidate in uncommitted_candidates)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Real isolated executor runs in Docker")

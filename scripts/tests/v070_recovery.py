@@ -23,6 +23,24 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import certification_v070
 import docker_state
 
+RESTORED_SERVICES = (*certification_v070.SERVICES, 'report-worker')
+
+
+def require_current_snapshot(state):
+    """Use the current frozen fingerprint inventory, including all new tables."""
+    if (state.get('schema_version') != docker_state.VERIFY_SCHEMA_VERSION
+            or state.get('migration') != docker_state.CURRENT_MIGRATION
+            or set(state.get('tables', {})) != docker_state.CURRENT_STATE_TABLES):
+        raise ValueError('La huella nativa no contiene el estado completo 0.8.0.')
+
+
+def require_preserved_061_history(before, after, normalized):
+    require_current_snapshot(after)
+    if normalized != before:
+        raise ValueError('La proyección restaurada no conserva exactamente la historia 0.6.1.')
+    if any(after['tables'][name] for name in docker_state.ASYNC_STATE_TABLES | docker_state.CATALOG_STATE_TABLES):
+        raise ValueError('La actualización produjo actividad nueva o gobierno histórico inventado.')
+
 
 def guarded_project(project):
     if not re.fullmatch(r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}', project):
@@ -48,7 +66,7 @@ def target_override(directory, project, *, backend_image='trackvance-v070-isolat
                 r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}:' + role, image):
             raise ValueError('La restauración sólo acepta imágenes privadas de certificación.')
     services = {}
-    for name in certification_v070.SERVICES:
+    for name in RESTORED_SERVICES:
         if name in {'postgres', 'web'}:
             continue
         services[name] = {'build': None, 'image': backend_image, 'pids_limit': 256,
@@ -56,6 +74,10 @@ def target_override(directory, project, *, backend_image='trackvance-v070-isolat
             'volumes': [{'type': 'bind', 'source': str(ROOT / 'backend/src'), 'target': '/app/backend/src', 'read_only': True},
                         {'type': 'bind', 'source': str(ROOT / 'backend/migrations'), 'target': '/app/backend/migrations', 'read_only': True},
                         {'type': 'bind', 'source': str(ROOT / 'scripts'), 'target': '/app/scripts', 'read_only': True}]}
+        if name == 'report-worker':
+            # Restored historical fixtures have no REPORT jobs. Keep the new
+            # coordinator bounded and stopped during exact state comparison.
+            services[name].update(mem_limit='256m', cpus=0.5, pids_limit=128)
     services['web'] = {'build': None, 'image': web_image, 'pids_limit': 128}
     services['postgres'] = {'pids_limit': 256}
     # Compose ignores a plain JSON null when merging build. The reset tag
@@ -168,8 +190,7 @@ def native_cycle(context_path, evidence_path=None):
         docker_state.backup(source, backup)
         docker_state.verify_backup(backup)
         before = json.loads((backup / 'state.json').read_text(encoding='utf-8'))
-        if before['schema_version'] != docker_state.VERIFY_SCHEMA_VERSION or before['migration'] != docker_state.CURRENT_MIGRATION or len(before['tables']) != 42:
-            raise ValueError('La huella nativa no contiene el estado completo 0.8.0.')
+        require_current_snapshot(before)
         source_compose = ['docker', 'compose', '--env-file', str(directory / 'test.env'), '-p', source,
             '-f', str(ROOT / 'compose.yml'), '-f', str(directory / 'compose.json')]
         result['backup_privacy'] = scan_backup_plaintext(backup, source_compose,
@@ -181,15 +202,15 @@ def native_cycle(context_path, evidence_path=None):
         restored = docker_state.inventory(target)
         if any(item['running'] for item in restored['containers']):
             raise ValueError('La restauración activó un componente antes de concluir la revisión.')
-        if {item['service'] for item in restored['containers']} != set(certification_v070.SERVICES):
-            raise ValueError('La restauración no preservó el inventario de nueve servicios.')
+        if {item['service'] for item in restored['containers']} != set(RESTORED_SERVICES):
+            raise ValueError('La restauración no preservó el inventario actual con REPORT detenido.')
         stage = 'restored_multipart'
         docker_state.compose(target, 'up', '-d', '--wait', 'api', environment=target_environment)
         api = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api['id'], evidence / 'restored-state.json')
         if after != before:
             raise ValueError('La segunda huella restaurada no coincide exactamente.')
-        result.update(status='PASS', revision=before['migration'], state_schema_version=before['schema_version'], tables=42,
+        result.update(status='PASS', revision=before['migration'], state_schema_version=before['schema_version'], tables=len(before['tables']),
             table_counts={name: len(rows) for name, rows in before['tables'].items()},
             verified_artifacts=before['verified_artifacts'], verified_source_secrets=before['verified_source_secrets'],
             verified_delivery_secrets=before['verified_delivery_secrets'],
@@ -363,7 +384,7 @@ with SessionLocal() as db:
         docker_state.ensure_fresh_project(source)
         source_claimed = False
         result['source_destroyed_before_restore'] = True
-        stage = 'restore_070_stopped'
+        stage = 'restore_080_stopped'
         docker_state.compose = compose_adapter(target, target_env_file, override, target_environment)
         target_claimed = True
         receipt = docker_state.restore(backup, target, start=False, web_port=target_port)
@@ -375,11 +396,9 @@ with SessionLocal() as db:
         api_container = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api_container['id'], evidence / 'restored-state.json')
         normalized = docker_state._copy_snapshot(api_container['id'], evidence / 'legacy-state.json', command='snapshot-legacy-v5')
-        if normalized != before or after['schema_version'] != docker_state.VERIFY_SCHEMA_VERSION or len(after['tables']) != 42:
-            raise ValueError('La proyección restaurada no conserva exactamente la historia 0.6.1.')
-        if any(after['tables'][name] for name in docker_state.ASYNC_STATE_TABLES):
-            raise ValueError('La actualización produjo actividad nueva o notificaciones retroactivas.')
-        result.update(exact_historical_state='PASS', schema_upgrade='0012→0016', native_tables=42, historical_tables=31,
+        require_preserved_061_history(before, after, normalized)
+        result.update(exact_historical_state='PASS', schema_upgrade='0012→0017', native_tables=len(after['tables']), historical_tables=31,
+            new_catalog_tables_empty=True,
             source_state_sha256=docker_state.canonical_hash(before), restored_legacy_sha256=docker_state.canonical_hash(normalized),
             artifacts=after['verified_artifacts'], source_secrets=after['verified_source_secrets'], delivery_secrets=after['verified_delivery_secrets'],
             historical_notifications=len(after['tables']['notification_deliveries']), no_history_replay='PASS', restore=receipt['status'])

@@ -205,9 +205,9 @@ def test_application_flows_materialize_opaque_storage_references(
             return self.local.dataset_paths(local)
 
         def put_dataset(self, db, parts, kind, organization_id, *, name="canonical.dataset.json",
-                        artifact_id=None, metadata=None):
+                        artifact_id=None, metadata=None, temporary_parent=None):
             artifact = self.local.put_dataset(db, parts, kind, organization_id, name=name,
-                artifact_id=artifact_id, metadata=metadata)
+                artifact_id=artifact_id, metadata=metadata, temporary_parent=temporary_parent)
             for item in db.scalars(select(Artifact).where(Artifact.organization_id == organization_id)):
                 if item.path.startswith("test-object://"):
                     continue

@@ -298,10 +298,14 @@ para PREVIEW, CSV, XLSX y fallo de recursos, sin mutaciones ni archivos resultad
 `test_reports_lifecycle.py` usa Intake y JobQueue reales hasta publicación y nueva
 aprobación. Windows marca explícitamente las pruebas del aislador como no aplicables;
 el gate Linux y la certificación aislada deben ejecutarlas.
-La recuperación incluye caída real `os._exit` durante materialización y profiling:
-el spill de profiling pertenece a `report-staging/<execution>/<attempt>-<owner>`.
+La recuperación incluye caída real `os._exit` durante materialización, profiling
+y preparación del descriptor. El spill de profiling y el JSON intermedio del
+descriptor pertenecen a `report-staging/<execution>/<attempt>-<owner>`.
+`StorageProvider.put_dataset` admite `temporary_parent` opcional, validado dentro
+del proveedor antes de promover partes; Reportes pasa su staging existente.
 La limpieza elimina únicamente el intento abandonado y conserva otro intento
-activo; los callers de profiling ajenos a Reportes conservan su ubicación previa.
+activo y los artefactos comprometidos. Las llamadas ajenas a Reportes conservan
+la ubicación previa cuando omiten ese parámetro.
 
 `scripts/tests/reports_runtime_probe.py` permite observar el runtime confinado en
 CI con datos sintéticos, sin revelar stderr o trazas. Reporta salida/señal, errno,

@@ -60,6 +60,21 @@ def test_artifact_store_copy_verify_immutability_and_boundary(database, tmp_path
             store.verify(first)
 
 
+def test_multipart_descriptor_rejects_unowned_or_non_directory_staging_before_promotion(database, tmp_path):
+    root = tmp_path / "store"
+    root.mkdir()
+    store = FileArtifactStore(root)
+    part = root / "part.parquet"
+    pl.DataFrame({"id": [1, 2]}).write_parquet(part)
+    with database() as db:
+        for temporary_parent in [tmp_path, root, part, root / "missing"]:
+            with pytest.raises(ArtifactIntegrityError):
+                store.put_dataset(db, [part], "REPORT_CANONICAL", "default",
+                                  temporary_parent=temporary_parent)
+        assert not (root / "artifacts").exists()
+        assert db.scalar(select(func.count()).select_from(Artifact)) == 0
+
+
 def test_intake_canonical_parquet_lineage_manifest_and_repeat_safety(database, queued_intake):
     assert process_once("evidence-worker")
     with database() as db:
