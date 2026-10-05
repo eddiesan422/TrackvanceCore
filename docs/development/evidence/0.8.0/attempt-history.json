@@ -212,6 +212,48 @@
       "backend_skipped": 16,
       "seconds": 345.53,
       "reason": "Hosted runtime probe, full pytest and Ruff PASS. Linux mypy found stdout Optional in nested reader closure. Generated contracts/migration steps and dependent jobs skipped; workflow not certified."
+    },
+    {
+      "check": "GitHub sixth 0.8 workflow failures observed",
+      "status": "FAIL",
+      "category": "HARNESS",
+      "sha": "38325965a94604913d6e96a88528331c668394ca",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37359580093",
+      "backend_passed": 1887,
+      "backend_failed": 0,
+      "backend_skipped": 16,
+      "seconds": 306.08,
+      "details": "Backend runtime/pytest/Ruff/mypy/contracts/migrations and ten jobs SUCCESS. Four historical suites failed before population on unscoped up --no-build; authentic0.6.1 restore hit stale current-table guards. Catalog gate still in progress at this observation; final all-job approval remains absent."
+    },
+    {
+      "check": "Report descriptor recovery final source",
+      "status": "PASS",
+      "passed": 87,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 41.48,
+      "category": "REAL_LINUX_CHECKPOINT",
+      "source_cut": "000e1bc1db497ea56ad5ddef19d454428a847fb8",
+      "details": "71 Reports plus16 storage/ports; real descriptor process crash and private attempt cleanup. Prior70 overlap, not additive. Exact source manifest and main/owned resource guards in descriptor-recovery.json."
+    },
+    {
+      "check": "Authentic0.6.1 current restore after table guard correction",
+      "status": "PASS",
+      "seconds": 164.566,
+      "source_tables": 31,
+      "target_tables": 55,
+      "migration": "0012→0017",
+      "historical_projection": "EXACT",
+      "new_tables_empty": 13,
+      "artifacts": 29,
+      "source_and_delivery_secrets": [
+        1,
+        1
+      ],
+      "main_inventory": "UNCHANGED",
+      "owned_remaining": 0,
+      "certifies_final_sha": false,
+      "details": "Genuine0.6.1 image/ORM created historical fixture; current target source mounted read-only and byte verified. CI383 original failure preserved separately."
     }
   ],
   "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."

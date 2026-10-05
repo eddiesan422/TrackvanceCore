@@ -25,11 +25,11 @@ automatización Delivery y bandeja funcional no estaban operativos. Las pruebas
 iniciales de esta evolución verificaron 1.197 tests backend y 174 frontend.
 Son diagnóstico de partida; la certificación 0.7.0 tiene evidencia independiente.
 
-La revisión implementa adquisición en background, lectura y publicación por lotes,
+La evolución 0.7.0 implementó adquisición en background, lectura y publicación por lotes,
 datasets multipartes, PySpark local y Standalone opcional, preflight persistido,
 preparación Delivery sellada en disco, scheduler independiente, Intake→Delivery,
 outbox PostgreSQL y bandeja personal. Las interfaces normales registran y siguen
-estos trabajos. El modelo final tiene 42 tablas y tres migraciones nuevas
+estos trabajos. Su modelo final tenía 42 tablas y tres migraciones nuevas
 0013..0015 en su publicación inicial; el ciclo C01–C06 añade exclusivamente
 0016_acquisition_diagnostics con dos campos nullable y mantiene 42 tablas.
 0.8.0 añade exclusivamente 0017 sobre esa historia:55 tablas y state 8, sin
@@ -38,8 +38,13 @@ Los bytes de 0001..0016 se conservan. El ciclo anterior partía del HEAD
 12ca7061696d3581a18237dc7737348a3462e2c4, sin retroceder a una baseline anterior.
 Los originales de Excel no están disponibles; las causas reproducidas se
 declaran sobre sintéticos, sin reinterpretar adquisiciones históricas.
-La revisión de implementación
-y las ejecuciones conocidas se registran en el capítulo 22. El HEAD documental
+La revisión de producto 0.8.0 al corte es
+000e1bc1db497ea56ad5ddef19d454428a847fb8; incluye la lectura exacta de contadores
+del cgroup propio, el lector tipado, los fixtures de recuperación completos,
+el descriptor temporal dentro del intento y los guards históricos actualizados
+a state 8/0017 con 55 tablas.
+Sus verificaciones locales y los intentos conocidos se
+registran en el capítulo 22. El HEAD documental
 final y su CI se registran externamente para evitar la referencia circular del PDF.
 
 ### Invariantes que continúan vigentes
@@ -103,7 +108,7 @@ No se introduce otro broker ni una cola independiente de adquisición.
 | ProcessingEngine | Ejecutar semántica portátil de reglas, transforms, condiciones y métricas sobre entradas materializadas. Polars y PySpark. |
 | ExecutionEngine | Integrar Run/Job, leases, cancelación, almacenamiento, evidencia, decisión y publicación. No equivale a una SparkSession. |
 | ExecutionPlanner | Congelar selección AUTO/POLARS/PYSPARK y explicar capacidades, costes, recursos y rechazos. |
-| JobQueue | Identidad Run XOR AcquisitionRun, claim persistente, heartbeats, lease, idempotencia y recuperación por lane. |
+| JobQueue | Exactamente un sujeto Run, AcquisitionRun o ReportExecution; claim persistente, heartbeats, lease, idempotencia y recuperación por lane. |
 | DataSink | Validar y preparar por lotes; ejecutar transacción SQL exclusiva en delivery-worker. |
 | Outbox / consumidores | Eventos durables y consumos independientes CHAINING/NOTIFICATIONS, deduplicación, leases y reintentos limitados. |
 
@@ -122,7 +127,7 @@ puerto/origen. La evolución no requiere Standalone ni puertos administrativos.
 
 | Servicio | Responsabilidad / acceso |
 | --- | --- |
-| postgres | Metadata, Run/AcquisitionRun, Job, outbox, inbox, ocurrencias e inventarios. |
+| postgres | Metadata, Run/AcquisitionRun/ReportExecution, Job, outbox, inbox, ocurrencias e inventarios. |
 | api | Autenticación, permisos, staging, inspección, registro durable, preview/paginación y controles HTTP. Acceso separado a ambos SecretStore para administrar. |
 | worker | Lane DEFAULT: Intake, ReconOps y Sentinel, Polars/PySpark. Sin secretos fuente/destino. |
 | acquisition-worker | Lane ACQUISITION: abrir fuentes, leer, materializar, perfilar y publicar. Sólo secretos fuente. |
@@ -840,11 +845,14 @@ config_hash y stored_config_hash permiten verificar lo publicado.
 @diagram delivery-lanes
 
 DEFAULT procesa Intake/Recon/Sentinel. DELIVERY procesa preflights persistentes
-y entregas; ACQUISITION procesa AcquisitionRun. El scheduler independiente
-despacha horarios y no calcula datasets ni espera al worker. Las tres lanes
-comparten metadata y StorageProvider; el delivery-worker sólo monta secretos de
-destino y no secretos fuente. El Job incluye lane y una reclamación condicionada
-al lease, con XOR entre Run y AcquisitionRun.
+y entregas; ACQUISITION procesa AcquisitionRun y REPORT procesa ReportExecution
+DATASET, como se describe en 5D. El scheduler independiente despacha horarios y
+no calcula datasets ni espera al worker. Las cuatro lanes coordinan su estado en
+PostgreSQL y sus servicios confiables publican mediante StorageProvider; el hijo
+SQL de Reportes conserva los accesos restringidos de 5D. El delivery-worker sólo
+monta secretos de destino y no secretos fuente. El Job incluye lane y una
+reclamación condicionada al lease, con exactamente un sujeto Run, AcquisitionRun
+o ReportExecution.
 
 La adquisición/reconciliación conserva el orden Run -> Job. Antes de STARTED se
 comprueba de nuevo que el worker conserva la reclamación. Una cancelación previa
@@ -1115,7 +1123,7 @@ picos entre muestras. El cgroup memory.peak es acumulado, no exclusivo del caso.
 
 En el ciclo histórico 0.5.1, los tiers de 100/500 MiB y 1/2/5 GiB quedaron
 NOT_RUN_RESOURCE_LIMIT por su límite de entrada de 10 MiB, no por una medición
-de incapacidad del hardware. Ese resultado no describe las cotas actuales 0.7.0.
+de incapacidad del hardware. Ese resultado no describe las cotas vigentes 0.8.0.
 El primer smoke falló antes de escribir porque el mapping del fixture usaba
 INT64 donde la inferencia produjo DECIMAL; se conserva como FAIL y su repetición
 es un resultado separado. La corrección no alteró tipos ni límites del producto.
@@ -1165,8 +1173,10 @@ MacroDomain y DataDomain son entidades por organización, con nombre normalizado
 descripción, actividad y versión. Cada dominio pertenece a un macrodominio. Una
 edición cambia el nombre conservando ID y relaciones. Un elemento inactivo no
 puede elegirse en una asignación nueva, pero conserva las referencias históricas.
-Se rechazan duplicados normalizados, dominios de otro macrodominio, entidades
-inactivas, organización ajena y ediciones con expected_version desactualizada.
+Se rechazan duplicados normalizados, dominios de otro macrodominio, asignaciones
+nuevas de entidades inactivas, organización ajena y ediciones con expected_version
+desactualizada. Editar otras propiedades permite conservar el mismo par de IDs
+ya persistido aunque se haya desactivado; no lo habilita para Reportes.
 
 Las cargas rápidas, adquisiciones de archivos y snapshots de conexión presentan
 selectores opcionales compartidos. No crean un segundo selector de área ni una
@@ -1184,9 +1194,10 @@ Renombrar Facturación a Ingresos conserva esos IDs e identifica la versión de 
 
 Cada dataset puede declarar descripción, responsable de negocio, steward,
 custodio técnico, criticidad y clasificación UNKNOWN/PUBLIC/INTERNAL/CONFIDENTIAL/
-RESTRICTED. Los responsables son usuarios activos de la misma organización y sus
-asignaciones no conceden permisos. GovernanceHistory conserva snapshot, actor,
-versión, fecha y motivo. La clasificación requerida para Reportes necesita ambos
+RESTRICTED. Las asignaciones nuevas requieren usuarios activos de la misma
+organización y no conceden permisos. Al editar otras propiedades pueden conservarse
+los mismos IDs de responsables históricos aunque estén inactivos. GovernanceHistory
+conserva snapshot, actor, versión, fecha y motivo. La clasificación requerida para Reportes necesita ambos
 IDs compatibles y activos; no exige cargar con ellos ni otorga aprobación por sí sola.
 
 La salida de Intake se identifica por entrada+contrato estable. Comparte gobierno
@@ -1335,6 +1346,13 @@ esperada o excede recursos: falla sin declarar un resultado truncado como comple
 
 ### F. PREVIEW: muestra efímera
 
+El ejecutor instala Landlock y seccomp antes de importar la extensión nativa
+DuckDB y su primera conexión recibe memoria/threads explícitos. El runtime puede
+leer los contadores públicos exactos de CPU/memoria de su cgroup propio,
+descubiertos desde /proc/self/cgroup, incluido un grupo anidado del runner.
+Los permisos son por archivo regular y sólo lectura; no se abre el árbol cgroup
+ni procesos vecinos, y los límites efectivos permanecen iguales.
+
 PREVIEW tiene máximo 10 filas, memoria/timeouts/lotes/bytes propios y cero permisos
 de escritura del sistema de archivos. Después de comprobar cardinalidad completa
 devuelve una muestra y marca total_rows desconocido. No crea dataset, Parquet,
@@ -1345,7 +1363,7 @@ permitir al usuario solicitar generación explícita; no la inicia automáticame
 
 ### G. DOWNLOAD: transmisión acotada
 
-CSV se serializa por lotes en UTF-8/RFC4180 quoted, con NULL representado por\\N,
+CSV se serializa por lotes en UTF-8/RFC4180 quoted, con NULL representado por `\N`,
 prefijos de barra y apóstrofe escapados y texto de fórmula protegido por apóstrofe.
 Ese contrato permite distinguir NULL, cadena vacía, cero inicial y contenido
 original. XLSX construye ZIP/OOXML incremental sin openpyxl spool ni temporales;
@@ -1376,8 +1394,13 @@ interna __tv_record_number conserva numeración DERIVED_RECORD_NUMBER desde 1,
 sin atribuirla a la fila física de una fuente. Descriptor/partes y perfil se
 preparan fuera del fence. Un commit corto revalida lease, usuario y todas las
 fuentes, y publica Dataset+Version+Artifacts+linaje+dependencias+JobSUCCESS.
-Un dueño antiguo no puede publicar. Los candidatos sin metadata comprometida se
-limpian; no se eliminan partes referenciadas por un resultado ya publicado.
+Un dueño antiguo no puede publicar. El spill de perfilado y el JSON intermedio
+del descriptor permanecen dentro de report-staging/<execution>/<attempt>-<owner>.
+put_dataset recibe ese directorio existente como temporary_parent y lo valida
+dentro del proveedor antes de promover partes. La recuperación de caídas durante
+materialización, perfilado y escritura del descriptor limpia únicamente el
+intento abandonado y sus candidatos sin metadata comprometida; conserva otro
+intento RUNNING y las partes referenciadas por un resultado ya publicado.
 
 ### I. Calidad y seguridad de un derivado
 
@@ -1452,15 +1475,18 @@ estable de la extracción materializada. Spark no asigna identidad de negocio
 según orden accidental de partición. Las salidas aceptadas Intake fijan padre
 y output_version_id de la Run concreta y conservan sólo filas aceptadas completas.
 
-### C03: área de negocio y reutilización
+### Antecedente C03 sobre 0.7.0 y evolución 0.8.0
 
-Adquisición normal y carga rápida comparten el selector de área. Incluye las
-cuatro áreas iniciales y dominios existentes de la organización, deduplicados y
-ordenados, con la acción Agregar nueva área y validación de 1..80 caracteres.
-El valor persiste en Dataset.domain; no añade una entidad de gobierno.
-Al reutilizar un dataset o registrar una nueva versión, se muestra su dominio
-real y no se sustituye por Operaciones. Nombres, dominios históricos, identidad
-del dataset y registro idempotente se conservan.
+En C03 sobre 0.7.0, adquisición normal y carga rápida compartían el selector de
+área, con cuatro áreas iniciales y dominios existentes de la organización,
+deduplicados y ordenados. Agregar nueva área validaba de 1..80 caracteres y
+persistía el texto en Dataset.domain, sin una entidad de gobierno. Al reutilizar
+un dataset se mostraba su dominio real sin sustituirlo por Operaciones.
+
+En 0.8.0, los selectores compartidos opcionales de MacroDomain y DataDomain
+sustituyen ese control libre, según 5C. El texto domain histórico queda como dato
+de solo lectura. Registrar una nueva versión conserva la clasificación vigente,
+los nombres, dominios históricos, identidad del dataset y registro idempotente.
 
 ## 7. Profiling, identificadores y transforms
 
@@ -1766,7 +1792,7 @@ health_score se pondera por unidades evaluadas según la agregación del backend
 
 ### Rutas SPA
 
-/; /datasets; /datasets/:id; /connections; /connections/:id; /delivery/*;
+/; /datasets; /datasets/:id; /connections; /connections/:id; /catalog/*; /reports/*; /delivery/*;
 /intake/*; /recon/*; /sentinel/*; /runs; /runs/:id; /notifications;
 /exceptions/*; /rules; /audit; /settings/*. Delivery incluye listado,
 `/delivery/new`, `/delivery/destinations` y `/delivery/destinations/:id`,
@@ -1778,6 +1804,13 @@ no una pantalla SPA independiente. La administración de usuarios está integrad
 en Configuración. El menú conserva los módulos y el diseño navy/teal. Estados
 de carga, vacío y error tienen tratamiento específico; se conserva request_id
 en errores para diagnóstico.
+
+Catálogo incluye `/catalog`, `/catalog/admin` y `/catalog/datasets/:id`, con
+sección y versión exactas mediante `section` y `version_id`. Reportes incluye
+`/reports/new`, `/reports/definitions`, `/reports/definitions/:id`,
+`/reports/history` y `/reports/executions/:id`. El detalle de definición admite
+`revision_id` para abrir la revisión inmutable exacta y `revision_offset` para
+paginar su historia; una revisión ausente o no autorizada produce un error.
 
 Cerrar sesión confirma `/auth/logout`, limpia token CSRF, caché de consultas y
 estado de sesión, y navega con reemplazo a `/`. El usuario vuelve a la pantalla
@@ -1830,10 +1863,11 @@ la población en un DataFrame local para exportar o generar el preview.
 La descarga de conjunto devuelve ZIP_STORED con descriptor.json exacto y las
 partes en los paths declarados. Se comprueba integridad y reserva de disco, y
 el temporal de descarga se elimina al terminar. El paquete contiene la población
-completa, no una muestra. El CSV completo de resultados se escribe por iteración
+completa, no una muestra. El CSV completo de resultados de Run se escribe por iteración
 acotada, se registra como EXPORT_CSV con hash/EXPORT_OF y permite descarga
 nativa del navegador. Excel tiene sus límites explícitos y no trunca para aparentar
-éxito. El inventario y el backup siguen todos los componentes del descriptor.
+éxito. El perfil DOWNLOAD de Reportes, descrito en 5D, transmite sin registrar
+un archivo de resultado. El inventario y el backup siguen todos los componentes del descriptor.
 
 ### Linaje y preservación
 
@@ -1888,7 +1922,11 @@ La administración añade USER_CREATED, USER_UPDATED, USER_CREDENTIALS_REGENERAT
 
 Se excluyen claves de passwords, tokens y secretos de metadata/evidencia. Los casos legacy sin identidad demostrable se marcan como legacy; no se atribuyen a un UUID de usuario inventado. Las auditorías de exportación agregan evidencia sin alterar el manifest original del Run.
 
-## 15. Reportes Excel de negocio y resultado completo
+## 15. Exportación Excel/CSV de ejecuciones y resultado completo
+
+Este capítulo describe los exports de Run de Intake, ReconOps y Sentinel,
+con sus artefactos y límites propios. El módulo Reportes y su perfil DOWNLOAD
+se describen en 5D: tienen cotas separadas y no conservan un archivo de resultado.
 
 Los reportes Excel conservan resumen, reglas, entradas, trazabilidad y seguridad
 contra fórmulas. La evolución no extiende arbitrariamente el dominio de Excel:
@@ -2136,7 +2174,7 @@ no replica un límite 100k ni cuenta el archivo entero dentro de HTTP.
 
 Intake/Recon/Sentinel aceptan requested_engine AUTO/POLARS/PYSPARK. El plan preview
 usa las mismas identidades y referencias de ejecución. GET /system/engines
-conserva worker DEFAULT por compatibilidad y añade workers ACQUISITION/DELIVERY,
+conserva worker DEFAULT por compatibilidad y expone workers DEFAULT/ACQUISITION/DELIVERY/REPORT,
 components y límites efectivos. POST /delivery/validations recibe un draft y 202;
 GET lista/detalle son personales; POST cancel pide cancelación cooperativa.
 Una configuración grande se publica con validation_run_id, unido al draft exacto.
@@ -2277,7 +2315,7 @@ sin modificar sus scripts; la actualización guarda primero el dump original,
 verifica ese catálogo y calcula la huella antes de iniciar el API antiguo.
 
 El backup quiesce API, todos los workers, scheduler y consumidores; rechaza
-Jobs/Runs/Acquisition activos para evitar una foto inconsistentemente publicada.
+Jobs/Runs/Acquisition/ReportExecution activos para evitar una foto inconsistentemente publicada.
 Un outbox pending durable puede respaldarse y reanudarse. Los secretos fuente
 quedan separados de los de destino y se valida que puedan descifrarse tras restore
 sin imprimirlos. Las fuentes/destinos restaurados de pruebas no se apuntan a
@@ -2287,7 +2325,8 @@ El backfill de artefactos conserva la compatibilidad de Intake, ReconOps y Senti
 históricos. Excluye DELIVERY y DELIVERY_PREFLIGHT: sus identidades de entrada y
 evidencia ya se fijan al crear/publicar la operación. Un preflight conserva SHA
 canónico y hash del draft en execution_plan; no recibe enlaces genéricos RUN_INPUT
-al reiniciar o restaurar. La primera restauración de volumen detectó tres enlaces
+al reiniciar o restaurar. En el ensayo histórico 0.7.0, la primera restauración de
+volumen detectó tres enlaces
 adicionales de ese tipo y seis relaciones adicionales, pese a igualdad de las otras
 41 tablas, archivos y secretos. Se corrigió el hook, sin borrar linaje existente ni
 ignorar esas diferencias. Tres regresiones focales de API con preflight persistido
@@ -2399,7 +2438,7 @@ Standalone registra application IDs/driver+dos executors y memoria por proceso.
 El mismo host no certifica multinodo. Las mediciones no son un SLA ni un umbral
 universal para otros anchos, skew, redes, triggers o motores SQL.
 
-### Método de medición por etapa y recorrido integral
+### Antecedente 0.7.0: medición por etapa y recorrido integral
 
 El primer volume_cycle agrupó recepción HTTP, espera de adquisición y perfil global en un tiempo CSV; se conservan sus cifras sin presentarlas como tiempos separados. El ensayo adicional acquisition_timing_cycle vuelve a recibir las tres fixtures CSV con datasets/targets nuevos. Comprueba igualdad completa del perfil y esquema persistidos, hash de toda la fuente, todos los aceptados y el destino SQL, y preservación de las versiones originales. No modifica targets ni versiones previos.
 
@@ -2452,8 +2491,8 @@ el detalle completo del método y las cifras anteriores está en
 
 @volume
 
-Los benchmarks de 0.4..0.6 conservados en development/evidence son antecedentes.
-No se reutilizan tiempos, memoria ni conteos como certificación de 0.7.0.
+Los benchmarks de 0.4..0.7 conservados en development/evidence son antecedentes.
+No se reutilizan tiempos, memoria ni conteos como certificación de 0.8.0.
 
 ## 21. Automatización Delivery, ocurrencias y outbox
 
@@ -2805,7 +2844,7 @@ ediciones originales; no se destruye historia para actualizar la especificación
 Las secciones 24, 31 y 35 son antecedentes de releases anteriores. Las secciones
 vigentes describen 0.8.0; una decisión histórica de no tener bandeja/PySpark no
 se interpreta como capacidad actual. Las tablas de validación de aquellos
-antecedentes conservan sus propios números, sin contarlos como tests 0.7.0.
+antecedentes conservan sus propios números, sin contarlos como tests 0.8.0.
 
 El PDF documenta la revisión de implementación/evidencia conocida antes del
 commit documental final. El informe externo identifica el HEAD final y todos
@@ -2975,7 +3014,8 @@ El catálogo de códigos pertenece al producto, versionado junto con la matriz d
 rutas. No hay API para inventar códigos. Un rol configura un subconjunto de ese
 catálogo. Incluye Datasets, Conexiones, Intake, ReconOps, Sentinel, Delivery,
 Destinos, Excepciones, Reglas, exports, artifacts, Auditoría, Usuarios, Roles,
-Notificaciones, Sistema y las vistas transversales de Runs. Los permisos de
+Notificaciones, Sistema, Catálogo, Gobierno, Dominios, Glosario, Restricciones,
+Reportes y las vistas transversales de Runs. Los permisos de
 consulta, configuración, ejecución, sobrescritura, ALTER, revisión y reparación
 se distinguen. Las rutas compartidas de Runs deben validar además el módulo del
 recurso consultado: un permiso transversal nunca debe abrir datos de un módulo
@@ -3245,7 +3285,7 @@ de negocio ficticia. Historia anterior no se reinterpreta ni se redistribuye.
 
 notification_deliveries mantiene registros de 0.6.0 sin reinterpretarlos como
 InternalNotification. Sus endpoints deprecated conservan HISTORICAL_ONLY.
-No existe SMTP, Mailpit, envío de credenciales ni canal externo en 0.7.0.
+No existe SMTP, Mailpit, envío de credenciales ni canal externo en 0.8.0.
 Alta/regeneración mantiene presentación efímera única y primer cambio obligatorio.
 Los avisos nunca conservan password, cookie, CSRF, token OIDC, DSN o excepción cruda.
 
@@ -3605,7 +3645,7 @@ informe ejecutado, nunca de los requisitos o de una certificación histórica.
 ### Resultados del antecedente
 
 Los resultados 0.6.0 permanecen en validation_results_0.6.0.json y evidence/0.6.0.
-La validación de este antecedente corresponde a 0.6.0; capítulo 35 conserva 0.6.1. El capítulo 22 contiene la evidencia propia de 0.7.0.
+La validación de este antecedente corresponde a 0.6.0; capítulo 35 conserva 0.6.1. El capítulo 22 distingue antecedentes 0.7.0 de la certificación vigente 0.8.0.
 
 
 ## 32. Configuración y prueba real SSO
@@ -3760,7 +3800,7 @@ El administrador entrega externamente por el canal de su organización; Trackvan
 no envía password por correo ni incluye temporal en una notificación interna.
 
 SMTP/Mailpit y adaptadores de emisión fueron retirados en 0.6.1 y no se reactivan
-en 0.7.0. notification_deliveries conserva sólo historia. La bandeja nueva informa
+en 0.8.0. notification_deliveries conserva sólo historia. La bandeja nueva informa
 procesos del producto mediante outbox/inbox personal; ese cambio no revierte la
 decisión de credenciales efímeras. Microsoft/Google SSO siguen opcionales y
 deshabilitados por defecto; nunca se deduce una identidad sólo por un correo

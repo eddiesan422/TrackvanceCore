@@ -1,0 +1,56 @@
+{
+  "status": "PASS",
+  "platform": "linux",
+  "python": "3.12.15",
+  "source_byte_proof": "PASS",
+  "source_files": 75,
+  "checks": [
+    {
+      "check": "mypy",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 10.296,
+      "diagnostics": "Success: no issues found in 75 source files\n"
+    },
+    {
+      "check": "ruff",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.117,
+      "diagnostics": "All checks passed!\n"
+    }
+  ],
+  "duration_seconds": 12.692,
+  "base_image_id": "sha256:d3037fba273d41a4d27a71e5f7447b29c19809c9a2043f3d13e22f35cbf1f262",
+  "head_checkpoint": "38325965a94604913d6e96a88528331c668394ca",
+  "source_manifest_sha256": "4284a6dca4399c5c3fb770c1dee8a9c27ca8b43962417c7e3d2ac4a0e2905789",
+  "locked_dev_dependencies": true,
+  "main_operations": "NONE",
+  "owned_remaining": 0,
+  "file_modes": "GIT_INDEX_WITH_NEW_FILES_0644",
+  "current_source_mounted_read_only": true,
+  "kernel_caps": {
+    "memory_gib": 2,
+    "cpus": 2,
+    "pids": 128,
+    "capabilities": [],
+    "network": "none",
+    "read_only_root": true
+  },
+  "certifies_final_sha": false,
+  "source_data": "Static source only; no habitual mounts, data, credentials, query bodies or environment inherited.",
+  "prior_harness_attempts": [
+    {
+      "category": "HARNESS",
+      "status": "FAIL",
+      "reason": "Docker BuildKit treated an image ID in FROM as a registry reference. Replaced with an owned tag verified against the immutable base image ID."
+    },
+    {
+      "category": "HARNESS",
+      "ruff": "EXE002_205_FILES",
+      "mypy": "PASS_75_FILES",
+      "status": "FAIL",
+      "reason": "Windows read-only bind mounts represented source files as executable. Repeated with the same byte-verified source and Git file modes; no Ruff rule ignored."
+    }
+  ]
+}

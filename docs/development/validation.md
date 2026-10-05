@@ -15,6 +15,82 @@ esos gates. El registro final se conserva en
 
 ## Checkpoint de desarrollo del 5 de octubre de 2026
 
+La regresión Windows posterior produjo **1.857 PASS, 42 SKIP** en 340,54 segundos,
+tras el import nativo y la limpieza de staging de perfilado. Las omisiones por
+plataforma/JVM se conservan explícitas. El checkpoint previo produjo
+**1.841 PASS, 40 SKIP** en 350,92 segundos;
+frontend **252 PASS**, lint, tipos y build. El navegador real final de ese
+checkpoint completó la cadena de Catálogo/Reportes sin omisiones ni reintentos en
+34,88 segundos. Las poblaciones de 120 y 400.000 filas por cada una de tres
+fuentes y el millón pasaron con oráculos completos. La ejecución de un millón
+registra cambios de fuente durante el recorrido y no certifica el SHA final.
+La observación HTTP sigue su propio registro. Los tres primeros CI 0.8.0 fallaron
+en 21 pruebas del ejecutor Linux; el cuarto, sobre `09730f0`, produjo
+1.860 PASS / 23 FAIL / 16 SKIP y un SIGABRT en el probe nativo. Sus dependientes
+quedaron SKIPPED. Esos fallos se conservan en
+[el historial de intentos](evidence/0.8.0/attempt-history.json); los ajustes de
+biblioteca del runtime, fallback de threads e import nativo no habían resuelto
+todos los fallos de ese runner. La comparación posterior aisló la causa restante.
+La comparación posterior en un mismo cgroup anidado reprodujo el SIGABRT y
+EACCES de `memory.max` con el código anterior; la revisión `3b48d97` completó
+el protocolo bajo los mismos límites. Tres regresiones Linux verifican permisos
+por archivo para cgroups v1/v2, exclusión de vecinos y rechazo de traversal/symlinks.
+La observación HTTP completó diez casos en 111,255 s sin escrituras durante
+los flujos API/motor/proxy; conserva tres FAIL previos del harness. El workflow
+37357555598 completó runtime/1.886 tests/Ruff y frontend con éxito, pero falló
+mypy Linux por stdout Optional en el closure del lector. Se captura ahora el
+stream no nulo; pasos posteriores y jobs omitidos no certifican el SHA final.
+La suite actual de Reportes en Ubuntu/Python Actions completó **70 PASS, cero
+FAIL/SKIP** en 33,63 s. El primer ensayo de ese conjunto produjo seis fallos de
+reserva de disco por el tmpfs insuficiente del fixture; se conserva y su repetición
+usa un volumen exclusivo con capacidad comprobada, sin cambiar límites de producto.
+La recuperación real nativa e histórica terminó **PASS en 388,57 s**: nativo con
+55 tablas y las trece entidades nuevas pobladas; origen auténtico 0.7.0 con 42→55,
+proyección exacta, archivos/secretos y diagnóstico real preservados. Los dos fallos
+previos del harness también se conservan. Esos ensayos no certifican el HEAD final.
+Estos números corresponden a árboles de desarrollo identificados en la
+evidencia y no sustituyen la certificación del SHA definitivo.
+
+El workflow `37359580093` sobre `3832596` pasó backend **1.887 PASS / 16 SKIP**
+en 306,08 s, Ruff, mypy75, contratos y migraciones. Diez jobs terminaron SUCCESS;
+XLSX y los tres tiers async fallaron antes de población porque un `up --no-build`
+sin lista de servicios intentaba arrancar REPORT sin imagen privada preparada.
+La restauración 0.6.1 tenía todavía guards de 42 tablas; la huella actual exige
+55/0017 y conserva la proyección histórica exacta. Esos cinco FAIL se registran
+en [el checkpoint de CI](evidence/0.8.0/ci-3832596-failure.json); el gate de Catálogo
+y Reportes seguía ejecutándose al corte. Las correcciones conservan la cobertura
+y los tiers obligatorios. El siguiente HEAD documental necesita todos los jobs
+SUCCESS de una ejecución completa.
+
+La revisión posterior del descriptor produjo **87 PASS / cero FAIL o SKIP** en
+41,48 s en Linux: 71 Reportes y 16 almacenamiento/puertos. Incluye una caída real
+`os._exit(77)` después de escribir el JSON del descriptor dentro del staging
+privado; el reintento publica una vez, la limpieza reclama sus candidatos sin
+metadata y conserva otro intento RUNNING. El área temporal global permanece
+intacta. Esas 71 pruebas se solapan con las 70 previas y no se suman como casos
+distintos. [La evidencia](evidence/0.8.0/descriptor-recovery.json) conserva límites,
+hashes y fallos del fixture. La fuente actual pasó también mypy75 y Ruff en Linux
+en 13,255 s, con prueba de bytes y dependencias bloqueadas, según
+[su registro](evidence/0.8.0/linux-typecheck-final-source.json).
+
+La recuperación posterior desde la baseline auténtica 0.6.1 `6fac26b` terminó
+**PASS en 164,566 s**: 31→55 tablas, 0012→0017, state 5→8 y proyección histórica
+exacta. Conservó 29 artefactos, los secretos cifrados de fuente y destino y la
+notificación histórica sin reproducirla; las trece tablas nuevas quedaron vacías.
+Origen destruido antes del restore fresco, destino STOPPED_VERIFIED, instalación
+habitual UNCHANGED y cleanup propio completo. [Su evidencia](evidence/0.8.0/authentic-061-current-restore.json)
+identifica la imagen y los bytes actuales montados; no certifica el SHA final de CI.
+
+El PDF 0.8.0 vigente se publicó tras revisar las **143 páginas**, con 280 marcadores
+y 40 secciones principales. Las dos copias oficiales tienen el SHA-256
+`223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c`;
+fuente, generador, insumos y extracción coinciden. La [verificación de publicación](evidence/0.8.0/pdf-verification.json)
+conserva la revisión visual completa y los hashes históricos intactos. Este PASS
+abarca únicamente el documento: el workflow completo del SHA que lo versiona y
+la actualización habitual mantienen sus gates externos hasta verificarse realmente.
+
+El checkpoint anterior se conserva a continuación:
+
 La suite completa de backend y scripts produjo **1.825 PASS, 32 SKIP, cero fallos**
 en 372,71 segundos sobre el árbol de desarrollo de ese checkpoint. Las omisiones
 de Windows no acreditan el ejecutor Linux ni JVM. Los cambios posteriores de

@@ -596,9 +596,16 @@ validado en `.codex-local/v080`. El ciclo integral ejecuta las consultas y
 oráculos de volumen antes de la recuperación:
 
 ```powershell
-python scripts/tests/catalog_reports_cycle.py --with-browser --with-recovery
+python scripts/tests/catalog_reports_cycle.py --rows 120 400000 1000000 --with-browser --with-ephemeral-observation --with-recovery
 python scripts/tests/catalog_reports_recovery.py --context .codex-local/v080/CONTEXTO_AUTORIZADO --mode both
 ```
+
+El primer comando detiene sus servicios de población antes de iniciar los
+proyectos separados de observación HTTP y recuperación. La observación usa
+imágenes de diagnóstico con strace, sin capacidades adicionales, y comprueba
+escrituras durante resolve, PREVIEW, CSV y XLSX a través de API/Nginx, incluidos
+errores y desconexiones. Publica sólo contadores, estados y hashes; las trazas
+permanecen privadas y no forman parte de las imágenes normales.
 
 El segundo comando permite repetir exclusivamente la recuperación cuando los
 trabajos del contexto ya finalizaron. El ciclo nativo crea fixtures propias con
