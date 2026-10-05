@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, uploadBinary } from '../../api/client'
 import { renderApp } from '../../test/render'
 import { acquisitionLimitsFixture } from '../../test/acquisitionLimits'
+import { governanceFixture } from '../../test/governance'
 import { AcquisitionDialog, AcquisitionHistory, AcquisitionStatus } from './Acquisitions'
 
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: vi.fn(), uploadBinary: vi.fn() }))
 const queued = { id: 'acq-one', dataset_id: 'orders', source_type: 'UPLOAD', filename: 'orders.csv', status: 'QUEUED', stage: 'QUEUED', attempts: 0, processed_rows: 0, processed_bytes: 0, total_rows: null, total_bytes: 16, duration_seconds: null, cancel_requested: false, output_version_id: null, error_code: null, error_message: null, initiated_by: 'Tester', created_at: '2026-10-03T12:00:00Z', started_at: null, finished_at: null }
 const received = { upload: { id: 'received-file', filename: 'orders.csv', size_bytes: 16, transfer_complete: true }, inspection: { format: 'CSV', format_label: 'CSV delimitado', filename: 'orders.csv', row_count: null, sampled_rows: 2, sheets: [], selected_sheet: null, detected_delimiter: ',', reader_options: { delimiter: ',' }, columns: [{ name: 'id', logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }, { name: 'amount', logical_type: 'DECIMAL' }] } }
 function mockApi(value: Record<string, unknown> | ((path: string, options?: RequestInit) => Promise<Record<string, unknown>>)) {
-  vi.mocked(api).mockImplementation(async (path, options) => acquisitionLimitsFixture(path) || (typeof value === 'function' ? value(path, options) : value))
+  vi.mocked(api).mockImplementation(async (path, options) => acquisitionLimitsFixture(path) || governanceFixture(path) || (typeof value === 'function' ? value(path, options) : value))
 }
 
 beforeEach(() => { vi.clearAllMocks(); mockApi({}); vi.mocked(uploadBinary).mockResolvedValue(received) })
@@ -116,7 +117,7 @@ describe('Durable asynchronous acquisition', () => {
     expect(JSON.parse(String(call[1]?.body)).column_overrides).toEqual({})
   })
 
-  it('persists a custom area once and reuses the same dataset and request key when registration is retried', async () => {
+  it('persists a controlled optional classification once and reuses the same dataset and request key when registration is retried', async () => {
     let attempts = 0
     mockApi(async path => {
       if (path === '/datasets') return { id: 'risk-events' }
@@ -127,38 +128,33 @@ describe('Durable asynchronous acquisition', () => {
     renderApp(<AcquisitionDialog open onClose={close} existingDatasets={[{ id: 'existing', name: 'Other', domain: 'Comercial' }]}/>)
     await user.upload(screen.getByLabelText('Archivo'), new File(['fixture'], 'risk_events.csv'))
     await screen.findByText(/Transferencia completa/)
-    expect(screen.getByRole('option', { name: 'Comercial' })).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Área de negocio'), '__new_domain__')
-    expect(screen.getByRole('button', { name: 'Registrar adquisición' })).toBeDisabled()
-    await user.type(screen.getByLabelText('Nueva área de negocio'), 'R'.repeat(81))
-    expect(screen.getByRole('button', { name: 'Registrar adquisición' })).toBeDisabled()
-    await user.clear(screen.getByLabelText('Nueva área de negocio'))
-    await user.type(screen.getByLabelText('Nueva área de negocio'), 'Riesgos')
+    await user.selectOptions(screen.getByLabelText('Macrodominio (opcional)'), 'macro-risk')
+    await screen.findByRole('option', { name: 'Crédito' })
+    await user.selectOptions(screen.getByLabelText('Dominio (opcional)'), 'domain-credit')
     await user.click(screen.getByRole('button', { name: 'Registrar adquisición' }))
     await screen.findByText('La adquisición no se registró. Intenta de nuevo.')
     expect(screen.getByLabelText('Nombre del dataset')).toBeDisabled()
-    expect(screen.getByLabelText('Área de negocio')).toBeDisabled()
-    expect(screen.getByLabelText('Área de negocio')).toHaveValue('Riesgos')
+    expect(screen.getByText(/La clasificación vigente pertenece al dataset/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Registrar adquisición' }))
     await waitFor(() => expect(close).toHaveBeenCalledOnce())
     const creates = vi.mocked(api).mock.calls.filter(([path]) => path === '/datasets')
     expect(creates).toHaveLength(1)
-    expect(JSON.parse(String(creates[0][1]?.body))).toEqual({ name: 'risk events', domain: 'Riesgos' })
+    expect(JSON.parse(String(creates[0][1]?.body))).toEqual({ name: 'risk events', macro_domain_id: 'macro-risk', domain_id: 'domain-credit' })
     const registrations = vi.mocked(api).mock.calls.filter(([path]) => path === '/datasets/risk-events/acquisitions')
     expect(registrations).toHaveLength(2)
     expect(registrations[0][1]?.headers).toEqual(registrations[1][1]?.headers)
   })
 
-  it('shows the exact existing area for matching names and fixed new versions', async () => {
+  it('shows the exact inherited area for matching names and fixed new versions', async () => {
     const user = userEvent.setup()
     const view = renderApp(<AcquisitionDialog open onClose={vi.fn()} existingDatasets={[{ id: 'orders', name: 'Pedidos', domain: 'Área histórica' }]}/>)
     await user.type(screen.getByLabelText('Nombre del dataset'), '  PEDIDOS  ')
-    expect(screen.getByLabelText('Área de negocio')).toHaveValue('Área histórica')
-    expect(screen.getByLabelText('Área de negocio')).toBeDisabled()
+    expect(screen.getByText(/Área heredada: Área histórica/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Área de negocio')).not.toBeInTheDocument()
     view.unmount()
     renderApp(<AcquisitionDialog open onClose={vi.fn()} datasetId="orders" datasetName="Pedidos" datasetDomain="Área histórica"/>)
-    expect(screen.getByLabelText('Área de negocio')).toHaveValue('Área histórica')
-    expect(screen.getByLabelText('Área de negocio')).toBeDisabled()
+    expect(screen.getByText(/Área heredada: Área histórica/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Área de negocio')).not.toBeInTheDocument()
   })
 
   it('retains a known persisted failure, separates counters and does not infer a total from zero materialized rows', async () => {

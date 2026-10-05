@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import fs from 'node:fs/promises'
+import { createClassification } from './helpers/classification'
 
 test.setTimeout(120_000)
 
@@ -199,7 +200,7 @@ test('un nombre de dataset existente se carga como una versión nueva', async ({
   expect(collection.items.filter((item: { name: string }) => item.name === name)).toHaveLength(1)
 })
 
-test('corrige esquema e identificadores, crea área y usa Todos en Data Intake', async ({ page }) => {
+test('corrige esquema e identificadores, crea clasificación controlada y usa Todos en Data Intake', async ({ page }) => {
   await signIn(page)
   const stamp = Date.now()
   const name = `E2E esquema editable ${stamp}`
@@ -219,16 +220,18 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   await expect(dialog.getByLabel('Otros identificadores por nombre')).toHaveCount(0)
   await dialog.getByLabel('Tipo de transaction_date').selectOption('STRING')
   await dialog.getByRole('checkbox', { name: 'Identificador document_number', exact: true }).check()
-  await dialog.getByLabel('Área de negocio', { exact: true }).selectOption('__new_domain__')
-  await expect(dialog.getByRole('button', { name: 'Registrar adquisición', exact: true })).toBeDisabled()
-  await dialog.getByLabel('Nueva área de negocio', { exact: true }).fill(area)
+  await expect(dialog.getByLabel('Macrodominio (opcional)', { exact: true })).toHaveValue('')
+  await expect(dialog.getByRole('button', { name: 'Registrar adquisición', exact: true })).toBeEnabled()
+  const classification = await createClassification(page, `E2E controlado ${stamp}`, area)
   await dialog.getByRole('button', { name: 'Registrar adquisición', exact: true }).click()
   await page.waitForURL(/\/datasets\/[^/?]+$/)
   const datasetId = page.url().split('/datasets/')[1]
   await expect.poll(async () => (await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()).version_count, { timeout: 90_000 }).toBe(1)
 
   let detail = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
-  expect(detail.domain).toBe(area)
+  expect(detail.macro_domain_id).toBe(classification.macro_domain_id)
+  expect(detail.domain_id).toBe(classification.domain_id)
+  expect(detail.governance.domain.name).toBe(area)
   expect(detail.origin).toBe('MANUAL')
   expect(detail.origin_label).toBe('Manual')
   let schema = Object.fromEntries(detail.versions[0].schema.map((column: { name: string }) => [column.name, column]))
@@ -239,8 +242,8 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
 
   await page.getByRole('button', { name: 'Nueva versión', exact: true }).click()
   dialog = page.getByRole('dialog')
-  await expect(dialog.getByLabel('Área de negocio', { exact: true })).toHaveValue(area)
-  await expect(dialog.getByLabel('Área de negocio', { exact: true })).toBeDisabled()
+  await expect(dialog.getByText('La clasificación vigente pertenece al dataset y se conserva al cargar versiones. Puedes administrarla desde Catálogo.')).toBeVisible()
+  await expect(dialog.getByLabel('Macrodominio (opcional)', { exact: true })).toHaveCount(0)
   await dialog.locator('input[type=file]').setInputFiles({ name: 'editable-v2.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) })
   await expect(dialog.getByLabel('Tipo de active')).toContainText('muestra STRING')
   await dialog.getByLabel('Tipo de active').selectOption('BOOLEAN')
@@ -267,7 +270,8 @@ test('corrige esquema e identificadores, crea área y usa Todos en Data Intake',
   await page.goto('/datasets')
   const datasetRow = page.locator('tbody tr').filter({ has: page.getByRole('link', { name, exact: true }) })
   await expect(datasetRow.getByText('Manual', { exact: true })).toBeVisible()
-  await expect(datasetRow.getByText(area, { exact: true })).toBeVisible()
+  await page.goto(`/catalog/datasets/${datasetId}`)
+  await expect(page.getByText(area, { exact: true }).last()).toBeVisible()
 
   await page.goto('/intake')
   await page.getByRole('button', { name: 'Nuevo contrato', exact: true }).click()

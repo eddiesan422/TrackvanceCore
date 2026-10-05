@@ -26,6 +26,7 @@ from trackvance import __version__, delivery_service, worker
 from trackvance.data_sinks import DeliveryError
 from trackvance.db import Base, iso, utcnow
 from trackvance.delivery_schemas import DeliveryReviewBody
+from trackvance.governance_models import DatasetBlock
 from trackvance.models import (
     Artifact,
     ArtifactLink,
@@ -573,10 +574,43 @@ def test_startup_backfill_preserves_all_tables_after_real_preflight(
         assert db.get(Configuration, run.config_id).status == "VALIDATION_PRIVATE"
         assert run.execution_plan["canonical_sha256"]
         before = snapshot(db)
-        assert len(before) == 42
+        assert len(before) == 55
         for _ in range(2):
             backfill_artifacts(db)
             db.commit()
             assert snapshot(db) == before
         assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
         assert not any(call[0] == "deliver_prepared" for call in delivery_case.runtime.calls)
+
+
+def test_content_revocation_after_preparation_prevents_remote_started(
+    authenticated, database, delivery_case, monkeypatch,
+):
+    configuration = publish_configuration(authenticated, delivery_case)
+    run = queue_run(authenticated, configuration["id"], delivery_case.source["version_id"], "revoked-after-preparation")
+    original_create = delivery_service.sink_registry.create
+
+    def create_revoking_sink(settings):
+        sink = original_create(settings)
+        original_prepare = sink.prepare_batched
+
+        def revoke_after_prepare(*args, **kwargs):
+            prepared = original_prepare(*args, **kwargs)
+            with database() as control:
+                source = control.get(DatasetVersion, delivery_case.source["version_id"])
+                control.add(DatasetBlock(dataset_id=source.dataset_id, scope="CONTENT", reason="Revoked before STARTED", created_by_id="test-user"))
+                control.commit()
+            return prepared
+
+        sink.prepare_batched = revoke_after_prepare
+        return sink
+
+    monkeypatch.setattr(delivery_service.sink_registry, "create", create_revoking_sink)
+    execute_queued(database, run["id"])
+    with database() as db:
+        current = db.get(Run, run["id"])
+        assert current.status == "FAILED_PRECONDITION" and current.decision == "FAILED"
+        assert db.scalar(select(func.count()).select_from(DeliveryAttempt)) == 0
+        assert db.scalar(select(AuditEvent.id).where(AuditEvent.run_id == current.id,
+            AuditEvent.event_type == "DELIVERY_FAILED", AuditEvent.metadata_json["error_code"].as_string() == "DATASET_BLOCKED"))
+    assert not any(call[0] == "deliver_prepared" for call in delivery_case.runtime.calls)

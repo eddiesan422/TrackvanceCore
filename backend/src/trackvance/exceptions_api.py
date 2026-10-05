@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from .artifactstore import artifact_dto, link_artifact, storage_provider
 from .audit_context import Actor
 from .db import get_db, iso, utcnow
-from .models import Artifact, ExceptionAttachment, ExceptionCase, Finding, Role, User
+from .models import Artifact, ExceptionAttachment, ExceptionCase, Finding, Role, Run, User
 from .operations_common import OperationError, save_case
 from .permissions import effective_permissions
 from .services import (
@@ -40,6 +40,10 @@ def owned_case(db: Session, case_id: str, user: User) -> ExceptionCase:
     case = db.get(ExceptionCase, case_id)
     if not case or case.organization_id != user.organization_id:
         raise OperationError(404, "NOT_FOUND", "No se encontró la excepción.")
+    from .governance import authorize_run_content
+    run = db.get(Run, case.run_id)
+    if run:
+        authorize_run_content(db, user, run)
     return case
 
 

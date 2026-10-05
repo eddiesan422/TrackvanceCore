@@ -91,11 +91,13 @@ class SourceDatasetBody(ConnectionInput):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
 
     name: str = Field(min_length=1, max_length=160)
-    domain: str = Field(default="Operaciones", min_length=1, max_length=80)
+    domain: str = Field(default="", max_length=80, deprecated=True)
     description: str = Field(default="", max_length=4000)
     schema_name: str = Field(min_length=1, max_length=128)
     object_name: str = Field(min_length=1, max_length=128)
     column_overrides: dict = Field(default_factory=dict)
+    macro_domain_id: str | None = Field(default=None, max_length=64)
+    domain_id: str | None = Field(default=None, max_length=64)
 
 
 @router.get("/connections", response_model=ConnectionListResponse)
@@ -214,13 +216,16 @@ def preview(connection_id: str, schema_name: str = Query(min_length=1, max_lengt
 @router.post("/connections/{connection_id}/datasets", status_code=201, response_model=SourceDatasetResponse)
 def register_source_dataset(connection_id: str, body: SourceDatasetBody,
                             db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .governance import validate_classification
+    validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     connection = owned_connection(db, connection_id, user, lock=True)
     source, _ = saved_source(db, connection)
     selected = next((item for item in source.objects(body.schema_name) if item["name"] == body.object_name), None)
     if selected is None:
         raise ConnectionOperationError(404, "SOURCE_OBJECT_NOT_FOUND", "No se encontró la tabla o vista accesible seleccionada.")
     dataset = Dataset(name=body.name, description=body.description, domain=body.domain,
-                      organization_id=user.organization_id, owner=user.name)
+                      organization_id=user.organization_id, owner=user.name,
+                      macro_domain_id=body.macro_domain_id, domain_id=body.domain_id)
     db.add(dataset)
     db.flush()
     binding = DatasetSourceBinding(organization_id=user.organization_id, dataset_id=dataset.id,
@@ -239,6 +244,8 @@ def refresh_source(dataset_id: str, db: Session = Depends(get_db), user: User = 
                         Dataset.organization_id == user.organization_id).with_for_update())
     if dataset is None:
         raise ConnectionOperationError(404, "NOT_FOUND", "No se encontró el dataset solicitado.")
+    from .governance import authorize_dataset
+    authorize_dataset(db, user, dataset.id, "CONTENT")
     binding = db.scalar(select(DatasetSourceBinding).where(DatasetSourceBinding.dataset_id == dataset.id,
                          DatasetSourceBinding.organization_id == user.organization_id))
     if binding is None:

@@ -31,6 +31,8 @@ jobs:
       - name: Install locked dependencies
         working-directory: backend
         run: uv sync --frozen
+      - name: Install Linux syscall verification tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y strace libseccomp2
       - name: Test processing and API
         working-directory: backend
         run: uv run pytest tests ../scripts/tests
@@ -44,7 +46,7 @@ jobs:
         working-directory: backend
         run: |
           uv run python ../scripts/export_contracts.py
-          git diff --exit-code -- openapi.json ../docs/specification/model_contract_0.7.0.json ../docs/specification/permission_contract_0.7.0.json ../docs/development/permission-matrix.md
+          git diff --exit-code -- openapi.json ../docs/specification/model_contract_0.8.0.json ../docs/specification/permission_contract_0.8.0.json ../docs/development/permission-matrix.md
       - name: Verify PostgreSQL migration round trip on disposable database
         working-directory: backend
         env:
@@ -264,7 +266,7 @@ jobs:
           docker build -t trackvance-v070-isolated:web -f deploy/docker/frontend.Dockerfile .
       - name: Restore PostgreSQL, artifacts and source credentials into a fresh project
         run: python scripts/tests/docker_backup_cycle.py
-      - name: Restore an authentic 0.5.1 backup into 0.7.0
+      - name: Restore an authentic 0.5.1 backup into 0.8.0
         run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.5.1
       - name: Preserve notification history from an authentic 0.6.0 backup
         run: python scripts/tests/identity_legacy_restore_cycle.py --source-version 0.6.0
@@ -280,6 +282,41 @@ jobs:
             .codex-local/v070/**/result.json
           include-hidden-files: true
           if-no-files-found: ignore
+  catalog-reports-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [backend, frontend]
+    env:
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@11.19.0
+      - name: Install locked browser dependencies
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Certify Catalog, frozen reports and complete 400k and 1M populations
+        run: python scripts/tests/catalog_reports_cycle.py --rows 120 400000 1000000 --main-project trackvance-ci-protected --with-browser --with-recovery
+      - name: Upload sanitized catalog and report certification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: catalog-reports-results
+          path: |
+            .codex-local/v080/trackvance-v080-test-catalog-reports-*/result.json
+            .codex-local/v080/trackvance-v080-test-catalog-reports-*/reports-*.json
+            .codex-local/v080/trackvance-v080-test-catalog-reports-*/browser-summary.json
+            .codex-local/v080/trackvance-v080-test-catalog-reports-*/browser-screenshots/*.png
+            .codex-local/v080/trackvance-v080-test-catalog-reports-*/catalog-recovery-*/result.json
+          include-hidden-files: true
+          if-no-files-found: error
   benchmark-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20

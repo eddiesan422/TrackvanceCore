@@ -4,12 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
 import { renderApp } from '../../test/render'
 import { acquisitionLimitsFixture } from '../../test/acquisitionLimits'
+import { governanceFixture } from '../../test/governance'
 import { DatasetsPage, UploadDialog } from './Datasets'
 
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn() }))
 
 function mockApi(value: Record<string, unknown> | ((path: string, options?: RequestInit) => Promise<Record<string, unknown>>)) {
-  vi.mocked(api).mockImplementation(async (path, options) => acquisitionLimitsFixture(path) || (typeof value === 'function' ? value(path, options) : value))
+  vi.mocked(api).mockImplementation(async (path, options) => acquisitionLimitsFixture(path) || governanceFixture(path) || (typeof value === 'function' ? value(path, options) : value))
 }
 function mockApiFailure(error: Error) { mockApi(async () => { throw error }) }
 
@@ -92,7 +93,7 @@ describe('Identifier override during upload', () => {
     })
   })
 
-  it('creates a dataset with a new business area entered in the upload flow', async () => {
+  it('creates a dataset with controlled optional classification in the quick upload flow', async () => {
     mockApi(async path => path === '/datasets/uploads/inspect' ? {
       format: 'CSV', format_label: 'CSV delimitado', filename: 'risk_events.csv', columns: [{ name: 'event_id', logical_type: 'STRING' }, { name: 'risk_score', logical_type: 'DECIMAL', numeric: true }],
     } : { id: 'version' })
@@ -103,13 +104,13 @@ describe('Identifier override during upload', () => {
     await user.upload(screen.getByLabelText('Seleccionar archivo de datos'), new File(['event_id,risk_score\nA-1,10\n'], 'risk_events.csv', { type: 'text/csv' }))
     await screen.findByText('CSV delimitado')
     await user.selectOptions(screen.getByLabelText('Tipo de risk_score'), 'INT64')
-    expect(screen.getByRole('option', { name: 'Comercial' })).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Área de negocio'), '__new_domain__')
-    await user.type(screen.getByLabelText('Nueva área de negocio'), 'Riesgos')
+    await user.selectOptions(screen.getByLabelText('Macrodominio (opcional)'), 'macro-risk')
+    await screen.findByRole('option', { name: 'Crédito' })
+    await user.selectOptions(screen.getByLabelText('Dominio (opcional)'), 'domain-credit')
     await user.click(screen.getByRole('button', { name: 'Cargar y analizar' }))
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/datasets', {
-      name: 'risk events', description: '', domain: 'Riesgos',
+      name: 'risk events', description: '', macro_domain_id: 'macro-risk', domain_id: 'domain-credit',
     }))
     expect(api).toHaveBeenCalledWith('/datasets/risk-events/versions/upload', expect.objectContaining({ method: 'POST' }))
     const uploadCall = vi.mocked(api).mock.calls.find(([path]) => path === '/datasets/risk-events/versions/upload')!
@@ -205,7 +206,8 @@ describe('Identifier override during upload', () => {
     expect(screen.getByText('UPLOAD_TOO_LARGE')).toBeInTheDocument()
     expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/uploads/inspect')).toBe(false)
     expect(screen.getByRole('button', { name: 'Cargar y analizar' })).toBeDisabled()
-    expect(screen.getByLabelText('Área de negocio')).toHaveValue('Finanzas')
+    expect(screen.getByText(/Área heredada: Finanzas/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Área de negocio')).not.toBeInTheDocument()
   })
 })
 
@@ -264,7 +266,7 @@ describe('Dataset list sorting', () => {
     expect(screen.getByText('Sin versiones')).toBeInTheDocument()
   })
 
-  it('offers areas beyond 100 datasets in both dialogs even when their datasets are hidden by the current filter', async () => {
+  it('uses shared macrodomains in both dialogs independently of filtered datasets', async () => {
     const items = Array.from({ length: 151 }, (_, index) => ({ id: `dataset-${index}`, name: `Dataset ${String(index).padStart(3, '0')}`, domain: `Área ${String(index).padStart(3, '0')}`, status: 'ACTIVE' }))
     mockApi(async path => path.startsWith('/acquisitions') ? { items: [], total: 0 } : { items, total: 151 })
     const user = userEvent.setup()
@@ -274,13 +276,13 @@ describe('Dataset list sorting', () => {
     expect(screen.queryByText('Dataset 150')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Cargar dataset' }))
     const dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByRole('option', { name: 'Área 150' })).toBeInTheDocument()
-    await user.selectOptions(dialog.getByLabelText('Área de negocio'), 'Área 150')
-    expect(dialog.getByLabelText('Área de negocio')).toHaveValue('Área 150')
+    await waitFor(() => expect(dialog.getByRole('option', { name: 'Riesgos' })).toBeInTheDocument())
+    await user.selectOptions(dialog.getByLabelText('Macrodominio (opcional)'), 'macro-risk')
+    expect(dialog.getByLabelText('Macrodominio (opcional)')).toHaveValue('macro-risk')
     await user.click(dialog.getByRole('button', { name: 'Usar carga rápida limitada' }))
     const legacy = within(screen.getByRole('dialog'))
-    expect(legacy.getByRole('option', { name: 'Área 150' })).toBeInTheDocument()
-    await user.selectOptions(legacy.getByLabelText('Área de negocio'), 'Área 150')
-    expect(legacy.getByLabelText('Área de negocio')).toHaveValue('Área 150')
+    await waitFor(() => expect(legacy.getByRole('option', { name: 'Riesgos' })).toBeInTheDocument())
+    await user.selectOptions(legacy.getByLabelText('Macrodominio (opcional)'), 'macro-risk')
+    expect(legacy.getByLabelText('Macrodominio (opcional)')).toHaveValue('macro-risk')
   })
 })

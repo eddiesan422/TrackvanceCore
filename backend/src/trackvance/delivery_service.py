@@ -26,7 +26,7 @@ from .artifactstore import (
     link_artifact,
     storage_provider,
 )
-from .audit_context import Actor
+from .audit_context import Actor, actor_context
 from .credential_store import SecretStoreError
 from .data_sinks import (
     AUDIT_NAMES,
@@ -93,6 +93,7 @@ def delivery_control(run_id: str, lease_owner: str | None):
                 if lease_owner is not None and (job is None or job.lease_owner != lease_owner or job.status != "RUNNING"
                         or job.lease_until is None or job.lease_until.replace(tzinfo=UTC) <= utcnow()):
                     raise DeliveryOperationError(409, "WORKER_LEASE_LOST", "El worker ya no posee esta ejecución.")
+                authorize_delivery_sources(control, current)
             if now >= deadline:
                 raise DeliveryOperationError(412, "DELIVERY_PREPARATION_TIMEOUT", "La validación o preparación superó su presupuesto de tiempo.")
             if shutil.disk_usage(artifact_store.root).free < DeliveryLimits.configured().reserve_disk_bytes:
@@ -110,6 +111,25 @@ def authorize_delivery_initiator(db: Session, run: Run, draft: DeliveryDraft):
     identity = metadata.get("responsible_user_id") if metadata else run.initiated_by_id
     user = db.get(User, identity, populate_existing=True) if identity else None
     _authorized(db, user, run.organization_id, draft)
+    authorize_delivery_sources(db, run)
+
+
+def authorize_delivery_sources(db: Session, run: Run) -> None:
+    from .governance import authorize_dataset_content
+    from .operations_common import OperationError
+
+    metadata = (run.execution_plan or {}).get("automation") or {}
+    identity = metadata.get("responsible_user_id") if metadata else run.initiated_by_id if run.initiated_by_type == "USER" else None
+    if identity is None:
+        return
+    user = db.get(User, identity, populate_existing=True)
+    source = db.get(DatasetVersion, run.dataset_version_id, populate_existing=True)
+    if user is None or source is None or user.organization_id != run.organization_id:
+        raise DeliveryOperationError(403, "SOURCE_ACCESS_DENIED", "El ejecutor o la procedencia ya no está disponible.")
+    try:
+        authorize_dataset_content(db, user, source)
+    except OperationError as error:
+        raise DeliveryOperationError(error.status, error.code, error.message, error.details) from None
 
 
 class DeliveryOperationError(Exception):
@@ -436,6 +456,12 @@ def _owned_version_metadata(
         raise DeliveryOperationError(
             412, "FAILED_PRECONDITION", "La DatasetVersion ya no está disponible."
         )
+    initiating = actor_context.get()
+    if initiating and initiating.type == "USER":
+        from .governance import authorize_dataset_content
+        user = db.get(User, initiating.id)
+        if user:
+            authorize_dataset_content(db, user, version)
     dataset = db.scalar(
         select(Dataset).where(
             Dataset.id == version.dataset_id,
@@ -1386,6 +1412,8 @@ def enqueue_delivery(
     *,
     queue: JobQueue | None = None,
 ) -> Run:
+    from .governance import authorize_dataset_content
+    authorize_dataset_content(db, actor, source)
     if config.module != "DELIVERY" or config.organization_id != actor.organization_id:
         raise DeliveryOperationError(422, "WRONG_MODULE", "La configuración no es de Delivery.")
     draft = DeliveryDraft.model_validate(config.config)

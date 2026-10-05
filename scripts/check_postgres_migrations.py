@@ -123,7 +123,7 @@ def corrections_rows(connection):
 
 
 def verify_corrections_preservation(connection, config) -> dict:
-    """Exercise 0015→0016→0015→0016 only in the checker's disposable DB."""
+    """Exercise 0015→head→0015→head only in the checker's disposable DB."""
     import sqlalchemy as sa
     import verify_storage
     from alembic import command
@@ -166,13 +166,61 @@ def verify_corrections_preservation(connection, config) -> dict:
     command.upgrade(config, verify_storage.CURRENT_MIGRATION)
     connection.commit()
     final, final_fks = corrections_rows(connection)
-    projected, projected_fks = verify_storage.project_corrections_upgrade(final, final_fks)
+    corrected, corrected_fks = verify_storage.project_catalog_upgrade(final, final_fks)
+    projected, projected_fks = verify_storage.project_corrections_upgrade(corrected, corrected_fks)
     assert verify_storage._table_hashes(projected) == before_hashes
     assert verify_storage.validate_relationships(projected, projected_fks) == relationships
     return {"status": "PASS", "tables": 42, "rows": sum(map(len, before.values())),
             "relationships": relationships, "physical_schema": physical,
             "failed_acquisition_preserved": True, "historical_notification_read_at_preserved": True,
             "domain_options_numbering_limits_preserved": True}
+
+
+def verify_catalog_preservation(connection, config) -> dict:
+    """Prove 0016 preservation, including non-NULL correction diagnostics."""
+    import sqlalchemy as sa
+    import verify_storage
+    from alembic import command
+    from physical_schema_guard import validate_physical_schema
+
+    from trackvance.db import Base
+
+    connection.rollback()
+    command.downgrade(config, verify_storage.CORRECTIONS_MIGRATION)
+    connection.commit()
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    acquisition = metadata.tables["acquisition_runs"]
+    connection.execute(acquisition.update().values(
+        error_details={"limit": 1000000, "observed": 1000001}, error_reference="historical-070-diagnostic"))
+    connection.commit()
+    before, before_fks = corrections_rows(connection)
+    before_hashes = verify_storage._table_hashes(before)
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    after, after_fks = corrections_rows(connection)
+    report = verify_storage.legacy_v7_report(
+        after, after_fks, current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=len(before["artifacts"]),
+        verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert report["tables"] == before_hashes
+    assert report["validated_relationships"] == verify_storage.validate_relationships(before, before_fks)
+    assert all(not after[table] for table in verify_storage.CATALOG_TABLES)
+    physical = validate_physical_schema(connection, Base.metadata)
+    connection.rollback()
+    command.downgrade(config, verify_storage.CORRECTIONS_MIGRATION)
+    connection.commit()
+    restored, _ = corrections_rows(connection)
+    assert verify_storage._table_hashes(restored) == before_hashes
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    return {"status": "PASS", "tables_before": len(before), "tables_after": len(after),
+            "legacy_area_preserved": True, "diagnostics_preserved": True,
+            "custom_roles_unchanged": True, "no_automatic_classification": True,
+            "physical_schema": physical}
 
 
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
@@ -410,6 +458,10 @@ def check() -> dict:
                 "acquisition_uploads", "acquisition_runs", "delivery_automations", "delivery_automation_versions",
                 "delivery_occurrences", "delivery_input_claims", "delivery_target_guards", "delivery_target_decisions",
                 "outbox_events", "event_consumptions", "internal_notifications",
+                "macro_domains", "data_domains", "governance_history", "glossary_terms",
+                "column_documentation", "glossary_associations", "dataset_blocks",
+                "dataset_security_dependencies", "strict_approvals", "report_definitions",
+                "report_revisions", "report_contexts", "report_executions",
             }
             for name, historical in identity_rows.items():
                 actual = [dict(row) for row in connection.execute(
@@ -480,6 +532,7 @@ def check() -> dict:
             command.upgrade(config, "head")
             connection.commit()
             corrections = verify_corrections_preservation(connection, config)
+            catalog = verify_catalog_preservation(connection, config)
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
                 "0008_0016_roundtrip": "PASS", "0012_0016_preservation": "PASS",
@@ -487,7 +540,8 @@ def check() -> dict:
                 "0012_tables_preserved": len(identity_rows), "0008_tables_preserved": len(baseline_rows),
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
                 "0008_delivery_lineage_edges_preserved": 8,
-                "0015_0016_preservation": corrections}
+                "0015_0017_preservation": corrections,
+                "0016_0017_preservation": catalog}
     finally:
         if test_engine is not None:
             test_engine.dispose()

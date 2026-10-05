@@ -22,9 +22,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import MetaData, inspect, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 from trackvance.db import engine
-from trackvance.models import Dataset, DatasetVersion
 
 sys.path.insert(0, str(Path.cwd().parent / "scripts"))
 from check_postgres_migrations import seed_delivery_baseline
@@ -41,16 +39,20 @@ with engine.begin() as connection:
         "password_hash": "test-only-no-password", "role": "Administrator", "active": True,
         "version": 1, "updated_at": now,
     })
-    with Session(bind=connection) as session:
-        session.add(Dataset(id="dataset", organization_id="historical", name="Historical source"))
-        session.flush()
-        session.add(DatasetVersion(
-            id="version", organization_id="historical", dataset_id="dataset", version=1,
-            filename="migration-fixture.csv", sha256="a" * 64, schema_hash="b" * 64,
-            size_bytes=42, row_count=3, column_count=1, original_path="migration-fixture.csv",
-            canonical_path="migration-fixture.parquet", schema_json=[], profile={},
-        ))
-        session.commit()
+    # Insert through the reflected historical schema: the current ORM includes
+    # additive governance columns absent from this real 0008 migration fixture.
+    connection.execute(before.tables["datasets"].insert(), {
+        "id": "dataset", "organization_id": "historical", "created_at": now,
+        "name": "Historical source", "description": "", "domain": "Operaciones",
+        "owner": "Equipo de datos", "criticality": "HIGH", "status": "ACTIVE",
+    })
+    connection.execute(before.tables["dataset_versions"].insert(), {
+        "id": "version", "organization_id": "historical", "created_at": now,
+        "dataset_id": "dataset", "version": 1, "source_type": "UPLOAD", "profile_status": "READY",
+        "filename": "migration-fixture.csv", "sha256": "a" * 64, "schema_hash": "b" * 64,
+        "size_bytes": 42, "row_count": 3, "column_count": 1, "original_path": "migration-fixture.csv",
+        "canonical_path": "migration-fixture.parquet", "schema_json": [], "profile": {},
+    })
     seed_delivery_baseline(connection, {
         "users": "reviewer", "datasets": "dataset", "dataset_versions": "version",
     })

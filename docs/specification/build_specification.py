@@ -40,8 +40,8 @@ def find_repo() -> Path:
 REPO: Path
 SOURCE = HERE / "Trackvance_Core_Especificacion_Tecnica_v1.1.md"
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.7.0"
-EDITION_DATE = "4 octubre 2026"
+VERSION = "0.8.0"
+EDITION_DATE = "5 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 NAVY = colors.HexColor("#15324B")
 TEAL = colors.HexColor("#008B83")
@@ -133,7 +133,7 @@ class Diagram(Flowable):
             self.height = 464
         elif kind == "delivery-lanes":
             self.height = 234
-        elif kind in {"local", "acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
+        elif kind in {"local", "report-profiles", "acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
             self.height = 310
 
     def box(self, x, y, w, h, title, detail=""):
@@ -162,7 +162,7 @@ class Diagram(Flowable):
         w = CONTENT
         if self.kind == "logical":
             self.box(0, 139, w, 43, "React / API / RBAC", "Interacción, identidad y contratos HTTP")
-            self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Delivery · Excepciones · Audit")
+            self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Delivery · Catálogo · Reportes · Audit")
             boundaries = ["DatasetSource", "DataSink", "StorageProvider", "ExecutionEngine", "JobQueue"]
             for i, title in enumerate(boundaries):
                 x = i * (w + 8) / 5
@@ -179,10 +179,11 @@ class Diagram(Flowable):
                 ("Acquisition worker", "Sólo secretos de fuentes"),
                 ("DEFAULT worker", "Polars / PySpark local"),
                 ("Delivery worker", "Sólo secretos de destinos"),
+                ("REPORT worker", "SQL hijo aislado"),
             ]):
-                x = i * 188
-                self.box(x, 156, 150, 56, title, detail)
-                self.arrow(x + 75, 214, 450, 246)
+                x = i * (w + 10) / 4
+                self.box(x, 156, (w - 30) / 4, 56, title, detail)
+                self.arrow(x + (w - 30) / 8, 214, 450, 246)
             for i, (title, detail) in enumerate([
                 ("Scheduler", "Sentinel + Delivery: despacho"),
                 ("Events CHAINING", "Intake output exacto"),
@@ -192,6 +193,18 @@ class Diagram(Flowable):
             self.box(0, 5, w, 52, "StorageProvider / volumen de artefactos", "Snapshots + partes + descriptor + perfiles + resultados + manifiestos")
             # The lightweight processes are independent peers coordinated by
             # PostgreSQL, rather than the next stage of an individual worker.
+        elif self.kind == "report-profiles":
+            self.box(0, 246, w, 52, "Resolver fuentes conjuntamente", "Entrada + contrato + aprobación + salida + esquema + usuario: contexto congelado")
+            titles = [("PREVIEW", "Muestra <= 10; sin escritura"), ("DOWNLOAD", "CSV / XLSX incremental; sin spool"), ("DATASET", "Job REPORT; staging propio acotado")]
+            width = (w - 24) / 3
+            for i, (title, detail) in enumerate(titles):
+                x = i * (width + 12)
+                self.box(x, 153, width, 63, title, detail)
+                self.arrow(x + width / 2, 245, x + width / 2, 218)
+            self.box(0, 76, w, 48, "Proceso SQL hijo: Landlock + seccomp", "Partes exactas de lectura; sin secretos/red/exec; cero escritura en PREVIEW y DOWNLOAD")
+            self.box(0, 5, w, 47, "Autorización actual de todas las fuentes y publicación con lease", "Sólo DATASET: versión inicial + perfil completo + linaje; calidad propia pendiente")
+            self.arrow(w / 2, 151, w / 2, 126)
+            self.arrow(w / 2, 75, w / 2, 54)
         elif self.kind in {"acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
             flows = {
                 "acquisition": [
@@ -273,12 +286,13 @@ class Diagram(Flowable):
             self.box(279, 178, 247, 47, "Scheduler independiente", "Sólo despacho; no calcula datasets")
             self.arrow(122, 177, 122, 168)
             self.arrow(402, 177, 402, 168)
-            self.box(0, 120, w, 47, "JobQueue durable", "Lane + lease + XOR Run / AcquisitionRun")
-            self.box(0, 54, 166, 53, "Worker DEFAULT", "Intake / Recon / Sentinel")
-            self.box(180, 54, 166, 53, "Worker DELIVERY", "Preflight + entrega; secretos destino")
-            self.box(360, 54, 166, 53, "Worker ACQUISITION", "Lectura / perfil; secretos fuente")
-            for x in (83, 263, 443):
-                self.arrow(x, 119, x, 109)
+            self.box(0, 120, w, 47, "JobQueue durable", "Lane + lease; un sujeto Run / AcquisitionRun / ReportExecution")
+            workers = [("DEFAULT", "Intake / Recon / Sentinel"), ("DELIVERY", "Preflight + entrega"),
+                       ("ACQUISITION", "Lectura / perfil"), ("REPORT", "Dataset derivado")]
+            for i, (lane, detail) in enumerate(workers):
+                x = i * (w + 12) / 4
+                self.box(x, 54, (w - 36) / 4, 53, "Worker " + lane, detail)
+                self.arrow(x + (w - 36) / 8, 119, x + (w - 36) / 8, 109)
             self.box(0, 0, w, 45, "Metadata y StorageProvider compartidos", "No hay transacción distribuida con la base externa")
         elif self.kind == "delivery-states":
             self.box(173, 137, 180, 42, "STARTED", "Marcador persistido antes del remoto")
@@ -445,7 +459,7 @@ def model_tables():
         # together; a heading alone at the foot of a page is not useful.
         story.append(CondPageBreak(120))
         story.append(paragraph(entity["table"], "h2"))
-        evolution = {"NEW": "Nueva en 0.7.0", "MODIFIED": "Evolucionada en 0.7.0",
+        evolution = {"NEW": "Nueva en 0.8.0", "MODIFIED": "Evolucionada en 0.8.0",
                      "PRESERVED": "Estructura histórica preservada"}.get(entity.get("evolution"))
         if evolution:
             story.append(paragraph(evolution, "small"))
@@ -499,7 +513,7 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Paragraph("Especificación técnica v1.1", ParagraphStyle("subtitle", fontName="Arial", fontSize=21, leading=28, textColor=NAVY)))
     story.append(Spacer(1, 25))
     cover_status = "Borrador: certificación consolidada en curso" if draft else "Estado funcional y evidencia de validación"
-    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · CORRECCIONES C01–C06"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
+    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · CATÁLOGO DE GOBIERNO Y REPORTES"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
     story.append(Spacer(1, 18))
     story.append(paragraph("Arquitectura local y evolución a producto", "h2"))
     story.append(paragraph("Monolito modular · Persistencia local · Reglas portables · Evidencia verificable"))
@@ -540,6 +554,9 @@ def build(candidate: Path, results: dict, draft: bool):
             story.append(openapi_table())
         elif line == "@validation":
             story.append(table([["Verificación", "Resultado ejecutado"], *[[k, v] for k, v in results.items()]]))
+        elif line == "@historicalvalidation":
+            historical = json.loads((REPO / "docs/specification/validation_results_0.7.0.json").read_text(encoding="utf-8"))
+            story.append(table([["Verificación histórica 0.7.0", "Resultado de esa revisión"], *[[k, v] for k, v in historical.items()]]))
         elif line == "@corrections":
             data = input_document("corrections_results")
             story.append(table([["Corrección / prueba", "Evidencia independiente"], *[
@@ -565,7 +582,11 @@ def build(candidate: Path, results: dict, draft: bool):
             code = []
             i += 1
             while i < len(lines) and not lines[i].startswith("```"):
-                code.append(Paragraph(html.escape(lines[i]).replace(" ", "&nbsp;"), STYLES["code"]))
+                indent = len(lines[i]) - len(lines[i].lstrip(" "))
+                # Preserve indentation while allowing commands to wrap between
+                # tokens instead of splitting an option such as --wait.
+                content = "&nbsp;" * indent + html.escape(lines[i][indent:])
+                code.append(Paragraph(content, STYLES["code"]))
                 i += 1
             # Each line is a row: long JSON/examples may split across pages.
             block = Table([[item] for item in code], colWidths=[CONTENT])

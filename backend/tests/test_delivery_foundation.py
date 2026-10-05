@@ -451,9 +451,11 @@ def test_lane_configuration_and_heartbeats_are_separate():
     assert configured_lane(" default ") == "DEFAULT"
     assert configured_lane("delivery") == "DELIVERY"
     assert configured_lane("acquisition") == "ACQUISITION"
+    assert configured_lane("report") == "REPORT"
     assert heartbeat_path("DEFAULT") != heartbeat_path("DELIVERY")
     assert heartbeat_path("ACQUISITION") not in {heartbeat_path("DEFAULT"), heartbeat_path("DELIVERY")}
-    with pytest.raises(RuntimeError, match="DEFAULT, DELIVERY o ACQUISITION"):
+    assert len({heartbeat_path(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION", "REPORT")}) == 4
+    with pytest.raises(RuntimeError, match="DEFAULT, DELIVERY, ACQUISITION o REPORT"):
         configured_lane("priority")
 
 

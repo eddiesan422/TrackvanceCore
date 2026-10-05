@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { createClassification } from './helpers/classification'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(5_400_000)
@@ -48,10 +49,9 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   await page.goto('/datasets?upload=1')
   const upload = page.getByRole('dialog')
   await upload.getByLabel('Nombre del dataset', { exact: true }).fill(datasetName)
-  await expect(upload.getByLabel('Área de negocio', { exact: true })).toHaveValue('Operaciones')
-  await upload.getByLabel('Área de negocio', { exact: true }).selectOption('__new_domain__')
+  await expect(upload.getByLabel('Macrodominio (opcional)', { exact: true })).toHaveValue('')
+  const classification = await createClassification(page, `Corrections XLSX ${stamp}`, businessArea)
   await expect(upload.getByRole('button', { name: 'Registrar adquisición', exact: true })).toBeDisabled()
-  await upload.getByLabel('Nueva área de negocio', { exact: true }).fill(businessArea)
   const receivedResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/datasets/uploads/stage' && response.request().method() === 'POST', { timeout: 300_000 })
   await upload.getByLabel('Archivo', { exact: true }).setInputFiles(fixturePath)
   const received = await receivedResponse
@@ -86,7 +86,9 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   expect(acquired.published_rows).toBe(fixture.rows)
   expect(acquired.error).toBeNull()
   const registeredDataset = await (await page.request.get(`/api/v1/datasets/${acquisition.dataset_id}`)).json()
-  expect(registeredDataset.domain).toBe(businessArea)
+  expect(registeredDataset.macro_domain_id).toBe(classification.macro_domain_id)
+  expect(registeredDataset.domain_id).toBe(classification.domain_id)
+  expect(registeredDataset.governance.domain.name).toBe(businessArea)
   await page.reload()
   await expect(page.getByRole('link', { name: 'Ver versión', exact: true })).toBeVisible()
   const profileResponse = await page.request.get(`/api/v1/dataset-versions/${acquired.output_version_id}/profile`)
@@ -97,14 +99,16 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   expect(profile.profile.columns.find((column: { name: string }) => column.name === 'observed').null_count).toBe(fixture.expected_observed_nulls)
   expect(profile.profile.columns.find((column: { name: string }) => column.name === 'late_type').logical_type).toBe('STRING')
   await page.goto('/datasets?upload=1')
-  await expect(page.getByRole('dialog').getByLabel('Área de negocio', { exact: true }).getByRole('option', { name: businessArea, exact: true })).toBeAttached()
+  await page.getByRole('dialog').getByLabel('Macrodominio (opcional)', { exact: true }).selectOption(classification.macro_domain_id)
+  await expect(page.getByRole('dialog').getByLabel('Dominio (opcional)', { exact: true }).getByRole('option', { name: businessArea, exact: true })).toBeAttached()
   await page.getByRole('dialog').getByRole('button', { name: 'Usar carga rápida limitada', exact: true }).click()
-  await expect(page.getByRole('dialog').getByLabel('Área de negocio', { exact: true }).getByRole('option', { name: businessArea, exact: true })).toBeAttached()
+  await page.getByRole('dialog').getByLabel('Macrodominio (opcional)', { exact: true }).selectOption(classification.macro_domain_id)
+  await expect(page.getByRole('dialog').getByLabel('Dominio (opcional)', { exact: true }).getByRole('option', { name: businessArea, exact: true })).toBeAttached()
   await page.getByRole('dialog').getByRole('button', { name: 'Cancelar', exact: true }).click()
   await page.goto(`/datasets/${acquisition.dataset_id}`)
   await page.getByRole('button', { name: 'Nueva versión', exact: true }).click()
-  await expect(page.getByRole('dialog').getByLabel('Área de negocio', { exact: true })).toHaveValue(businessArea)
-  await expect(page.getByRole('dialog').getByLabel('Área de negocio', { exact: true })).toBeDisabled()
+  await expect(page.getByRole('dialog').getByText('La clasificación vigente pertenece al dataset y se conserva al cargar versiones. Puedes administrarla desde Catálogo.')).toBeVisible()
+  await expect(page.getByRole('dialog').getByLabel('Macrodominio (opcional)', { exact: true })).toHaveCount(0)
   await page.getByRole('dialog').getByRole('button', { name: 'Cerrar', exact: true }).click()
 
   await page.goto('/intake')
@@ -290,5 +294,5 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   await writeFile(testInfo.outputPath('corrections-ui.json'), JSON.stringify({ project, acquisition_id: acquisition.id,
     source_version_id: acquired.output_version_id, intake_run_id: execution.id, output_version_id: accepted.output_version_id,
     delivery_run_id: committed.id, automation_id: automation.id, schema, table: tableName,
-    business_area: businessArea, timezone_validation: 'PASS', preserved_starts_at: preservedInstant, unread_persistence: 'PASS', notification_id: personal.id, expected_rows: fixture.rows, expected_canonical_rows_sha256: fixture.canonical_rows_sha256 }, null, 2))
+    classification: { ...classification, domain_name: businessArea }, timezone_validation: 'PASS', preserved_starts_at: preservedInstant, unread_persistence: 'PASS', notification_id: personal.id, expected_rows: fixture.rows, expected_canonical_rows_sha256: fixture.canonical_rows_sha256 }, null, 2))
 })

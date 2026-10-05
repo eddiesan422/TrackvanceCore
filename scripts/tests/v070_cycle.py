@@ -45,7 +45,7 @@ def main():
     with (directory / "test.env").open("a", encoding="utf-8") as stream:
         stream.write("TRACKVANCE_ACQUISITION_MAX_UPLOAD_BYTES=2147483648\n"
                      "TRACKVANCE_ACQUISITION_MAX_OBSERVED_BYTES=4294967296\n")
-    summary = {"status": "FAIL", "version": "0.7.0", "project": context["project"],
+    summary = {"status": "FAIL", "version": "0.8.0", "project": context["project"],
                "tier_mib": args.tier_mib, "rows": 1_000_000}
     started = False
     try:

@@ -427,7 +427,7 @@ def test_legacy_projections_reject_reviews_and_current_state_includes_them():
     legacy["delivery_reviews"] = rows["delivery_reviews"]
     with pytest.raises(ValueError, match="registros de Data Delivery"):
         verify_storage.legacy_v2_report(
-            legacy, [], current_migration=verify_storage.CURRENT_MIGRATION,
+            legacy, [], current_migration=verify_storage.CORRECTIONS_MIGRATION,
             verified_artifacts=0, verified_source_secrets=0,
         )
     assert verify_storage._table_hashes(rows)["delivery_reviews"]["review"]
@@ -521,7 +521,7 @@ def asynchronous_upgrade_rows():
 
 def test_v5_projection_preserves_all_historical_hashes_and_only_reverses_explicit_pause():
     previous, upgraded = asynchronous_upgrade_rows()
-    report = verify_storage.legacy_v5_report(upgraded, [], current_migration=verify_storage.CURRENT_MIGRATION,
+    report = verify_storage.legacy_v5_report(upgraded, [], current_migration=verify_storage.CORRECTIONS_MIGRATION,
         verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0)
     assert report['tables'] == verify_storage._table_hashes(previous)
     assert report['schema_version'] == 5 and report['migration'] == verify_storage.IDENTITY_MIGRATION
@@ -579,7 +579,7 @@ def corrections_upgrade_rows():
     return previous, upgraded, fks
 
 
-def corrections_report(rows, fks, migration=verify_storage.CURRENT_MIGRATION):
+def corrections_report(rows, fks, migration=verify_storage.CORRECTIONS_MIGRATION):
     return verify_storage.legacy_v6_report(rows, fks, current_migration=migration,
         verified_artifacts=1, verified_source_secrets=0, verified_delivery_secrets=0)
 
@@ -600,7 +600,7 @@ def test_v6_projection_retains_every_historical_row_value_and_aggregate():
                                    "missing_column", "unknown_table", "missing_table", "wrong_revision"])
 def test_v6_projection_rejects_any_nonnull_new_diagnostic_or_incomplete_schema(damage):
     _, upgraded, fks = corrections_upgrade_rows()
-    migration = verify_storage.CURRENT_MIGRATION
+    migration = verify_storage.CORRECTIONS_MIGRATION
     if damage == "details":
         upgraded["acquisition_runs"][0]["error_details"] = {"observed": 400000}
     elif damage == "empty_details":
@@ -649,7 +649,7 @@ def test_v6_projection_never_hides_changes_to_historical_data(damage):
 
 
 @pytest.mark.parametrize("schema", [2, 3, 4, 5])
-@pytest.mark.parametrize("migration", [verify_storage.PRE_CORRECTIONS_MIGRATION, verify_storage.CURRENT_MIGRATION])
+@pytest.mark.parametrize("migration", [verify_storage.PRE_CORRECTIONS_MIGRATION, verify_storage.CORRECTIONS_MIGRATION])
 def test_older_projections_remain_strict_across_both_async_heads(schema, migration):
     _, upgraded = asynchronous_upgrade_rows()
     kwargs = {"current_migration": migration, "verified_artifacts": 0, "verified_source_secrets": 0}
@@ -663,9 +663,141 @@ def test_older_projections_remain_strict_across_both_async_heads(schema, migrati
 def test_cli_v6_projection_uses_checked_snapshot_inputs(monkeypatch, capsys):
     _, upgraded, fks = corrections_upgrade_rows()
     monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
-        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+        verify_storage.CORRECTIONS_MIGRATION, upgraded, fks, 1, 0, 0))
     monkeypatch.setattr(verify_storage.sys, "argv", ["verify_storage", "snapshot-legacy-v6"])
     assert verify_storage.main() == 0
     import json
 
     assert json.loads(capsys.readouterr().out) == corrections_report(upgraded, fks)
+
+
+def catalog_upgrade_rows():
+    _, previous, fks = corrections_upgrade_rows()
+    upgraded = deepcopy(previous)
+    upgraded.update({name: [] for name in verify_storage.CATALOG_TABLES})
+    for name, defaults in verify_storage.CATALOG_DEFAULTS.items():
+        for row in upgraded[name]:
+            row.update(defaults)
+    return previous, upgraded, fks
+
+
+def catalog_report(rows, fks):
+    return verify_storage.legacy_v7_report(
+        rows, fks, current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=1, verified_source_secrets=0, verified_delivery_secrets=0)
+
+
+def test_catalog_projection_preserves_state7_without_rewriting_governance_or_history():
+    previous, upgraded, fks = catalog_upgrade_rows()
+    original = deepcopy(upgraded)
+    report = catalog_report(upgraded, fks)
+    assert report["schema_version"] == 7
+    assert report["migration"] == verify_storage.CORRECTIONS_MIGRATION
+    assert report["tables"] == verify_storage._table_hashes(previous)
+    assert len(report["tables"]) == 42
+    assert upgraded == original
+
+
+@pytest.mark.parametrize("damage", [
+    "classification", "version", "new_history", "new_report", "report_job",
+    "missing_default", "missing_table", "unknown_table",
+])
+def test_catalog_projection_refuses_to_hide_new_activity_or_unknown_schema(damage):
+    _, upgraded, fks = catalog_upgrade_rows()
+    if damage == "classification":
+        upgraded["datasets"][0]["information_classification"] = "PUBLIC"
+    elif damage == "version":
+        upgraded["datasets"][0]["governance_version"] = 2
+    elif damage == "new_history":
+        upgraded["governance_history"] = [{"id": "history"}]
+    elif damage == "new_report":
+        upgraded["report_contexts"] = [{"id": "context"}]
+    elif damage == "report_job":
+        upgraded["jobs"][0]["report_execution_id"] = "report"
+    elif damage == "missing_default":
+        del upgraded["datasets"][0]["macro_domain_id"]
+    elif damage == "missing_table":
+        del upgraded["glossary_terms"]
+    else:
+        upgraded["unknown"] = []
+    with pytest.raises(ValueError):
+        catalog_report(upgraded, fks)
+
+
+def test_catalog_projection_detects_changes_to_legacy_business_values():
+    _, upgraded, fks = catalog_upgrade_rows()
+    expected = catalog_report(upgraded, fks)
+    upgraded["datasets"][0]["domain"] = "Unexpected rewrite"
+    with pytest.raises(ValueError, match="persistencia cambió"):
+        verify_storage.compare(expected, catalog_report(upgraded, fks))
+
+
+@pytest.mark.parametrize("schema", [2, 3, 4, 5, 6])
+def test_catalog_upgrade_chains_all_historical_projection_checks(schema):
+    if schema == 6:
+        _, upgraded, fks = catalog_upgrade_rows()
+    else:
+        _, upgraded = asynchronous_upgrade_rows()
+        fks = []
+        upgraded.update({name: [] for name in verify_storage.CATALOG_TABLES})
+    kwargs = {"current_migration": verify_storage.CURRENT_MIGRATION,
+              "verified_artifacts": 0, "verified_source_secrets": 0}
+    if schema > 2:
+        kwargs["verified_delivery_secrets"] = 0
+    report = getattr(verify_storage, f"legacy_v{schema}_report")(upgraded, fks, **kwargs)
+    assert report["schema_version"] == schema
+
+
+def test_native_catalog_snapshot_keeps_every_table_and_uses_state8(monkeypatch):
+    _, upgraded, fks = catalog_upgrade_rows()
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
+        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+    report = verify_storage.snapshot()
+    assert report["schema_version"] == 8
+    assert set(report["tables"]) == verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]
+    assert len(report["tables"]) == 55
+
+
+def test_cli_v7_projection_uses_verified_snapshot_inputs(monkeypatch, capsys):
+    import json
+
+    _, upgraded, fks = catalog_upgrade_rows()
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
+        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+    monkeypatch.setattr(verify_storage.sys, "argv", ["verify_storage", "snapshot-legacy-v7"])
+    assert verify_storage.main() == 0
+    assert json.loads(capsys.readouterr().out) == catalog_report(upgraded, fks)
+
+
+@pytest.mark.parametrize("lane,profile", [("DEFAULT", "DATASET"), ("REPORT", "PREVIEW")])
+def test_report_jobs_require_materialization_and_their_own_lane(lane, profile):
+    rows = {"jobs": [{"id": "job", "organization_id": "org", "lane": lane,
+                      "run_id": None, "acquisition_id": None, "report_execution_id": "report"}],
+            "report_executions": [{"id": "report", "organization_id": "org", "profile": profile}]}
+    with pytest.raises(ValueError, match="reporte"):
+        verify_storage.validate_relationships(rows, [])
+
+
+@pytest.mark.parametrize("damage", ["macro", "cycle", "approval", "context_hash", "execution_owner", "unpublished_success"])
+def test_native_catalog_relationships_reject_corrupt_security_and_frozen_context(damage):
+    rows = {"datasets": [{"id": "a", "domain_id": "domain", "macro_domain_id": "macro"}],
+            "data_domains": [{"id": "domain", "macro_domain_id": "macro"}]}
+    if damage == "macro":
+        rows["data_domains"][0]["macro_domain_id"] = "other"
+    elif damage == "cycle":
+        rows["dataset_security_dependencies"] = [{"id": "dep1", "dataset_id": "a", "source_dataset_id": "b", "active": True},
+                                                   {"id": "dep2", "dataset_id": "b", "source_dataset_id": "a", "active": True}]
+    elif damage == "approval":
+        rows["strict_approvals"] = [{"id": "approval", "run_id": "missing"}]
+    elif damage == "context_hash":
+        rows["report_contexts"] = [{"id": "context", "snapshot": {}, "integrity_hash": "wrong"}]
+    else:
+        rows["report_executions"] = [{"id": "execution", "profile": "DATASET", "status": "SUCCESS", "context_id": "context", "user_id": "actor", "output_version_id": None}]
+        if damage == "unpublished_success":
+            # Invoke the JSON relationship checker with an already verified context.
+            index = {"report_contexts": {"context": {"user_id": "actor"}}}
+            with pytest.raises(ValueError, match="publicación"):
+                verify_storage.validate_catalog_relationships({"report_executions": rows["report_executions"]}, index)
+            return
+    with pytest.raises(ValueError):
+        verify_storage.validate_relationships(rows, [])

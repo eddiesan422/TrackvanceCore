@@ -9,6 +9,12 @@ from .models import Role, RolePermission, User
 GROUPS = {"datasets": "Datasets", "connections": "Conexiones", "intake": "Data Intake", "recon": "ReconOps", "sentinel": "Sentinel", "delivery": "Data Delivery", "destinations": "Destinos", "exceptions": "Excepciones", "rules": "Reglas", "exports": "Evidencia / exports", "artifacts": "Evidencia / exports", "audit": "Auditoría", "users": "Usuarios", "roles": "Roles", "notifications": "Notificaciones", "system": "Sistema", "runs": "Ejecuciones"}
 ACTIONS = {"read": "Consultar", "write": "Crear y editar", "use": "Utilizar", "manage": "Administrar", "configure": "Configurar", "execute": "Ejecutar", "schedule": "Programar", "overwrite": "Reemplazar contenido", "alter_target": "Crear o modificar target", "review_unknown": "Revisar UNKNOWN", "repair_evidence": "Reparar evidencia", "close": "Cerrar", "download": "Descargar"}
 _ACTIONS_BY_GROUP = {"datasets": "read write", "connections": "read use manage", "intake": "read configure execute", "recon": "read configure execute", "sentinel": "read configure execute schedule", "delivery": "read configure execute schedule overwrite alter_target review_unknown repair_evidence", "destinations": "read use manage", "exceptions": "read write close", "rules": "read", "exports": "download", "artifacts": "download", "audit": "read", "users": "read manage", "roles": "read manage", "notifications": "read manage", "system": "read", "runs": "read execute"}
+GROUPS.update({"catalog": "Catálogo", "governance": "Gobierno", "domains": "Dominios",
+               "glossary": "Glosario", "blocks": "Restricciones", "reports": "Reportes"})
+ACTIONS.update({"preview": "Previsualizar", "generate": "Generar dataset"})
+_ACTIONS_BY_GROUP.update({"catalog": "read", "governance": "read write", "domains": "read manage",
+                         "glossary": "read manage", "blocks": "read manage",
+                         "reports": "read write preview download generate"})
 CATALOG = frozenset(f"{group}:{action}" for group, actions in _ACTIONS_BY_GROUP.items() for action in actions.split())
 NON_DELEGABLE = frozenset({"users:manage", "roles:manage"})
 DEPENDENCIES: dict[str, frozenset[str]] = {}
@@ -25,6 +31,11 @@ for _module in ("intake", "recon", "sentinel", "delivery"):
     DEPENDENCIES[f"{_module}:configure"] |= {"datasets:read"}
     DEPENDENCIES[f"{_module}:execute"] |= {"datasets:read"}
 DEPENDENCIES["delivery:configure"] |= {"destinations:read", "destinations:use"}
+for _code in ("catalog:read", "governance:read", "reports:read", "domains:read", "glossary:read", "blocks:read"):
+    DEPENDENCIES[_code] = frozenset({"datasets:read"})
+DEPENDENCIES["reports:generate"] |= {"datasets:write"}
+for _code in ("reports:preview", "reports:download", "reports:generate"):
+    DEPENDENCIES[_code] |= {"intake:read"}
 
 
 def catalog_dto() -> list[dict]:
@@ -144,6 +155,23 @@ _routes("delivery:execute", "POST", "/delivery/automations/{id}/dispatch")
 _routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/resume-target")
 _routes("notifications:read", "GET", "/notifications/inbox", "/notifications/unread-count")
 _routes("notifications:read", "POST", "/notifications/inbox/read-all", "/notifications/inbox/{id}/read", "/notifications/inbox/{id}/unread")
+_routes("datasets:read", "GET", "/governance/macrodomains", "/governance/domains", "/catalog/macrodomains", "/catalog/domains")
+_routes("domains:manage", "POST", "/governance/macrodomains", "/governance/domains", "/catalog/macrodomains", "/catalog/domains")
+_routes("domains:manage", "PATCH", "/governance/macrodomains/{id}", "/governance/domains/{id}", "/catalog/macrodomains/{id}", "/catalog/domains/{id}")
+_routes("catalog:read", "GET", "/catalog/tree", "/catalog/resources", "/catalog/datasets", "/catalog/datasets/{id}", "/catalog/datasets/{id}/blocks")
+_routes("governance:write", "PATCH", "/datasets/{id}/governance", "/catalog/datasets/{id}/columns")
+_routes("glossary:read", "GET", "/governance/glossary")
+_routes("glossary:manage", "POST", "/governance/glossary", "/catalog/datasets/{id}/terms")
+_routes("glossary:manage", "PATCH", "/governance/glossary/{id}")
+_routes("glossary:manage", "DELETE", "/catalog/glossary-associations/{id}")
+_routes("blocks:manage", "POST", "/catalog/datasets/{id}/blocks")
+_routes("blocks:manage", "PATCH", "/catalog/blocks/{id}", "/catalog/security-dependencies/{id}")
+_routes("reports:read", "GET", "/reports/limits", "/reports/sources", "/reports/definitions", "/reports/definitions/{id}", "/reports/executions", "/reports/executions/{id}")
+_routes("reports:read", "POST", "/reports/resolve")
+_routes("reports:write", "POST", "/reports/definitions", "/reports/definitions/{id}/revisions")
+_routes("reports:preview", "POST", "/reports/preview")
+_routes("reports:download", "POST", "/reports/download")
+_routes("reports:generate", "POST", "/reports/datasets", "/reports/executions/{id}/cancel")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

@@ -1,9 +1,9 @@
 # Operación local y verificación de persistencia
 
-Trackvance Core 0.7.0, ciclo correctivo C01–C06, se ejecuta con nueve servicios de Docker Compose: PostgreSQL 16,
+Trackvance Core 0.8.0 se ejecuta con diez servicios de Docker Compose: PostgreSQL 16,
 API FastAPI, pasarela web React/nginx, `worker`, `delivery-worker`,
-`acquisition-worker`, `scheduler`, `events-notifications` y `events-chaining`.
-Los tres workers consumen lanes `DEFAULT`, `DELIVERY` y `ACQUISITION`; los otros
+`acquisition-worker`, `report-worker`, `scheduler`, `events-notifications` y `events-chaining`.
+Los cuatro workers consumen lanes `DEFAULT`, `DELIVERY`, `ACQUISITION` y `REPORT`; los otros
 tres procesos gestionan calendario y eventos sin ejecutar conectores ni SQL remoto.
 La única puerta publicada es la web, ligada a `127.0.0.1`; PostgreSQL y la API no
 publican puertos al host.
@@ -23,7 +23,7 @@ Desde la raíz del repositorio, con Docker Desktop en contenedores Linux:
 
 Si `.env` no existe, bootstrap lo crea desde `.env.example` con una contraseña
 aleatoria local. No la muestra ni la sube a Git. Conserva un `.env` existente.
-El arranque instala las imágenes, aplica Alembic y espera la salud de los nueve
+El arranque instala las imágenes, aplica Alembic y espera la salud de los diez
 servicios. La interfaz queda en `http://localhost:3000`.
 
 Un entorno adicional puede coexistir con el prototipo nativo:
@@ -44,7 +44,7 @@ volúmenes. No se debe usar `down -v` para reiniciar o actualizar una instalaci�
 El prototipo nativo usa `.local/trackvance.db` y `.local/storage`; ese entorno no
 es la base PostgreSQL de Docker y no se modifica al arrancar Compose.
 
-Los nueve servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
+Los diez servicios declaran `restart: "no"`. Docker Desktop puede iniciar con
 Windows sin levantar Trackvance; el proyecto permanece detenido hasta ejecutar
 manualmente `docker compose up -d --wait` desde la raíz. Para apagarlo sin borrar
 contenedores ni volúmenes se utiliza `docker compose stop`.
@@ -57,6 +57,10 @@ sólo los de fuentes, Delivery sólo los de destinos y los procesos de metadata
 y DEFAULT reciben directorios aislados sin sus secretos. El diagnóstico local
 comprueba los seis heartbeats:
 
+Ese arranque nativo conserva las tres lanes históricas. Las consultas y la
+generación de Reportes requieren el ejecutor Linux de Docker con Landlock ABI 3
+y seccomp; Windows no aplica una ejecución alternativa sin esas fronteras.
+
 ```powershell
 .\scripts\start-local.ps1
 python scripts/doctor.py --base-url http://localhost:3000 --storage-dir .local/storage
@@ -68,8 +72,9 @@ python scripts/doctor.py --base-url http://localhost:3000 --storage-dir .local/s
 `GET /api/v1/health/ready` verifica conexión SQL, revisión Alembic y una escritura
 temporal en almacenamiento. Devuelve 503 si alguna comprobación falla. Cada worker
 escribe su propio heartbeat (`worker-heartbeat-default.json`,
-`worker-heartbeat-delivery.json` y `worker-heartbeat-acquisition.json`).
-`doctor.py --docker` comprueba las tres lanes y los heartbeats independientes de
+`worker-heartbeat-delivery.json`, `worker-heartbeat-acquisition.json` y
+`worker-heartbeat-report.json`).
+`doctor.py --docker` comprueba las cuatro lanes y los heartbeats independientes de
 `scheduler`, `events-notifications` y `events-chaining`.
 El script respeta `COMPOSE_PROJECT_NAME` y nunca imprime la URL de base de datos,
 el contenido de `.env` ni credenciales.
@@ -266,7 +271,8 @@ No crea otra entrega, evento de ejecución ni auditoría ficticia de negocio.
 
 ## Migraciones y preservación
 
-La revisión actual del ciclo correctivo 0.7.0 es `0016_acquisition_diagnostics`.
+La revisión actual 0.8.0 es `0017_catalog_reports`. El ciclo correctivo 0.7.0
+terminaba en `0016_acquisition_diagnostics`.
 La publicación inicial 0.7.0 terminaba en `0015_sentinel_execution_identity`.
 Las revisiones
 históricas llegan hasta `0012_delivery_target_audit`, precedida por
@@ -280,8 +286,10 @@ históricas llegan hasta `0012_delivery_target_audit`, precedida por
 outbox, consumidores, bandeja personal y responsable verificable de Sentinel.
 0016 añade sólo `error_details` JSON nullable y `error_reference` nullable en
 AcquisitionRun, sin reescribir errores, áreas, límites ni ninguna fila histórica.
-0001..0015 permanecen byte por byte intactas. La API aplica las migraciones
-pendientes al iniciar; las 42 tablas actuales se verifican sin ignorar tablas
+0017 añade trece tablas de gobierno/Reportes, campos opcionales Dataset y Job REPORT.
+Las clasificaciones anteriores quedan NULL/UNKNOWN y no se indexa aprobación histórica.
+0001..0016 permanecen byte por byte intactas. La API aplica las migraciones
+pendientes al iniciar; las 55 tablas actuales se verifican sin ignorar tablas
 desconocidas.
 En bases SQLite previas sin tabla Alembic, el adaptador
 solo adopta un schema original reconocido o uno que coincida con el modelo actual;
@@ -324,7 +332,7 @@ docker compose --env-file RUTA_ENV_PRIVADO -p PROYECTO_UUID_AISLADO exec -T api 
 verifica tamaño/SHA-256 de todos los artifacts registrados. Su salida contiene IDs
 y hashes, no datos de negocio ni sesiones. Para certificar un reinicio, finalizar
 los runs/jobs y detener nuevas operaciones. Mantener scheduler, consumidores y
-los tres workers detenidos durante ambas capturas:
+los cuatro workers detenidos durante ambas capturas:
 
 El helper `physical_schema_guard.py` exige tablas, columnas y claves foráneas
 físicas idénticas al ORM del runtime instalado antes de leer sus filas. No ignora
@@ -332,7 +340,7 @@ columnas desconocidas, ni compara nombres de constraints o grafías de tipos.
 `docker_state.py` copia ambos scripts y comprueba su SHA antes de ejecutarlos.
 
 ```powershell
-docker compose stop worker delivery-worker acquisition-worker scheduler events-notifications events-chaining
+docker compose stop worker delivery-worker acquisition-worker report-worker scheduler events-notifications events-chaining
 docker compose cp scripts/physical_schema_guard.py api:/tmp/physical_schema_guard.py
 docker compose cp scripts/verify_storage.py api:/tmp/verify_storage.py
 docker compose exec -T api python /tmp/verify_storage.py snapshot > before.json
@@ -347,7 +355,7 @@ Si se recrea el contenedor, deben copiarse de nuevo ambos scripts antes de la
 segunda captura. No ejecutar login, exports, smoke ni pruebas durante el intervalo:
 son operaciones auditadas y agregan registros legítimos que cambiarían la huella.
 
-## Actualización 0.7.0 inicial → 0.7.0 corregida
+## Antecedente: actualización 0.7.0 inicial → 0.7.0 corregida
 
 La actualización de una instalación existente requiere conservar su nombre Compose,
 puerto/origen, configuración externa y los seis volúmenes. La actualización del
@@ -488,7 +496,9 @@ servidos, 0016 y la configuración efectiva.
 La línea `snapshot-legacy-v6` corresponde al origen 0.7.0 inicial state 6/0015.
 Para 0.6.1/0.6.0 state 5/0012 usar `snapshot-legacy-v5`; las fuentes anteriores
 usan sus proyecciones explícitas. Un backup ya corregido state 7/0016 exige
-`snapshot` nativo exactamente igual. El backup coordinado conserva el estado inicial
+`snapshot-legacy-v7` exactamente igual al actualizar a 0.8.0. La igualdad con
+`snapshot` nativo corresponde a una restauración que conserva el runtime 0.7.0.
+El backup coordinado conserva el estado inicial
 de los servicios: detenerlos antes del backup evita que se reactiven al terminar.
 No usar `restore --start` para revisar una copia con destinos operativos: restaurar
 con el valor por defecto, arrancar sólo API/web tras la verificación y mantener
@@ -503,8 +513,12 @@ COMMITTED; los cambios remotos no pertenecen al backup de Trackvance.
 
 ### Formatos de backup y proyección histórica
 
-El backup Docker actual conserva **manifest 2** y **state 7**,
-revisión `0016_acquisition_diagnostics`. La publicación inicial 0.7.0 usaba
+El backup Docker actual conserva **manifest 2** y **state 8**,
+revisión `0017_catalog_reports`, con las 55 tablas, contextos congelados,
+definiciones/revisiones/ejecuciones, gobierno, restricciones y dependencias.
+`report-staging` se excluye sólo de la raíz del volumen de datos; los artefactos
+publicados y todas sus partes se verifican. La corrección 0.7.0 usaba state 7/0016.
+La publicación inicial 0.7.0 usaba
 state 6/0015; ambos formatos siguen reconocidos con su versión real. Los números
 de manifest y state son contratos distintos. State 7 cubre 42 tablas: las 31 históricas de state 5 y las
 11 de adquisición, automatización, outbox, consumidores, bandeja y decisiones de
@@ -512,20 +526,24 @@ destino. Incluye todas sus columnas por hash, Job con Run o AcquisitionRun exclu
 responsables y pausas de Sentinel. Verifica artifacts, descriptor y cada parte de
 datasets multipart, FK, linaje y ambas familias de secretos.
 
-| Fuente | Manifest / state / migración | Validación al restaurar con 0.7.0 corregida |
+| Fuente | Manifest / state / migración | Validación al restaurar con 0.8.0 |
 | --- | --- | --- |
-| 0.7.0 corregida | 2 / 7 / 0016 | Igualdad nativa exacta de las 42 tablas y artifacts antes de actividad nueva |
-| 0.7.0 inicial | 2 / 6 / 0015 | Migración a 0016; `snapshot-legacy-v6` exactamente igual, sólo dos diagnósticos NULL proyectados |
-| 0.6.1 | 2 / 5 / 0012 | Migración a 0016 y `snapshot-legacy-v5` exactamente igual; tablas nuevas de 0.7.0 vacías |
-| 0.6.0 | 2 / 5 / 0012 | Migración a 0016 y `snapshot-legacy-v5` exactamente igual; tablas nuevas de 0.7.0 vacías |
-| 0.5.1 | 2 / 4 / 0009 | Migración a 0016 y proyección `snapshot-legacy-v4` exactamente igual |
-| 0.5.0 | 2 / 3 / 0008 | Migración a 0016, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
-| 0.4.1 | 1 / 2 / 0007 | Migración a 0016, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
+| 0.8.0 | 2 / 8 / 0017 | Igualdad nativa exacta de 55 tablas y artifacts; procedencia/contextos verificados |
+| 0.7.0 corregida | 2 / 7 / 0016 | Migración a 0017; `snapshot-legacy-v7` exacto sobre 42 tablas, trece nuevas vacías y defaults NULL/1/UNKNOWN |
+| 0.7.0 inicial | 2 / 6 / 0015 | Migración a 0017; `snapshot-legacy-v6` exactamente igual, sólo adiciones documentadas |
+| 0.6.1 | 2 / 5 / 0012 | Migración a 0017 y `snapshot-legacy-v5` exactamente igual; entidades añadidas posteriormente vacías |
+| 0.6.0 | 2 / 5 / 0012 | Migración a 0017 y `snapshot-legacy-v5` exactamente igual; entidades añadidas posteriormente vacías |
+| 0.5.1 | 2 / 4 / 0009 | Migración a 0017 y proyección `snapshot-legacy-v4` exactamente igual |
+| 0.5.0 | 2 / 3 / 0008 | Migración a 0017, proyección `snapshot-legacy-v3` exacta y revisiones vacías |
+| 0.4.1 | 1 / 2 / 0007 | Migración a 0017, proyección `snapshot-legacy-v2` exacta y Delivery vacío |
 
 Las proyecciones excluyen únicamente adiciones de versiones posteriores para
 comparar los registros históricos; no sobrescriben backups ni normalizan sus datos
 en el origen. No se inventan hashes del catálogo para state 2, que no los almacenaba.
-State 6→7 no permite un filtro genérico de campos: sólo elimina los dos nuevos
+State 7→8 exige las trece tablas nuevas vacías y los defaults sin modificar de
+Dataset y Job antes de proyectar. Un gobierno o Reporte nuevo impide presentar
+ese estado como una preservación exacta de 0.7.0. No clasifica datasets históricos
+ni reescribe sus archivos. State 6→7 no permite un filtro genérico de campos: sólo elimina los dos nuevos
 diagnósticos NULL y retiene todas las tablas/columnas anteriores, errores,
 actividad asíncrona y estados de lectura. Las proyecciones state 2–5 encadenan
 primero ese paso y luego las adiciones históricas expresamente permitidas.
@@ -572,6 +590,35 @@ requiere `delivery:repair_evidence`; la revisión externa requiere
 
 ### Simulacros aislados reproducibles
 
+La certificación 0.8.0 utiliza proyectos `trackvance-v080-test-*-<12hex>`,
+PostgreSQL sintético `tv_v080_test`, un archivo privado explícito y contexto
+validado en `.codex-local/v080`. El ciclo integral ejecuta las consultas y
+oráculos de volumen antes de la recuperación:
+
+```powershell
+python scripts/tests/catalog_reports_cycle.py --with-browser --with-recovery
+python scripts/tests/catalog_reports_recovery.py --context .codex-local/v080/CONTEXTO_AUTORIZADO --mode both
+```
+
+El segundo comando permite repetir exclusivamente la recuperación cuando los
+trabajos del contexto ya finalizaron. El ciclo nativo crea fixtures propias con
+las trece clases nuevas pobladas, Reporte guardado y revisado, contexto congelado,
+generación real, clasificación, documentación, glosario, bloqueo y dependencias.
+Compara todas las filas y artifacts antes de iniciar procesos automáticos. El
+ciclo legacy construye el commit auténtico 0.7.0
+`d9b6856e757a2a1fcab3913209146f3b7b79d70c` mediante `git archive`, sin cambiar
+el checkout; respalda state 7/0016, destruye ese origen privado y exige la
+proyección exacta, las trece tablas nuevas vacías y ausencia de clasificación
+automática en el destino 0.8.0. Dump, archivos, credenciales y diagnósticos
+quedan privados; sólo el resumen saneado `result.json` se puede publicar.
+
+Estos comandos describen verificaciones del runner. Su disponibilidad y sus
+pruebas unitarias no certifican una recuperación ejecutada: el resultado de cada
+drill, su revisión y sus gates pendientes se registran por separado en
+[validación](validation.md).
+
+### Antecedentes de simulacros 0.7.0
+
 Los ciclos 0.7.0 usan exclusivamente proyectos `trackvance-v070-test-*-<12hex>`,
 base/usuario `tv_v070_test`, imágenes privadas, archivos `--env-file` explícitos y
 evidencia dentro de `.codex-local/v070`. El ciclo nativo se ejecuta después de
@@ -594,7 +641,7 @@ sin correo. El vínculo OIDC, notificación SMTP y policy sintéticos se identif
 como fixtures de persistencia; no acreditan SMTP, SSO externo ni escritura remota.
 
 Los comandos siguientes conservan las rutas de regresión históricas 0.5/0.6.
-El tooling vigente restaura en state 7/0016; los resultados publicados de ciclos
+El tooling vigente restaura en state 8/0017; los resultados publicados de ciclos
 anteriores conservan su destino original y no se cambian retrospectivamente.
 
 ```powershell

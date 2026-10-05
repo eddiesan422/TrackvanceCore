@@ -124,13 +124,24 @@ class NotificationDeliveryRecord(Record, Base):
 
 class Dataset(Record, Base):
     __tablename__ = "datasets"
-    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+    __table_args__ = (UniqueConstraint("organization_id", "name"),
+                     UniqueConstraint("organization_id", "intake_input_dataset_id", "intake_contract_id",
+                                      name="uq_dataset_intake_identity"))
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="")
     domain: Mapped[str] = mapped_column(String(80), default="Operaciones")
     owner: Mapped[str] = mapped_column(String(120), default="Equipo de datos")
     criticality: Mapped[str] = mapped_column(String(20), default="HIGH")
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    macro_domain_id: Mapped[str | None] = mapped_column(ForeignKey("macro_domains.id"), nullable=True, index=True)
+    domain_id: Mapped[str | None] = mapped_column(ForeignKey("data_domains.id"), nullable=True, index=True)
+    governance_version: Mapped[int] = mapped_column(Integer, default=1)
+    business_owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    steward_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    technical_custodian_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    information_classification: Mapped[str] = mapped_column(String(40), default="UNKNOWN")
+    intake_input_dataset_id: Mapped[str | None] = mapped_column(ForeignKey("datasets.id"), nullable=True)
+    intake_contract_id: Mapped[str | None] = mapped_column(ForeignKey("configurations.id", name="fk_dataset_intake_contract", use_alter=True, ondelete="SET NULL"), nullable=True)
 
 
 class DatasetVersion(Record, Base):
@@ -291,10 +302,11 @@ class Job(Record, Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_lane_status_created_at", "lane", "status", "created_at"),
-        CheckConstraint("(run_id IS NOT NULL AND acquisition_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND lane = 'ACQUISITION')", name="ck_job_subject_lane"),
+        CheckConstraint("(run_id IS NOT NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND report_execution_id IS NULL AND lane = 'ACQUISITION') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NOT NULL AND lane = 'REPORT')", name="ck_job_subject_lane"),
     )
     run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=True)
     acquisition_id: Mapped[str | None] = mapped_column(ForeignKey("acquisition_runs.id"), unique=True, nullable=True)
+    report_execution_id: Mapped[str | None] = mapped_column(ForeignKey("report_executions.id"), unique=True, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
     lane: Mapped[str] = mapped_column(String(20), default="DEFAULT", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -501,3 +513,5 @@ class MonitorOccurrence(Record, Base):
 # also safe during SQLAlchemy metadata discovery.
 from . import acquisition_models as _acquisition_models  # noqa: F401
 from . import automation_models as _automation_models  # noqa: F401
+from . import governance_models as _governance_models  # noqa: F401
+from . import report_models as _report_models  # noqa: F401

@@ -1,6 +1,28 @@
 # Trackvance Core
 
-## Ejecución de volumen y automatización 0.7.0
+## Catálogo de gobierno y Reportes 0.8.0
+
+Catálogo organiza datasets por macrodominio y dominio controlados. La clasificación
+es opcional al cargar; las entradas existentes conservan su texto e historia y
+pueden clasificarse después. El panel reúne descripción, responsables, sensibilidad,
+columnas, glosario, versiones, calidad, linaje e historia. Gobierno y restricciones
+se aplican en el backend y se heredan por todas las fuentes de un dataset derivado.
+
+Reportes combina salidas con aprobación estricta de Intake mediante selección
+guiada o SELECT validado por AST. La resolución conjunta congela versiones,
+contratos, aprobaciones, esquemas y parámetros. Vista previa, descarga incremental
+y generación durable tienen perfiles separados; sólo la última publica un dataset
+nuevo, pendiente de su propia validación de calidad. El proceso SQL ejecuta en
+Linux con Landlock/seccomp, sin credenciales de negocio ni acceso general a archivos.
+
+Véanse las guías de [Catálogo](docs/development/catalog-governance-0.8.0.md),
+[Reportes](docs/development/reports-0.8.0.md), [parámetros](docs/development/parameters-0.8.0.md)
+y [guía de usuario](docs/development/catalog-reports-user-guide.md),
+además de la [auditoría de partida](docs/development/catalog-reports-audit-0.8.0.md).
+El cierre requiere las pruebas integradas y todos los jobs de GitHub Actions del
+commit final; su estado real se registra en [validación](docs/development/validation.md).
+
+## Capacidades de volumen y automatización conservadas
 
 El ciclo C01–C06 corrige la adquisición XLSX, diagnóstico de límites, selector de
 área, edición de zona horaria, despacho de automatizaciones y marca no leída.

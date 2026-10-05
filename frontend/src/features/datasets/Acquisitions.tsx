@@ -6,7 +6,8 @@ import { api, ApiError, uploadBinary } from '../../api/client'
 import type { RecordData } from '../../api/client'
 import { usePermission } from '../../app/session'
 import { Badge, date, Empty, ErrorState, Field, Loading, Modal, Notice, number } from '../../components/ui'
-import { BusinessAreaField, businessAreaError } from './BusinessAreaField'
+import { ClassificationField, unclassified } from '../catalog/ClassificationField'
+import type { Classification } from '../catalog/ClassificationField'
 import { AcquisitionLimits, getAcquisitionLimits, limitFormat, limitsKey, limitValue, useAcquisitionLimits } from './AcquisitionLimits'
 import type { EffectiveLimits } from './AcquisitionLimits'
 
@@ -98,12 +99,12 @@ export function AcquisitionHistory({ datasetId, onCompleted }: { datasetId?: str
 export function AcquisitionDialog({ open, onClose, onLegacy, datasetId, datasetName, datasetDomain, existingDatasets = [] }: { open: boolean; onClose: () => void; onLegacy?: () => void; datasetId?: string; datasetName?: string; datasetDomain?: string; existingDatasets?: RecordData[] }) {
   const navigate = useNavigate(), cache = useQueryClient()
   const [file, setFile] = useState<File | null>(null), [received, setReceived] = useState<Received | null>(null)
-  const [transferred, setTransferred] = useState(0), [name, setName] = useState(datasetName || ''), [domain, setDomain] = useState('Operaciones')
+  const [transferred, setTransferred] = useState(0), [name, setName] = useState(datasetName || ''), [classification, setClassification] = useState<Classification>(unclassified)
   const [options, setOptions] = useState<{ sheet_name?: string; delimiter?: string }>({}), [overrides, setOverrides] = useState<Overrides>({})
   const format = received?.inspection.format || limitFormat(file?.name)
   const limits = useAcquisitionLimits(format, 'ASYNC_ACQUISITION', open)
   const transfer = useRef<AbortController | null>(null), registeredDataset = useRef<string | undefined>(datasetId), requestKey = useRef(crypto.randomUUID())
-  const [createdMetadata, setCreatedMetadata] = useState<{ name: string; domain: string } | null>(null)
+  const [createdMetadata, setCreatedMetadata] = useState<{ name: string } | null>(null)
   useEffect(() => () => transfer.current?.abort(), [])
   const stage = useMutation({ mutationFn: async (selection: File) => {
     transfer.current?.abort(); const controller = new AbortController(); transfer.current = controller
@@ -126,8 +127,8 @@ export function AcquisitionDialog({ open, onClose, onLegacy, datasetId, datasetN
       const match = existingDatasets.find(item => String(item.name).trim().replace(/\s+/g, ' ').toLocaleLowerCase('es') === name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es'))
       identifier = match?.id
       if (!identifier) {
-        identifier = (await api<{ id: string }>('/datasets', { method: 'POST', body: JSON.stringify({ name: name.trim(), domain: domain.trim() }) })).id
-        setCreatedMetadata({ name: name.trim(), domain: domain.trim() })
+        identifier = (await api<{ id: string }>('/datasets', { method: 'POST', body: JSON.stringify({ name: name.trim(), ...classification }) })).id
+        setCreatedMetadata({ name: name.trim(), ...classification })
       }
       registeredDataset.current = identifier
     }
@@ -136,9 +137,7 @@ export function AcquisitionDialog({ open, onClose, onLegacy, datasetId, datasetN
   const inspection = received?.inspection
   const effectiveLimits = inspection?.effective_limits || limits.data
   const matching = !datasetId && existingDatasets.find(item => String(item.name).trim().replace(/\s+/g, ' ').toLocaleLowerCase('es') === name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es'))
-  const fixedDomain = datasetId ? datasetDomain ?? '' : createdMetadata ? createdMetadata.domain : matching ? String(matching.domain || '') : undefined
-  const areaValid = fixedDomain !== undefined || !businessAreaError(domain)
-  const canRegister = !!received && !!effectiveLimits && !stage.isPending && !inspect.isPending && !inspect.error && !register.isPending && !!name.trim() && areaValid
+  const canRegister = !!received && !!effectiveLimits && !stage.isPending && !inspect.isPending && !inspect.error && !register.isPending && !!name.trim()
   function changeOptions(value: typeof options) { setOptions(value); requestKey.current = crypto.randomUUID(); inspect.mutate(value) }
   return <Modal open={open} onOpenChange={value => { if (!value && !register.isPending) onClose() }} title={datasetId ? 'Adquirir nueva versión' : 'Adquirir dataset'} description="Primero recibe el archivo y confirma su lectura. El análisis completo continúa en segundo plano." wide>
     <form className="form-stack" onSubmit={event => { event.preventDefault(); if (canRegister) register.mutate() }}>
@@ -154,7 +153,7 @@ export function AcquisitionDialog({ open, onClose, onLegacy, datasetId, datasetN
         <Notice>{effectiveLimits?.inspection_limited ? 'La inspección preliminar está limitada. Puedes seleccionar la hoja y registrar sin overrides; sus columnas y tipos se comprobarán durante la adquisición. ' : 'La vista previa es una muestra. '}El perfil final y los tipos confirmados se validan contra la fuente completa, con los límites efectivos mostrados para esta ruta.</Notice>
         <div className="table-scroll"><table><thead><tr><th>Columna</th><th>Tipo confirmado</th><th>Identificador</th></tr></thead><tbody>{inspection?.columns.map(column => <tr key={column.name}><td className="mono">{column.name}</td><td><select aria-label={`Tipo de ${column.name}`} disabled={register.isPending || overrides[column.name]?.semantic_tag === 'IDENTIFIER'} value={overrides[column.name]?.logical_type || ''} onChange={event => { const value = event.target.value; setOverrides(current => ({ ...current, [column.name]: value ? { ...current[column.name], logical_type: value } : {} })); requestKey.current = crypto.randomUUID() }}><option value="">Inferir completamente · muestra {column.logical_type}</option>{['STRING', 'DECIMAL', 'INT64', 'DATE', 'TIMESTAMP', 'BOOLEAN'].map(type => <option key={type}>{type}</option>)}</select></td><td><input type="checkbox" aria-label={`Identificador ${column.name}`} checked={overrides[column.name]?.semantic_tag === 'IDENTIFIER' || column.semantic_tag === 'IDENTIFIER'} disabled={register.isPending || column.semantic_tag === 'IDENTIFIER'} onChange={event => { setOverrides(current => ({ ...current, [column.name]: event.target.checked ? { logical_type: 'STRING', semantic_tag: 'IDENTIFIER' } : {} })); requestKey.current = crypto.randomUUID() }}/></td></tr>)}</tbody></table></div>
       </>}
-      <div className="form-grid">{!datasetId && <Field label="Nombre del dataset"><input required maxLength={160} value={name} disabled={register.isPending || !!createdMetadata} onChange={event => { setName(event.target.value); registeredDataset.current = undefined; requestKey.current = crypto.randomUUID() }}/></Field>}<BusinessAreaField value={domain} datasets={existingDatasets} fixedValue={fixedDomain} disabled={register.isPending} onChange={value => { setDomain(value); requestKey.current = crypto.randomUUID() }}/></div>
+      <div className="form-grid">{!datasetId && <Field label="Nombre del dataset"><input required maxLength={160} value={name} disabled={register.isPending || !!createdMetadata} onChange={event => { setName(event.target.value); registeredDataset.current = undefined; requestKey.current = crypto.randomUUID() }}/></Field>}<ClassificationField value={classification} fixed={!!datasetId || !!createdMetadata || !!matching} legacyValue={datasetDomain || (matching ? String(matching.domain || '') : undefined)} disabled={register.isPending} onChange={value => { setClassification(value); requestKey.current = crypto.randomUUID() }}/></div>
       {matching && <Notice>Ya existe “{matching.name}”. Este archivo se agregará como una nueva versión inmutable del dataset existente.</Notice>}
       {register.error && <ErrorState error={register.error}/>}
       {onLegacy && <button type="button" className="text-button" disabled={stage.isPending || register.isPending} onClick={() => { onClose(); onLegacy() }}>Usar carga rápida limitada</button>}

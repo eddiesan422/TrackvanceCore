@@ -1,4 +1,47 @@
-# Validación del ciclo C01–C06 de Trackvance Core 0.7.0
+# Validación de Trackvance Core 0.8.0
+
+La implementación actual incorpora Catálogo, gobierno y Reportes sobre el
+baseline auténtico 0.7.0 `d9b6856e757a2a1fcab3913209146f3b7b79d70c`.
+El contrato vigente es `0017_catalog_reports`, 55 tablas y backup manifest 2 /
+state 8. Las referencias a 42 tablas, state 7 y migración 0016 en los antecedentes
+de este documento describen ejecuciones históricas, no el runtime actual.
+
+El ciclo 0.8.0 permanece abierto hasta completar los oráculos de volumen,
+recuperación nativa y desde el commit auténtico, revisión del documento, todos los
+jobs GitHub Actions del SHA final y la actualización autorizada de la instalación
+habitual. Las pruebas de desarrollo y los resultados de otra revisión no cierran
+esos gates. El registro final se conserva en
+[validation_results_0.8.0.json](../specification/validation_results_0.8.0.json).
+
+## Checkpoint de desarrollo del 5 de octubre de 2026
+
+La suite completa de backend y scripts produjo **1.825 PASS, 32 SKIP, cero fallos**
+en 372,71 segundos sobre el árbol de desarrollo de ese checkpoint. Las omisiones
+de Windows no acreditan el ejecutor Linux ni JVM. Los cambios posteriores de
+paginación del catálogo, retención de asociaciones inactivas, guardas de
+recuperación y selección de revisión tienen verificaciones focales separadas:
+la última selección de gobierno, lifecycle de Reportes y recuperación produjo
+**47 PASS y 9 SKIP** en 19,30 segundos. Son conjuntos solapados y no se suman.
+Ruff del alcance backend/scripts y mypy de los 75 módulos fuente pasaron; el CI
+exacto final debe volver a ejecutar las comprobaciones sobre su propio SHA.
+
+El contrato exportado tras añadir selección de revisión contiene 152 paths HTTP,
+56 permisos y 55 tablas. La migración PostgreSQL aislada
+0016→0017→0016→0017 preservó la proyección anterior y la estructura física:
+55 tablas, 645 columnas y 109 claves foráneas. Ese ensayo de migración no sustituye
+un backup/restore con las trece clases nuevas pobladas ni una recuperación desde
+un backup auténtico 0.7.0.
+
+Las verificaciones de gobierno incluyen aprobación estricta con evidencia real,
+integridad de archivos, linaje y configuración; rechazo de errores, advertencias,
+cobertura insuficiente, salida vacía y enlaces incompatibles; autorización
+transitiva en rutas nativas y exportación; retirada de permisos o bloqueo antes
+de publicar; aislamiento de organización y paginación SQL. La revisión de las
+fronteras implementadas está en
+[security-review-0.8.0.md](security-review-0.8.0.md). La disponibilidad de un runner,
+un PASS unitario o un endpoint no demuestra su gate de volumen o recuperación.
+
+## Antecedente: ciclo C01–C06 de Trackvance Core 0.7.0
 
 Baseline `12ca7061696d3581a18237dc7737348a3462e2c4`, rama `feat/local-prototype`. Implementación formal `393b7e25e413bf641d5483c25c53951642611f51`, con árbol limpio al ejecutar. Los [resultados iniciales](validation-0.7.0-initial.md) se conservan como antecedentes. Este ciclo permanece **ABIERTO** hasta pruebas completas, PDF revisado, CI del HEAD final y upgrade real verificado. Ningún verde previo se hereda.
 

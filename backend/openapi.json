@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "paths": {
     "/health": {
@@ -309,7 +309,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DatasetBody"
+                "$ref": "#/components/schemas/trackvance__api__DatasetBody"
               }
             }
           },
@@ -9166,6 +9166,3344 @@
         ],
         "x-required-permission": "delivery:configure"
       }
+    },
+    "/api/v1/catalog/macrodomains": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Macro Domains",
+        "operationId": "macro_domains_api_v1_catalog_macrodomains_get",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Macro",
+        "operationId": "create_macro_api_v1_catalog_macrodomains_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/macrodomains": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Macro Domains",
+        "operationId": "macro_domains_api_v1_governance_macrodomains_get",
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Macro",
+        "operationId": "create_macro_api_v1_governance_macrodomains_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/catalog/domains": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Domains",
+        "operationId": "domains_api_v1_catalog_domains_get",
+        "parameters": [
+          {
+            "name": "macro_domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Macro Domain Id"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Data Domain",
+        "operationId": "create_data_domain_api_v1_catalog_domains_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/domains": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Domains",
+        "operationId": "domains_api_v1_governance_domains_get",
+        "parameters": [
+          {
+            "name": "macro_domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Macro Domain Id"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Data Domain",
+        "operationId": "create_data_domain_api_v1_governance_domains_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/catalog/macrodomains/{identity}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Macro",
+        "operationId": "edit_macro_api_v1_catalog_macrodomains__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage"
+      }
+    },
+    "/api/v1/governance/macrodomains/{identity}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Macro",
+        "operationId": "edit_macro_api_v1_governance_macrodomains__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage"
+      }
+    },
+    "/api/v1/catalog/domains/{identity}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Domain",
+        "operationId": "edit_domain_api_v1_catalog_domains__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage"
+      }
+    },
+    "/api/v1/governance/domains/{identity}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Domain",
+        "operationId": "edit_domain_api_v1_governance_domains__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "domains:manage"
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/governance": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Governance",
+        "operationId": "edit_governance_api_v1_datasets__dataset_id__governance_patch",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GovernancePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "governance:write"
+      }
+    },
+    "/api/v1/governance/glossary": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Glossary",
+        "operationId": "glossary_api_v1_governance_glossary_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "glossary:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Term",
+        "operationId": "create_term_api_v1_governance_glossary_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "glossary:manage",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/glossary/{identity}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Term",
+        "operationId": "edit_term_api_v1_governance_glossary__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "glossary:manage"
+      }
+    },
+    "/api/v1/catalog/datasets/{dataset_id}/columns": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Edit Column",
+        "operationId": "edit_column_api_v1_catalog_datasets__dataset_id__columns_patch",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ColumnBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "governance:write"
+      }
+    },
+    "/api/v1/catalog/datasets/{dataset_id}/terms": {
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Associate Term",
+        "operationId": "associate_term_api_v1_catalog_datasets__dataset_id__terms_post",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssociationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "glossary:manage"
+      }
+    },
+    "/api/v1/catalog/glossary-associations/{association_id}": {
+      "delete": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Remove Association",
+        "operationId": "remove_association_api_v1_catalog_glossary_associations__association_id__delete",
+        "parameters": [
+          {
+            "name": "association_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Association Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "glossary:manage"
+      }
+    },
+    "/api/v1/catalog/datasets/{dataset_id}/blocks": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Dataset Blocks",
+        "operationId": "dataset_blocks_api_v1_catalog_datasets__dataset_id__blocks_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      },
+      "post": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Create Block",
+        "operationId": "create_block_api_v1_catalog_datasets__dataset_id__blocks_post",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "blocks:manage"
+      }
+    },
+    "/api/v1/catalog/blocks/{block_id}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Release Block",
+        "operationId": "release_block_api_v1_catalog_blocks__block_id__patch",
+        "parameters": [
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Block Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "blocks:manage"
+      }
+    },
+    "/api/v1/catalog/security-dependencies/{dependency_id}": {
+      "patch": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Release Dependency",
+        "operationId": "release_dependency_api_v1_catalog_security_dependencies__dependency_id__patch",
+        "parameters": [
+          {
+            "name": "dependency_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dependency Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "blocks:manage"
+      }
+    },
+    "/api/v1/catalog/tree": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Tree",
+        "operationId": "tree_api_v1_catalog_tree_get",
+        "parameters": [
+          {
+            "name": "parent_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Type"
+            }
+          },
+          {
+            "name": "parent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      }
+    },
+    "/api/v1/catalog/datasets": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Resources",
+        "operationId": "resources_api_v1_catalog_datasets_get",
+        "parameters": [
+          {
+            "name": "resource_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "DATASET",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain Id"
+            }
+          },
+          {
+            "name": "macro_domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Macro Domain Id"
+            }
+          },
+          {
+            "name": "responsible",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Responsible"
+            }
+          },
+          {
+            "name": "pending",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Pending"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      }
+    },
+    "/api/v1/catalog/resources": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Resources",
+        "operationId": "resources_api_v1_catalog_resources_get",
+        "parameters": [
+          {
+            "name": "resource_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "DATASET",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain Id"
+            }
+          },
+          {
+            "name": "macro_domain_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Macro Domain Id"
+            }
+          },
+          {
+            "name": "responsible",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Responsible"
+            }
+          },
+          {
+            "name": "pending",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Pending"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      }
+    },
+    "/api/v1/catalog/datasets/{dataset_id}": {
+      "get": {
+        "tags": [
+          "Catálogo y gobierno"
+        ],
+        "summary": "Dataset Panel",
+        "operationId": "dataset_panel_api_v1_catalog_datasets__dataset_id__get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "summary",
+                "columns",
+                "versions",
+                "quality",
+                "lineage",
+                "history"
+              ],
+              "type": "string",
+              "default": "summary",
+              "title": "Section"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      }
+    },
+    "/api/v1/reports/limits": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Limits",
+        "operationId": "limits_api_v1_reports_limits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      }
+    },
+    "/api/v1/reports/sources": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Sources",
+        "operationId": "sources_api_v1_reports_sources_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 160,
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "revision_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Revision Offset"
+            }
+          },
+          {
+            "name": "version_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Version Offset"
+            }
+          },
+          {
+            "name": "contract_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contract Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      }
+    },
+    "/api/v1/reports/resolve": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Resolve Draft",
+        "operationId": "resolve_draft_api_v1_reports_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/definitions": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Definitions",
+        "operationId": "definitions_api_v1_reports_definitions_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 160,
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      },
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Save Definition",
+        "operationId": "save_definition_api_v1_reports_definitions_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefinitionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:write",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/definitions/{identity}": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Definition",
+        "operationId": "definition_api_v1_reports_definitions__identity__get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "revision_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Revision Offset"
+            }
+          },
+          {
+            "name": "revision_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Revision Limit"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      }
+    },
+    "/api/v1/reports/definitions/{identity}/revisions": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Save Revision",
+        "operationId": "save_revision_api_v1_reports_definitions__identity__revisions_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:write"
+      }
+    },
+    "/api/v1/reports/executions": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Executions",
+        "operationId": "executions_api_v1_reports_executions_get",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PREVIEW",
+                    "DOWNLOAD",
+                    "DATASET"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      }
+    },
+    "/api/v1/reports/executions/{identity}": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Execution",
+        "operationId": "execution_api_v1_reports_executions__identity__get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:read"
+      }
+    },
+    "/api/v1/reports/preview": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Preview",
+        "operationId": "preview_api_v1_reports_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:preview",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/download": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Download",
+        "operationId": "download_api_v1_reports_download_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:download",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/datasets": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Generate",
+        "operationId": "generate_api_v1_reports_datasets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/trackvance__report_api__DatasetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:generate",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/executions/{identity}/cancel": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Cancel",
+        "operationId": "cancel_api_v1_reports_executions__identity__cancel_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "reports:generate"
+      }
     }
   },
   "components": {
@@ -9508,6 +12846,45 @@
         ],
         "title": "AcquisitionResponse"
       },
+      "AssociationBody": {
+        "properties": {
+          "term_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Term Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "column_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 240
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "term_id"
+        ],
+        "title": "AssociationBody"
+      },
       "AuthenticationResponse": {
         "properties": {
           "user": {
@@ -9790,6 +13167,31 @@
         ],
         "title": "AutomationSettings"
       },
+      "BlockBody": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "REPORT",
+              "CONTENT"
+            ],
+            "title": "Scope"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scope",
+          "reason"
+        ],
+        "title": "BlockBody"
+      },
       "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post": {
         "properties": {
           "file": {
@@ -10020,6 +13422,48 @@
           "version"
         ],
         "title": "CasePatch"
+      },
+      "ColumnBody": {
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Version Id"
+          },
+          "column_name": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Column Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Description",
+            "default": ""
+          },
+          "term_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Term Ids"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version_id",
+          "column_name",
+          "expected_version"
+        ],
+        "title": "ColumnBody"
       },
       "ColumnMapping": {
         "properties": {
@@ -10592,52 +14036,18 @@
         ],
         "title": "ConnectionTestResponse"
       },
-      "DatasetBody": {
+      "ContextBody": {
         "properties": {
-          "name": {
+          "context_id": {
             "type": "string",
-            "maxLength": 160,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 4000,
-            "title": "Description",
-            "default": ""
-          },
-          "domain": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Domain",
-            "default": "Operaciones"
-          },
-          "owner": {
-            "type": "string",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Owner",
-            "default": "Equipo de datos"
-          },
-          "criticality": {
-            "type": "string",
-            "enum": [
-              "LOW",
-              "MEDIUM",
-              "HIGH",
-              "CRITICAL"
-            ],
-            "title": "Criticality",
-            "default": "HIGH"
+            "title": "Context Id"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "required": [
-          "name"
+          "context_id"
         ],
-        "title": "DatasetBody"
+        "title": "ContextBody"
       },
       "DatasetFileInspection": {
         "properties": {
@@ -10867,6 +14277,33 @@
           "scanned_at"
         ],
         "title": "DatasetSchemaResponse"
+      },
+      "DefinitionBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Description",
+            "default": ""
+          },
+          "draft": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "draft"
+        ],
+        "title": "DefinitionBody"
       },
       "DeliveryAttemptsResponse": {
         "properties": {
@@ -11906,6 +15343,113 @@
         ],
         "title": "DispatchBody"
       },
+      "DomainBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description",
+            "default": ""
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DomainBody"
+      },
+      "DomainPatch": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "DomainPatch"
+      },
+      "DownloadBody": {
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "title": "Context Id"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "CSV",
+              "XLSX"
+            ],
+            "title": "Format",
+            "default": "CSV"
+          }
+        },
+        "type": "object",
+        "required": [
+          "context_id"
+        ],
+        "title": "DownloadBody"
+      },
       "ExternalIdentityResponse": {
         "properties": {
           "id": {
@@ -11973,6 +15517,128 @@
           "new_password"
         ],
         "title": "FirstLoginPassword"
+      },
+      "GovernancePatch": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "business_owner_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Owner Id"
+          },
+          "steward_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steward Id"
+          },
+          "technical_custodian_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technical Custodian Id"
+          },
+          "information_classification": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "UNKNOWN",
+                  "PUBLIC",
+                  "INTERNAL",
+                  "CONFIDENTIAL",
+                  "RESTRICTED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Classification"
+          },
+          "criticality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "CRITICAL",
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criticality"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "GovernancePatch"
       },
       "HTTPValidationError": {
         "properties": {
@@ -12933,6 +16599,79 @@
         ],
         "title": "ReconRunBody"
       },
+      "ReleaseBody": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "active": {
+            "type": "boolean",
+            "const": false,
+            "title": "Active",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "reason"
+        ],
+        "title": "ReleaseBody"
+      },
+      "ResolveBody": {
+        "properties": {
+          "draft": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Draft"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draft"
+        ],
+        "title": "ResolveBody"
+      },
+      "RevisionBody": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "draft": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "draft"
+        ],
+        "title": "RevisionBody"
+      },
       "RoleCreate": {
         "properties": {
           "name": {
@@ -13368,9 +17107,9 @@
           "domain": {
             "type": "string",
             "maxLength": 80,
-            "minLength": 1,
             "title": "Domain",
-            "default": "Operaciones"
+            "default": "",
+            "deprecated": true
           },
           "description": {
             "type": "string",
@@ -13394,6 +17133,30 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Column Overrides"
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
           }
         },
         "additionalProperties": false,
@@ -13449,9 +17212,9 @@
           "domain": {
             "type": "string",
             "maxLength": 80,
-            "minLength": 1,
             "title": "Domain",
-            "default": "Operaciones"
+            "default": "",
+            "deprecated": true
           },
           "description": {
             "type": "string",
@@ -13475,6 +17238,30 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Column Overrides"
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
           }
         },
         "additionalProperties": false,
@@ -13702,6 +17489,81 @@
         ],
         "title": "TemporaryCredentialsResponse",
         "description": "Ephemeral disclosure; never attach this model to persisted user metadata."
+      },
+      "TermBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "definition": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Definition"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "definition"
+        ],
+        "title": "TermBody"
+      },
+      "TermPatch": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "TermPatch"
       },
       "UnreadResponse": {
         "properties": {
@@ -14155,6 +18017,77 @@
         ],
         "title": "VersionInput"
       },
+      "trackvance__api__DatasetBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description",
+            "default": ""
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Domain",
+            "default": "",
+            "deprecated": true
+          },
+          "owner": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Owner",
+            "default": "Equipo de datos"
+          },
+          "criticality": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ],
+            "title": "Criticality",
+            "default": "HIGH"
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatasetBody"
+      },
       "trackvance__automation_api__OccurrenceCollection": {
         "properties": {
           "items": {
@@ -14501,6 +18434,124 @@
           "read_at"
         ],
         "title": "NotificationResponse"
+      },
+      "trackvance__report_api__DatasetBody": {
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "title": "Context Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Description",
+            "default": ""
+          },
+          "macro_domain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macro Domain Id"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          },
+          "owner": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Owner",
+            "default": ""
+          },
+          "criticality": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ],
+            "title": "Criticality",
+            "default": "HIGH"
+          },
+          "business_owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Owner Id"
+          },
+          "steward_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steward Id"
+          },
+          "technical_custodian_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technical Custodian Id"
+          },
+          "information_classification": {
+            "type": "string",
+            "enum": [
+              "UNKNOWN",
+              "PUBLIC",
+              "INTERNAL",
+              "CONFIDENTIAL",
+              "RESTRICTED"
+            ],
+            "title": "Information Classification",
+            "default": "UNKNOWN"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "context_id",
+          "idempotency_key",
+          "name"
+        ],
+        "title": "DatasetBody"
       },
       "trackvance__sentinel_api__OccurrenceCollection": {
         "properties": {

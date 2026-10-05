@@ -23,9 +23,9 @@ interface DatasetSchema {
 }
 const definitions = { intake: { singular: 'contrato', endpoint: '/intake/contracts' }, recon: { singular: 'control', endpoint: '/recon/controls' }, sentinel: { singular: 'monitor', endpoint: '/monitors' } }
 const newOwnerOption = '__new_owner__'
-export function ConfigDialog({ module, open, close, initial }: { module: Module; open: boolean; close: () => void; initial?: RecordData }) {
+export function ConfigDialog({ module, open, close, initial, initialDatasetId }: { module: Module; open: boolean; close: () => void; initial?: RecordData; initialDatasetId?: string }) {
   const definition = definitions[module], cache = useQueryClient(), old = initial?.config || {}
-  const [name, setName] = useState(initial?.name || ''), [datasetId, setDatasetId] = useState(initial?.dataset_id || ''), [targetId, setTargetId] = useState(initial?.target_dataset_id || '')
+  const [name, setName] = useState(initial?.name || ''), [datasetId, setDatasetId] = useState(initial?.dataset_id || initialDatasetId || ''), [targetId, setTargetId] = useState(initial?.target_dataset_id || '')
   const [owner, setOwner] = useState(initial?.owner || 'Equipo de datos'), [addingOwner, setAddingOwner] = useState(false), [customOwner, setCustomOwner] = useState(''), [description, setDescription] = useState(initial?.description || '')
   const [required, setRequired] = useState<string[]>(old.required_columns || []), [unique, setUnique] = useState<string[]>(old.unique_columns || []), [numeric, setNumeric] = useState<string[]>(old.numeric_columns || []), [positive, setPositive] = useState<string[]>(old.positive_columns || [])
   const [sentinelRequired, setSentinelRequired] = useState<string[]>(old.required_columns || []), [keys, setKeys] = useState<string[]>(old.key_columns || []), [nullColumns, setNullColumns] = useState<string[]>(old.null_columns || [])

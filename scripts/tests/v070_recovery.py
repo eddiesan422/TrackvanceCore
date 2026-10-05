@@ -1,4 +1,4 @@
-"""Private Compose adapters and native recovery for the 0.7.0 certification.
+"""Private Compose adapters and native recovery for the 0.8.0 certification.
 
 The existing source is a previously authorized certification context. Restoration
 uses a new project with the same generated database identity, explicit env-file,
@@ -26,7 +26,7 @@ import docker_state
 
 def guarded_project(project):
     if not re.fullmatch(r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}', project):
-        raise ValueError('La recuperación requiere un proyecto exclusivo de certificación 0.7.0.')
+        raise ValueError('La recuperación requiere un proyecto exclusivo de certificación 0.8.0.')
     return docker_state.validate_project(project)
 
 
@@ -169,7 +169,7 @@ def native_cycle(context_path, evidence_path=None):
         docker_state.verify_backup(backup)
         before = json.loads((backup / 'state.json').read_text(encoding='utf-8'))
         if before['schema_version'] != docker_state.VERIFY_SCHEMA_VERSION or before['migration'] != docker_state.CURRENT_MIGRATION or len(before['tables']) != 42:
-            raise ValueError('La huella nativa no contiene el estado completo 0.7.0.')
+            raise ValueError('La huella nativa no contiene el estado completo 0.8.0.')
         source_compose = ['docker', 'compose', '--env-file', str(directory / 'test.env'), '-p', source,
             '-f', str(ROOT / 'compose.yml'), '-f', str(directory / 'compose.json')]
         result['backup_privacy'] = scan_backup_plaintext(backup, source_compose,
@@ -219,7 +219,7 @@ def native_cycle(context_path, evidence_path=None):
 
 
 def authentic_061_cycle(commit, evidence_path=None):
-    """Archive an immutable 0.6.1 source and destroy it before restoring 0.7.0."""
+    """Archive an immutable 0.6.1 source and destroy it before restoring 0.8.0."""
     from docker_backup_cycle import (
         RecoveryApi,
         RecoveryCommandError,
@@ -241,7 +241,7 @@ def authentic_061_cycle(commit, evidence_path=None):
         docker_state.ensure_fresh_project(project)
     evidence = (evidence_path or ROOT / '.codex-local/v070' / f'legacy061-{suffix}').resolve()
     if not evidence.is_relative_to((ROOT / '.codex-local/v070').resolve()):
-        raise ValueError('La evidencia debe permanecer en el directorio privado 0.7.0.')
+        raise ValueError('La evidencia debe permanecer en el directorio privado 0.8.0.')
     evidence.mkdir(parents=True, exist_ok=False)
     baseline = evidence / 'baseline'
     baseline.mkdir()
@@ -279,7 +279,7 @@ def authentic_061_cycle(commit, evidence_path=None):
     source_claimed = target_claimed = False
     main_project = 'trackvance-certification'
     main_before = certification_v070.inventory(main_project)
-    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.7.0', 'baseline_commit': commit,
+    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.8.0', 'baseline_commit': commit,
               'source_project': source, 'target_project': target, 'automatic_processes_started': False}
     stage, started = 'authentic_archive', time.monotonic()
     def run(arguments, *, input_text=None):
@@ -370,8 +370,8 @@ with SessionLocal() as db:
         if any(item['running'] for item in docker_state.inventory(target)['containers']):
             raise ValueError('El destino activó procesos antes de verificar la preservación.')
         docker_state.compose(target, 'up', '-d', '--wait', 'api', 'web', environment=target_environment)
-        if health_version(target_port) != '0.7.0':
-            raise ValueError('El destino no ejecuta 0.7.0.')
+        if health_version(target_port) != '0.8.0':
+            raise ValueError('El destino no ejecuta 0.8.0.')
         api_container = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api_container['id'], evidence / 'restored-state.json')
         normalized = docker_state._copy_snapshot(api_container['id'], evidence / 'legacy-state.json', command='snapshot-legacy-v5')

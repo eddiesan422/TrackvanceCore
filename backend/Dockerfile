@@ -3,7 +3,7 @@ FROM python:3.12-slim-bookworm
 
 # Spark 4.0.3 supports Java 17/21. The same locked runtime is used by driver/executors.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps libseccomp2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=uv /uv /uvx /usr/local/bin/

@@ -44,9 +44,15 @@ def inspect_health(base_url: str) -> dict[str, bool]:
 def _compose_prefix(project: str | None, context: Path | None = None) -> list[str]:
     prefix = ["docker", "compose"]
     if context:
-        import certification_v070
+        if context.resolve().is_relative_to((ROOT / ".codex-local" / "v080").resolve()):
+            import certification_v080
 
-        directory, resolved = certification_v070.load_context(context)
+            directory, resolved = certification_v080.load_context(context)
+            certification_v080.preflight(directory, resolved)
+        else:
+            import certification_v070
+
+            directory, resolved = certification_v070.load_context(context)
         if project != resolved["project"]:
             raise ValueError("El diagnóstico debe usar el proyecto exacto del contexto desechable.")
         prefix.extend(["--env-file", str(directory / "test.env")])
@@ -92,6 +98,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         worker = services["worker"]
         delivery_worker = services["delivery-worker"]
         acquisition_worker = services["acquisition-worker"]
+        report_worker = services["report-worker"]
         metadata_components = [services[name] for name in ("scheduler", "events-notifications", "events-chaining")]
         source_mounts = {
             "/var/lib/trackvance": volumes["trackvance_data"],
@@ -106,6 +113,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         worker_mounts = _inspect_mounts(worker["id"])
         delivery_worker_mounts = _inspect_mounts(delivery_worker["id"])
         acquisition_worker_mounts = _inspect_mounts(acquisition_worker["id"])
+        report_worker_mounts = _inspect_mounts(report_worker["id"])
         mounts_ok = all(
             api_mounts.get(path) == volume
             for path, volume in {**source_mounts, **delivery_mounts}.items()
@@ -135,6 +143,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         metadata_ok = all(_inspect_mounts(item["id"]) == {"/var/lib/trackvance": volumes["trackvance_data"]}
                           for item in metadata_components)
         worker_ok = worker_ok and set(worker_mounts.values()) <= {volumes["trackvance_data"]}
+        report_worker_ok = report_worker_mounts == {"/var/lib/trackvance": volumes["trackvance_data"]}
         delivery_worker_ok = delivery_worker_ok and set(delivery_worker_mounts.values()) <= {volumes["trackvance_data"], *delivery_mounts.values()}
     except (ImportError, KeyError, ValueError, RuntimeError):
         return {
@@ -144,7 +153,7 @@ def recovery_checks(project: str, min_free_mib: int) -> dict[str, bool]:
         }
 
     checks = {
-        "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok and acquisition_worker_ok and metadata_ok
+        "Montajes de recuperación": mounts_ok and worker_ok and delivery_worker_ok and acquisition_worker_ok and report_worker_ok and metadata_ok
     }
     copied = True
     for filename in ("verify_storage.py", "physical_schema_guard.py"):
@@ -176,7 +185,7 @@ def local_storage_checks(root: Path) -> dict[str, bool]:
         checks["Disco local (al menos 64 MiB libres)"] = (
             shutil.disk_usage(resolved).free >= 64 * 1024 * 1024
         )
-        for lane in ("default", "delivery", "acquisition"):
+        for lane in ("default", "delivery", "acquisition", "report"):
             heartbeat = json.loads(
                 (resolved / f"worker-heartbeat-{lane}.json").read_text(encoding="utf-8")
             )
@@ -261,6 +270,8 @@ def main() -> int:
         )[0]
         checks["Worker Compose ACQUISITION"] = command_check([*prefix, "exec", "-T", "acquisition-worker", "python", "-c",
             "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])[0]
+        checks["Worker Compose REPORT"] = command_check([*prefix, "exec", "-T", "report-worker", "python", "-c",
+            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"])[0]
         for component in ("scheduler", "events-notifications", "events-chaining"):
             checks[f"Componente Compose {component}"] = command_check([*prefix, "exec", "-T", component, "python", "-c",
                 f"from trackvance.component_health import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])[0]

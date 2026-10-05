@@ -377,7 +377,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -405,7 +405,7 @@ def write_pre_corrections_backup(root):
     manifest, state = write_delivery_backup(root, current=True)
     manifest["migration"] = state["migration"] = docker_state.PRE_CORRECTIONS_MIGRATION
     state["schema_version"] = docker_state.PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION
-    for name in docker_state.CURRENT_STATE_TABLES:
+    for name in docker_state.CORRECTIONS_STATE_TABLES:
         state["tables"].setdefault(name, {})
     state["tables"]["acquisition_runs"] = {"historical-failure": "e" * 64}
     state["tables"]["internal_notifications"] = {"historical-read-notice": "f" * 64}
@@ -430,6 +430,7 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     _manifest, expected = write_pre_corrections_backup(root)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES})
     restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
     state = modern_inventory()
     state["project"] = "trackvance-restore-test"
@@ -460,6 +461,7 @@ def test_restore_v6_refuses_changed_or_missing_historical_projection(tmp_path, d
     manifest, expected = write_pre_corrections_backup(tmp_path / "backup")
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES})
     projected = json.loads(json.dumps(expected))
     if damage == "normalized_hash":
         projected["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64
@@ -758,6 +760,7 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
                     migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES})
     restored["tables"]["delivery_reviews"] = {}
     restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES | docker_state.ASYNC_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
@@ -971,3 +974,19 @@ def test_new_backup_directory_is_private_on_posix(tmp_path):
     path = docker_state._new_directory(tmp_path / "private-backup")
     if os.name != "nt":
         assert path.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("logical,expected", [("trackvance_data", False), ("connection_credentials", True)])
+def test_report_attempt_staging_excluded_only_from_data_backup(tmp_path, logical, expected):
+    source = tmp_path / "source"
+    (source / "report-staging" / "execution" / "attempt").mkdir(parents=True)
+    (source / "report-staging" / "execution" / "attempt" / "part.parquet").write_bytes(b"unpublished")
+    (source / "published").mkdir()
+    (source / "published" / "report-staging").write_bytes(b"canonical")
+    program = docker_state.ARCHIVE_PROGRAM.replace("root = '/source'", f"root = {str(source)!r}")
+    archive = tmp_path / "stream.tar.gz"
+    with archive.open("wb") as output:
+        subprocess.run([sys.executable, "-c", program, logical], stdout=output, check=True)
+    entries = docker_state.inspect_archive(archive)
+    assert ("report-staging/execution/attempt/part.parquet" in entries) is expected
+    assert "published/report-staging" in entries

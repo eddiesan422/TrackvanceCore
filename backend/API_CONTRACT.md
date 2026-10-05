@@ -1,9 +1,9 @@
-# Contrato Trackvance Core local 0.7.0
+# Contrato Trackvance Core local 0.8.0
 
 El esquema ejecutable se genera desde la aplicación y mantiene la base `/api/v1`
 para compatibilidad. [openapi.json](openapi.json) se regenera y revisa como paso
-documental separado. El snapshot corregido 0.7.0 contiene 119 paths y corresponde a las rutas
-instaladas. Regenerar con `uv run python ../scripts/export_contracts.py` desde
+documental separado. Los snapshots 0.7.0 se conservan como antecedentes;
+el contrato actual incluye gobierno, Catálogo y Reportes. Regenerar con `uv run python ../scripts/export_contracts.py` desde
 backend; no conecta a la DB. El contrato documenta cookie, CSRF, MIME, DTOs y errores.
 
 Base `/api/v1`. Las listas usan `{items: [...], total: number}`, IDs string opacos
@@ -13,6 +13,87 @@ acceso limita la sesión a /me, logout y change-password. Los aliases absolutos
 `/health` y `/health/ready` también son públicos para diagnóstico y Compose. Las
 mutaciones autenticadas exigen `X-CSRF-Token` devuelto al iniciar sesión. El proxy
 Vite preserva la cookie; usar `credentials: 'include'`.
+
+## Gobierno y Catálogo 0.8.0
+
+Clasificación controlada opcional mediante macro_domain_id/domain_id en
+POST `/datasets`, `/connections/{id}/datasets` y `/connections/{id}/acquisitions`.
+También puede editarse posteriormente sin crear otra DatasetVersion. El dominio
+debe pertenecer al macrodominio activo de la organización. Sólo macrodominio o
+ambos null son válidos para cargar; Reportes exige clasificación completa activa.
+`domain` textual es deprecated, conserva compatibilidad explícita y default
+vacío en altas API; no se convierte en una entidad ni clasifica por defecto.
+
+Las entidades de clasificación devuelven `{id,name,description,active,version}`;
+Dominio añade macro_domain_id. Términos devuelven `{id,name,definition,active,version}`.
+PATCH usa expected_version y devuelve 409 VERSION_CONFLICT ante CAS obsoleto.
+Duplicados normalizados conservan etiquetas y producen 409 DOMAIN_DUPLICATE.
+Desactivar conserva historia y relaciones; no existe borrado de dominios.
+
+| Método/ruta | Entrada/resultado y permiso |
+| --- | --- |
+| GET `/governance/macrodomains` | active/search/offset/limit → colección; datasets:read permite selectores en carga normal |
+| POST `/governance/macrodomains` | name,description? → entidad201; domains:manage |
+| PATCH `/governance/macrodomains/{id}` | expected_version,name?/description?/active?; domains:manage |
+| GET `/governance/domains` | macro_domain_id/active/search/offset/limit → colección; datasets:read |
+| POST `/governance/domains` | name,macro_domain_id,description? → entidad201; domains:manage |
+| PATCH `/governance/domains/{id}` | expected_version,name?/description?/active?; domains:manage |
+| PATCH `/datasets/{id}/governance` | expected_version y macro_domain_id/domain_id/description/business_owner_id/steward_id/technical_custodian_id/information_classification/criticality opcionales → dataset/governance; governance:write |
+| GET `/governance/glossary` | active/search/offset/limit; glossary:read |
+| POST `/governance/glossary` | name,definition → término201; glossary:manage |
+| PATCH `/governance/glossary/{id}` | expected_version,name?/definition?/active?; glossary:manage |
+| GET `/catalog/tree` | parent_type/parent_id/offset/limit → nodos id/label/type/count/has_children; catalog:read |
+| GET `/catalog/resources` | resource_type/search/status/domain_id/macro_domain_id/responsible/pending/offset/limit → referencias id/name/resource_type/status/dataset_id/governance/href; catalog:read y lectura del módulo concreto |
+| GET `/catalog/datasets/{id}` | section=summary/columns/versions/quality/lineage/history y version_id/offset/limit → panel; catalog:read y quality añade intake:read |
+| PATCH `/catalog/datasets/{id}/columns` | version_id,column_name,description,term_ids,expected_version; cero crea → documentación de versión; governance:write |
+| POST `/catalog/datasets/{id}/terms` | term_id,version_id?/column_name? → asociación idempotente; glossary:manage |
+| DELETE `/catalog/glossary-associations/{id}` | Retira asociación y audita; glossary:manage |
+| GET `/catalog/datasets/{id}/blocks` | Bloqueos propios/históricos; catalog:read |
+| POST `/catalog/datasets/{id}/blocks` | scope=REPORT/CONTENT,reason → bloqueo201; blocks:manage |
+| PATCH `/catalog/blocks/{id}` | expected_version,active=false,reason → liberación explícita; blocks:manage |
+| PATCH `/catalog/security-dependencies/{id}` | expected_version,active=false,reason → libera dependencia expresamente; blocks:manage |
+
+Aliases compartidos: GET/POST/PATCH `/catalog/macrodomains` y `/catalog/domains`
+con los mismos contratos; GET `/catalog/datasets` usa resources con DATASET.
+offset >=0 y limit 1..200. Los tipos son
+DATASET/INTAKE/RECON/SENTINEL/DELIVERY/REPORT. Árbol: parent_type ausente,
+macro_domain/macrodomain, domain o pending; resource_type es hoja, no padre.
+
+El panel devuelve `{dataset,governance,items,total,offset,limit,section}`.
+summary agrega eligibility/blocks; columns agrega version_id/dataset_terms;
+lineage agrega security_dependencies y nombres/enlaces de entidades autorizadas.
+Columnas están ligadas a versión/schema_hash: descripción o término no se
+reasignan a una nueva columna homónima. Historial contiene snapshots y actores
+sin clasificar retrospectivamente ejecuciones viejas.
+
+`eligibility={eligible,classification_complete,strict_approval,availability,reasons,governance}`.
+strict_approval.approved expresa la evidencia histórica; availability.available
+es metadata READY y verified_bytes=false en navegación. El worker verifica
+evidencia/original/canónicos completos fuera de locks antes de usar la fuente.
+No confundir SUCCESS, nombre de salida o porcentaje redondeado con aprobación.
+Metrics anteriores sin contabilidad suficiente requieren nueva validación.
+
+Los datasets Intake heredan gobierno de la entrada comprobada; Reportes publica
+datasets con gobierno propio. Dataset DTO incorpora macro_domain_id/domain_id,
+governance_version y governance. El snapshot incorpora origen del gobierno,
+inherited, clasificación/actividad, responsables y textos legacy explícitos.
+
+Scopes REPORT/CONTENT se propagan a generaciones y descendientes Intake;
+no eliminan aprobaciones históricas. Perfil, artifacts y partes, resultados,
+exports y uso de entradas vuelven a comprobar autorización transitiva vigente.
+Responsables/creadores no reciben permisos automáticamente. Administrator
+mantiene catálogo completo y roles personalizados existentes conservan grants.
+La guía completa está en
+[Catálogo y gobierno](../docs/development/catalog-governance-0.8.0.md) y
+[ADR0026](../docs/adr/0026-controlled-governance-strict-approval.md).
+
+## Reportes 0.8.0
+
+Definiciones/revisiones, resolución multifuente congelada, preview/descarga
+efímeros y generación deliberada tienen entidades/endpoints propios. No crean
+un Run ni un dataset ficticio para representar la consulta. El contrato detallado
+de fuentes, joins, SQL, contextos, perfiles y ejecución está en
+[Reportes 0.8.0](../docs/development/reports-0.8.0.md).
 
 ## Adquisición asíncrona 0.7.0
 
@@ -73,7 +154,8 @@ conteos/tamaños registrados; ejecución verifica físicamente las partes.
 Run.execution_plan schema 3 conserva motor/versión/master,
 parámetros/presupuesto, reason/rejection y selección explícita; un fallo no cambia
 silenciosamente de motor. `/system/engines` informa Java/PySpark reales,
-modo/master/parameters/budget y heartbeats de tres lanes y tres procesos ligeros.
+modo/master/parameters/budget y heartbeats de cuatro lanes (DEFAULT, DELIVERY,
+ACQUISITION y REPORT) y tres procesos ligeros.
 Un runtime instalado no certifica que el master Standalone remoto sea alcanzable;
 la creación de una aplicación Spark comprueba esa conectividad.
 
@@ -199,7 +281,7 @@ ni envío de credenciales.
 
 ## Identidad y estado
 
-- `GET /health` → `{status:'ok',version:'0.7.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
+- `GET /health` → `{status:'ok',version:'0.8.0',mode:'local-prototype',demo_enabled:true,demo_access_enabled:true,demo_seed_enabled:true}`; `demo_enabled` se conserva por compatibilidad y refleja `DEMO_ACCESS_ENABLED`.
 - `GET /health/ready` → 200 con DB/storage/migrations listos o 503; alias absoluto `/health/ready` para Compose.
 - `POST /auth/demo` cuerpo `{}` → sesión demo explícita (no password): `AuthenticationResponse={user:UserResponse,organization:{id,name},csrf_token,demo_mode:true}`; cookie HttpOnly `trackvance_session`. Requiere `DEMO_ACCESS_ENABLED=true`; si está deshabilitado devuelve 404 `DEMO_DISABLED`, con independencia de que existan datos demo.
 - `POST /auth/login` `{username,password}` o `{email,password}` → AuthenticationResponse. El campo username acepta usuario o correo; se envía exactamente un identificador. `demo_mode` es true sólo para la cuenta demo.
@@ -215,7 +297,7 @@ ni envío de credenciales.
 `Version = {id,dataset_id,version,filename,source_type,sha256,schema_hash,size_bytes,row_count,column_count,profile_status,created_at,schema:[{name,logical_type,native_type?,nullable}],profile:{row_count,column_count,columns:[{name,logical_type,null_count,null_rate,distinct_count}]},ingestion_metadata:{reader:{key,version},source_format,format_label,reader_options,row_numbering,native_schema}}`.
 
 - `GET /datasets` → lista Dataset.
-- `POST /datasets` `{name,description?:'',domain?:'Operaciones',owner?:'Equipo de datos',criticality?:'HIGH'}` → Dataset 201. Un nombre ya usado en la organización devuelve 409 `DATASET_NAME_EXISTS` con el ID existente para orientar la carga de una versión nueva.
+- `POST /datasets` `{name,description?:'',macro_domain_id?:null,domain_id?:null,owner?:'Equipo de datos',criticality?:'HIGH',domain?:''}` → Dataset 201. domain textual es deprecated, sólo para compatibilidad. Un nombre ya usado en la organización devuelve 409 `DATASET_NAME_EXISTS` con el ID existente para orientar la carga de una versión nueva.
 - `GET /datasets/{id}` → Dataset más `{versions:Version[]}` (recientes primero).
 - `GET /datasets/{id}/schema` → esquema de la última versión desde el perfil
   persistido, con `{version_id,version,schema_hash,scan_mode,scanned_rows:0,
@@ -458,7 +540,7 @@ RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execut
 - `GET /runs/{id}/evidence` → descarga JSON manifest (v1 histórico intacto o v2 nuevo); `GET /runs/{id}/export.xlsx` → informe Excel estructurado. `export.csv` es deprecated y se conserva por compatibilidad de clientes históricos.
 - `GET /monitors/{id}/metrics` → lista `{run_id,observed_at,row_count,null_rate,health_score,status}`.
 
-Intake metrics: `{total_rows,valid_rows,error_rows,warning_rows,error_count,acceptance_rate,rules:[{code,column,failed_count,status}],decision}`. Errores rows `{original_row_number,rule_code,column,received_value,severity,message,classification:'ERROR'}`.
+Intake metrics nuevos añaden `{processed_rows,output_rows,discarded_rows,validation_coverage_rows}` a `{total_rows,valid_rows,error_rows,warning_rows,error_count,acceptance_rate,rules:[{rule_id,code,column,columns,severity,evaluated_count,skipped_count,failed_count,status}],decision}`. coverage cuenta la unión real de identidades evaluadas; no la suma de reglas. Los históricos no reciben contadores fabricados. Errores rows `{original_row_number,rule_code,column,received_value,severity,message,classification:'ERROR'}`.
 
 Recon metrics: `{total_rows,source_rows,target_rows,matched,mismatched,source_only,target_only,duplicate_source,duplicate_target,invalid,match_rate,counts:{MATCH:n,VALUE_MISMATCH:n,...}}`. Result row `{key,classification,source_value,target_value,difference,tolerance,message,source_row,target_row}`. Valores moneda strings; ausencias null.
 
@@ -498,7 +580,7 @@ TRACKVANCE_WORKER_LANE=DELIVERY uv run python -m trackvance.worker
 
 Variables: `DATABASE_URL` (SQLite por defecto o PostgreSQL psycopg),
 `TRACKVANCE_STORAGE_DIR` (alias `TRACKVANCE_STORAGE_ROOT` admitido),
-`TRACKVANCE_WORKER_LANE=DEFAULT|DELIVERY|ACQUISITION`,
+`TRACKVANCE_WORKER_LANE=DEFAULT|DELIVERY|ACQUISITION|REPORT`,
 `TRACKVANCE_DESTINATION_SECRETS_DIR`,
 `TRACKVANCE_DESTINATION_SECRET_KEY_FILE`, `DEMO_ACCESS_ENABLED=true`,
 `DEMO_SEED_ENABLED=true`, `TRACKVANCE_WEB_ORIGIN=http://localhost:3000`,

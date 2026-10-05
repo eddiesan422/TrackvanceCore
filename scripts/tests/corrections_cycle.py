@@ -268,7 +268,7 @@ def certify(directory, context, args):
     api = volume.VolumeApi(f'http://127.0.0.1:{context["port"]}', 1800)
     session = api.post("/api/v1/auth/demo", {}, expected=(200,))
     api.csrf = session["csrf_token"]
-    report = {"schema_version": 1, "version": "0.7.0", "cycle": "C01-C06", "project": context["project"], "status": "FAIL", "tiers": [],
+    report = {"schema_version": 1, "version": "0.8.0", "cycle": "C01-C06", "project": context["project"], "status": "FAIL", "tiers": [],
         "source_sha": certification.command(["git", "rev-parse", "HEAD"]).strip(),
         "source_tree_dirty": bool(certification.command(["git", "status", "--porcelain"]).strip()),
         "effective_limits": api.get("/api/v1/system/engines")["limits"]["acquisition"],

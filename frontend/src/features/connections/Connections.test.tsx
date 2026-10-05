@@ -237,7 +237,7 @@ describe('Source discovery and snapshots', () => {
     await user.click(screen.getByRole('button', { name: 'Crear dataset y adquirir fuente' }))
     expect(await screen.findByRole('link', { name: 'Ver dataset' })).toHaveAttribute('href', '/datasets/sales-dataset')
     expect(screen.getByRole('link', { name: /Ir a Data Intake/ })).toHaveAttribute('href', '/intake')
-    expect(api).toHaveBeenCalledWith('/connections/source-db/acquisitions', { method: 'POST', headers: { 'Idempotency-Key': expect.any(String) }, body: JSON.stringify({ name: 'ventas_vista', domain: 'Operaciones', description: '', schema_name: 'comercial', object_name: 'ventas_vista' }) })
+    expect(api).toHaveBeenCalledWith('/connections/source-db/acquisitions', { method: 'POST', headers: { 'Idempotency-Key': expect.any(String) }, body: JSON.stringify({ name: 'ventas_vista', macro_domain_id: null, domain_id: null, description: '', schema_name: 'comercial', object_name: 'ventas_vista' }) })
   })
 
   it('does not explore without source permission and disables actions for a disabled connection', async () => {

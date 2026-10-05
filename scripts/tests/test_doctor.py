@@ -19,6 +19,7 @@ def recovery_inventory(monkeypatch):
             {"id": "worker-id", "service": "worker"},
             {"id": "delivery-worker-id", "service": "delivery-worker"},
             {"id": "acquisition-worker-id", "service": "acquisition-worker"},
+            {"id": "report-worker-id", "service": "report-worker"},
             {"id": "scheduler-id", "service": "scheduler"},
             {"id": "events-notifications-id", "service": "events-notifications"},
             {"id": "events-chaining-id", "service": "events-chaining"},

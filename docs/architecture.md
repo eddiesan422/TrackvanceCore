@@ -1,13 +1,13 @@
 # Arquitectura local y evolución de Trackvance Core
 
-Revisión de implementación: ciclo correctivo C01–C06 de 0.7.0, adquisición
-asíncrona, ejecución Spark, automatizaciones, eventos y bandeja personal,
-4 de octubre de 2026. La certificación integrada se registra por separado;
+Revisión de implementación: 0.8.0, Catálogo de gobierno y Reportes, sobre el
+ciclo correctivo C01–C06, adquisición asíncrona, Spark, automatizaciones,
+eventos y bandeja personal. Fecha: 5 de octubre de 2026. La certificación integrada se registra por separado;
 los resultados históricos no certifican automáticamente esta revisión ni
 demuestran que la instalación principal ya haya sido actualizada.
 
 Trackvance es un monolito modular con una API FastAPI, una aplicación React y
-tres workers, un scheduler y dos consumidores de eventos que comparten los modelos y servicios del backend. Docker Compose con
+cuatro workers, un scheduler y dos consumidores de eventos que comparten los modelos y servicios del backend. Docker Compose con
 PostgreSQL es la instalación local principal. Las reglas y los módulos conservan
 sus contratos al sustituir infraestructura mediante puertos. No se plantea dividir
 el producto en microservicios para completar esta evolución.
@@ -28,6 +28,7 @@ flowchart LR
   K[Worker DEFAULT] --> P
   KD[Delivery worker] --> P
   KA[Acquisition worker] --> P
+  KR[Report worker: coordinador] --> P
   SCH[Scheduler independiente] --> P
   EN[Consumidor notificaciones] --> P
   EC[Consumidor encadenamiento] --> P
@@ -35,6 +36,11 @@ flowchart LR
   K --> S
   KD --> S
   KA --> S
+  KR --> S
+  A --> R[Proceso SQL aislado]
+  KR --> R
+  R --> RP[Partes exactas autorizadas: sólo lectura]
+  R --> ST[Staging privado sólo DATASET]
   S --> V[(Volumen persistente de artifacts)]
   K --> E[ExecutionEngine: Polars / PySpark]
   A --> D[DatasetSource + DatasetReader]
@@ -76,6 +82,46 @@ Es una instalación separada, con su propia base y almacenamiento en `.local/`.
 No representa la topología principal ni comparte datos con PostgreSQL en Compose.
 
 ## Puertos y adaptadores
+
+### Catálogo y Reportes 0.8.0
+
+Catálogo consulta metadata paginada, sin iniciar scans ni leer Parquet. Macrodominio
+y dominio tienen identidad estable, organización y actividad; la clasificación
+opcional de la entrada y la edición posterior no crean una DatasetVersion.
+La descripción, responsables, sensibilidad y restricciones tienen historia propia.
+Intake conserva la relación explícita entrada+contrato de su salida; el gobierno
+actual puede heredarse y la aprobación conserva su snapshot histórico, incluso UNKNOWN.
+
+Reportes resuelve conjuntamente todas las fuentes en una nueva transacción PostgreSQL
+REPEATABLE READ. El contexto persistido incluye entrada, salida, aprobación, contrato
+y revisiones admitidas, esquemas, hashes, políticas, consulta, parámetros, usuario y
+organización; expira en 15 minutos. El ordinal de entrada determina la última versión
+aprobada, no la fecha de reejecución. Una fuente seleccionada inelegible falla sin
+retroceder a una versión más antigua. La autorización vigente se revisa al usar el
+contexto y al publicar/emitir lotes; el congelado no conserva permisos revocados.
+
+SQLGlot valida un SELECT plano completo sobre alias autorizados. La ruta guiada
+genera el mismo plan; ambos admiten cruces INNER/LEFT/RIGHT/FULL de igualdad y llaves
+compuestas, cardinalidad esperada/real y autorización explícita de N:M. Se rechazan
+CTE, subconsultas, archivos, catálogos arbitrarios, extensiones, funciones fuera de
+allowlist, DDL/DML y sentencias múltiples. DuckDB realiza la analítica en un hijo
+Linux sin imports de la aplicación ni credenciales de negocio. Landlock/seccomp
+permiten sólo partes exactas y runtime público de lectura, niegan red, ejecución y
+procesos nuevos; threads del motor heredan las restricciones. El coordinador HTTP
+o worker usa PostgreSQL, mientras el hijo recibe sólo plan y fuentes comprobadas.
+
+PREVIEW limita la salida a 10 filas después de validar cardinalidad completa.
+DOWNLOAD produce CSV/OOXML incremental con backpressure, sin spool de resultados,
+Parquet de salida ni temporales. DATASET tiene Job REPORT, lease/CAS e idempotencia;
+puede usar staging/spill privado y acotado. Un perfil completo y hashes de todas las
+partes preceden a la publicación atómica Dataset+Version+Artifacts+linaje+JobSUCCESS.
+Cada generación crea un dataset nuevo pendiente de Intake. Sus dependencias incluyen
+todas las fuentes; bloqueos y autorización se propagan a las lecturas nativas y
+a descendientes posteriores. Las rutas de metadata mantienen su propósito separado.
+
+Decisiones: [ADR 0026](adr/0026-controlled-governance-strict-approval.md),
+[ADR 0027](adr/0027-reports-frozen-context-sandbox.md) y
+[ADR 0028](adr/0028-isolated-certification-recovery-upgrade-080.md).
 
 | Frontera | Responsabilidad | Adaptador actual | Evolución preparada |
 | --- | --- | --- | --- |

@@ -57,17 +57,19 @@ class AcquisitionBody(BaseModel):
 class SourceAcquisitionBody(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
     name: str = Field(min_length=1, max_length=160)
-    domain: str = Field(default="Operaciones", min_length=1, max_length=80)
+    domain: str = Field(default="", max_length=80, deprecated=True)
     description: str = Field(default="", max_length=4000)
     schema_name: str = Field(min_length=1, max_length=128)
     object_name: str = Field(min_length=1, max_length=128)
     column_overrides: dict = Field(default_factory=dict)
+    macro_domain_id: str | None = Field(default=None, max_length=64)
+    domain_id: str | None = Field(default=None, max_length=64)
 
-    @field_validator("name", "domain")
+    @field_validator("name")
     @classmethod
     def business_label(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("El nombre y el área no pueden quedar vacíos.")
+            raise ValueError("El nombre no puede quedar vacío.")
         return value.strip()
 
 
@@ -117,6 +119,8 @@ def _dataset(db: Session, user: User, identifier: str) -> Dataset:
     dataset = db.scalar(select(Dataset).where(Dataset.id == identifier, Dataset.organization_id == user.organization_id))
     if dataset is None:
         raise AcquisitionOperationError(404, "NOT_FOUND", "No se encontró el dataset solicitado.")
+    from .governance import authorize_dataset
+    authorize_dataset(db, user, dataset.id, "CONTENT")
     return dataset
 
 
@@ -296,8 +300,11 @@ def acquire_source(connection_id: str, body: SourceAcquisitionBody, idempotency_
     found = db.scalar(select(Dataset).where(Dataset.organization_id == user.organization_id, Dataset.name == body.name))
     if found:
         raise AcquisitionOperationError(409, "DATASET_NAME_EXISTS", "El nombre ya corresponde a un dataset; utiliza Actualizar desde fuente.")
+    from .governance import validate_classification
+    validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     dataset = Dataset(id=uid(), organization_id=user.organization_id, name=body.name,
-                      domain=body.domain, description=body.description, owner=user.name)
+                      domain=body.domain, description=body.description, owner=user.name,
+                      macro_domain_id=body.macro_domain_id, domain_id=body.domain_id)
     db.add(dataset)
     try:
         db.flush()

@@ -1,6 +1,6 @@
 # Trackvance Core
 Especificación técnica v1.1
-IMPLEMENTACIÓN 0.7.0 | Correcciones C01–C06 | 4 de octubre de 2026
+IMPLEMENTACIÓN 0.8.0 | Catálogo de gobierno y Reportes | 5 de octubre de 2026
 Trackvance Colombia SAS
 
 Documento oficial de referencia para el prototipo local y su evolución a producto.
@@ -10,7 +10,14 @@ Esta revisión sustituye la descripción del estado de implementación de la edi
 
 ### Baseline y evolución aprobada
 
-IMPLEMENTACIÓN 0.7.0 conserva el nombre documental v1.1 y evoluciona la baseline
+IMPLEMENTACIÓN 0.8.0 conserva el nombre documental v1.1. Parte de la revisión
+0.7.0 d9b6856e757a2a1fcab3913209146f3b7b79d70c en feat/local-prototype,
+conservando sus migraciones y registros. Añade Catálogo de gobierno, clasificación
+controlada, glosario, restricciones, aprobación estricta verificable y Reportes
+multifuente. La carga sin clasificación continúa disponible; completar gobierno
+posteriormente no vuelve a importar ni fabrica una aprobación histórica.
+
+La evolución anterior de volumen y automatización 0.7.0 partió de la baseline
 0.6.1 exacta 6fac26b3648cb4a4b50c094ef12c1e103bc97ddd. Aquella revisión tenía
 31 tablas, Alembic 0012_delivery_target_audit, cinco servicios Compose, Polars
 operativo y cargas síncronas de 10 MiB/100.000 filas. PySpark, adquisición durable,
@@ -25,7 +32,9 @@ outbox PostgreSQL y bandeja personal. Las interfaces normales registran y siguen
 estos trabajos. El modelo final tiene 42 tablas y tres migraciones nuevas
 0013..0015 en su publicación inicial; el ciclo C01–C06 añade exclusivamente
 0016_acquisition_diagnostics con dos campos nullable y mantiene 42 tablas.
-Los bytes de 0001..0015 se conservan. El ciclo parte del HEAD real
+0.8.0 añade exclusivamente 0017 sobre esa historia:55 tablas y state 8, sin
+clasificación automática ni reescritura de registros anteriores.
+Los bytes de 0001..0016 se conservan. El ciclo anterior partía del HEAD
 12ca7061696d3581a18237dc7737348a3462e2c4, sin retroceder a una baseline anterior.
 Los originales de Excel no están disponibles; las causas reproducidas se
 declaran sobre sintéticos, sin reinterpretar adquisiciones históricas.
@@ -72,7 +81,7 @@ HEAD documental, todos sus jobs y la verificación efectiva de la instalación;
 completa esos dos gates sin volver a modificar los bytes ya revisados del PDF.
 
 Quedan fuera de esta evolución conectores adicionales, Redis/Celery, mensajería
-externa, object storage remoto, Kubernetes/Helm/Terraform, masking, gobierno,
+externa, object storage remoto, Kubernetes/Helm/Terraform, masking,
 observabilidad empresarial, retención avanzada y notificaciones de asignación.
 Standalone en el mismo PC prueba executors separados; no añade RAM/CPU física
 ni certifica escalamiento multinodo o capacidad productiva universal.
@@ -87,7 +96,7 @@ No se introduce otro broker ni una cola independiente de adquisición.
 
 @diagram logical
 
-| Puerto | Contrato operativo 0.7.0 |
+| Puerto | Contrato operativo 0.8.0 |
 | --- | --- |
 | DatasetSource | Abrir snapshot por revisión congelada; iterar lotes acotados y cerrar el cursor. Conectores PostgreSQL/SQL Server. |
 | StorageProvider | put_file/materialize para históricos; put_dataset/dataset_paths para conjuntos ordenados y verificados. Temporales pertenecen al proveedor que los asignó. |
@@ -105,7 +114,7 @@ original, y repetir consumo no debe crear una entrega lógica adicional.
 
 ## 3. Despliegue local de referencia
 
-Compose inicia nueve servicios explícitos. Todos conservan restart: "no".
+Compose inicia diez servicios explícitos. Todos conservan restart: "no".
 La instalación principal mantiene PostgreSQL 16, su proyecto/volúmenes y su
 puerto/origen. La evolución no requiere Standalone ni puertos administrativos.
 
@@ -118,6 +127,7 @@ puerto/origen. La evolución no requiere Standalone ni puertos administrativos.
 | worker | Lane DEFAULT: Intake, ReconOps y Sentinel, Polars/PySpark. Sin secretos fuente/destino. |
 | acquisition-worker | Lane ACQUISITION: abrir fuentes, leer, materializar, perfilar y publicar. Sólo secretos fuente. |
 | delivery-worker | Lane DELIVERY: preflight persistido, preparación y DataSink. Sólo secretos destino. |
+| report-worker | Lane REPORT: generación durable, perfil y publicación. Coordina PostgreSQL; el proceso SQL hijo no recibe credenciales ni acceso general a storage. |
 | scheduler | Despachar Sentinel y Delivery. No procesa datasets ni abre sinks. |
 | events-chaining | Consumir eventos Intake, resolver política y registrar ocurrencias/Jobs. |
 | events-notifications | Crear resumen personal por transición, con autorización vigente al consultar. |
@@ -163,7 +173,7 @@ rechaza PYSPARK con ENGINE_UNAVAILABLE; no hace fallback silencioso.
 
 ## 4. Código, stack y dependencias
 
-El runtime fija dependencias mediante backend/uv.lock y frontend/pnpm-lock.yaml.
+El runtime fija dependencias mediante backend/uv.lock y frontend/pnpm-lock.yaml. SQLGlot 30.21.0 valida el AST completo admitido por Reportes; Landlock y libseccomp2 confinan el proceso Linux.
 Backend integra FastAPI, SQLAlchemy/Alembic, Polars, PyArrow, DuckDB, PySpark
 4.0.3, psycopg y el adaptador SQL Server existente; frontend React/TypeScript
 usa componentes y TanStack Query del producto. La imagen backend incorpora
@@ -184,7 +194,8 @@ para Spark/PySpark ni instalación a voluntad en cada carga del usuario.
 | events, notifications_api | Outbox atómica, consumos CAS, retries, resumen personal y consultas autorizadas. |
 | permissions, api, worker | Contratos HTTP, autoridad vigente, lanes y protección contra publicaciones de owners vencidos. |
 | frontend/features/datasets, delivery, notifications, runs | Recepción/seguimiento, automatización, preflight, bandeja y selector de engine. |
-| scripts/verify_storage, docker_state, backup_local | Huella state 7/0016, conjuntos, separación de secretos y proyección estricta state 6. |
+| governance*, report* | Metadata de gobierno, aprobación estricta, contexto conjunto, AST, sandbox y publicación derivada. |
+| scripts/verify_storage, docker_state, backup_local | Huella state 8/0017, conjuntos, separación de secretos y proyecciones históricas estrictas. |
 
 Las reglas de negocio permanecen en el núcleo portable. PySpark distribuye
 llamadas a esos kernels y las operaciones globales de agrupación/referencias;
@@ -444,7 +455,7 @@ Las fuentes externas requieren acceso de red desde API. El overlay offline restr
 
 ### Representación y límites
 
-El preview aplica LIMIT/TOP en origen; el snapshot lee por lotes de 100 hasta 100.000 filas, 100 columnas y 64 MiB de valores normalizados. Cada celda tiene límite de 64 KiB. Una fila adicional detecta el exceso y se rechaza la importación completa: nunca se guarda una muestra parcial como si fuera un dataset completo. Timeout configurable de conexión 1..15 segundos; consulta 1..60 segundos. Este contrato describe la ruta legacy síncrona. El recorrido normal 0.7.0 usa adquisición asíncrona y sus cotas/consistencia documentadas en el capítulo 5.
+El preview aplica LIMIT/TOP en origen; el snapshot lee por lotes de 100 hasta 100.000 filas, 100 columnas y 64 MiB de valores normalizados. Cada celda tiene límite de 64 KiB. Una fila adicional detecta el exceso y se rechaza la importación completa: nunca se guarda una muestra parcial como si fuera un dataset completo. Timeout configurable de conexión 1..15 segundos; consulta 1..60 segundos. Este contrato describe la ruta legacy síncrona. El recorrido normal vigente usa adquisición asíncrona y sus cotas/consistencia documentadas en el capítulo 5.
 
 Los valores se conservan como texto/null: Decimal sin redondeo float, fechas ISO, Unicode y espacios originales. Los identificadores siguen la política id/*_id y permiten override. Los binarios son Base64. SQL Server timestamp se interpreta como rowversion; `datetimeoffset` (hasta escala 6) y PostgreSQL `timestamptz` conservan `TIMESTAMP` con offset. `timestamp without time zone`, `datetime`, `datetime2` y `smalldatetime` se adquieren como `STRING`: no se inventa una zona horaria y Delivery conserva el texto exacto. `datetimeoffset(7)` también se adquiere como `STRING` para conservar el séptimo dígito. El orden DATABASE_UNSPECIFIED depende del motor; SNAPSHOT_ROW es posición en el snapshot, no un número físico en la tabla externa.
 
@@ -473,10 +484,10 @@ Un nuevo adaptador implementa DatasetSource y su normalización, registra opcion
 IMPLEMENTADO. Data Delivery publica una DatasetVersion canónica e inmutable en
 PostgreSQL o SQL Server. La versión 0.5.1 endurece la evidencia, la interpretación
 operativa de UNKNOWN y las métricas. No incorpora transformación funcional,
-conectores nuevos ni una transacción distribuida. La automatización vigente 0.7.0 se describe en el capítulo 21.
+conectores nuevos ni una transacción distribuida. La automatización vigente se describe en el capítulo 21.
 
 
-### Adaptación vigente 0.7.0 a volumen
+### Adaptación vigente a volumen
 
 El preflight conserva los mismos códigos y condiciones funcionales de bloqueo,
 con mensajes centralizados distintos para éxito/fallo. PERMISSIONS no atribuye
@@ -1027,12 +1038,12 @@ estable y no permiten cruzar attempt/Run/organización.
 ### X. Backup, restauración y compatibilidad
 
 El backup conserva PostgreSQL, artifacts, secretos fuente/destino y ambas claves.
-Manifest mantiene schema 2; state 7/0016 cubre las 42 tablas, diagnósticos nuevos y conjuntos multipartes. State 6/0015 corresponde a la publicación inicial 0.7.0 y tiene proyección estricta de ambos diagnósticos NULL. State 5/31 tablas de 0.6.1 es antecedente y se conserva su proyección estricta documentada. El restore nativo exige
+Manifest mantiene schema 2. El estado nativo 8/0017 cubre las 55 tablas, gobierno, contextos y ejecuciones de Reportes, diagnósticos y conjuntos multipartes; excluye staging efímero de Reportes. El antecedente state 7/0016 cubría 42 tablas. State 6/0015 corresponde a la publicación inicial 0.7.0 y tiene proyección estricta de ambos diagnósticos NULL. State 5/31 tablas de 0.6.1 es antecedente y se conserva su proyección estricta documentada. El restore nativo exige
 igualdad exacta de filas, hashes, relaciones y secretos. Los secretos OIDC sólo utilizan
 variables externas: los archivos de configuración privados se conservan por separado de los archivos de datos estándar. El upgrade autorizado exige copiar y verificar también el .env privado vigente, sin publicarlo, y preservar secretos/claves de fuente y destino.
 
 Backups 0.5.1/0009/state4, 0.5.0/0008/state3 y 0.4.x/0007/state2 se actualizan
-a 0016 y comparan su proyección legacy-v4/v3/v2 más adiciones permitidas 0.7.0. La proyección valida primero
+a 0017 por la cadena aditiva y comparan su proyección legacy-v4/v3/v2 más adiciones permitidas de identidad y las trece tablas nuevas vacías. La proyección valida primero
 integridad y migración de identidad, admite roles/grants sembrados y elimina sólo
 adiciones esperadas. Rechaza actividad nueva en tablas que debían estar vacías;
 no oculta filas, errores de referencias ni alteraciones de campos históricos.
@@ -1135,6 +1146,282 @@ sin coerción, linaje exacto, benchmark y code splitting. Además se repiten las
 suites base, migraciones, conexiones, Delivery, recovery, navegador y CI. El
 apartado de validación contiene resultados ejecutados; este diseño no sustituye
 esa evidencia.
+
+## 5C. Catálogo de gobierno del dato
+
+### A. Propósito y navegación integrada
+
+Catálogo es una vista de metadata de los datasets y contratos existentes. Permite
+encontrar activos por macrodominio/dominio, texto, tipo y calidad, consultar el
+árbol y abrir un panel con Resumen, Columnas, Versiones, Calidad, Linaje e Historia.
+Las páginas y los contadores se resuelven en PostgreSQL; navegar no lee Parquet,
+abre conectores ni inicia cálculos completos. El resultado de un filtro vacío
+se muestra como tal, con paginación y errores visibles. Los perfiles de contenido
+siguen usando las rutas de datasets y su autorización correspondiente.
+
+### B. Clasificación controlada y carga opcional
+
+MacroDomain y DataDomain son entidades por organización, con nombre normalizado,
+descripción, actividad y versión. Cada dominio pertenece a un macrodominio. Una
+edición cambia el nombre conservando ID y relaciones. Un elemento inactivo no
+puede elegirse en una asignación nueva, pero conserva las referencias históricas.
+Se rechazan duplicados normalizados, dominios de otro macrodominio, entidades
+inactivas, organización ajena y ediciones con expected_version desactualizada.
+
+Las cargas rápidas, adquisiciones de archivos y snapshots de conexión presentan
+selectores opcionales compartidos. No crean un segundo selector de área ni una
+clasificación libre paralela. Se puede cargar sin ambos IDs y clasificarse después.
+El texto domain histórico permanece como antecedente; no se convierte por
+coincidencia de nombre ni se inventa Operaciones como gobierno de datos anteriores.
+La edición posterior conserva bytes, DatasetVersion, esquema y aprobación original.
+
+Ejemplo: una entrada existente con domain='Finanzas' y IDs NULL aparece sin
+clasificación controlada. Elegir macrodominio Finanzas y dominio Facturación guarda
+IDs existentes e incrementa governance_version. No reimporta ni valida el archivo.
+Renombrar Facturación a Ingresos conserva esos IDs e identifica la versión de gobierno.
+
+### C. Gobierno actual e historia de la aprobación
+
+Cada dataset puede declarar descripción, responsable de negocio, steward,
+custodio técnico, criticidad y clasificación UNKNOWN/PUBLIC/INTERNAL/CONFIDENTIAL/
+RESTRICTED. Los responsables son usuarios activos de la misma organización y sus
+asignaciones no conceden permisos. GovernanceHistory conserva snapshot, actor,
+versión, fecha y motivo. La clasificación requerida para Reportes necesita ambos
+IDs compatibles y activos; no exige cargar con ellos ni otorga aprobación por sí sola.
+
+La salida de Intake se identifica por entrada+contrato estable. Comparte gobierno
+actual de la entrada y mantiene el snapshot del momento de aprobación. La relación
+no depende del sufijo del nombre. Para salidas anteriores sin IDs nuevos sólo se
+admite una procedencia completa y coherente de parent_version_id/source_run_id,
+Run/configuración/output; la metadata histórica ausente queda UNKNOWN.
+
+### D. Diccionario por versión y glosario
+
+La columna técnica continúa en schema_json con su tipo, nulabilidad y etiquetas.
+ColumnDocumentation agrega descripción para DatasetVersion+schema_hash+column_name,
+con expected_version. No redefine tipo ni modifica datos. Una versión/esquema nuevo
+no recibe automáticamente documentación incompatible. GlossaryTerm mantiene nombre,
+definición, actividad y versión; GlossaryAssociation vincula un término al dataset
+o a una columna exacta. Una asociación inválida o de otra organización se rechaza.
+La interfaz muestra términos activos y las referencias históricas, con guardado y
+conflictos visibles. El glosario describe negocio; no cambia reglas ni permisos.
+
+### E. Aprobación estricta de Intake
+
+SUCCESS es estado técnico, no aprobación. La elegibilidad comprueba Run intake,
+decision APPROVED, entrada/salida/configuración coherentes, evidencia y manifest
+consistentes, population no vacía y validaciones configuradas con cobertura real.
+Exige contadores explícitos total_rows, processed_rows, valid_rows, output_rows,
+error_rows, warning_rows, discarded_rows y validation_coverage_rows. Procesados,
+válidos, salida y cobertura deben igualar toda la entrada; errores, warnings y
+descartes deben ser cero. No usa un porcentaje redondeado ni suma evaluaciones
+superpuestas para reconstruir cobertura. Transformar filas sin validarlas no basta.
+
+Cada regla configurada conserva evaluated/skipped/failed; evaluated+skipped cubre
+la población, failed es cero y skipped sólo es válido para una condición explícita
+no aplicable. Al menos una validación efectiva debe cubrir cada fila. Una regla
+condicional que salta todas las filas no acredita calidad. Un histórico sin esos
+contadores no se vuelve aprobado: se pide ejecutar una validación nueva y verificable.
+
+Ejemplo: aceptar9.900 de 10.000 filas y rechazar100 nunca es aprobación estricta.
+APPROVED_WITH_WARNINGS tampoco lo es, incluso si el porcentaje visible redondea a 100.
+Clasificar después de una aprobación íntegra puede completar gobierno actual; la
+evidencia conserva el snapshot anterior, sin atribuirle retrospectivamente los IDs.
+
+### F. Disponibilidad, restricciones y autorización transitiva
+
+La elegibilidad presenta motivos separados para clasificación, calidad,
+disponibilidad y autorización. El listado usa metadata registrada y marca que no
+ha verificado bytes. Antes de ejecutar se verifican todos los artefactos/partes,
+hashes, conteos, esquema y evidencia fuera de locks prolongados. Falta o corrupción
+no genera fallback a otra salida más antigua.
+
+DatasetBlock tiene alcance REPORT o CONTENT, motivo, actividad y versión. Soltar
+un bloqueo requiere permiso, expected_version y motivo y guarda actor/fecha. REPORT
+impide Reportes; CONTENT impide contenido y Reportes. Un dataset generado conserva
+dependencias de seguridad de todas las fuentes. Intake sobre él conserva también
+esa ascendencia; preview, archivo, export, inputs de módulos y lecturas posteriores
+comprueban las fuentes vigentes. El recorrido admite como máximo 128 ancestros,
+rechaza ciclos, relaciones incompletas y organización ajena. Un error de procedencia
+no se convierte en autorización. Metadata descriptiva tiene su propio permiso y propósito.
+
+### G. API, permisos y operación
+
+Las rutas catalog/governance/macrodomain/domain, paneles, diccionario, glosario y
+restricciones se detallan en el inventario HTTP y la matriz de autorización. RBAC
+se verifica en cada endpoint; Administrator protegido recibe el catálogo vigente,
+los roles personalizados conservan sólo sus permisos. Versiones de gobierno y
+bloqueos usan concurrencia optimista; la UI actualiza y muestra conflictos.
+La migración 0017 no rellena clasificación ni índices estrictos históricos.
+Guía operativa: catalog-governance-0.8.0.md. Decisión: ADR 0026.
+
+## 5D. Reportes multifuente y datasets derivados
+
+### A. Recorrido del usuario
+
+Reportes permite elegir fuentes aprobadas, configurar cruces, columnas, filtros,
+orden y parámetros; ofrece constructor guiado y SQL admitido. Resolver muestra
+la selección concreta de entrada/salida/contrato/aprobación y sus advertencias.
+Desde ese contexto se puede ver una muestra, descargar o generar un dataset nuevo.
+Resolver y probar no generan un DatasetVersion. Generar es una acción explícita,
+requiere nombre y metadatos y devuelve un trabajo durable con progreso/cancelación.
+La página puede cerrarse después del registro y el Job sigue ejecutando.
+
+@diagram report-profiles
+
+### B. Selección de entrada y revisión de contrato
+
+Cada alias selecciona input_dataset_id, contract_id estable y una lista explícita
+de contract_revision_ids admitidas. SPECIFIC fija input_version_id. LATEST_APPROVED
+elige la mayor versión de entrada con aprobación estricta bajo esas revisiones.
+El orden de entrada prevalece sobre la fecha de terminación del Run: reejecutar
+una entrada vieja no la convierte en la última. La consulta siempre lee la salida
+exacta de la aprobación elegida. Una entrada nueva pendiente/rechazada produce
+una advertencia; no elimina la última entrada aprobada verificable.
+
+Se elige primero y después se valida elegibilidad. Si la entrada elegida tiene
+esquema incompatible, bloqueo, artefacto ausente o falta de permiso, la solicitud
+falla indicando el motivo; no retrocede silenciosamente a una entrada anterior.
+Cambiar nombre de dataset/contrato no cambia su identidad ni el conjunto admitido.
+
+### C. Contexto congelado conjunto
+
+La resolución usa una Session nueva con REPEATABLE READ antes del primer SELECT,
+independiente de la transacción HTTP previa. Todas las fuentes pertenecen a un
+snapshot MVCC conjunto. ReportContext conserva usuario/organización, expiración 15 min,
+revisión opcional, borrador, plan, parámetros tipados, orden, alias, políticas,
+entrada/salida/aprobación/contrato, esquema/hash y artefacto/hash, con integrity_hash.
+Una aprobación posterior no cambia ese contexto. Una resolución nueva puede elegir
+una versión nueva. Un contexto expirado, alterado o ajeno se rechaza.
+
+Una ejecución durable ya registrada utiliza ese mismo contexto, incluso al
+reanudar su Job, y revalida permisos/bloqueos actuales. No resuelve otras fuentes
+para continuar. Guardar una definición crea ReportDefinition y ReportRevision
+inmutable; editar agrega revisión con expected_version. Los esquemas usados se
+guardan y los cambios incompatibles de columnas usadas requieren resolver/corregir.
+
+### D. SELECT validado y equivalente guiado
+
+SQLGlot analiza exactamente un SELECT plano en dialecto DuckDB. Sólo alias de
+fuentes autorizadas, columnas existentes y nodos/funciones de allowlist pasan.
+Los parámetros TEXT/INTEGER/DECIMAL/DATE/TIMESTAMP/BOOLEAN se enlazan tipados,
+sin interpolar valores en SQL. Se admiten proyecciones, filtros agrupados,
+agregados documentados, GROUP BY/HAVING, orden, límites y cruces de igualdad.
+Se rechazan CTE/subconsultas, SELECT *, catálogos, funciones de archivo/red,
+INSTALL/LOAD/extensions, DDL/DML, múltiples sentencias y estructuras desconocidas.
+COUNT(*) es la excepción explícita a la prohibición de proyección wildcard.
+
+El constructor guiado compila por el mismo validador. Puede filtrar cada fuente
+antes del cruce y aplicar filtro final. NULL usa IS NULL/IS NOT NULL; comparar
+EQ con NULL se rechaza. Los nombres de salida son únicos y explícitos. El orden
+de usuario se completa con posiciones verificadas de fuentes para resultados
+ordinarios; agregados usan orden de valores de negocio para estabilidad.
+
+### E. Cruces y cardinalidad completa
+
+INNER, LEFT, RIGHT y FULL requieren fuentes distintas y una o más igualdades
+entre columnas compatibles. Se admiten llaves compuestas y tres o más fuentes
+hasta 8; cada JOIN relaciona la fuente nueva con las anteriores. No hay CROSS,
+NATURAL, producto cartesiano implícito ni igualdad sólo dentro de una fuente.
+Cada cruce declara1:1,1:N,N:1 oN:M y se contrasta sobre toda la población tras
+prefiltros. N:M requiere allow_many_to_many explícito y sigue sujeto a límites
+de filas y factor de expansión. El control precede a la muestra de 10; no se
+deduce cardinalidad mirando únicamente esas diez filas.
+
+Los NULL de llaves no se igualan. Cadena vacía es un valor ordinario. '001' y'1'
+siguen siendo identificadores diferentes, al igual que espacios/Unicode observados.
+Las llaves no se convierten a float. Un cruce desborda, no coincide con cardinalidad
+esperada o excede recursos: falla sin declarar un resultado truncado como completo.
+
+### F. PREVIEW: muestra efímera
+
+PREVIEW tiene máximo 10 filas, memoria/timeouts/lotes/bytes propios y cero permisos
+de escritura del sistema de archivos. Después de comprobar cardinalidad completa
+devuelve una muestra y marca total_rows desconocido. No crea dataset, Parquet,
+spool, spill, tmpfs ni archivo de stdout. El catálogo PostgreSQL guarda estado,
+consulta/contexto y métricas, nunca filas de preview. La UI muestra la condición de
+muestra, las fuentes resueltas, advertencias y errores. Un error de recursos puede
+permitir al usuario solicitar generación explícita; no la inicia automáticamente.
+
+### G. DOWNLOAD: transmisión acotada
+
+CSV se serializa por lotes en UTF-8/RFC4180 quoted, con NULL representado por\\N,
+prefijos de barra y apóstrofe escapados y texto de fórmula protegido por apóstrofe.
+Ese contrato permite distinguir NULL, cadena vacía, cero inicial y contenido
+original. XLSX construye ZIP/OOXML incremental sin openpyxl spool ni temporales;
+valores precisos/identificadores van como texto, fechas ISO, NULL sin celda y
+cadena vacía explícita. No genera fórmulas. XLSX tiene sus límites de50k filas/64 MiB;
+CSV100k/128 MiB por defecto. Los descriptores efectivos se consultan en /reports/limits.
+
+El productor tiene cola acotada de un lote, backpressure y timeout; el consumidor
+desconectado termina el proceso y cierra el canal. Cambiar permisos o bloquear una
+fuente durante la transmisión impide siguientes lotes. Las cotas se verifican
+también durante serialización y un exceso falla/interrumpe, sin presentar truncamiento
+como éxito. Se separan generation_status y transmission_status; enviar todo al
+servidor HTTP no certifica que el navegador guardó el archivo en disco.
+
+### H. DATASET: generación y publicación durable
+
+ReportExecution DATASET referencia un Job laneREPORT, claim/lease, fencing e
+idempotency_key ligada al contexto y metadatos. Repetir la misma solicitud devuelve
+la misma ejecución; reutilizar la clave con otro cuerpo falla. El worker coordina
+PostgreSQL y ejecuta el plan congelado en un hijo aislado. Puede crear staging y
+spill sólo en report-staging/<execution>/<attempt-owner>, con cuota/timeout/reserva
+de disco. Cancelación, pérdida de lease o error retiran únicamente su intento.
+
+El publisher confiable escribe partes comprimidas, verifica conteos/hashes y
+calcula perfil completo. Las columnas canónicas de negocio usan texto/NULL
+exacto con sus tipos lógicos registrados; DECIMAL no pasa por float. Una columna
+interna __tv_record_number conserva numeración DERIVED_RECORD_NUMBER desde 1,
+sin atribuirla a la fila física de una fuente. Descriptor/partes y perfil se
+preparan fuera del fence. Un commit corto revalida lease, usuario y todas las
+fuentes, y publica Dataset+Version+Artifacts+linaje+dependencias+JobSUCCESS.
+Un dueño antiguo no puede publicar. Los candidatos sin metadata comprometida se
+limpian; no se eliminan partes referenciadas por un resultado ya publicado.
+
+### I. Calidad y seguridad de un derivado
+
+La generación siempre crea un dataset nuevo con versión inicial, origen
+REPORT_OUTPUT, fuentes y ejecución identificadas. No hereda el APPROVED de sus
+entradas. La UI permite abrirlo en Data Intake con preselección, ejecutar una
+validación estricta propia y usar su salida aprobada como nueva fuente de Reportes.
+Gobierno puede asignarse explícitamente y la sensibilidad conserva la más
+restrictiva de las fuentes/solicitud; UNKNOWN no se rebaja automáticamente.
+
+Las dependencias guardan todas las fuentes, independientemente de las columnas
+proyectadas. Bloquear después una fuente afecta al resultado, exports/archivos,
+inputs nativos y descendientes Intake. Roles o responsables del derivado no
+borran restricciones de procedencia. Una liberación explícita requiere permiso y
+motivo/auditoría; renombrar o revalidar nunca elimina por sí mismo la ascendencia.
+
+### J. Frontera SQL aislada y límites
+
+El hijo inicia con entorno allowlist, sin DATABASE_URL, claves ni credenciales de
+negocio. LandlockABI>=3 concede READ_FILE sólo a partes exactas autorizadas y
+runtime público mínimo de Python/DuckDB. Seccomp deniega red, exec, fork y clones
+de proceso; threads nuevos se crean después del confinamiento y heredan la política.
+RLIMIT_AS/CPU/NOFILE, DuckDBmemory/threads, lotes, resultados, expansión y concurrencia
+global PostgreSQL son controles complementarios. PREVIEW/DOWNLOAD no tienen grant
+de escritura. DATASET recibe sólo su staging privado. Un kernel o runtime que no
+puede establecer la frontera se rechaza; no ejecuta una ruta menos aislada.
+
+Los mínimos públicos de runtime incluyen bibliotecas y contadores exactos de CPU/
+cgroup necesarios para inicializar DuckDB, sin acceso general a /proc, /data,
+/app, home, secrets o storage. La imagen report-worker usa cap_drop: [ALL] y
+no-new-privileges; no requiere Docker socket ni capacidades elevadas. El proceso
+SQL no importa módulos de Trackvance. Las métricas de RSS del hijo no equivalen
+al RSS de todo el coordinador ni al memory.current del contenedor.
+
+### K. Pruebas y límites de certificación
+
+Las pruebas negativas cubren AST, fuentes ajenas, esquema, expiración, integridad,
+cardinalidad, límites, precisión, bloqueos transitivos, idempotencia y publicación.
+La certificación real recorre navegador/API/PG/workers y compara todos los valores
+y multiplicidades de INNER/LEFT/RIGHT/FULL y tres fuentes con un oráculo independiente.
+400k y1M significan filas por cada fuente; no se reemplazan con diez filas depreview.
+CSV mide transmisión real dentro de su cota. No se anuncia capacidad productiva
+universal ni se reutilizan resultados0.7 como prueba de Reportes 0.8.
+Guía: reports-0.8.0.md. Decisiones: ADR0027/0028. Estado real en capítulo 22.
 
 ## 6. Carga, esquema y versionado
 
@@ -1388,7 +1675,7 @@ COALESCE_LATEST agrupa intervalos vencidos tras una pausa; SKIP_WHILE_ACTIVE evi
 Mientras el scheduler está detenido no hay nuevos ticks; mientras DEFAULT
 está detenido no se ejecutan los Jobs de calidad. Un Job largo puede retrasar
 el inicio de la siguiente Run, pero no detiene los ticks independientes. La
-diferencia entre fecha prevista e inicio real queda visible. Las series agrupan muestras por métrica, dimensiones, método y versión, con un máximo de 2000 muestras recientes. Las alertas internas son Findings y aparecen en Sentinel y Centro de Control. La bandeja interna 0.7.0 publica resúmenes personales mediante outbox.
+diferencia entre fecha prevista e inicio real queda visible. Las series agrupan muestras por métrica, dimensiones, método y versión, con un máximo de 2000 muestras recientes. Las alertas internas son Findings y aparecen en Sentinel y Centro de Control. La bandeja interna vigente publica resúmenes personales mediante outbox.
 NotificationDelivery conserva metadata histórica; Email, Teams, Slack y Webhook
 no están integrados.
 
@@ -1775,8 +2062,13 @@ un dueño. legacy_enabled_before_identity conserva el enabled anterior necesario
 para proyección estricta y recuperación del estado. La UI permite asignación
 explícita posterior sin reescribir actores de ocurrencias/ejecuciones históricas.
 
-El inventario final consta de 42 tablas. Las migraciones 0001..0015 permanecen
-byte a byte. Los backups actuales identifican revisión real 0016 y state 7; la
+0017_catalog_reports añade13 tablas de gobierno, restricciones, aprobaciones
+y definiciones/revisiones/contextos/ejecuciones de Reportes. Dataset recibeIDs
+opcionales y defaults NULL/1/UNKNOWN; Job agrega sujeto/laneREPORT. No clasifica ni
+indexa aprobaciones históricas. El inventario final consta de 55 tablas. Las
+migraciones0001..0016 permanecen byte a byte. Backups actuales identifican
+0017/state 8; snapshot-legacy-v7 conserva exactamente42 tablas de 0016, con
+trece tablas nuevas vacías y únicamente defaults documentados. La
 compatibilidad con state 6 elimina sólo los dos diagnósticos cuando son NULL,
 conservando todas las tablas asíncronas pobladas. Para state 5 y anteriores la
 proyección mantiene únicamente los defaults/columnas documentados; las tablas
@@ -1785,10 +2077,10 @@ una tabla física desconocida o una diferencia fuera de esa proyección se recha
 
 ### Campos y vínculos del inventario completo
 
-El inventario siguiente documenta las 42 tablas y sus 511 campos, 95 índices,
+El inventario siguiente documenta las55 tablas y sus645 columnas,
 PK/FK, nulabilidad y restricciones CHECK/UNIQUE. Se genera desde el ORM vigente
-e identifica las once tablas nuevas, las tres estructuras evolucionadas y las
-28 estructuras preservadas. Los cambios de datos permitidos por migración y
+e identifica las13 tablas nuevas, Dataset/Job evolucionadas y40estructuras
+preservadas. Los cambios de datos permitidos por migración y
 la proyección legacy se describen arriba; «preservada» se refiere al esquema,
 sin afirmar que una operación nueva no pueda añadir historia legítima.
 
@@ -1807,7 +2099,7 @@ vincula review histórica, actor real y nota, sin cambiar el intento UNKNOWN.
 
 0016_acquisition_diagnostics añade acquisition_runs.error_details JSON nullable
 y error_reference String(64) nullable. No rellena, traduce ni sustituye códigos,
-mensajes o valores históricos. Estado nativo 7 cubre las mismas 42 tablas y sus
+mensajes o valores históricos. El estado 7 de 0.7.0 cubría las mismas 42 tablas y sus
 campos actuales. La proyección estricta hacia state 6 elimina sólo estos dos
 campos cuando son NULL; un diagnóstico nuevo no puede esconderse para hacer
 coincidir un backup anterior. La conservación se comprueba con roundtrip real
@@ -1815,7 +2107,7 @@ coincidir un backup anterior. La conservación se comprueba con roundtrip real
 
 ## 18. API, DTOs y errores
 
-OpenAPI se genera desde la aplicación 0.7.0 y se versiona en backend/openapi.json.
+OpenAPI se genera desde la aplicación 0.8.0 y se versiona en backend/openapi.json.
 La API mantiene /api/v1, cookie HttpOnly, CSRF, IDs opacos y fechas ISO UTC.
 Las rutas legacy conservan su contrato; las nuevas operaciones asíncronas
 utilizan endpoints explícitos y 202. Health/ready continúa pública. Todo endpoint
@@ -1951,17 +2243,20 @@ Los benchmarks usan perfil aislado declarado
 cuando el formato/overhead real excede el tamaño nominal del escalón. Eso no
 certifica 2 GiB ni cambia silenciosamente .env de la instalación real.
 
-### Backup nativo state 7 y compatibilidad state 6
+### Backup nativo state 8 y compatibilidad histórica
 
-backup-manifest.json conserva schema 2; state.json evoluciona a schema 7 con el
-inventario exacto de 42 tablas, artifacts y relaciones. El verificador reconoce
+backup-manifest.json conserva schema 2; state.json evoluciona a schema 8 con el
+inventario exacto de 55 tablas, artifacts y relaciones. Incluye contexto/integrity_hash,
+defs/revisiones/ejecuciones, gobierno/glosario/bloqueos/dependencias; excluye filas
+efímeras depreview/descarga y staging privado no publicado. El verificador reconoce
 la revisión real de runtime, no sólo el script copiado. Paths, SHA/tamaños,
 descriptor y todas las partes se verifican; archivos no declarados o symlinks
 se rechazan. Metadata y los cinco volúmenes de archivos/secretos/claves se
 respaldan de manera coordinada. .env se conserva aparte y privado.
 
-El backup actual state 6/0015 de la instalación 0.7.0 se admite como baseline
-auténtica. Restore aplica 0016 y obtiene state 7; snapshot-legacy-v6 recalcula
+Un backupstate 7/0016 se admite con snapshot-legacy-v7 exacto y trece tablas nuevas
+vacías/defaults NULL/1/UNKNOWN. Un backupstate6/0015 de 0.7 se admite como baseline
+auténtica. Restore aplica hasta 0017 y obtiene state 8; snapshot-legacy-v6 recalcula
 exactamente los hashes anteriores quitando sólo los dos diagnósticos NULL.
 Conserva las 42 tablas con adquisiciones, errores, áreas, límites/opciones,
 numeración e inbox poblados; no exige vacías las tablas asíncronas de state 6.
@@ -2010,7 +2305,7 @@ posterior al fix tardó 150,541 s; no es el tiempo total del backup ni de los do
 intentos fallidos conservados. El escaneo privado revisó 5.666 archivos y el dump
 SQL descomprimido, sin publicar su contenido. La instalación principal quedó intacta.
 
-### Compatibilidad estricta 0.6.1→0.7.0
+### Compatibilidad estricta histórica y cadena hasta 0.8.0
 
 La huella legacy state 5 conserva tablas, actores, versiones, hashes, profiles,
 configs, Run/Attempt y linaje. La comparación proyecta sólo campos nuevos
@@ -2055,14 +2350,18 @@ se normaliza, pero sus identidades/valores se comparan estrictamente.
 Después de aprobar código/E2E/recovery/documentos y todos los jobs CI del HEAD
 final, se pausa nuevo despacho, comprueba ausencia de trabajos activos, respalda
 consistentemente con herramientas compatibles, registra inventario y verifica
-el backup. Para el ciclo C01–C06 la instalación ya está en 0.7.0/0015:
-recrea servicios desde revisión final y aplica exclusivamente 0016,
-y conserva .env/puerto/origen/restart:no/demo seed false/SSO deshabilitado. No se usa down-v,
+el backup mediante restore aislado sin workers/dispatch ni conectividad a destinos
+reales. La revisión/migración aplicada se consulta del runtime: el tag histórico
+de la imagen no la demuestra. Se recrean todos los servicios afectados desde el
+commit aprobado y se aplica únicamente 0017 sobre el origen compatible verificado.
+Se conservan .env/puerto/origen/restart:no y la configuración real de demo/SSO,
+usuarios, secretos, zonas horarias y pausas. No se usa down-v,
 prune, reset, fixture ni escritura de prueba en el proyecto del usuario.
 
-La verificación final no destructiva comprueba health, Alembic, los tres workers,
-scheduler/consumidores, storage, API/UI 0.7.0, imágenes/revisión y la preservación
-estricta state 6→7 y proyección v6 idéntica. Comprueba además los límites XLSX
+La verificación final no destructiva comprueba health, Alembic, los cuatro workers,
+scheduler/consumidores, storage, API/UI 0.8.0, imágenes/revisión y preservación
+estricta state 7→8/proyección v7 o la cadena correspondiente al origen real.
+Comprueba además los límites XLSX/Reportes
 efectivos de API/runtime/UI, sin fixtures ni adquisiciones nuevas sobre datos
 del usuario. Si falla, se usa el procedimiento de recuperación probado, sin
 downgrade destructivo improvisado. El informe externo identifica backup privado,
@@ -2322,11 +2621,15 @@ Las suites Docker dedicadas ejecutan los escenarios JVM obligatorios sin SKIP.
 Las pruebas E2E principales atraviesan navegador, API, PostgreSQL, workers,
 artefactos, Spark y SQL real; mocks de componente no las sustituyen.
 
-### Resultados históricos de la publicación inicial 0.7.0
+### Corte de certificación actual 0.8.0
 
 @validation
 
-### Certificación independiente C01–C06
+### Resultados históricos de la publicación inicial 0.7.0
+
+@historicalvalidation
+
+### Antecedente: certificación independiente C01–C06
 
 El ciclo requiere nuevas ejecuciones sobre su revisión de implementación.
 No hereda los verdes de 12ca706 ni resultados anteriores. El generador
@@ -2431,11 +2734,13 @@ extrapolan al perfil principal, que tiene recursos distintos.
 | E Automatización | Horarios/timezone/revisiones, identity, no-repeat, aceptación salida exacta, target guard y unknown decisions. | test_automation_events/scheduler y chain_decisions; automation_cycle API/PostgreSQL: warnings default/opt-in, REJECTED, salida APPROVED vacía y eventos duplicados; Playwright real. |
 | F Notificaciones | Inbox personal, filters/read/count, permisos actuales, dedupe y enlaces. | automation/inbox tests; browser, recovery persistente, probes secretos. |
 | G Recuperación | Jobs leases, publicación fenced, parts/staging, outbox pendiente/retry y scheduler independiente. | fault injection determinista de suites, concurrencia PostgreSQL, worker/consumer recovery. |
-| H Compatibilidad | Migración aditiva 0016, state 7 exacto y proyección state 6 poblado, secretos separados, restauración multipart y baselines históricas. | check_postgres_migrations, native/legacy recovery results y hashes. |
+| H Compatibilidad | Migración aditiva 0017, state 8 exacto y proyección state 7 poblado, cadena de snapshots legacy, secretos separados y restauración multipart. | check_postgres_migrations, native/legacy recovery results y hashes. |
 | I E2E integrado | Large acquire→Intake PySpark→aceptados exactos→Delivery SQL→bandeja del responsable. | volume_cycle/volume.spec y acquisition_timing_cycle --with-chain; negativa/revocación; target count/hash y reloj integral observado. |
+| J Gobierno | Clasificación opcional controlada, glosario/diccionario, historial, aprobación estricta y restricciones transitivas. | test_governance_catalog, API real, navegador y restore nativo/histórico. |
+| K Reportes | SELECT admitido, contexto conjunto PostgreSQL, joins/cardinalidad, perfiles efímeros y publicación con lease. | SQL/export/executor/lifecycle, observación strace, snapshot concurrente, oráculo completo 120/400k/1M y navegador. |
 | Documentación/PDF | Capítulos vigentes, tablas/diagramas, generator/input/extraction, copias oficiales. | Hash/páginas/texto seleccionable + inspección visual completa final. |
 | Promoción | HEAD contiene código+migraciones+UI+tests+PDF, todos workflows/jobs aplicables aprobados. | URLs de runs GitHub, SHA exacto y conclusiones de jobs final externos. |
-| Instalación | Backup consistente, mismos volúmenes/PostgreSQL 16, runtime/UI 0.7.0, todos los servicios y huella. | Inventario/verificación de backup nuevo main 0.7.0, proyección state 6→7 idéntica y sólo 0016; sin fixtures en real. |
+| Instalación | Backup consistente, mismos volúmenes/PostgreSQL 16, runtime/UI 0.8.0 y conservación del estado operativo. | Inventario real, restore aislado del backup fresco y proyección correspondiente al origen verificado; sólo migraciones nuevas, sin fixtures en real. |
 
 ### Reglas de aislamiento y evidencia
 
@@ -2460,19 +2765,23 @@ de red no ejecutada. CI verde de otro SHA no es certificación final.
 | --- | --- |
 | Reglas/evidencia/puertos/conectores/Delivery/RBAC/SSO y auditoría histórica | ADR 0001..0019 se conservan y continúan aplicando donde no fueron evolucionadas explícitamente. |
 | Adquisición asíncrona y conjuntos Parquet | ADR 0020. |
-| Inventario state 7, proyección estricta state 6/legacy y secretos/backup | ADR 0021. |
+| Inventario histórico state 7, proyección estricta state 6/legacy y secretos/backup | ADR 0021, extendido por ADR 0028 para state 8/0017. |
 | PySpark real, kernels portables y recursos | ADR 0022. |
 | Preparación/preflight de Delivery de volumen | ADR 0023. |
 | Automatización, outbox y bandeja personal | ADR 0024. |
 | XLSX incremental, diagnóstico, áreas/zona, despacho metadata y no leída | ADR 0025, correcciones C01–C06 sobre 0.7.0. |
+
+| Gobierno controlado y aprobación estricta | ADR 0026. |
+| Contexto conjunto, ejecutor confinado y publicación de Reportes | ADR 0027. |
+| Certificación aislada, state 8 y actualización final protegida | ADR 0028. |
 
 ### Fuente, candidato, revisión y publicación
 
 Revisión histórica de implementación inicial y runners: `a5f12ddc2850dea4053ad77121835e42a37a72cf`, rama feat/local-prototype, baseline auténtica `6fac26b3648cb4a4b50c094ef12c1e103bc97ddd`. Los dos drivers Spark finales leyeron la misma huella de fuentes `3bdfe0166af8dab6e50ee916c83b02fda9d0c3a2b6908717766df443d2acc5d1`; los informes seguros registran hashes de inputs/resultados, entornos y alcance de cada ejecución. El cambio posterior 191ff280 sólo evita SQL nativo en metadata/vistas previas de Delivery API; la iteración poblacional y los engines Spark permanecen iguales. a5f12dd añade únicamente verificación física/transportes de recuperación y pruebas de selector de bandeja; no modifica los engines ni las fuentes de producto backend/frontend. Los ciclos Spark host conservan su procedencia anterior; los dos modos se reejecutan en CI sobre el HEAD final. Esta revisión antecede al commit documental final; sus gates GitHub y upgrade se registran en el informe externo después de aprobarse.
 
 Esta fuente editable, build_specification.py, backend/openapi.json,
-model_contract_0.7.0.json, permission_contract_0.7.0.json y
-parameters_0.7.0.json son inputs vigentes actualizados para el ciclo C01–C06.
+model_contract_0.8.0.json, permission_contract_0.8.0.json y
+parameters_0.8.0.json son los inputs vigentes. Los inputs 0.7.0 del ciclo C01–C06 se conservan íntegros como antecedentes.
 volume_results_0.7.0.json y validation_results_0.7.0.json conservan, de forma
 explícita, los resultados históricos de la publicación inicial. No se les
 atribuye la certificación del ciclo correctivo. corrections_results_0.7.0.json
@@ -2494,7 +2803,7 @@ oficial ProductOne/Documentación, verificando SHA idéntico. Archivo conserva
 ediciones originales; no se destruye historia para actualizar la especificación.
 
 Las secciones 24, 31 y 35 son antecedentes de releases anteriores. Las secciones
-vigentes describen 0.7.0; una decisión histórica de no tener bandeja/PySpark no
+vigentes describen 0.8.0; una decisión histórica de no tener bandeja/PySpark no
 se interpreta como capacidad actual. Las tablas de validación de aquellos
 antecedentes conservan sus propios números, sin contarlos como tests 0.7.0.
 
@@ -2511,6 +2820,7 @@ la promoción y gates correspondientes se verifican de nuevo.
 | 27-09-2026 | v1.1, implementación 0.6.1 | Temporal efímera, retiro de SMTP, SSO opcional, 31 tablas/0012. |
 | 03-10-2026 | v1.1, implementación 0.7.0 | Asincronía, multipartes, PySpark, Delivery de volumen, automatización, outbox, bandeja, 42 tablas/0015. |
 | 04-10-2026 | v1.1, correcciones C01–C06 sobre 0.7.0 | XLSX incremental, diagnósticos/límites, áreas, timezone, dispatch metadata, no leída, 42 tablas/0016/state 7; archivo íntegro de edición previa. |
+| 05-10-2026 | v1.1, implementación 0.8.0 | Catálogo/gobierno/glosario, fuentes estrictas, Reportes multifuente, perfiles separados, sandbox, derivados/autorización transitiva, 55 tablas/0017/state 8. |
 
 ## 24. Antecedente: cambios funcionales y técnicos 0.5.1
 
@@ -2944,12 +3254,12 @@ Los avisos nunca conservan password, cookie, CSRF, token OIDC, DSN o excepción 
 C01–C06 conserva dominios, opciones de lectura/numeración, límites capturados y
 diagnósticos antiguos, además de read_at de notificaciones y todas las revisiones
 de automatización. 0016 agrega campos nullable sin backfill. Backup/restore nativo
-state 7 compara los campos nuevos, mientras la proyección estricta state 6
+state 8 compara todos los campos actuales; el antecedente state 7 comparaba los diagnósticos nuevos y la proyección estricta state 6
 comprueba cada valor anterior; no ignora tablas asíncronas pobladas.
 
 Los usuarios/roles/grants/OIDC/notification_deliveries históricos conservan
 identidad. Nuevas tablas de bandeja y automatización no alteran roles personalizados
-ni el historial de intentos Delivery. state 7 incluye todo el inventario; unknown
+ni el historial de intentos Delivery. state 8 incluye todo el inventario actual; unknown
 tables no se omiten. Secrets cifrados y claves se conservan separados en restore.
 
 Sentinel sólo atribuye responsable si su Actor USER legacy es verificable dentro
@@ -3188,7 +3498,7 @@ drift, receipt/manifest, usuarios local/Microsoft/Google y restart.
 La prueba UNKNOWN hace commit real y pierde deliberadamente el acknowledgement
 del adaptador; su nombre y evidencia declaran la simulación. No certifica un
 fallo de red físico ni a Google/Microsoft reales. El resultado ejecutado de cada
-matriz histórica queda en `docs/development/evidence/0.6.1/`; la evidencia vigente está en 0.7.0; este documento describe casos,
+matriz histórica queda en `docs/development/evidence/0.6.1/`; la evidencia vigente está en 0.8.0; este documento describe casos,
 no convierte escenarios preparados en PASS. Los providers reales requieren
 credenciales externas y su estado se informa por separado.
 
@@ -3464,7 +3774,7 @@ ligeros, y el worker de calidad sólo recibe snapshots inmutables.
 
 ## 34. Matriz completa de autorización
 
-La tabla se genera desde permissions.py del runtime 0.7.0. La autoridad backend
+La tabla se genera desde permissions.py del runtime 0.8.0. La autoridad backend
 incluye clausura transitiva, organización, propietario, CSRF, primer acceso,
 recurso activo y controles de estrategia. Administrator continúa protegido;
 no tiene acceso automático a inbox/validaciones personales ajenas.
@@ -3480,7 +3790,7 @@ y su recurso vinculado; se prueban 401/403/404/crossorg/crossuser.
 
 ## 35. Antecedente: cambios funcionales y técnicos 0.6.1
 
-Este capítulo conserva el estado de la release 0.6.1. Sus exclusiones y resultados son históricos; no describen el estado vigente 0.7.0.
+Este capítulo conserva el estado de la release 0.6.1. Sus exclusiones y resultados son históricos; no describen el estado vigente 0.8.0.
 
 ### 1. Situación 0.6.0
 

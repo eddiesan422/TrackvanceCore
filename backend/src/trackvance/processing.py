@@ -470,6 +470,7 @@ def intake(
     bad_rows: set[int] = set()
     warning_rows: set[int] = set()
     summaries: list[dict] = []
+    validation_coverage: set[int] = set()
     observed = observed_at or datetime.now(UTC)
     original = frame.to_dicts()
     input_lines = _record_lines(frame, input_row_numbers)
@@ -482,6 +483,7 @@ def intake(
             transformed, compile_rule(rule, observed), references
         )
         passed = evaluation.passed
+        validation_coverage.update(i for i, evaluated in enumerate(evaluation.evaluated) if evaluated)
         failed_indices = [i for i, valid in enumerate(passed) if not valid]
         summaries.append(
             {
@@ -526,6 +528,10 @@ def intake(
     )
     metrics = {
         "total_rows": total,
+        "processed_rows": frame.height,
+        "output_rows": total - failed,
+        "discarded_rows": failed,
+        "validation_coverage_rows": len(validation_coverage),
         "valid_rows": total - failed,
         "error_rows": failed,
         "warning_rows": len(warning_rows),

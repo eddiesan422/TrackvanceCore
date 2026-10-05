@@ -107,12 +107,14 @@ def version_dto(v: DatasetVersion, db: Session | None = None) -> dict:
             "parent_version_id": v.parent_version_id,
             "original_artifact_id": v.original_artifact_id, "canonical_artifact_id": v.canonical_artifact_id,
             "source_run_id": v.source_run_id, "artifacts": artifacts, "lineage": lineage,
-            "is_derived": v.source_type == "INTAKE_OUTPUT", "has_original_upload": bool(v.original_artifact_id)}
+            "is_derived": v.source_type in {"INTAKE_OUTPUT", "REPORTS", "REPORT_OUTPUT", "REPORT"}, "has_original_upload": bool(v.original_artifact_id)}
 
 
 DATASET_ORIGINS = {
     "UPLOAD": ("MANUAL", "Manual"),
     "INTAKE_OUTPUT": ("DATA_INTAKE", "Data Intake"),
+    "REPORTS": ("REPORTS", "Reportes"),
+    "REPORT_OUTPUT": ("REPORTS", "Reportes"),
     "DEMO": ("DEMO", "Demo"),
     "GENERATED_DEMO": ("DEMO", "Demo"),
     "POSTGRESQL": ("POSTGRESQL", "PostgreSQL"),
@@ -134,8 +136,11 @@ def dataset_origin(source_type: str | None) -> tuple[str, str]:
 
 
 def dataset_dto(db: Session, d: Dataset) -> dict:
-    versions = db.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == d.id).order_by(DatasetVersion.version.desc())).all()
-    latest = versions[0] if versions else None
+    from .governance import governance_snapshot
+    governance = governance_snapshot(db, d)
+    latest = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == d.id).order_by(DatasetVersion.version.desc()).limit(1))
+    from sqlalchemy import func
+    version_count = db.scalar(select(func.count()).select_from(DatasetVersion).where(DatasetVersion.dataset_id == d.id)) or 0
     origin, origin_label = dataset_origin(latest.source_type if latest else None)
     binding = db.scalar(select(DatasetSourceBinding).where(DatasetSourceBinding.dataset_id == d.id,
                         DatasetSourceBinding.organization_id == d.organization_id))
@@ -150,8 +155,10 @@ def dataset_dto(db: Session, d: Dataset) -> dict:
         else None
     )
     return {"id": d.id, "name": d.name, "description": d.description, "domain": d.domain,
+            "macro_domain_id": governance["macro_domain_id"], "domain_id": governance["domain_id"],
+            "governance": governance, "governance_version": d.governance_version,
             "owner": d.owner, "criticality": d.criticality, "status": d.status,
-            "created_at": iso(d.created_at), "version_count": len(versions),
+            "created_at": iso(d.created_at), "version_count": version_count,
             "row_count": latest.row_count if latest else 0, "column_count": latest.column_count if latest else 0,
             "latest_version_id": latest.id if latest else None,
             "origin": origin, "origin_label": origin_label,
@@ -614,8 +621,18 @@ def enqueue(
     from .planner import ExecutionPlanner, WorkloadInput, WorkloadMetadataError
 
     identity, legacy = resolve_actor(db, actor, config.organization_id)
+    if identity.type == "USER":
+        from .governance import authorize_dataset_content
+        initiating_user = db.get(User, identity.id)
+        if initiating_user:
+            authorize_dataset_content(db, initiating_user, source)
+            if target:
+                authorize_dataset_content(db, initiating_user, target)
     effective = effective_config(config.module, config.config)
     references = rule_reference_versions(db, effective, config.organization_id)
+    if identity.type == "USER" and initiating_user:
+        for reference in references:
+            authorize_dataset_content(db, initiating_user, reference)
     try:
         inputs = [WorkloadInput.from_metadata(db, v)
                   for v in {v.id: v for v in [source, target, *references] if v}.values()]
@@ -630,6 +647,8 @@ def enqueue(
         plan = ExecutionPlanner().plan(config.module, inputs, effective,
                                        requested_engine=requested_engine)
     plan["config_hash"] = configuration_hash(effective)
+    from .governance import governance_snapshot
+    plan["governance_snapshot"] = governance_snapshot(db, require_record(db, Dataset, source.dataset_id))
     run = Run(id=uid(), organization_id=config.organization_id, module=config.module, name=config.name,
               config_id=config.id, dataset_version_id=source.id, target_version_id=target.id if target else None,
               initiated_by=identity.display_name, initiated_by_type=identity.type, initiated_by_id=identity.id,
@@ -645,6 +664,7 @@ def enqueue(
             link_artifact(db, run.organization_id, "RUN_INPUT", "RUN", run.id, "DATASET_VERSION", version.id)
     for version in references:
         link_artifact(db, run.organization_id, "RUN_REFERENCE", "RUN", run.id, "DATASET_VERSION", version.id)
+    link_artifact(db, run.organization_id, "USES_CONFIGURATION", "RUN", run.id, "CONFIGURATION", config.id)
     audit(db, "RUN_QUEUED" if plan["allowed"] else "RUN_FAILED", "run", run.id,
           f"Ejecución programada: {run.name}" if plan["allowed"] else f"{run.name}: {run.error}",
           actor, run.organization_id, {"reason_code": plan["reason_code"]})
@@ -892,6 +912,22 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
             shutil.rmtree(artifact_store.checked_path(directory), ignore_errors=True)
 
 
+def _authorize_execution_sources(db: Session, run: Run, versions: list[DatasetVersion | None]) -> None:
+    if run.initiated_by_type != "USER":
+        return
+    from .governance import authorize_dataset_content
+    from .permissions import effective_permissions
+
+    user = db.get(User, run.initiated_by_id, populate_existing=True)
+    if user is None or user.organization_id != run.organization_id:
+        raise OperationError(403, "SOURCE_ACCESS_DENIED", "El usuario ejecutor ya no está disponible.")
+    if f"{run.module.lower()}:execute" not in effective_permissions(db, user):
+        raise OperationError(403, "EXECUTION_PERMISSION_REVOKED", "El ejecutor ya no conserva el permiso para ejecutar este módulo.")
+    for version in versions:
+        if version:
+            authorize_dataset_content(db, user, version)
+
+
 def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, observed_at=None,
                       spark_directories: list[Path] | None = None):
     """Shared worker/seed service. Configuration and dataset references are immutable."""
@@ -917,6 +953,7 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     source = require_record(db, DatasetVersion, run.dataset_version_id)
     target = require_record(db, DatasetVersion, run.target_version_id) if run.target_version_id else None
     reference_versions = rule_reference_versions(db, effective, run.organization_id)
+    _authorize_execution_sources(db, run, [source, target, *reference_versions])
     current_plan = ExecutionPlanner().plan(config.module,
         [WorkloadInput.from_version(db, v) for v in {v.id: v for v in [source, target, *reference_versions] if v}.values()], effective,
         requested_engine=(run.execution_plan or {}).get("requested_engine", "AUTO"))
@@ -1008,6 +1045,9 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
         run.status, run.progress_stage, run.finished_at = "CANCELLED", "Cancelado", utcnow()
         return
     _verify_lease(db, run, lease_owner)
+    # Revalidate after compute, before publishing any results or derived version.
+    # A block or permission change during a long scan must not mint a new asset.
+    _authorize_execution_sources(db, run, [source, target, *reference_versions])
     run.execution_plan = computed_plan
     # Provider-generated artifact identities keep retries immutable without
     # exposing a local directory layout to the application service.
@@ -1028,15 +1068,25 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
             results.unlink(missing_ok=True)
     link_artifact(db, run.organization_id, "RUN_OUTPUT", "RUN", run.id, "ARTIFACT", result_artifact.id)
     if (accepted is not None or spark_result is not None and spark_result.accepted_paths) and not run.output_version_id:
+        from .governance import add_security_dependency, contract_identity
+        root_contract_id = contract_identity(db, config)
         output_dataset = db.scalar(select(Dataset).where(Dataset.organization_id == run.organization_id,
-                                  Dataset.name == require_record(db, Dataset, source.dataset_id).name + " · Aprobados"))
+                                  Dataset.intake_input_dataset_id == source.dataset_id,
+                                  Dataset.intake_contract_id == root_contract_id))
         if not output_dataset:
             original_dataset = require_record(db, Dataset, source.dataset_id)
-            output_dataset = Dataset(name=original_dataset.name + " · Aprobados", organization_id=run.organization_id,
+            label = original_dataset.name[:140] + " · Aprobados"
+            if db.scalar(select(Dataset.id).where(Dataset.organization_id == run.organization_id, Dataset.name == label)):
+                label = original_dataset.name[:105] + " · Aprobados · " + root_contract_id
+            output_dataset = Dataset(name=label, organization_id=run.organization_id,
                                      description="Filas conformes derivadas de Data Intake Gateway", domain=original_dataset.domain,
-                                     owner=original_dataset.owner, criticality=original_dataset.criticality)
+                                     owner=original_dataset.owner, criticality=original_dataset.criticality,
+                                     intake_input_dataset_id=original_dataset.id, intake_contract_id=root_contract_id)
             db.add(output_dataset)
             db.flush()
+        add_security_dependency(db, output_dataset.id, source.dataset_id)
+        for reference in reference_versions:
+            add_security_dependency(db, output_dataset.id, reference.dataset_id)
         if spark_result is not None:
             from .dataset_scans import publish_materialized_version
 
@@ -1107,6 +1157,11 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
                 "configuration": {"id": config.id, "name": config.name, "version": config.version, "config": effective,
                 "config_hash": configuration_hash(effective), "stored_config_hash": configuration_hash(config.config)},
                 "metrics": metrics, "output_version_id": run.output_version_id,
+                "outputs": [{"dataset_version_id": output.id, "dataset_id": output.dataset_id,
+                    "schema_hash": output.schema_hash, "row_count": output.row_count, "column_count": output.column_count,
+                    "canonical_artifact_id": output.canonical_artifact_id,
+                    "canonical_sha256": require_record(db, Artifact, output.canonical_artifact_id).sha256}
+                    for output in ([require_record(db, DatasetVersion, run.output_version_id)] if run.output_version_id else [])],
                 "references": [{"dataset_version_id": v.id, "dataset_id": v.dataset_id, "version": v.version, "artifact_sha256": v.sha256, "schema_hash": v.schema_hash, "canonical_artifact_id": v.canonical_artifact_id, "canonical_sha256": require_record(db, Artifact, v.canonical_artifact_id).sha256 if v.canonical_artifact_id else None} for v in reference_versions],
                 "result_artifacts": result_artifacts}
     temp_evidence = storage_provider.temporary_path(".json")
@@ -1125,6 +1180,9 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
         temp_evidence.unlink(missing_ok=True)
     run.evidence_path = evidence.path
     link_artifact(db, run.organization_id, "RUN_OUTPUT", "RUN", run.id, "ARTIFACT", evidence.id)
+    from .governance import index_strict_approval
+    db.flush()
+    index_strict_approval(db, run)
     audit(db, "RUN_COMPLETED", "run", run.id, f"{run.name}: {decision}",
           Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), run.organization_id,
           {"module": run.module, "status": run.status, "decision": decision})

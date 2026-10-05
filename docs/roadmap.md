@@ -14,7 +14,9 @@ La evolución funcional local precede a la productización. Este orden sustituye
 | 8 | Reset, backup/restore integral y diagnóstico | Implementado; reset protegido y backup/restore destructivo aislado aprobados |
 | 9 | Benchmarks reproducibles y límites medidos | Antecedentes: general 0.4.0 de 106.194.531 bytes / 50.000 filas y Delivery 0.5.1 de 8.917.809 bytes / 20.000 filas. En 0.6.0 se ejecutan smoke acotados; no recertifican esos volúmenes mayores ni elevan límites. |
 | 10 | Data Delivery controlado a PostgreSQL/SQL Server | Hardening 0.5.1 conservado; 0.6.0 añade auditoría permanente, snapshot de username, drift y permisos propios. SQL real y navegador local aprobados; el HEAD final requiere su propio CI. |
-| 11 | Productización | Fuera del ciclo; objetivo futuro |
+| 11 | Catálogo de gobierno, clasificación, glosario y restricciones | Implementación 0.8.0; certificación propia en validation.md |
+| 12 | Reportes guiados/SQL y datasets derivados | Implementación 0.8.0; perfiles separados, autorización transitiva y certificación propia |
+| 13 | Productización | Fuera del ciclo; objetivo futuro |
 
 El cierre de cada punto exige pruebas satisfactorias, documentadas en `development/validation.md`. Las capacidades presentes en código aún pendientes de certificación no se anuncian como certificadas. Los informes de ciclos anteriores se conservan como evidencia histórica.
 

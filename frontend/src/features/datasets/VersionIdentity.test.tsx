@@ -6,6 +6,13 @@ import { ProfilingPolicy, SampleValue, VersionIdentity } from './VersionIdentity
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), download: vi.fn() }))
 
 describe('Observed values and DatasetVersion identity', () => {
+  it('identifies a report publication and requires its own Intake approval', () => {
+    renderApp(<VersionIdentity version={{ source_type: 'REPORT_OUTPUT', filename: 'report.dataset.json', sha256: 'report-hash', ingestion_metadata: { report_execution_id: 'report-run' }, artifacts: [{ artifact_id: 'canonical', name: 'part-00001.parquet', kind: 'REPORT_OUTPUT', size_bytes: 200 }] }}/>)
+    expect(screen.getByLabelText('Fuente de la versión')).toHaveValue('Dataset generado por Reportes')
+    expect(screen.queryByLabelText('Archivo original')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver ejecución de Reportes de origen' })).toHaveAttribute('href', '/reports/executions/report-run')
+    expect(screen.getByText(/Requiere una aprobación Intake propia/)).toBeVisible()
+  })
   it('preserves snapshot identity without linking to a deleted connection', () => {
     renderApp(<VersionIdentity connectionState="DELETED" version={{ source_type: 'POSTGRESQL', filename: 'snapshot.parquet', ingestion_metadata: { source: { connection_id: 'deleted-connection', connection_version_id: 'historical-config' } } }}/>)
     expect(screen.getByDisplayValue('historical-config')).toBeInTheDocument()

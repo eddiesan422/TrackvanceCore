@@ -1,6 +1,6 @@
 [project]
 name = "trackvance-core"
-version = "0.7.0"
+version = "0.8.0"
 description = "Trackvance Core local prototype API and processing worker"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -22,6 +22,7 @@ dependencies = [
   "joserfc>=1.6,<2",
   "httpx>=0.28,<1",
   "tzdata>=2026.3",
+  "sqlglot>=30,<31",
 ]
 
 [dependency-groups]

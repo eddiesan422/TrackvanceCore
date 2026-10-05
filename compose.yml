@@ -64,6 +64,27 @@ x-backend: &backend
     TRACKVANCE_EVENT_LEASE_SECONDS: ${TRACKVANCE_EVENT_LEASE_SECONDS:-300}
     TRACKVANCE_EVENT_POLL_SECONDS: ${TRACKVANCE_EVENT_POLL_SECONDS:-1}
     PYTHONUNBUFFERED: '1'
+    REPORT_THREADS: ${REPORT_THREADS:-2}
+    REPORT_MEMORY_MB: ${REPORT_MEMORY_MB:-512}
+    REPORT_PROCESS_MEMORY_MB: ${REPORT_PROCESS_MEMORY_MB:-2048}
+    REPORT_CONCURRENCY: ${REPORT_CONCURRENCY:-2}
+    REPORT_BATCH_ROWS: ${REPORT_BATCH_ROWS:-512}
+    REPORT_BATCH_BYTES: ${REPORT_BATCH_BYTES:-8388608}
+    REPORT_MAX_JOIN_ROWS: ${REPORT_MAX_JOIN_ROWS:-5000000}
+    REPORT_MAX_JOIN_EXPANSION: ${REPORT_MAX_JOIN_EXPANSION:-100}
+    REPORT_PREVIEW_TIMEOUT_SECONDS: ${REPORT_PREVIEW_TIMEOUT_SECONDS:-60}
+    REPORT_PREVIEW_MAX_ROWS: ${REPORT_PREVIEW_MAX_ROWS:-10}
+    REPORT_PREVIEW_MAX_BYTES: ${REPORT_PREVIEW_MAX_BYTES:-8388608}
+    REPORT_DOWNLOAD_TIMEOUT_SECONDS: ${REPORT_DOWNLOAD_TIMEOUT_SECONDS:-180}
+    REPORT_DOWNLOAD_MAX_ROWS: ${REPORT_DOWNLOAD_MAX_ROWS:-100000}
+    REPORT_DOWNLOAD_MAX_BYTES: ${REPORT_DOWNLOAD_MAX_BYTES:-134217728}
+    REPORT_XLSX_TIMEOUT_SECONDS: ${REPORT_XLSX_TIMEOUT_SECONDS:-180}
+    REPORT_XLSX_MAX_ROWS: ${REPORT_XLSX_MAX_ROWS:-50000}
+    REPORT_XLSX_MAX_BYTES: ${REPORT_XLSX_MAX_BYTES:-67108864}
+    REPORT_DATASET_TIMEOUT_SECONDS: ${REPORT_DATASET_TIMEOUT_SECONDS:-1800}
+    REPORT_DATASET_MAX_ROWS: ${REPORT_DATASET_MAX_ROWS:-5000000}
+    REPORT_DATASET_MAX_BYTES: ${REPORT_DATASET_MAX_BYTES:-2147483648}
+    REPORT_DATASET_TEMP_BYTES: ${REPORT_DATASET_TEMP_BYTES:-2147483648}
   volumes:
     - trackvance_data:/var/lib/trackvance
   # Trackvance only starts through an explicit `docker compose up`.
@@ -185,6 +206,29 @@ services:
         condition: service_healthy
     healthcheck:
       test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+  report-worker:
+    <<: *backend
+    cpus: 2
+    mem_limit: 3g
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: ['python', '-m', 'trackvance.report_worker']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_WORKER_LANE: REPORT
+    # Only the trusted coordinator sees metadata and canonical storage. It
+    # passes exact sources to the Landlock/seccomp child; no business secrets.
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"]
       interval: 15s
       timeout: 5s
       start_period: 20s

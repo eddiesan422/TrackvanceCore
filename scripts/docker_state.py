@@ -33,7 +33,9 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 7
+VERIFY_SCHEMA_VERSION = 8
+CORRECTIONS_VERIFY_SCHEMA_VERSION = 7
+CORRECTIONS_MIGRATION = "0016_acquisition_diagnostics"
 PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION = 6
 PRE_CORRECTIONS_MIGRATION = "0015_sentinel_execution_identity"
 IDENTITY_VERIFY_SCHEMA_VERSION = 5
@@ -44,12 +46,12 @@ DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION = 3
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0016_acquisition_diagnostics"
+CURRENT_MIGRATION = "0017_catalog_reports"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
 PRIMARY_SERVICES = LEGACY_PRIMARY_SERVICES | {"acquisition-worker", "scheduler", "events-notifications", "events-chaining"}
-OPTIONAL_SERVICES = frozenset({"scheduler", "spark-master", "spark-worker"})
+OPTIONAL_SERVICES = frozenset({"scheduler", "spark-master", "spark-worker", "report-worker"})
 PRIMARY_VOLUMES = frozenset(
     {
         "postgres_data",
@@ -127,7 +129,14 @@ IDENTITY_STATE_TABLES_ALL = REVIEW_STATE_TABLES | IDENTITY_STATE_TABLES
 ASYNC_STATE_TABLES = frozenset({"acquisition_uploads", "acquisition_runs", "delivery_automations",
     "delivery_automation_versions", "delivery_occurrences", "delivery_input_claims", "delivery_target_guards",
     "delivery_target_decisions", "outbox_events", "event_consumptions", "internal_notifications"})
-CURRENT_STATE_TABLES = IDENTITY_STATE_TABLES_ALL | ASYNC_STATE_TABLES
+CORRECTIONS_STATE_TABLES = IDENTITY_STATE_TABLES_ALL | ASYNC_STATE_TABLES
+CATALOG_STATE_TABLES = frozenset({
+    "macro_domains", "data_domains", "governance_history", "glossary_terms",
+    "column_documentation", "glossary_associations", "dataset_blocks",
+    "dataset_security_dependencies", "strict_approvals", "report_definitions",
+    "report_revisions", "report_contexts", "report_executions",
+})
+CURRENT_STATE_TABLES = CORRECTIONS_STATE_TABLES | CATALOG_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -359,8 +368,12 @@ def _volume_for(state: Mapping[str, Any], logical: str) -> str:
 ARCHIVE_PROGRAM = r"""
 import os, stat, sys, tarfile
 root = '/source'
+excluded = {'report-staging'} if len(sys.argv) > 1 and sys.argv[1] == 'trackvance_data' else set()
 with tarfile.open(fileobj=sys.stdout.buffer, mode='w|gz', format=tarfile.PAX_FORMAT) as archive:
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        if current == root:
+            directories[:] = [name for name in directories if name not in excluded]
+            files[:] = [name for name in files if name not in excluded]
         directories.sort(); files.sort()
         for name in directories + files:
             path = os.path.join(current, name)
@@ -448,6 +461,7 @@ def _archive_volume(
             "python",
             "-c",
             _python_payload(ARCHIVE_PROGRAM),
+            logical,
         ], stdout=output)
     return {
         "path": relative,
@@ -471,7 +485,7 @@ def _stop_services(state: Mapping[str, Any], services: Iterable[str]) -> list[st
 
 
 def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None:
-    order = ("postgres", "api", "worker", "delivery-worker", "acquisition-worker", "scheduler", "events-notifications", "events-chaining", "web")
+    order = ("postgres", "api", "worker", "delivery-worker", "acquisition-worker", "report-worker", "scheduler", "events-notifications", "events-chaining", "web")
     for service in order:
         for container in state["containers"]:
             if container["service"] == service and container["id"] in identifiers:
@@ -515,7 +529,7 @@ def snapshot_stdin_source() -> str:
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     bootstrap = snapshot_bootstrap()
     for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
@@ -543,7 +557,7 @@ def backup(project: str, destination: Path) -> Path:
     if not postgres["running"] or not api["running"]:
         raise OperationError("PostgreSQL y API deben estar activos para tomar el respaldo.")
     try:
-        _stop_services(state, ("web", "scheduler", "events-chaining", "events-notifications", "acquisition-worker", "delivery-worker", "worker"))
+        _stop_services(state, ("web", "scheduler", "events-chaining", "events-notifications", "acquisition-worker", "delivery-worker", "report-worker", "worker"))
         snapshot_state = _copy_snapshot(str(api["id"]), destination / "state.json")
         _stop_services(state, ("api",))
 
@@ -680,6 +694,7 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
     expected_migrations = {DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION: DELIVERY_BASELINE_MIGRATION,
         REVIEW_VERIFY_SCHEMA_VERSION: REVIEW_MIGRATION, IDENTITY_VERIFY_SCHEMA_VERSION: IDENTITY_MIGRATION,
         PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION: PRE_CORRECTIONS_MIGRATION,
+        CORRECTIONS_VERIFY_SCHEMA_VERSION: CORRECTIONS_MIGRATION,
         VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
     if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
             or state.get("migration") != expected_migrations[state["schema_version"]]):
@@ -691,6 +706,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         if state.get("schema_version") == REVIEW_VERIFY_SCHEMA_VERSION
         else IDENTITY_STATE_TABLES_ALL
         if state.get("schema_version") == IDENTITY_VERIFY_SCHEMA_VERSION
+        else CORRECTIONS_STATE_TABLES
+        if state.get("schema_version") in {PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION, CORRECTIONS_VERIFY_SCHEMA_VERSION}
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -791,6 +808,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = IDENTITY_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == PRE_CORRECTIONS_MIGRATION:
         expected_state_schema = PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == CORRECTIONS_MIGRATION:
+        expected_state_schema = CORRECTIONS_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -853,10 +872,18 @@ def validate_restored_state(
     schema_version = manifest.get("schema_version")
     validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == CORRECTIONS_MIGRATION:
+            if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                    or restored_state.get("migration") != CURRENT_MIGRATION
+                    or normalized_legacy_state != expected_state
+                    or any(restored_state["tables"].get(name) != {} for name in CATALOG_STATE_TABLES)):
+                raise OperationError("La huella v7 normalizada no coincide con el respaldo.")
+            return
         if manifest.get("migration") == PRE_CORRECTIONS_MIGRATION:
             if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                     or restored_state.get("migration") != CURRENT_MIGRATION
-                    or normalized_legacy_state != expected_state):
+                    or normalized_legacy_state != expected_state
+                    or any(restored_state["tables"].get(name) != {} for name in CATALOG_STATE_TABLES)):
                 raise OperationError("La huella v6 normalizada no coincide con el respaldo.")
             return
         if manifest.get("migration") in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, IDENTITY_MIGRATION}:
@@ -868,7 +895,7 @@ def validate_restored_state(
                 or (manifest.get("migration") == DELIVERY_BASELINE_MIGRATION
                     and tables.get("delivery_reviews") != {})
                 or normalized_legacy_state != expected_state
-                or any(tables.get(name) != {} for name in ASYNC_STATE_TABLES)
+                or any(tables.get(name) != {} for name in ASYNC_STATE_TABLES | CATALOG_STATE_TABLES)
             ):
                 release = "0.5.0" if manifest.get("migration") == DELIVERY_BASELINE_MIGRATION else "0.5.1" if manifest.get("migration") == REVIEW_MIGRATION else "0.6.1"
                 raise OperationError(f"La huella {release} normalizada no coincide con el respaldo.")
@@ -885,7 +912,7 @@ def validate_restored_state(
     # backups.  A future backup schema must record that evidence at backup time.
     tables = restored_state.get("tables")
     delivery_empty = isinstance(tables, Mapping) and all(
-        tables.get(table) == {} for table in DELIVERY_TABLES | {"delivery_reviews"} | ASYNC_STATE_TABLES
+        tables.get(table) == {} for table in DELIVERY_TABLES | {"delivery_reviews"} | ASYNC_STATE_TABLES | CATALOG_STATE_TABLES
     )
     if (
         restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
@@ -943,10 +970,16 @@ def compose(project: str, *arguments: str, environment: Mapping[str, str] | None
     if private_env or private_overlay:
         if (not private_env or not private_overlay or
                 child_environment.get('TRACKVANCE_CERTIFICATION_PROJECT') != project or
-                not re.fullmatch(r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}', project)):
+                not re.fullmatch(r'trackvance-v0(?:70|80)-test-[a-z0-9-]+-[a-f0-9]{12}', project)):
             raise OperationError('El perfil Compose privado no coincide con el proyecto desechable.')
         if not Path(private_env).is_file() or not Path(private_overlay).is_file():
             raise OperationError('El perfil Compose privado no existe.')
+        if project.startswith('trackvance-v080-test-'):
+            import certification_v080
+            directory, context = certification_v080.load_context(Path(private_env).parent)
+            if context['project'] != project or Path(private_overlay).resolve() != directory / 'compose.json':
+                raise OperationError('La recuperación no coincide con su contexto aislado.')
+            certification_v080.preflight(directory, context)
         command.extend(['--env-file', private_env])
     command.extend(['-p', project, '-f', str(ROOT / 'compose.yml')])
     if private_overlay:
@@ -1087,6 +1120,8 @@ def _restore_verified(
             if manifest.get("migration") == IDENTITY_MIGRATION
             else "snapshot-legacy-v6"
             if manifest.get("migration") == PRE_CORRECTIONS_MIGRATION
+            else "snapshot-legacy-v7"
+            if manifest.get("migration") == CORRECTIONS_MIGRATION
             else None
         )
         if legacy_command:

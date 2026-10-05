@@ -13,6 +13,7 @@ Object.assign(labels, { ASSIGNED: 'Asignada', REOPENED: 'Reabierta', PENDING_VAL
 Object.assign(labels, { FAILED_PRECONDITION: 'Precondición no cumplida', POSTGRESQL: 'PostgreSQL', SQLSERVER: 'SQL Server', SOURCE_SNAPSHOT: 'Snapshot de fuente externa' })
 Object.assign(labels, { DELIVERY: 'Data Delivery', delivery: 'Data Delivery', STARTED: 'Iniciado', COMMITTED: 'Confirmado', UNKNOWN: 'Confirmación desconocida', CREATE_AND_LOAD: 'Crear y cargar', APPEND: 'Agregar registros', OVERWRITE: 'Reemplazar datos', UPSERT: 'Actualizar y agregar', EXISTING_TABLE: 'Tabla existente', CREATE_TABLE: 'Tabla nueva', DELIVERY_RECEIPT: 'Receipt de entrega' })
 Object.assign(labels, { DELETED: 'Eliminado', SENT: 'Enviado', PENDING: 'Pendiente' })
+Object.assign(labels, { REPORT_OUTPUT: 'Salida de Reportes', REPORT: 'Reportes', PREVIEW: 'Vista previa', DOWNLOAD: 'Descarga', DATASET: 'Generación de dataset', COMPLETE: 'Completa', CANCELLED: 'Cancelada', INTERRUPTED: 'Interrumpida', PUBLIC: 'Pública', INTERNAL: 'Interna', CONFIDENTIAL: 'Confidencial', RESTRICTED: 'Restringida' })
 export function label(value: unknown) { return labels[String(value)] || String(value ?? '—').replaceAll('_', ' ') }
 export function Badge({ value, children }: { value?: unknown; children?: ReactNode }) {
   const v = String(value || '').toUpperCase()

@@ -53,13 +53,18 @@ export function uploadBinary<T>(path: string, file: File, progress: (bytes: numb
     request.send(file)
   })
 }
-export async function download(path: string, fileName: string) {
+export async function download(path: string, fileName: string, options: RequestInit = {}) {
   let response: Response
-  try { response = await fetch(`/api/v1${path}`, { credentials: 'same-origin' }) }
-  catch { throw new ApiError('No pudimos conectar con el servicio local para descargar el archivo.', 0) }
+  const headers = new Headers(options.headers)
+  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  if (options.method && options.method !== 'GET') headers.set('X-CSRF-Token', csrfToken)
+  try { response = await fetch(`/api/v1${path}`, { ...options, headers, credentials: 'same-origin' }) }
+  catch { throw new ApiError(options.signal?.aborted ? 'Transferencia cancelada.' : 'No pudimos conectar con el servicio local para descargar el archivo.', 0, undefined, options.signal?.aborted ? 'TRANSFER_CANCELLED' : undefined) }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new ApiError(body.error?.message || 'No se pudo descargar la evidencia. Inténtalo de nuevo.', response.status, body.error?.request_id)
+    const detail = body.error || body.detail || {}
+    if (response.status === 401 || response.status === 403) window.dispatchEvent(new Event('trackvance:session-refresh'))
+    throw new ApiError(typeof detail === 'string' ? detail : detail.message || 'No se pudo descargar el archivo. Inténtalo de nuevo.', response.status, detail.request_id, detail.code, detail.details)
   }
   const disposition = response.headers.get('Content-Disposition') || ''
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
@@ -68,7 +73,11 @@ export async function download(path: string, fileName: string) {
   if (encoded) { try { suggested = decodeURIComponent(encoded) } catch { suggested = fileName } }
   // eslint-disable-next-line no-control-regex -- Download filenames must exclude literal control characters.
   const safeName = suggested.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/^\.+/, '').trim().slice(0, 180) || fileName
-  const url = URL.createObjectURL(await response.blob())
+  let content: Blob
+  try { content = await response.blob() }
+  catch { throw new ApiError(options.signal?.aborted ? 'Transferencia cancelada.' : 'La transferencia se interrumpió antes de recibir el archivo completo.', 0, undefined, options.signal?.aborted ? 'TRANSFER_CANCELLED' : undefined) }
+  if (options.signal?.aborted) throw new ApiError('Transferencia cancelada.', 0, undefined, 'TRANSFER_CANCELLED')
+  const url = URL.createObjectURL(content)
   const link = document.createElement('a'); link.href = url; link.download = safeName
   document.body.appendChild(link); link.click(); link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)

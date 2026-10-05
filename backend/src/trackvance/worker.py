@@ -21,7 +21,7 @@ from .services import _verify_lease, audit
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 90
-WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION"})
+WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT"})
 DELIVERY_TERMINAL_STATUSES = frozenset(
     {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}
 )
@@ -31,7 +31,7 @@ def configured_lane(raw: str | None = None) -> str:
     configured = raw if raw is not None else (os.getenv("TRACKVANCE_WORKER_LANE") or "DEFAULT")
     lane = configured.strip().upper()
     if lane not in WORKER_LANES:
-        raise RuntimeError("TRACKVANCE_WORKER_LANE debe ser DEFAULT, DELIVERY o ACQUISITION.")
+        raise RuntimeError("TRACKVANCE_WORKER_LANE debe ser DEFAULT, DELIVERY, ACQUISITION o REPORT.")
     return lane
 
 
@@ -159,6 +159,8 @@ def process_once(
     lane = configured_lane(lane)
     if lane == "ACQUISITION":
         raise RuntimeError("La lane ACQUISITION utiliza trackvance.acquisition_worker.")
+    if lane == "REPORT":
+        raise RuntimeError("La lane REPORT utiliza trackvance.report_worker.")
     selected_engine = engine or execution_engine
     eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()))
     with SessionLocal() as db:

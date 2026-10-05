@@ -483,9 +483,11 @@ class PySparkProcessingEngine:
         references = {key: self._dataset(value) for key, value in references.items()}
         errors = self.session.sparkContext.emptyRDD()
         summaries = []
+        coverage = self.session.sparkContext.emptyRDD()
         for ordinal, rule in enumerate(rules):
             evaluation = self._evaluate(records, columns, rule, observed_at, references).persist(StorageLevel.DISK_ONLY)
             evaluated, failed = evaluation.values().map(lambda flags: (int(flags[1]), int(not flags[0]))).fold((0, 0), _sum_counts)
+            coverage = coverage.union(evaluation.filter(lambda item: bool(item[1][1])).keys())
             label_columns = rule.parameters.get("columns", [rule.column] if rule.column else [])
             if rule.type == "column_compare":
                 label_columns = [*label_columns, rule.parameters["other_column"]]
@@ -512,7 +514,9 @@ class PySparkProcessingEngine:
         total = source.row_count
         decision = ("REJECTED" if total and failed / total > effective.get("max_error_rate", 0)
                     else "APPROVED_WITH_WARNINGS" if failed or warnings else "APPROVED")
-        metrics = {"total_rows": total, "valid_rows": total - failed, "error_rows": failed,
+        metrics = {"total_rows": total, "processed_rows": records.count(), "output_rows": total - failed,
+                   "discarded_rows": failed, "validation_coverage_rows": coverage.distinct().count(),
+                   "valid_rows": total - failed, "error_rows": failed,
                    "warning_rows": warnings, "error_count": sum(s["failed_count"] for s in summaries if s["severity"] == "ERROR"),
                    "acceptance_rate": round(100 * (total - failed) / total, 2) if total else 100,
                    "rules": summaries, "decision": decision, "normalization_policy": "DECLARED_ONLY"}

@@ -90,7 +90,7 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
 def assert_native_fingerprint(state: dict[str, Any]) -> None:
     ensure(state.get('schema_version') == docker_state.VERIFY_SCHEMA_VERSION and set(state.get('tables', {})) == docker_state.CURRENT_STATE_TABLES
            and state.get('migration') == docker_state.CURRENT_MIGRATION,
-           'La captura no contiene las 42 tablas y la revisión nativa 0.7.0.')
+           'La captura no contiene las 55 tablas y la revisión nativa 0.8.0.')
 
 
 def assert_stream_no_secrets(stream: BinaryIO, credentials: tuple[str, ...]) -> None:
@@ -1119,7 +1119,7 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
 
 def main() -> int:
     if '--v070-context' in sys.argv:
-        parser = argparse.ArgumentParser(description='Native isolated 0.7.0 recovery without starting automatic processes')
+        parser = argparse.ArgumentParser(description='Native isolated 0.8.0 recovery without starting automatic processes')
         parser.add_argument('--v070-context', type=Path, required=True)
         parser.add_argument('--evidence-dir', type=Path)
         options = parser.parse_args()
@@ -1223,7 +1223,7 @@ def main() -> int:
         attach_external_network(source, database, environment)
         source_api = RecoveryApi(source_port, credentials)
         result["version"] = source_api.json("GET", "/health")["version"]
-        ensure(result['version'] == '0.7.0', 'La fuente no ejecuta la versión objetivo.')
+        ensure(result['version'] == '0.8.0', 'La fuente no ejecuta la versión objetivo.')
         original = capture_original(source_api, reader_password, delivery_password)
         stage = "delivery_operational_fixtures"
         prepare_delivery_operations(source_api, original, compose, fixture, environment, credentials)

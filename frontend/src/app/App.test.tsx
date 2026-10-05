@@ -10,7 +10,7 @@ import App from './App'
 vi.mock('../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../api/client')>(), api: vi.fn(), post: vi.fn(), setCsrfToken: vi.fn() }))
 
 const session: Session = {
-  user: { id: 'user-1', name: 'Equipo Trackvance', email: 'local@example.test', role: 'Administrator', permissions: ['runs:read', 'datasets:read', 'intake:read', 'recon:read', 'sentinel:read', 'delivery:read'] },
+  user: { id: 'user-1', name: 'Equipo Trackvance', email: 'local@example.test', role: 'Administrator', permissions: ['runs:read', 'datasets:read', 'intake:read', 'recon:read', 'sentinel:read', 'delivery:read', 'catalog:read', 'reports:read'] },
   organization: { id: 'organization', name: 'Trackvance' },
   csrf_token: 'csrf-token',
 }
@@ -41,7 +41,7 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.7\.0/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.8\.0/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
@@ -51,6 +51,8 @@ describe('App session', () => {
 
   it.each([
     ['/datasets', 'Datasets'],
+    ['/catalog', 'Catálogo'],
+    ['/reports', 'Reportes'],
     ['/delivery', 'Data Delivery'],
     ['/intake', 'Data Intake'],
     ['/recon', 'ReconOps'],

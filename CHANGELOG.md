@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.0 — 2026-10-05 — Catálogo de gobierno y Reportes
+
+- Macrodominios/dominios con identidad, actividad y control de versión; clasificación
+  opcional en cargas y edición posterior con historia, responsables y sensibilidad.
+- Catálogo paginado sobre metadata, diccionario por versión/esquema, glosario,
+  calidad estricta, restricciones y linaje sin abrir Parquet al navegar.
+- Resolución multifuente conjunta con versiones de entrada aprobadas bajo revisiones
+  explícitas; SELECT limitado por AST y cruces INNER/LEFT/RIGHT/FULL con cardinalidad.
+- PREVIEW de hasta 10 filas y descargas CSV/XLSX incrementales sin archivos de
+  resultado; DATASET mediante Job REPORT, lease, publicación atómica y perfiles completos.
+- Proceso SQL Linux aislado con Landlock/seccomp, recursos finitos y autorización
+  vigente de todas las fuentes, propagada a contenidos nativos y descendientes Intake.
+- Migración aditiva 0017, 55 tablas y backup state 8; recuperación anterior conserva
+  exactamente los registros históricos y admite sólo adiciones explícitas vacías/default.
+- CI conserva los gates anteriores y añade Catálogo/Reportes real en navegador,
+  fuentes de 400k/1M y verificación completa contra un oráculo independiente.
+
+La disponibilidad del código y el resultado de cada certificación se registran
+por separado; esta entrada no sustituye los gates del commit final ni el upgrade.
+
 ## 0.7.0 — 2026-10-04 — correcciones C01–C06
 
 - C01: sustituye el fallback XLSX de adquisición por ZIP/XML incremental, índices

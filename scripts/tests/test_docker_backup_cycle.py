@@ -719,7 +719,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner, "cleanup", lambda project, path: calls.append(("cleanup", project)))
     monkeypatch.setattr(runner, "initialize_source", lambda *args: None)
     monkeypatch.setattr(runner, "attach_external_network", lambda *args: None)
-    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.7.0"}))
+    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.8.0"}))
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
     monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
     monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: args[-1])
@@ -815,7 +815,7 @@ def test_native_fingerprint_never_ignores_unknown_or_missing_tables(change):
         state['schema_version'] = 5
     if change == 'migration':
         state['migration'] = runner.docker_state.IDENTITY_MIGRATION
-    with pytest.raises(RuntimeError, match='42 tablas'):
+    with pytest.raises(RuntimeError, match='55 tablas'):
         runner.assert_native_fingerprint(state)
 
 

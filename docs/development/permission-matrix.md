@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.7.0
+# Matriz de permisos HTTP y catálogo 0.8.0
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 42 códigos; la matriz tiene 130 entradas protegidas.
+El catálogo contiene 56 códigos; la matriz tiene 170 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -12,6 +12,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 |---|---|---|---|
 | `artifacts:download` | Evidencia / exports | — | Sí |
 | `audit:read` | Auditoría | — | Sí |
+| `blocks:manage` | Restricciones | blocks:read | Sí |
+| `blocks:read` | Restricciones | datasets:read | Sí |
+| `catalog:read` | Catálogo | datasets:read | Sí |
 | `connections:manage` | Conexiones | connections:read | Sí |
 | `connections:read` | Conexiones | — | Sí |
 | `connections:use` | Conexiones | connections:read | Sí |
@@ -28,10 +31,16 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | `destinations:manage` | Destinos | destinations:read | Sí |
 | `destinations:read` | Destinos | — | Sí |
 | `destinations:use` | Destinos | destinations:read | Sí |
+| `domains:manage` | Dominios | domains:read | Sí |
+| `domains:read` | Dominios | datasets:read | Sí |
 | `exceptions:close` | Excepciones | exceptions:read, exceptions:write | Sí |
 | `exceptions:read` | Excepciones | — | Sí |
 | `exceptions:write` | Excepciones | exceptions:read | Sí |
 | `exports:download` | Evidencia / exports | — | Sí |
+| `glossary:manage` | Glosario | glossary:read | Sí |
+| `glossary:read` | Glosario | datasets:read | Sí |
+| `governance:read` | Gobierno | datasets:read | Sí |
+| `governance:write` | Gobierno | governance:read | Sí |
 | `intake:configure` | Data Intake | datasets:read, intake:read | Sí |
 | `intake:execute` | Data Intake | datasets:read, intake:read | Sí |
 | `intake:read` | Data Intake | — | Sí |
@@ -40,6 +49,11 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | `recon:configure` | ReconOps | datasets:read, recon:read | Sí |
 | `recon:execute` | ReconOps | datasets:read, recon:read | Sí |
 | `recon:read` | ReconOps | — | Sí |
+| `reports:download` | Reportes | intake:read, reports:read | Sí |
+| `reports:generate` | Reportes | datasets:write, intake:read, reports:read | Sí |
+| `reports:preview` | Reportes | intake:read, reports:read | Sí |
+| `reports:read` | Reportes | datasets:read | Sí |
+| `reports:write` | Reportes | reports:read | Sí |
 | `roles:manage` | Roles | roles:read | No |
 | `roles:read` | Roles | — | Sí |
 | `rules:read` | Reglas | — | Sí |
@@ -57,6 +71,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 
 | Método | Ruta | Permiso |
 |---|---|---|
+| DELETE | `/catalog/glossary-associations/{id}` | `glossary:manage` |
 | DELETE | `/connections/{id}` | `connections:manage` |
 | DELETE | `/delivery/destinations/{id}` | `destinations:manage` |
 | DELETE | `/roles/{id}` | `roles:manage` |
@@ -67,6 +82,13 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/acquisitions/{id}` | `datasets:read` |
 | GET | `/artifacts/{id}/download` | `artifacts:download` |
 | GET | `/audit-events` | `audit:read` |
+| GET | `/catalog/datasets` | `catalog:read` |
+| GET | `/catalog/datasets/{id}` | `catalog:read` |
+| GET | `/catalog/datasets/{id}/blocks` | `catalog:read` |
+| GET | `/catalog/domains` | `datasets:read` |
+| GET | `/catalog/macrodomains` | `datasets:read` |
+| GET | `/catalog/resources` | `catalog:read` |
+| GET | `/catalog/tree` | `catalog:read` |
 | GET | `/connections` | `connections:read` |
 | GET | `/connections/{id}` | `connections:read` |
 | GET | `/connections/{id}/objects` | `connections:use` |
@@ -99,6 +121,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/exceptions/{id}` | `exceptions:read` |
 | GET | `/exceptions/{id}/attachments/{attachment_id}/download` | `artifacts:download` |
 | GET | `/findings` | `runs:read` |
+| GET | `/governance/domains` | `datasets:read` |
+| GET | `/governance/glossary` | `glossary:read` |
+| GET | `/governance/macrodomains` | `datasets:read` |
 | GET | `/intake/contracts` | `intake:read` |
 | GET | `/intake/runs/{id}/errors` | `intake:read` |
 | GET | `/monitors` | `sentinel:read` |
@@ -113,6 +138,12 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/notifications/unread-count` | `notifications:read` |
 | GET | `/recon/controls` | `recon:read` |
 | GET | `/recon/runs/{id}/results` | `recon:read` |
+| GET | `/reports/definitions` | `reports:read` |
+| GET | `/reports/definitions/{id}` | `reports:read` |
+| GET | `/reports/executions` | `reports:read` |
+| GET | `/reports/executions/{id}` | `reports:read` |
+| GET | `/reports/limits` | `reports:read` |
+| GET | `/reports/sources` | `reports:read` |
 | GET | `/roles` | `roles:read` |
 | GET | `/roles/permissions` | `roles:read` |
 | GET | `/roles/{id}` | `roles:read` |
@@ -129,12 +160,25 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/users` | `users:read` |
 | GET | `/users/roles` | `users:read` |
 | GET | `/users/{id}` | `users:read` |
+| PATCH | `/catalog/blocks/{id}` | `blocks:manage` |
+| PATCH | `/catalog/datasets/{id}/columns` | `governance:write` |
+| PATCH | `/catalog/domains/{id}` | `domains:manage` |
+| PATCH | `/catalog/macrodomains/{id}` | `domains:manage` |
+| PATCH | `/catalog/security-dependencies/{id}` | `blocks:manage` |
 | PATCH | `/connections/{id}` | `connections:manage` |
+| PATCH | `/datasets/{id}/governance` | `governance:write` |
 | PATCH | `/delivery/destinations/{id}` | `destinations:manage` |
 | PATCH | `/exceptions/{id}` | `exceptions:write` |
+| PATCH | `/governance/domains/{id}` | `domains:manage` |
+| PATCH | `/governance/glossary/{id}` | `glossary:manage` |
+| PATCH | `/governance/macrodomains/{id}` | `domains:manage` |
 | PATCH | `/roles/{id}` | `roles:manage` |
 | PATCH | `/users/{id}` | `users:manage` |
 | POST | `/acquisitions/{id}/cancel` | `datasets:write` |
+| POST | `/catalog/datasets/{id}/blocks` | `blocks:manage` |
+| POST | `/catalog/datasets/{id}/terms` | `glossary:manage` |
+| POST | `/catalog/domains` | `domains:manage` |
+| POST | `/catalog/macrodomains` | `domains:manage` |
 | POST | `/connections` | `connections:manage` |
 | POST | `/connections/test` | `connections:manage` |
 | POST | `/connections/{id}/acquisitions` | `connections:use` |
@@ -168,6 +212,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/exceptions/{id}/validate` | `exceptions:write` |
 | POST | `/execution-plans/preview` | `runs:execute` |
 | POST | `/findings/{id}/exceptions` | `exceptions:write` |
+| POST | `/governance/domains` | `domains:manage` |
+| POST | `/governance/glossary` | `glossary:manage` |
+| POST | `/governance/macrodomains` | `domains:manage` |
 | POST | `/intake/contracts` | `intake:configure` |
 | POST | `/intake/contracts/{id}/versions` | `intake:configure` |
 | POST | `/intake/runs` | `intake:execute` |
@@ -181,6 +228,13 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/recon/controls` | `recon:configure` |
 | POST | `/recon/controls/{id}/versions` | `recon:configure` |
 | POST | `/recon/runs` | `recon:execute` |
+| POST | `/reports/datasets` | `reports:generate` |
+| POST | `/reports/definitions` | `reports:write` |
+| POST | `/reports/definitions/{id}/revisions` | `reports:write` |
+| POST | `/reports/download` | `reports:download` |
+| POST | `/reports/executions/{id}/cancel` | `reports:generate` |
+| POST | `/reports/preview` | `reports:preview` |
+| POST | `/reports/resolve` | `reports:read` |
 | POST | `/roles` | `roles:manage` |
 | POST | `/runs/{id}/cancel` | `runs:execute` |
 | POST | `/users` | `users:manage` |

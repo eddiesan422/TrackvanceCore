@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -309,6 +309,33 @@ def owned(db: Session, model, record_id: str, user: User):
         raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite consultar este módulo.")
     if isinstance(item, Finding):
         owned(db, Run, item.run_id, user)
+    from .governance import authorize_dataset, authorize_dataset_content, authorize_run_content
+    if isinstance(item, Dataset):
+        authorize_dataset(db, user, item.id, "METADATA")
+    elif isinstance(item, DatasetVersion):
+        authorize_dataset_content(db, user, item)
+    elif isinstance(item, (Run, Configuration)):
+        if isinstance(item, Run):
+            authorize_run_content(db, user, item)
+        else:
+            authorize_dataset(db, user, item.dataset_id, "METADATA")
+    elif isinstance(item, Artifact):
+        identities = {item.id}
+        pending = [item.id]
+        while pending:
+            identity = pending.pop()
+            for ancestor in db.scalars(select(ArtifactLink.source_id).where(
+                ArtifactLink.organization_id == user.organization_id, ArtifactLink.relation == "DATASET_PART",
+                ArtifactLink.source_type == "ARTIFACT", ArtifactLink.target_type == "ARTIFACT", ArtifactLink.target_id == identity)):
+                if ancestor not in identities:
+                    if len(identities) >= 128:
+                        raise APIError(403, "SECURITY_LINEAGE_LIMIT", "La procedencia del artefacto excede el límite.")
+                    identities.add(ancestor)
+                    pending.append(ancestor)
+        versions = db.scalars(select(DatasetVersion).where(
+            or_(DatasetVersion.canonical_artifact_id.in_(identities), DatasetVersion.original_artifact_id.in_(identities))))
+        for version in versions:
+            authorize_dataset_content(db, user, version)
     return item
 
 
@@ -498,9 +525,11 @@ class InputModel(BaseModel):
 class DatasetBody(InputModel):
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=4000)
-    domain: str = Field(default="Operaciones", min_length=1, max_length=80)
+    domain: str = Field(default="", max_length=80, deprecated=True)
     owner: str = Field(default="Equipo de datos", min_length=1, max_length=120)
     criticality: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
+    macro_domain_id: str | None = Field(default=None, max_length=64)
+    domain_id: str | None = Field(default=None, max_length=64)
 
 
 class DatasetSchemaColumn(BaseModel):
@@ -673,11 +702,14 @@ def stage_upload(file: UploadFile, filename: str) -> Path:
 
 @router.get("/datasets")
 def datasets(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return listing([dataset_dto(db, d) for d in scoped(db, Dataset, user)])
+    from .governance_api import authorized_datasets
+    return listing([dataset_dto(db, d) for d, _ in authorized_datasets(db, user)])
 
 
 @router.post("/datasets", status_code=201)
 def new_dataset(body: DatasetBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .governance import validate_classification
+    validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     existing = db.scalar(select(Dataset).where(
         Dataset.organization_id == user.organization_id,
         Dataset.name == body.name,
@@ -763,6 +795,10 @@ def inspect_dataset_upload(
 @router.get("/datasets/{dataset_id}")
 def dataset_detail(dataset_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     dataset = owned(db, Dataset, dataset_id, user)
+    # Version DTOs include value-bearing profiles; metadata-only catalog views
+    # have a separate projection and remain visible for authorized blocked assets.
+    from .governance import authorize_dataset
+    authorize_dataset(db, user, dataset.id)
     versions = db.scalars(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version.desc())).all()
     return {**dataset_dto(db, dataset), "versions": [version_dto(v, db) for v in versions]}
 
@@ -1354,7 +1390,17 @@ def findings(db: Session = Depends(get_db), user: User = Depends(current_user)):
     allowed = readable_modules(db, user)
     rows = db.scalars(select(Finding).join(Run, Finding.run_id == Run.id).where(
         Finding.organization_id == user.organization_id, Run.module.in_(allowed))).all()
-    return listing([finding_dto(db, finding) for finding in rows])
+    from .governance import authorize_run_content
+    authorized = []
+    for finding in rows:
+        run = db.get(Run, finding.run_id)
+        try:
+            if run:
+                authorize_run_content(db, user, run)
+                authorized.append(finding_dto(db, finding))
+        except OperationError:
+            continue
+    return listing(authorized)
 
 
 @router.post("/findings/{finding_id}/exceptions", status_code=201)
@@ -1415,7 +1461,7 @@ def engines():
     from .dispatcher import component_status
     from .spark_engine import runtime_status
     from .worker import worker_status
-    workers = {lane: worker_status(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION")}
+    workers = {lane: worker_status(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION", "REPORT")}
     acquisition = AcquisitionLimits.configured()
     delivery = DeliveryLimits.configured()
     spark = runtime_status()
@@ -1523,6 +1569,11 @@ app.include_router(acquisition_router)
 app.include_router(automation_router)
 app.include_router(notifications_router)
 app.include_router(delivery_validation_router)
+from .governance_api import router as governance_router
+from .report_api import router as report_router
+
+app.include_router(governance_router)
+app.include_router(report_router)
 
 
 def openapi_contract():
