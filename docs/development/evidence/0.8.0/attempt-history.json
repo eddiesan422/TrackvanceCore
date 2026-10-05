@@ -268,6 +268,23 @@
       "evidence": "ci-3832596-completed-failure.json",
       "details": "The previously active catalog job failed historical recovery after native recovery PASS. Its shallow checkout lacked authentic d9. An isolated reproduction kept the same HEAD: git archive exit128 before full-history fetch, exit0 afterwards. Local diagnostic stderr is not attributed to original CI. Browser, all three full-oracle tiers, ten HTTP cases and native 55-table recovery passed; these partial results do not approve the workflow or final SHA.",
       "certifies_final_sha": false
+    },
+    {
+      "check": "GitHub eighth 0.8 workflow attempt4 completed",
+      "status": "CANCELLED",
+      "category": "CI_EXECUTION_TIMEOUT",
+      "sha": "495f4ebb363f11b52e5e130cf9fe9e30b43fb836",
+      "run_url": "https://github.com/eddiesan422/TrackvanceCore/actions/runs/37368090419",
+      "run_attempt": 4,
+      "jobs": 16,
+      "success": 15,
+      "cancelled": 1,
+      "xlsx_job_id": 111992798346,
+      "configured_timeout_minutes": 90,
+      "evidence": "ci-495f4eb-timeout.json",
+      "reason": "Actual hosted job exceeded 1h30m0s. Eight initial acquisitions and dispatch passed; first browser PASS387.001s corresponds to400k only by driver-order inference. Whole XLSX evidence and native recovery result absent. Job budget now180min with safe phase/rows checkpoints; populations and runtime limits unchanged. New complete CI and habitual promotion remain required.",
+      "raw_private_logs_published": false,
+      "certifies_final_sha": false
     }
   ],
   "source_data": "Synthetic only; no habitual data, database dump, credentials, query bodies or trace files."

@@ -30,6 +30,11 @@ from xlsx_fixtures import COLUMNS, HEADER_ROW, generate
 volume.COLUMNS = COLUMNS
 
 
+def checkpoint(phase, rows, state):
+    print(json.dumps({"corrections_checkpoint": phase, "rows": rows, "state": state,
+                      "at": datetime.now(UTC).isoformat()}), flush=True)
+
+
 def record_integrity(directory, context, version_id, fixture):
     observed = volume.materialized_hash(directory, context, version_id)
     if observed["rows"] != fixture["rows"] or observed["canonical_rows_sha256"] != fixture["canonical_rows_sha256"]:
@@ -321,23 +326,33 @@ def certify(directory, context, args):
                 environment = {**os.environ, "TV_E2E_URL": f'http://localhost:{context["port"]}', "TV_E2E_PRIVATE_ARTIFACTS": "1",
                     "TV_CORRECTIONS_E2E": "true", "TV_CORRECTIONS_PROJECT": context["project"], "TV_CORRECTIONS_FIXTURE": fixture["path"],
                     "TV_CORRECTIONS_METADATA": str(metadata), "TV_CORRECTIONS_DESTINATION": destination["id"], "TV_CORRECTIONS_SCHEMA": schema}
+                checkpoint("browser", rows, "START")
                 browser = run_browser(shutil.which("pnpm"), ["tests-e2e/corrections-volume.spec.ts"], root=ROOT,
                     project=context["project"] + f"-xlsx-{rows}", environment=environment, evidence=directory)
                 if browser.get("skipped", 0) or browser.get("expected") != 1:
                     raise AssertionError("No se ejecutó la prueba de navegador XLSX obligatoria completa.")
+                checkpoint("browser", rows, "PASS")
                 reports = list((ROOT / ".codex-local" / "browser-results" / (context["project"] + f"-xlsx-{rows}")).rglob("corrections-ui.json"))
                 if len(reports) != 1:
                     raise AssertionError("Falta evidencia integral del navegador XLSX.")
                 ui = json.loads(reports[0].read_text(encoding="utf-8"))
                 for key in ("source_version_id", "output_version_id"):
+                    verification = "browser_full_source_verification" if key == "source_version_id" else "browser_full_output_verification"
+                    checkpoint(verification, rows, "START")
                     record_integrity(directory, context, ui[key], fixture)
+                    checkpoint(verification, rows, "PASS")
+                checkpoint("browser_full_sql_verification", rows, "START")
                 target = volume.target_hash(directory, context, schema, ui["table"])
                 if target["rows"] != rows or target["canonical_rows_sha256"] != fixture["canonical_rows_sha256"]:
                     raise AssertionError("El navegador no conservó todas las filas/valores en SQL.")
+                checkpoint("browser_full_sql_verification", rows, "PASS")
                 report.setdefault("browser", []).append({"rows": rows, "status": "PASS", "target": target, "ui": ui})
+        checkpoint("personal_unread_api_restart", max(args.rows), "START")
         certify_unread_restart(api, directory, context, chained["unread"]["notification_id"], report)
+        checkpoint("personal_unread_api_restart", max(args.rows), "PASS")
         if args.with_native_recovery:
             native_directory = directory / ("corrections-native-recovery-" + uuid4().hex[:12])
+            checkpoint("native_backup_restore", max(args.rows), "START")
             run([sys.executable, "scripts/tests/docker_backup_cycle.py", "--v070-context", str(directory),
                  "--evidence-dir", str(native_directory)], directory, "corrections-native-recovery")
             report["native_recovery"] = "PASS"
@@ -347,6 +362,7 @@ def certify(directory, context, args):
             if notification["read_at"] is not None:
                 raise AssertionError("El backup/restore no conservó la transición personal no leída.")
             report["unread_restart"]["native_state_fingerprint_comparison"] = "PASS"
+            checkpoint("native_backup_restore", max(args.rows), "PASS")
         certification.assert_main_unchanged(context)
         report["status"] = "PASS"
         return report

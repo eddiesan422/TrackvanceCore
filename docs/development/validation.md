@@ -72,6 +72,16 @@ El [resultado completado](evidence/0.8.0/ci-3832596-completed-failure.json) cons
 los seis fallos y los PASS reales de navegador, tres tiers, diez casos HTTP y
 recuperación nativa. El CI íntegro del nuevo SHA continúa siendo obligatorio.
 
+El workflow `37368090419`, intento 4 sobre `495f4eb`, terminó **CANCELLED: 15
+SUCCESS y un CANCELLED entre los 16 jobs**. XLSX agotó el presupuesto de 90
+minutos; el log no muestra un fallo de assertion. Su único navegador completado
+pasó en 387,001 s y corresponde a 400.000 por inferencia del orden del driver,
+no por metadata del artefacto. Dispatch pasó; el ciclo XLSX integral y su
+recuperación nativa quedaron sin acreditar. [La evidencia real](evidence/0.8.0/ci-495f4eb-timeout.json)
+conserva hashes y estados. Sólo se amplía ese job a 180 minutos y se añaden
+checkpoints saneados, manteniendo poblaciones y límites. El nuevo CI íntegro y
+la instalación habitual siguen pendientes; este intento no cierra la certificación.
+
 La revisión posterior del descriptor produjo **87 PASS / cero FAIL o SKIP** en
 41,48 s en Linux: 71 Reportes y 16 almacenamiento/puertos. Incluye una caída real
 `os._exit(77)` después de escribir el JSON del descriptor dentro del staging

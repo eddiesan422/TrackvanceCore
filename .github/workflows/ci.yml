@@ -123,7 +123,7 @@ jobs:
           if-no-files-found: ignore
   xlsx-corrections-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: [backend, frontend]
     env:
       PLAYWRIGHT_CHANNEL: chromium
