@@ -17,6 +17,45 @@ from trackvance.report_query import compile_draft
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux Landlock/seccomp executor is certified in Docker")
 
 
+@pytest.mark.parametrize("membership,relative_files", [
+    ("0::/runner.slice/job.scope\n", ["runner.slice/job.scope/cpu.max", "runner.slice/job.scope/memory.max"]),
+    ("2:cpu,cpuacct:/runner/job\n3:memory:/runner/job\n",
+     ["cpu/runner/job/cpu.cfs_quota_us", "cpu/runner/job/cpu.cfs_period_us",
+      "memory/runner/job/memory.limit_in_bytes", "memory/runner/job/memory.usage_in_bytes"]),
+])
+def test_own_nested_cgroup_counters_receive_only_exact_file_grants(tmp_path, membership, relative_files):
+    from trackvance.report_sandbox import _cgroup_counter_files
+
+    root = tmp_path / "cgroup"
+    root.mkdir()
+    expected = []
+    for relative in ["memory.max", *relative_files]:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("max\n")
+        expected.append(str(path.resolve()))
+    (root / "cgroup.procs").write_text("123\n")
+    sibling = root / "another-job" / "memory.max"
+    sibling.parent.mkdir()
+    sibling.write_text("max\n")
+    own = tmp_path / "membership"
+    own.write_text(membership)
+    assert _cgroup_counter_files(own, root) == sorted(expected)
+
+
+def test_cgroup_membership_cannot_grant_traversal_or_escaping_symlinks(tmp_path):
+    from trackvance.report_sandbox import _cgroup_counter_files
+
+    root = tmp_path / "cgroup"
+    root.mkdir()
+    secret = tmp_path / "memory.max"
+    secret.write_text("private")
+    (root / "memory.max").symlink_to(secret)
+    own = tmp_path / "membership"
+    own.write_text("0::/../\n0::relative\n0::/job\n")
+    assert _cgroup_counter_files(own, root) == []
+
+
 def fixture_sources(tmp_path):
     a = [["001", "12.01"], ["001", "3.10"], ["é", "7.00"], [None, "9.00"], ["", "8.00"]]
     b = [["001", "A"], ["002", "B"], [None, "NULL"], ["", "EMPTY"], ["東京", "U"]]

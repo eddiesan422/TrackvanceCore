@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import date, datetime
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 import sqlglot
@@ -95,6 +95,48 @@ def tagged(value):
     return value
 
 
+def _cgroup_counter_files(cgroup_file: Path = Path("/proc/self/cgroup"),
+                          root: Path = Path("/sys/fs/cgroup")) -> list[str]:
+    """Exact public resource counters for this process, never a tree grant.
+
+    A hosted process may belong to a nested cgroup. DuckDB reads its own
+    cpu/memory limits before applying connection options; root-only grants
+    leave those reads denied. Membership comes from the kernel, not payloads.
+    Root fallbacks also support container cgroup namespaces and cgroup v1.
+    """
+    counters = {root / name for name in ("cpu.max", "memory.max", "memory.current", "memory.peak")}
+    counters.update(root / "cpu" / name for name in ("cpu.cfs_quota_us", "cpu.cfs_period_us"))
+    counters.update(root / "memory" / name for name in ("memory.limit_in_bytes", "memory.usage_in_bytes"))
+    try:
+        with cgroup_file.open("rb") as membership:
+            content = membership.read(65537)
+        if len(content) > 65536:
+            raise ValueError("Oversized kernel cgroup membership")
+        for line in content.decode("utf-8", errors="surrogateescape").splitlines():
+            hierarchy, controllers, raw_path = line.split(":", 2)
+            relative = PurePosixPath(raw_path)
+            if not hierarchy.isdecimal() or not relative.is_absolute() or ".." in relative.parts:
+                continue
+            parts = relative.parts[1:]
+            if hierarchy == "0" and not controllers:
+                directory = root.joinpath(*parts)
+                counters.update(directory / name for name in ("cpu.max", "memory.max", "memory.current", "memory.peak"))
+            for controller in controllers.split(","):
+                if controller == "cpu":
+                    directory = (root / "cpu").joinpath(*parts)
+                    counters.update(directory / name for name in ("cpu.cfs_quota_us", "cpu.cfs_period_us"))
+                elif controller == "memory":
+                    directory = (root / "memory").joinpath(*parts)
+                    counters.update(directory / name for name in ("memory.limit_in_bytes", "memory.usage_in_bytes"))
+    except (OSError, UnicodeError, ValueError):
+        pass  # Optional membership; missing files receive no grant.
+    base = root.resolve()
+    # Refuse symlinks escaping the public cgroup filesystem. Each return value
+    # is a regular counter file, so Landlock receives READ_FILE only.
+    return sorted({str(path.resolve()) for path in counters
+                   if path.is_file() and path.resolve().is_relative_to(base)})
+
+
 def _landlock(read_files: list[str], writable_dir: str | None):
     libc = ctypes.CDLL(None, use_errno=True)
     abi = libc.syscall(444, 0, 0, 1)
@@ -128,13 +170,11 @@ def _landlock(read_files: list[str], writable_dir: str | None):
                 allow(location, 1 | 4 | 8)
         for location in ("/etc/ld.so.cache", "/usr/share/zoneinfo/UTC", "/proc/self/cgroup",
                          "/proc/stat", "/sys/devices/system/cpu/online",
-                         "/proc/sys/vm/overcommit_memory", "/sys/fs/cgroup/cpu.max",
-                         "/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
-                         "/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.peak",
-                         "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-                         "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+                         "/proc/sys/vm/overcommit_memory"):
             if Path(location).is_file():
                 allow(location, 4)
+        for location in _cgroup_counter_files():
+            allow(location, 4)
         for path in read_files:
             allow(path, 4)
         if writable_dir:

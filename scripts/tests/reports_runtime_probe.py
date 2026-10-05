@@ -74,6 +74,9 @@ def diagnose(force_default_cpu_count: int | None = None, public_wrapper_baseline
                       "MEMORY": b"(?i)memory|ENOMEM|bad_alloc", "THREAD": b"(?i)thread|system_error|resource temporarily",
                       "PERMISSION": b"(?i)permission|operation not permitted|EACCES|EPERM",
                       "LOADER": b"(?i)shared librar|importerror|modulenotfound", "FILESYSTEM": b"(?i)filesystem|directory|file not found",
+                      "CGROUP": b"(?i)cgroup", "CPP_TERMINATE": b"(?i)terminate called|terminating with",
+                      "CPP_IO_EXCEPTION": b"(?i)ioexception|ios_base|filesystem_error",
+                      "CPP_ASSERTION": b"(?i)assertion|assert failed", "NUMERIC_CONVERSION": b"(?i)stoi|stoll|out_of_range|invalid_argument",
                   }.items() if re.search(pattern, result.stderr)], "raw_stderr_published": False,
                   "raw_trace_published": False}
         if result.returncode and shutil.which("strace"):
@@ -89,7 +92,10 @@ def diagnose(force_default_cpu_count: int | None = None, public_wrapper_baseline
                 if failure:
                     name, error = failure.groups()
                     denials[name + ":" + error] += 1
-                    recent.append({"syscall": name, "errno": error,
+                    counter_name = next((value for value in ("memory.max", "cpu.max", "memory.current", "memory.peak",
+                                        "memory.limit_in_bytes", "cpu.cfs_quota_us", "cpu.cfs_period_us")
+                                         if "/" + value + '"' in line), None)
+                    recent.append({"syscall": name, "errno": error, "public_counter": counter_name,
                                    "path_category": "CGROUP" if "/sys/fs/cgroup" in line else "RUNTIME_LIBRARY" if "/lib" in line else
                                    "PROC_CPU" if "/proc" in line else "OTHER"})
                 for signal in re.findall(r"\bSIG(?:ABRT|SEGV|ILL|SYS|KILL|XCPU|BUS)\b", line):

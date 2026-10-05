@@ -112,6 +112,12 @@ def prepare(port: int, main_project: str | None) -> tuple[Path, dict]:
         else:
             entry["environment"].update(PYTHONDONTWRITEBYTECODE="1", REPORT_BATCH_ROWS="16", REPORT_PREVIEW_MAX_BYTES="65536",
                 REPORT_DOWNLOAD_MAX_ROWS="300", REPORT_XLSX_MAX_ROWS="300", REPORT_MAX_JOIN_ROWS="3000")
+            # The production ready probe intentionally writes a .ready file.
+            # Verify it explicitly before the observation baseline below; use
+            # the real read-only liveness endpoint for concurrent Docker checks.
+            entry["healthcheck"] = {"test": ["CMD", "python", "-c",
+                "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"],
+                "interval": "5s", "timeout": "5s", "retries": 20}
     (directory / "compose.json").write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     guard.preflight(directory, context)
     return directory, context
@@ -207,7 +213,7 @@ def storage_snapshot(directory: Path, context: dict) -> dict:
 from pathlib import Path
 from sqlalchemy import select,func
 from trackvance.db import SessionLocal
-from trackvance.models import Artifact,DatasetVersion
+from trackvance.models import Artifact,DatasetVersion,Job
 digest,files,total=hashlib.sha256(),0,0
 for path in sorted(Path('/var/lib/trackvance').rglob('*')):
     if path.is_file():
@@ -217,6 +223,7 @@ for path in sorted(Path('/var/lib/trackvance').rglob('*')):
             while chunk:=source.read(1048576):digest.update(chunk)
 with SessionLocal() as db:
     counts={name:db.scalar(select(func.count()).select_from(model)) for name,model in [('artifacts',Artifact),('versions',DatasetVersion)]}
+    counts['jobs']=dict(db.execute(select(Job.status,func.count()).group_by(Job.status)).all())
 active=0
 for path in Path('/proc').glob('[0-9]*/cmdline'):
     try:
@@ -238,7 +245,7 @@ def verify_trace_privacy(directory: Path) -> None:
                      "-yy", "-s", "0", "-e", "trace=write,writev", "-o", "/observe/privacy-check",
                      "/bin/sh", "-c", "printf " + sentinel], directory, service + "-privacy-check")
         trace = (directory / "observer" / service / "privacy-check").read_text(encoding="utf-8")
-        if sentinel in trace or "write(" not in trace:
+        if sentinel in trace or re.search(r"\b(?:write|writev)\(", trace) is None:
             raise RuntimeError("strace no ocultó el buffer o no produjo evidencia de escritura.")
 
 
@@ -273,8 +280,16 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
     for name, query in (("broad", broad), ("narrow", narrow), ("excessive", excessive), ("preview_disconnect", narrow)):
         phase(progress, "FREEZE_JOINT_CONTEXT", name)
         frozen[name] = client.call("/reports/resolve", {"draft": query})["context_id"]
+    phase(progress, "VERIFY_FIXTURE_JOBS_TERMINAL")
+    progress["fixture_job_counts_before_stop"] = storage_snapshot(directory, context)["jobs"]
+    assert progress["fixture_job_counts_before_stop"] == {"SUCCESS": 4}, "Los cuatro trabajos de adquisición/Intake deben terminar antes del baseline."
+    phase(progress, "STOP_COMPLETED_FIXTURE_WORKERS")
+    private_run([*guard.compose_args(directory, context), "stop", "worker", "acquisition-worker"],
+                directory, "freeze-fixture-workers")
     phase(progress, "STORAGE_AND_METADATA_BASELINE")
+    assert client.call("/health/ready")["status"] == "ready"
     before = storage_snapshot(directory, context)
+    progress["metadata_storage_baseline"] = before
     assert before["active_report_children"] == 0
     expected = cycle.rows_hash(cycle.oracle_rows("FULL", 120))
     cases = progress["cases"]
@@ -282,6 +297,7 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
     def record(name: str, baseline: dict, execution: dict, **evidence):
         phase(progress, "VERIFY_STORAGE_METADATA_AND_SYSCALLS", name)
         after = storage_snapshot(directory, context)
+        progress["last_storage_snapshot"] = after
         progress["last_execution"] = {key: execution.get(key) for key in ("status", "generation_status", "transmission_status", "error_code")}
         observed = observe(directory, baseline)
         progress["last_observation"] = observed

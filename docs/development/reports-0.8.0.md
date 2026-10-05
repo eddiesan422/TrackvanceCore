@@ -264,6 +264,12 @@ recibe threads/memoria explícitos. No inicializa los tipos DB-API del paquete
 público, que crean una conexión por defecto sin esos límites. El cargador usa
 exclusivamente `sys.base_prefix/lib`, derivado del runtime, sin heredar su valor
 del proceso coordinador.
+Los límites públicos de CPU/memoria del cgroup propio se descubren desde
+`/proc/self/cgroup` antes de instalar Landlock. Se permiten únicamente archivos
+regulares de contadores concretos dentro de `/sys/fs/cgroup`, incluidas las rutas
+anidadas del proceso en runners hosted; ningún directorio cgroup recibe permiso
+de lectura. Rutas relativas, traversal y symlinks fuera de ese filesystem se
+rechazan. No concede acceso a procesos vecinos ni amplía los presupuestos.
 
 Métricas `rows`, `bytes`, `elapsed_seconds`, `max_rss_bytes` pertenecen al motor
 y canal. RSS máximo es del hijo, no pico agregado; tiempo comienza tras conexión.
@@ -314,6 +320,14 @@ cap-drop ALL/no-new-privileges; no se usan como imágenes de instalación. Las
 trazas privadas nunca se publican: sólo casos, códigos, contadores y hashes.
 El proxy de `/api/v1/reports/` desactiva buffering de solicitudes/respuestas y
 temporales de proxy; el gate comprueba esa configuración exacta.
+Los cuatro Jobs de preparación (dos adquisiciones y dos Intake) deben estar
+SUCCESS antes de detener sus workers; nunca se cancelan para iniciar la medición.
+El probe real `/health/ready` se comprueba una vez antes del baseline, pues escribe
+un marcador de disponibilidad por diseño. Durante el intervalo Docker usa el
+endpoint real `/health` de sólo lectura. El observador no exime archivos `.ready`
+ni permite escrituras de otros procesos dentro del intervalo.
+La evidencia pública preserva los intentos fallidos y el resultado de los diez
+casos en `docs/development/evidence/0.8.0/reports-ephemeral-http*.json`.
 
 `scripts/tests/reports_postgres_snapshot.py` verifica la resolución conjunta real
 contra dos nuevas aprobaciones Intake confirmadas en otra conexión entre la
