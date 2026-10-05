@@ -48,6 +48,7 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         if len(content) > 2 * 1024**2:
             raise OperationError(422, "REPORT_CONTEXT_LIMIT", "El contexto resuelto supera 2 MiB.")
         assert process.stdin and process.stdout
+        output_stream = process.stdout
         process.stdin.write(content)
         process.stdin.close()
         messages: queue.Queue = queue.Queue(maxsize=1)
@@ -55,7 +56,7 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         def read():
             try:
                 while not stop.is_set():
-                    line = process.stdout.readline(limits.batch_bytes + 1024)
+                    line = output_stream.readline(limits.batch_bytes + 1024)
                     if not line:
                         value = None
                     elif len(line) > limits.batch_bytes:

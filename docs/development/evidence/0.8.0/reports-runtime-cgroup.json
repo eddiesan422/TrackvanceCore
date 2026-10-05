@@ -370,11 +370,175 @@
     }
   },
   "cleanup": {
-    "owned_remaining": 0
+    "owned_remaining": 0,
+    "owned_volumes_remaining": 0
   },
   "raw_queries_published": false,
   "raw_rows_published": false,
   "raw_stderr_published": false,
   "raw_trace_published": false,
-  "raw_kernel_membership_paths_published": false
+  "raw_kernel_membership_paths_published": false,
+  "full_suite_attempts": [
+    {
+      "attempt": 1,
+      "status": "FAIL",
+      "source_commit_sha": "3b48d9754b4e63e2ac7736fc16989d75174a54a9",
+      "passed": 64,
+      "failed": 6,
+      "skipped": 0,
+      "warnings": 2,
+      "elapsed_seconds": 23.13,
+      "error_code": "REPORT_DISK_LIMIT",
+      "failure_scope": "Owned fixture tmpfs capacity512MiB did not meet unchanged DATASET disk reservation",
+      "failed_tests": [
+        "tests/test_reports_lifecycle.py::test_ephemeral_outputs_publication_idempotency_and_native_intake",
+        "tests/test_reports_lifecycle.py::test_cancel_at_each_materialization_stage_leaves_no_partial_output[PUBLICATION]",
+        "tests/test_reports_lifecycle.py::test_pending_publications_same_name_have_one_winner_and_no_orphans",
+        "tests/test_reports_lifecycle.py::test_worker_recovery_reclaims_old_prepared_attempt_and_publishes_once",
+        "tests/test_reports_lifecycle.py::test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup[MATERIALIZATION]",
+        "tests/test_reports_lifecycle.py::test_actual_worker_process_crash_restart_and_abandoned_staging_cleanup[PROFILING]"
+      ],
+      "kernel_caps": {
+        "started_at": "2026-10-05T18:41:30.2312508Z",
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "nano_cpus": 2000000000,
+        "pids": 128,
+        "network_mode": "none",
+        "cgroup_namespace": "private",
+        "pid_mode": "",
+        "ipc_mode": "private",
+        "cap_drop": [
+          "ALL"
+        ],
+        "security_opt": [
+          "no-new-privileges"
+        ],
+        "readonly_rootfs": true,
+        "privileged": false,
+        "tmpfs": {
+          "/tmp": "rw,noexec,nosuid,size=512m"
+        },
+        "mounts": [
+          {
+            "Destination": "/app/backend/alembic.ini",
+            "RW": false
+          },
+          {
+            "Destination": "/testdeps",
+            "RW": false
+          },
+          {
+            "Destination": "/app/backend/src",
+            "RW": false
+          },
+          {
+            "Destination": "/app/scripts",
+            "RW": false
+          },
+          {
+            "Destination": "/app/backend/tests",
+            "RW": false
+          },
+          {
+            "Destination": "/app/backend/migrations",
+            "RW": false
+          }
+        ],
+        "live_before_memory_bytes": 1610612736,
+        "combined_memory_bytes": 3758096384,
+        "cap_budget_bytes": 9663676416
+      },
+      "fixture_cleaned": true
+    },
+    {
+      "attempt": 2,
+      "status": "PASS",
+      "source_commit_sha": "3b48d9754b4e63e2ac7736fc16989d75174a54a9",
+      "selection": [
+        "tests/test_reports_query_exports.py",
+        "tests/test_reports_executor.py",
+        "tests/test_reports_lifecycle.py"
+      ],
+      "passed": 70,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 2,
+      "elapsed_seconds": 33.63,
+      "container_exit": 0,
+      "fixture_change": "Owned Docker volume for temporary files; product resource profiles unchanged",
+      "disk_preflight": {
+        "check": "OWNED_REPORTS_SUITE_DISK_PREFLIGHT",
+        "uid": 1001,
+        "gid": 1001,
+        "free_bytes": 949528801280,
+        "required_free_bytes": 5368709120,
+        "profile_memory_bytes": 536870912,
+        "process_memory_bytes": 2147483648,
+        "profile_temp_bytes": 2147483648
+      },
+      "kernel_caps": {
+        "started_at": "2026-10-05T18:44:17.047786Z",
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "nano_cpus": 2000000000,
+        "pids": 128,
+        "network_mode": "none",
+        "cgroup_namespace": "private",
+        "pid_mode": "",
+        "ipc_mode": "private",
+        "cap_drop": [
+          "ALL"
+        ],
+        "security_opt": [
+          "no-new-privileges"
+        ],
+        "readonly_rootfs": true,
+        "privileged": false,
+        "volume_owned": true,
+        "owner_uid": 1001,
+        "mounts": [
+          {
+            "Type": "bind",
+            "Destination": "/app/backend/migrations",
+            "RW": false
+          },
+          {
+            "Type": "bind",
+            "Destination": "/app/backend/alembic.ini",
+            "RW": false
+          },
+          {
+            "Type": "bind",
+            "Destination": "/testdeps",
+            "RW": false
+          },
+          {
+            "Type": "volume",
+            "Destination": "/tmp",
+            "RW": true
+          },
+          {
+            "Type": "bind",
+            "Destination": "/app/backend/src",
+            "RW": false
+          },
+          {
+            "Type": "bind",
+            "Destination": "/app/scripts",
+            "RW": false
+          },
+          {
+            "Type": "bind",
+            "Destination": "/app/backend/tests",
+            "RW": false
+          }
+        ],
+        "live_before_memory_bytes": 0,
+        "combined_memory_bytes": 2147483648,
+        "cap_budget_bytes": 9663676416
+      },
+      "fixture_cleaned": true
+    }
+  ]
 }

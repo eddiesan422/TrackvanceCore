@@ -1,0 +1,59 @@
+{
+  "run_id": 37357555598,
+  "head_sha": "3b48d9754b4e63e2ac7736fc16989d75174a54a9",
+  "backend_job_id": 111923706011,
+  "backend": "FAILURE",
+  "frontend": "SUCCESS",
+  "dependent_jobs_skipped": 12,
+  "probe": {
+    "affinity_cpu_count": 4,
+    "check": "REPORT_NATIVE_RUNTIME_DIAGNOSTIC",
+    "host_cpu_count": 4,
+    "libc": [
+      "glibc",
+      "2.39"
+    ],
+    "message_kinds": [
+      "cardinality",
+      "schema",
+      "batch",
+      "complete"
+    ],
+    "process_memory_bytes": 2147483648,
+    "profile_memory_bytes": 536870912,
+    "profile_threads": 2,
+    "python": "3.12.14",
+    "raw_stderr_published": false,
+    "raw_trace_published": false,
+    "runtime_exit_code": 0,
+    "runtime_module": "_duckdb",
+    "status": "PASS",
+    "stderr_bytes": 0,
+    "stderr_categories": [],
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "synthetic_default_cpu_count": null
+  },
+  "pytest": {
+    "collected": 1902,
+    "passed": 1886,
+    "failed": 0,
+    "skipped": 16,
+    "warnings": 13,
+    "elapsed_seconds": 345.53
+  },
+  "ruff": "PASS",
+  "mypy": {
+    "checked_source_files": 75,
+    "errors": [
+      {
+        "file": "src/trackvance/report_executor.py",
+        "line": 58,
+        "code": "union-attr",
+        "message": "Item \"None\" of \"IO[Any] | None\" has no attribute \"readline\""
+      }
+    ]
+  },
+  "contracts": "SKIPPED",
+  "postgres_migrations": "SKIPPED",
+  "closure_status": "Not100percent"
+}

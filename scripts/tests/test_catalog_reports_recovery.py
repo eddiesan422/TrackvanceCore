@@ -23,6 +23,15 @@ def test_diagnostic_fixture_passes_bounded_inspection_and_fails_complete_reader(
         list(FileBatchReader(path, path.name))
 
 
+def test_saved_definition_resolves_its_exact_persisted_schema_draft():
+    draft = {"mode": "GUIDED", "expected_schemas": {"a": [{"name": "id", "logical_type": "STRING"}]}}
+    calls = []
+    api = SimpleNamespace(json=lambda *arguments: calls.append(arguments) or {"context_id": "frozen"})
+    result = recovery.resolve_saved_definition(api, {"revisions": [{"id": "r2", "draft": draft}]})
+    assert result == {"context_id": "frozen"}
+    assert calls == [("POST", "/reports/resolve", {"draft": draft, "revision_id": "r2"})]
+
+
 def test_native_recovery_requires_populated_new_entities():
     tables = {name: {"row": "hash"} for name in recovery.docker_state.CURRENT_STATE_TABLES}
     state = {"schema_version": 8, "migration": "0017_catalog_reports", "tables": tables}
@@ -90,9 +99,15 @@ def test_native_sequence_starts_fixture_services_then_stops_source_after_restore
     original = recovery.docker_state.compose
 
     def compose(identity, *arguments):
-        assert identity == project and arguments[:2] == ("up", "--no-build")
-        assert arguments[-6:] == recovery.NATIVE_FIXTURE_SERVICES
-        events.append("start")
+        assert identity == project
+        if arguments[0] == "up":
+            assert arguments[:2] == ("up", "--no-build")
+            assert arguments[-6:] == recovery.NATIVE_FIXTURE_SERVICES
+            events.append("start")
+        else:
+            assert arguments[:3] == ("create", "--no-build", "--no-recreate")
+            assert arguments[3:] == ("delivery-worker", "scheduler", "events-notifications", "events-chaining")
+            events.append("create_inactive")
 
     def backup(identity, target):
         assert identity == project
@@ -111,7 +126,7 @@ def test_native_sequence_starts_fixture_services_then_stops_source_after_restore
     monkeypatch.setattr(recovery, "restore_compare", lambda *_args, **_kwargs: events.append("restore") or {})
     monkeypatch.setattr(recovery, "stop_quiescent_population", lambda *_args: events.append("stop") or "STOPPED_QUIESCENT")
     result = recovery.native_cycle(tmp_path, {"project": project}, tmp_path)
-    assert events == ["start", "fixture", "backup", "verify", "state", "privacy", "restore", "stop"]
+    assert events == ["start", "create_inactive", "fixture", "backup", "verify", "state", "privacy", "restore", "stop"]
     assert result["source_final_state"] == "STOPPED_QUIESCENT"
     assert recovery.docker_state.compose is original
 

@@ -34,6 +34,7 @@ AUTHENTIC_070 = "d9b6856e757a2a1fcab3913209146f3b7b79d70c"
 AUTOMATIC = ("worker", "acquisition-worker", "delivery-worker", "report-worker", "scheduler",
              "events-notifications", "events-chaining")
 NATIVE_FIXTURE_SERVICES = ("postgres", "api", "worker", "acquisition-worker", "report-worker", "web")
+INACTIVE_NATIVE_SERVICES = tuple(name for name in AUTOMATIC if name not in NATIVE_FIXTURE_SERVICES)
 
 
 def available_port():
@@ -177,6 +178,11 @@ def diagnostic_fixture_payload():
     return b"id,value\n" + b"001,valid\n" * 100 + b"101,invalid,extra\n"
 
 
+def resolve_saved_definition(api, definition):
+    revision = definition["revisions"][0]
+    return api.json("POST", "/reports/resolve", {"draft": revision["draft"], "revision_id": revision["id"]})
+
+
 def prepare_native(context, environment):
     api = RecoveryApi(context["port"], (environment["POSTGRES_PASSWORD"],))
     label = "Recovery080 " + uuid4().hex[:8]
@@ -191,7 +197,7 @@ def prepare_native(context, environment):
         "joins": [], "order_by": [{"source_alias": "a", "column": "id", "direction": "ASC"}]}
     definition = api.json("POST", "/reports/definitions", {"name": label + " Report", "draft": draft})
     definition = api.json("POST", "/reports/definitions/" + definition["id"] + "/revisions", {"expected_version": 1, "draft": draft})
-    context_result = api.json("POST", "/reports/resolve", {"draft": draft, "revision_id": definition["revisions"][0]["id"]})
+    context_result = resolve_saved_definition(api, definition)
     generation = api.json("POST", "/reports/datasets", {"context_id": context_result["context_id"],
         "idempotency_key": "recover-" + uuid4().hex, "name": label + " Output"})
     completed = wait(api, "/reports/executions/" + generation["id"])
@@ -312,6 +318,7 @@ def native_cycle(directory, context, evidence):
         docker_state.compose = compose_adapter(directory, context, environment)
         started = True
         docker_state.compose(context["project"], "up", "--no-build", "-d", "--wait", "--wait-timeout", "300", *NATIVE_FIXTURE_SERVICES)
+        docker_state.compose(context["project"], "create", "--no-build", "--no-recreate", *INACTIVE_NATIVE_SERVICES)
         fixture = prepare_native(context, environment)
         backup = evidence / "backup"
         docker_state.backup(context["project"], backup)
