@@ -11,17 +11,21 @@ from pathlib import Path
 from uuid import uuid4
 
 from ci.common import ROOT, SHA, load_manifest, require
+from ci.compose_preflight import PREFLIGHT_CODES
 
 MAX_BYTES = 2 * 1024**2
 ERROR_TYPES = {'AssertionError', 'RuntimeError', 'ValueError', 'TimeoutError', 'TimeoutExpired',
                'FileNotFoundError', 'ConnectionError', 'HTTPError', 'URLError', 'IncompleteRead',
-               'EvidenceError', 'PermissionError', 'OSError', 'KeyError', 'TypeError', 'MemoryError'}
+               'EvidenceError', 'PermissionError', 'OSError', 'KeyError', 'TypeError', 'MemoryError',
+               'RecoveryCheckError', 'RecoveryCommandError', 'DeliveryEvidenceError',
+               'ImportError', 'ModuleNotFoundError', 'ComposePreflightError'}
 ERROR_CODES = {'REPORT_TIMEOUT', 'REPORT_RESULT_LIMIT', 'REPORT_JOIN_LIMIT', 'REPORT_JOIN_EXPANSION',
                'REPORT_MEMORY_LIMIT', 'REPORT_DISK_LIMIT', 'REPORT_ENGINE_FAILED', 'REPORT_ENGINE_ERROR',
                'REPORT_SOURCE_CHANGED', 'REPORT_CONTEXT_EXPIRED', 'REPORT_CANCELLED',
                'ACQUISITION_ROW_LIMIT', 'CHILD_EXIT_NONZERO', 'CHILD_TIMEOUT', 'GROUP_DEADLINE_EXPIRED',
                'EVIDENCE_VALIDATION_FAILED', 'OWNED_CLEANUP_FAILED', 'UNCLASSIFIED_CHILD_FAILURE'}
 ERROR_CODES |= {'CERTIFICATION_ASSERTION_FAILED', 'CERTIFICATION_EXCEPTION'}
+ERROR_CODES |= PREFLIGHT_CODES
 CHILD_PHASES = {'backend-build', 'web-build', 'startup', 'postgres-snapshot', 'recovery',
                 'ephemeral-observation', 'stop-population-services', 'browser',
                 *(f'{prefix}-{rows}' for prefix in ('reports', 'copy') for rows in (120, 400000, 1000000))}
@@ -37,6 +41,28 @@ CATALOG_PHASES = {'SCOPE_VALIDATION', 'AUTHENTICATION', 'CATALOG_FIXTURE', 'SQL_
     *(f'{join}_{suffix}' for join in ('INNER', 'LEFT', 'RIGHT', 'FULL') for suffix in ('RESOLVE', 'PREVIEW',
       'FULL_POPULATION_ORACLE', 'DATASET_ENQUEUE_IDEMPOTENCE', 'DATASET_WAIT', 'DATASET_ASSERT', 'MATERIALIZED_FULL_ORACLE')),
     *(f'{fmt}_{suffix}' for fmt in ('CSV', 'XLSX') for suffix in ('DOWNLOAD', 'FULL_ORACLE', 'TERMINAL_ASSERT', 'ABOVE_LIMIT_NEGATIVE'))}
+RECOVERY_PHASES = {'freshness_guards', 'external_postgresql', 'source_trackvance',
+    'postgres_migration', 'source_trackvance_fixtures', 'delivery_operational_fixtures',
+    'identity_fixtures', 'backup', 'destroy_source', 'restore', 'functional_recovery',
+    'doctor_and_logs', 'freshness', 'authentic_source_build', 'source_fixtures',
+    'source_backup', 'enable_disposable_access', 'current_credentials', 'current_backup_privacy',
+    'authentic_archive', 'authentic_source_start', 'historical_fixtures', 'authentic_backup',
+    'destroy_authentic_source', 'restore_080_stopped', 'multipart_fixture', 'native_backup',
+    'fresh_restore', 'restored_multipart'}
+RECOVERY_CODES = {'RECOVERY_API_UNEXPECTED_HTTP', 'RECOVERY_RUN_NOT_SUCCESS',
+    'RECOVERY_ACQUISITION_NOT_PUBLISHED', 'CANONICAL_ARTIFACT_HASH_MISMATCH',
+    'CANONICAL_BUNDLE_INVENTORY_MISMATCH', 'CANONICAL_DESCRIPTOR_INVALID',
+    'CANONICAL_DESCRIPTOR_HASH_MISMATCH', 'CANONICAL_DESCRIPTOR_TOTALS_MISMATCH',
+    'CANONICAL_PART_SIZE_MISMATCH', 'CANONICAL_PART_HASH_MISMATCH',
+    'SOURCE_CONNECTION_TEST_FAILED', 'SOURCE_SCHEMA_UNAVAILABLE', 'SOURCE_OBJECTS_UNAVAILABLE',
+    'SOURCE_PREVIEW_MISMATCH', 'SOURCE_SNAPSHOT_MISMATCH', 'SOURCE_SNAPSHOT_LINEAGE_MISMATCH',
+    'SOURCE_INTAKE_DECISION_MISMATCH', 'DELIVERY_EVIDENCE_NOT_COMMITTED',
+    'DELIVERY_EVIDENCE_PENDING_REPAIR', 'DELIVERY_EVIDENCE_TIMEOUT'}
+RECOVERY_CODES |= PREFLIGHT_CODES
+COMPOSE_FAILURES = {'CONTAINER_UNHEALTHY', 'BUILD_FAILED', 'PORT_BIND_FAILED', 'OTHER_COMPOSE_FAILURE'}
+RUNTIME_SERVICES = {'postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
+                    'report-worker', 'scheduler', 'events-notifications', 'events-chaining',
+                    'web', 'mock-oidc', 'source-postgres', 'source-sqlserver'}
 
 
 def number(value):
@@ -54,6 +80,32 @@ def safe_error(value):
             result['type'] = value['type']
         if allowed(value.get('code'), ERROR_CODES):
             result['code'] = value['code']
+    return result
+
+
+def sanitize_download_oracles(value):
+    """Retain complete count/checksum comparisons, without source data or text."""
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for format, limit in (('CSV', 100000), ('XLSX', 50000)):
+        oracle = value.get(format)
+        if (not isinstance(oracle, dict) or set(oracle) != {'actual', 'expected', 'status'}
+                or not allowed(oracle.get('status'), {'PASS', 'FAIL'})):
+            continue
+        valid = True
+        for key, maximum in (('actual', 1000000), ('expected', limit)):
+            item = oracle[key]
+            if (not isinstance(item, dict) or set(item) != {'rows', 'sha256'}
+                    or type(item.get('rows')) is not int or not 0 <= item['rows'] <= maximum
+                    or not isinstance(item.get('sha256'), str)
+                    or not re.fullmatch(r'[a-f0-9]{64}', item['sha256'])):
+                valid = False
+                break
+        if not valid or (oracle['actual'] == oracle['expected']) != (oracle['status'] == 'PASS'):
+            continue
+        result[format] = {'actual': dict(oracle['actual']), 'expected': dict(oracle['expected']),
+                          'status': oracle['status']}
     return result
 
 
@@ -88,6 +140,9 @@ def sanitize_summary(value, depth=0):
             result[key] = value[key]
     if number(value.get('duration_seconds')):
         result['duration_seconds'] = value['duration_seconds']
+    oracles = sanitize_download_oracles(value.get('download_oracles'))
+    if oracles:
+        result['download_oracles'] = oracles
     error = safe_error(value.get('error'))
     if error:
         result['error'] = error
@@ -143,7 +198,9 @@ def extract_log_facts(path: Path, sources: set[str]):
             source_file = ROOT / failure[1]
             if source_file.is_file() and re.search(r'\bdef\s+' + re.escape(failure[2]) + r'\b', source_file.read_text(encoding='utf-8')):
                 tests.add(failure[1] + '::' + failure[2])  # parameter values are never retained
-        exception = re.match(r'^([A-Za-z][A-Za-z0-9_]*)(?::|$)', line)
+        # Python qualifies this trusted exception by its defining module. No
+        # arbitrary module names, exception message or resolved values survive.
+        exception = re.match(r'^(?:(?:scripts\.)?ci\.compose_preflight\.)?([A-Za-z][A-Za-z0-9_]*)(?::|$)', line)
         if exception and exception[1] in ERROR_TYPES:
             types.add(exception[1])
         if exception and exception[1] in ERROR_TYPES:
@@ -171,6 +228,12 @@ def extract_log_facts(path: Path, sources: set[str]):
 
 
 def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, sources=None):
+    if group == 'backup-restore':
+        return collect_recovery_failure(before, root=root)
+    if group == 'corrections-recovery':
+        return collect_corrections_recovery_failure(before, root=root)
+    if group in {'compose-critical', 'identity-sso', 'connections'}:
+        return collect_compose_failure(group, before, root=root)
     if group != 'catalog-reports':
         return []
     sources = trusted_sources() if sources is None else sources
@@ -198,6 +261,185 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
             if any(facts.values()):
                 observations.append({'kind': 'CATALOG_TIER_LOG_FACTS', 'rows': rows, 'facts': facts})
     return observations[:12]
+
+
+def sanitize_recovery_summary(value):
+    """Closed runner diagnostics only; never include a request, message or row."""
+    if not isinstance(value, dict):
+        return {}
+    result = {'status': value['status']} if allowed(value.get('status'), {'PASS', 'FAIL'}) else {}
+    for key, choices in (('failed_stage', RECOVERY_PHASES), ('error_type', ERROR_TYPES),
+                         ('error_code', RECOVERY_CODES),
+                         ('error_category', {'CONNECTION', 'SQL', 'UNHEALTHY', 'BUILD', 'UNKNOWN'}),
+                         ('source_version', {'0.5.1', '0.6.0', '0.6.1'}),
+                         ('target_version', {'0.8.0'}), ('cleanup', {'PASS', 'FAIL'}),
+                         ('main_inventory', {'UNCHANGED', 'CHANGED_OR_UNVERIFIABLE', 'UNVERIFIABLE'}),
+                         ('cleanup_error_type', ERROR_TYPES), ('inventory_error_type', ERROR_TYPES)):
+        if allowed(value.get(key), choices):
+            result[key] = value[key]
+    if type(value.get('exit_code')) is int and -255 <= value['exit_code'] <= 255:
+        result['exit_code'] = value['exit_code']
+    if number(value.get('duration_seconds')):
+        result['duration_seconds'] = value['duration_seconds']
+    return result
+
+
+def collect_corrections_recovery_failure(before: set[Path], *, root: Path = ROOT):
+    """Read the parent's closed native sidecar from its fresh exact UUID context."""
+    base = root / '.codex-local/v070'
+    if (not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                               for part in (base, base.parent, base.parent.parent))):
+        return []
+    observations = []
+    for context in sorted(base.iterdir()):
+        if (not re.fullmatch(r'trackvance-v070-test-corrections-recovery-[a-f0-9]{12}', context.name)
+                or not context.is_dir() or context.is_symlink()
+                or getattr(context, 'is_junction', lambda: False)()):
+            continue
+        isolation = context / 'isolation.json'
+        path = context / 'native-recovery-diagnostic.json'
+        if any(not file.is_file() or file.resolve() in before or file.is_symlink()
+               or getattr(file, 'is_junction', lambda: False)() or file.stat().st_size > MAX_BYTES
+               for file in (isolation, path)):
+            continue
+        try:
+            identity = json.loads(isolation.read_text(encoding='utf-8'))
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if (not isinstance(identity, dict) or identity.get('project') != context.name
+                or not isinstance(value, dict) or type(value.get('schema_version')) is not int
+                or value['schema_version'] != 1 or value.get('kind') != 'RECOVERY_PARTIAL_SUMMARY'
+                or value.get('profile') != 'native' or type(value.get('summary_present')) is not bool):
+            continue
+        result = sanitize_recovery_summary(value.get('result'))
+        if result.get('status') not in {'PASS', 'FAIL'}:
+            continue
+        observations.append({'kind': 'RECOVERY_PARTIAL_SUMMARY', 'profile': 'native',
+                             'summary_present': value['summary_present'], 'result': result})
+    return observations[:4]
+
+
+def collect_recovery_failure(before: set[Path], *, root: Path = ROOT):
+    """Read only new UUID-owned native/legacy result documents before wrapper cleanup."""
+    observations = []
+    bases = [(root / '.codex-local/recovery', False), (root / '.codex-local/v070', True)]
+    for base, legacy061 in bases:
+        if not base.is_dir() or base.is_symlink() or getattr(base, 'is_junction', lambda: False)():
+            continue
+        if any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+               for part in (base.parent, base.parent.parent)):
+            continue
+        for context in sorted(base.iterdir()):
+            if not context.is_dir() or context.is_symlink() or getattr(context, 'is_junction', lambda: False)():
+                continue
+            native = re.fullmatch(r'trackvance-v070-test-recovery-src-([a-f0-9]{12})-to-'
+                                  r'trackvance-v070-test-recovery-dst-\1', context.name) if not legacy061 else None
+            legacy = re.fullmatch(r'legacy061-([a-f0-9]{12})' if legacy061 else
+                                  r'identity-legacy-([a-f0-9]{12})', context.name)
+            if not native and not legacy:
+                continue
+            path = context / 'result.json'
+            if (not path.is_file() or path.resolve() in before or path.is_symlink()
+                    or getattr(path, 'is_junction', lambda: False)() or path.stat().st_size > MAX_BYTES):
+                continue
+            try:
+                value = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError, RecursionError):
+                continue
+            if not isinstance(value, dict) or value.get('status') != 'FAIL':
+                continue
+            if native:
+                suffix, prefix, profile = native[1], 'recovery', 'native'
+            else:
+                version = value.get('source_version')
+                if not allowed(version, {'0.6.1'} if legacy061 else {'0.5.1', '0.6.0'}):
+                    continue
+                suffix = legacy[1]
+                profile = prefix = 'legacy' + version.replace('.', '')
+            source = f'trackvance-v070-test-{prefix}-src-{suffix}'
+            target = f'trackvance-v070-test-{prefix}-dst-{suffix}'
+            if value.get('source_project') != source or value.get('target_project') != target:
+                continue
+            observations.append({'kind': 'RECOVERY_PARTIAL_SUMMARY', 'profile': profile,
+                                 'result': sanitize_recovery_summary(value)})
+    return observations[:8]
+
+
+def sanitize_runtime_diagnostics(value):
+    """Retain health/exit/OOM counters, never IDs, env, health output or logs."""
+    if not isinstance(value, list):
+        return []
+    results = []
+    for row in value[:20]:
+        if not isinstance(row, dict) or not allowed(row.get('service'), RUNTIME_SERVICES):
+            continue
+        result = {'service': row['service']}
+        for key, choices in (('state', {'created', 'restarting', 'running', 'removing', 'paused', 'exited', 'dead', 'UNKNOWN'}),
+                             ('health', {'starting', 'healthy', 'unhealthy', 'UNKNOWN'})):
+            if allowed(row.get(key), choices):
+                result[key] = row[key]
+        if type(row.get('oom_killed')) is bool:
+            result['oom_killed'] = row['oom_killed']
+        if type(row.get('exit_code')) is int and -255 <= row['exit_code'] <= 255:
+            result['exit_code'] = row['exit_code']
+        for key in ('pids_limit', 'memory_limit_bytes', 'nano_cpus'):
+            if type(row.get(key)) is int and 0 <= row[key] <= 128 * 1024**3:
+                result[key] = row[key]
+        results.append(result)
+    return results
+
+
+def collect_compose_failure(group, before, *, root=ROOT):
+    """Read only the exact fresh disposable child namespace for this group."""
+    folder, pattern = {
+        'compose-critical': ('v070', r'trackvance-v070-test-e2e-[a-f0-9]{12}'),
+        'identity-sso': ('v070', r'trackvance-v070-test-identity-[a-f0-9]{12}'),
+        'connections': ('connections-e2e', r'trackvance-connections-e2e-(?:[0-9]+-)?[a-f0-9]{12}'),
+    }[group]
+    base = root / '.codex-local' / folder
+    if (not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                               for part in (base, base.parent, base.parent.parent))):
+        return []
+    results = []
+    for context in sorted(base.iterdir()):
+        if (not re.fullmatch(pattern, context.name) or not context.is_dir() or context.is_symlink()
+                or getattr(context, 'is_junction', lambda: False)()):
+            continue
+        path = context / 'result.json'
+        if (not path.is_file() or path.resolve() in before or path.is_symlink()
+                or path.stat().st_size > MAX_BYTES):
+            continue
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if not isinstance(value, dict) or value.get('status') != 'FAIL' or value.get('project') != context.name:
+            continue
+        summary = {'status': 'FAIL'}
+        for key, choices in (('error_type', ERROR_TYPES), ('failed_stage', {'docker', 'storage_snapshot', 'restart_readiness'}),
+                             ('compose_failure', COMPOSE_FAILURES), ('cleanup', {'PASS', 'FAIL', 'NOT_STARTED'}),
+                             ('main_inventory', {'UNCHANGED', 'CHANGED_OR_UNVERIFIABLE'})):
+            if allowed(value.get(key), choices):
+                summary[key] = value[key]
+        if type(value.get('failed_exit_code')) is int and -255 <= value['failed_exit_code'] <= 255:
+            summary['failed_exit_code'] = value['failed_exit_code']
+        if number(value.get('duration_seconds')):
+            summary['duration_seconds'] = value['duration_seconds']
+        if type(value.get('demo_seed_enabled')) is bool:
+            summary['demo_seed_enabled'] = value['demo_seed_enabled']
+        runtime = sanitize_runtime_diagnostics(value.get('runtime_diagnostics'))
+        runtime_path = context / 'runtime-diagnostics.json'
+        if (not runtime and runtime_path.is_file() and runtime_path.resolve() not in before
+                and not runtime_path.is_symlink() and runtime_path.stat().st_size <= MAX_BYTES):
+            try:
+                runtime = sanitize_runtime_diagnostics(json.loads(runtime_path.read_text(encoding='utf-8')))
+            except (OSError, ValueError, RecursionError):
+                pass
+        if runtime:
+            summary['runtime'] = runtime
+        results.append({'kind': 'COMPOSE_PARTIAL_SUMMARY', 'profile': group, 'result': summary})
+    return results[:4]
 
 
 def publish_failure(group: str, output: Path, *, source_sha: str, ci: dict, phases: list[dict],

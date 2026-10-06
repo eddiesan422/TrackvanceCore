@@ -1,8 +1,10 @@
 """Pure regressions for every resolved resource, live inheritance and CI opt-in."""
+import ast
 import json
 import sys
 from copy import deepcopy
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -203,6 +205,91 @@ def test_resolved_environment_fails_closed_without_exposing_values(resolved, dam
     with pytest.raises(guard.ComposePreflightError) as raised:
         validate(resolved)
     assert "do-not-print-main-secret" not in str(raised.value)
+
+
+@pytest.mark.parametrize("key,value", [
+    ("TRACKVANCE_SECRETS_DIR", "/var/lib/trackvance-credentials"),
+    ("TRACKVANCE_SECRET_KEY_FILE", "/var/lib/trackvance-keys/master.key"),
+    ("TRACKVANCE_DESTINATION_SECRETS_DIR", "/var/lib/trackvance-delivery-credentials"),
+    ("TRACKVANCE_DESTINATION_SECRET_KEY_FILE", "/var/lib/trackvance-delivery-keys/master.key"),
+    ("AUTH_TOKEN_ENABLED", "false"), ("AUTH_SECRET_REQUIRED", "true"),
+    ("AUTH_TOKEN_TTL", "3600"), ("AUTH_SECRET_SCHEME", "Bearer"), ("AUTH_SECRET_MODE", "strict"),
+])
+def test_logical_container_paths_and_recognized_config_metadata_are_not_credential_material(resolved, key, value):
+    config, _, baseline, _ = resolved
+    baseline["containers"][0]["Config"]["Env"].append(key + "=" + value)
+    config["services"]["api"]["environment"][key] = value
+    validate(resolved)
+    assert value not in guard._protected(baseline)[4]
+
+
+@pytest.mark.parametrize("key", ["POSTGRES_PASSWORD", "AUTH_SECRET", "AUTH_TOKEN", "AUTH_PRIVATE_KEY",
+                                  "AUTH_CLIENT_ID", "ACCESS_KEY", "API_KEY", "AUTH_PASSWD"])
+@pytest.mark.parametrize("value", ["synthetic-credential-never-log", "/looks/like/a/path", "false", "Bearer"])
+def test_real_credential_material_remains_protected_even_when_renamed_or_shaped_as_metadata(resolved, key, value):
+    config, _, baseline, _ = resolved
+    baseline["containers"][0]["Config"]["Env"].append(key + "=" + value)
+    config["services"]["api"]["environment"]["RENAMED_VARIABLE"] = value
+    with pytest.raises(guard.ComposePreflightError) as raised:
+        validate(resolved)
+    assert raised.value.code == str(raised.value) == "LIVE_CREDENTIAL_INHERITANCE"
+    assert value not in str(raised.value)
+
+
+@pytest.mark.parametrize("key", ["AUTH_TOKEN_ENABLED", "AUTH_SECRET_TTL", "AUTH_TOKEN_MODE",
+                                  "AUTH_PRIVATE_KEY_FILE", "AUTH_SECRET_SCHEME"])
+def test_ambiguous_secret_named_metadata_is_protected_when_value_is_not_recognized(resolved, key):
+    config, _, baseline, _ = resolved
+    value = "synthetic-sensitive-value"
+    baseline["containers"][0]["Config"]["Env"].append(key + "=" + value)
+    config["services"]["api"]["environment"]["RENAMED_VARIABLE"] = value
+    with pytest.raises(guard.ComposePreflightError, match="LIVE_CREDENTIAL_INHERITANCE"):
+        validate(resolved)
+
+
+@pytest.mark.parametrize("baseline_url,fixture_url", [(False, True), (True, False), (True, True)])
+def test_url_password_encoding_and_renaming_cannot_hide_actual_credential_reuse(resolved, baseline_url, fixture_url):
+    config, _, baseline, _ = resolved
+    password = "synthetic:@ password/+é"
+    encoded = quote(password, safe="")
+    source = "DATABASE_URL=postgresql+psycopg://unused:" + encoded + "@private.invalid/unused" if baseline_url else "AUTH_SECRET=" + password
+    baseline["containers"][0]["Config"]["Env"].append(source)
+    values = config["services"]["api"]["environment"]
+    if fixture_url:
+        values["DATABASE_URL"] = "postgresql+psycopg://tv_v070_test:" + encoded + "@postgres:5432/tv_v070_test"
+    else:
+        values["RENAMED_VARIABLE"] = password
+    with pytest.raises(guard.ComposePreflightError) as raised:
+        validate(resolved)
+    assert raised.value.code == "LIVE_CREDENTIAL_INHERITANCE"
+    assert password not in str(raised.value) and encoded not in str(raised.value)
+
+
+def test_malformed_url_password_preserves_encoded_material_without_diagnostic_leak(resolved):
+    config, _, baseline, _ = resolved
+    baseline["containers"][0]["Config"]["Env"].append("DATABASE_URL=postgresql://user:%FFraw-secret@private.invalid/db")
+    config["services"]["api"]["environment"]["RENAMED_VARIABLE"] = "%FFraw-secret"
+    with pytest.raises(guard.ComposePreflightError, match="LIVE_CREDENTIAL_INHERITANCE"):
+        validate(resolved)
+
+
+def test_closed_preflight_codes_cover_every_literal_and_dynamic_resource_code():
+    tree = ast.parse(Path(guard.__file__).read_text(encoding="utf-8"))
+    codes = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        argument = node.args[1] if node.func.id == "require" and len(node.args) > 1 else (
+            node.args[0] if node.func.id == "ComposePreflightError" and node.args else None)
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            codes.add(argument.value)
+    assert guard.PREFLIGHT_CODES == codes | {"SHARED_VOLUMES", "SHARED_NETWORKS"}
+    for code in guard.PREFLIGHT_CODES:
+        error = guard.ComposePreflightError(code)
+        assert error.code == str(error) == code
+    with pytest.raises(ValueError) as raised:
+        guard.ComposePreflightError("unknown-env-payload-secret")
+    assert str(raised.value) == "UNKNOWN_PREFLIGHT_CODE"
 
 
 def test_mock_oidc_requires_explicit_overlay_and_mock_discovery(resolved):

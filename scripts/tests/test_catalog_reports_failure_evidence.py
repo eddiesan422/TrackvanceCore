@@ -78,6 +78,52 @@ def test_live_checkpoint_is_atomic_and_complete_status_is_not_invented(tmp_path,
     assert "secret" not in capsys.readouterr().out and "secret" not in json.dumps(result)
 
 
+@pytest.mark.parametrize('format', ['CSV', 'XLSX'])
+@pytest.mark.parametrize('damage', [None, 'short_population', 'same_count_different_content'])
+def test_download_oracle_preserves_counts_and_hashes_and_still_rejects_any_mismatch(tmp_path, format, damage):
+    progress = api.CertificationProgress(400000, tmp_path)
+    progress.phase(format + '_FULL_ORACLE')
+    expected = api.rows_hash([['synthetic-one'], ['synthetic-two']])
+    actual = expected if damage is None else api.rows_hash(
+        [['synthetic-one']] if damage == 'short_population' else [['synthetic-one'], ['different-two']])
+    if damage is None:
+        api.assert_download_oracle(progress, format, actual, expected)
+    else:
+        with pytest.raises(AssertionError):
+            api.assert_download_oracle(progress, format, actual, expected)
+    checkpoint = json.loads((tmp_path / 'result.json').read_text())
+    assert checkpoint['status'] == 'RUNNING'
+    assert checkpoint['active_phase'] == format + '_FULL_ORACLE'
+    assert checkpoint['download_oracles'][format] == {
+        'actual': actual, 'expected': expected, 'status': 'PASS' if damage is None else 'FAIL'}
+    assert 'synthetic-one' not in json.dumps(checkpoint) and 'different-two' not in json.dumps(checkpoint)
+
+
+@pytest.mark.parametrize('unavailable', [False, True])
+def test_stream_mismatch_retains_durable_failure_without_masking_comparison(tmp_path, unavailable):
+    progress = api.CertificationProgress(400000, tmp_path)
+    actual, expected = api.rows_hash([]), api.rows_hash([['synthetic']])
+    calls = []
+
+    class Client:
+        def call(self, path):
+            calls.append(path)
+            if unavailable:
+                raise RuntimeError('private diagnostic unavailable')
+            return {'status': 'FAILED', 'generation_status': 'FAILED', 'transmission_status': 'INTERRUPTED',
+                    'error_code': 'REPORT_TIMEOUT', 'message': 'private rows', 'rows': ['private rows']}
+
+    with pytest.raises(AssertionError):
+        api.assert_download_oracle(progress, 'CSV', actual, expected, client=Client(), execution_id='synthetic-id')
+    assert calls == ['/reports/executions/synthetic-id']
+    checkpoint = json.loads((tmp_path / 'result.json').read_text())
+    assert checkpoint['download_oracles']['CSV']['status'] == 'FAIL'
+    if not unavailable:
+        assert checkpoint['last_terminal'] == {'status': 'FAILED', 'generation_status': 'FAILED',
+            'transmission_status': 'INTERRUPTED', 'error_code': 'REPORT_TIMEOUT'}
+    assert 'private' not in json.dumps(checkpoint) and 'synthetic-id' not in json.dumps(checkpoint)
+
+
 def test_parent_copies_failed_million_checkpoint_before_raising(tmp_path, monkeypatch):
     original = RuntimeError("child exit=1; private log available")
     calls = []

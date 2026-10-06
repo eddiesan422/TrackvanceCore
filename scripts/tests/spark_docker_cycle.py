@@ -33,6 +33,22 @@ def memory_bytes(raw):
     return int(float(match[1]) * {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}[match[2]])
 
 
+def observed_population_mode(measured):
+    """Publish only the common mode observed in all verified module runtimes."""
+    outcomes = measured.get("outcomes", {}) if isinstance(measured, dict) else {}
+    if not isinstance(outcomes, dict) or set(outcomes) != {"intake", "recon", "sentinel"}:
+        raise RuntimeError("SPARK_DEPLOYMENT_MODE_NOT_OBSERVED")
+    modes = []
+    for module in ("intake", "recon", "sentinel"):
+        outcome = outcomes[module]
+        runtime = outcome.get("runtime") if isinstance(outcome, dict) else None
+        mode = runtime.get("deployment_mode") if isinstance(runtime, dict) else None
+        if not isinstance(mode, str) or mode != "STANDALONE_CLIENT":
+            raise RuntimeError("SPARK_DEPLOYMENT_MODE_NOT_OBSERVED")
+        modes.append(mode)
+    return modes[0]
+
+
 def execute(evidence: Path, rows: int, *, parity_only: bool = False):
     evidence = prepare_evidence(evidence)
     context = docker("context", "show").strip()
@@ -143,7 +159,8 @@ def execute(evidence: Path, rows: int, *, parity_only: bool = False):
         summary["tests"] = assert_tests(evidence / "parity.xml")
         if not parity_only:
             docker("cp", driver + ":/var/lib/trackvance/million/evidence.json", str(evidence / "evidence.json"))
-            assert_population(evidence / "evidence.json", rows, "STANDALONE_CLIENT")
+            measured = assert_population(evidence / "evidence.json", rows, "STANDALONE_CLIENT")
+            summary["deployment_mode"] = observed_population_mode(measured)
         summary["elapsed_seconds"] = round(time.monotonic() - started, 3)
         summary["status"] = "PASS"
     finally:

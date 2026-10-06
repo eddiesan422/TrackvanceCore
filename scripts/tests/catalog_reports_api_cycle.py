@@ -163,6 +163,24 @@ def rows_hash(rows):
     return {"rows": count, "sha256": digest.hexdigest()}
 
 
+def assert_download_oracle(progress, format, actual, expected, *, client=None, execution_id=None):
+    """Retain population counts and hashes before the original exact comparison."""
+    assert format in {'CSV', 'XLSX'}
+    progress.result.setdefault('download_oracles', {})[format] = {
+        'actual': actual, 'expected': expected, 'status': 'PASS' if actual == expected else 'FAIL'}
+    progress.save()
+    if actual != expected and client is not None and execution_id is not None:
+        try:
+            # A failed stream can end without raising an HTTP read exception.
+            # Its durable terminal state explains a count/hash mismatch without
+            # retaining output values. Failure of this read cannot accept it.
+            terminal = client.call('/reports/executions/' + execution_id)
+            progress.phase(format + '_FULL_ORACLE', terminal)
+        except (OSError, RuntimeError, AssertionError, ValueError, KeyError, TypeError):
+            pass
+    assert actual == expected
+
+
 def xlsx_rows(content):
     namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
     with zipfile.ZipFile(io.BytesIO(content)) as package, package.open("xl/worksheets/sheet1.xml") as sheet:
@@ -354,7 +372,9 @@ def _certify(rows, directory, progress):
                 downloaded = rows_hash([decode_csv(v) for v in row] for row in reader)
             progress.phase("CSV_FULL_ORACLE")
             from itertools import islice
-            assert downloaded == rows_hash(islice(oracle_rows("INNER", rows), 100000))
+            assert_download_oracle(progress, 'CSV', downloaded,
+                                   rows_hash(islice(oracle_rows("INNER", rows), 100000)),
+                                   client=client, execution_id=execution_id)
             transmission = client.call("/reports/executions/" + execution_id)
             progress.phase("CSV_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"
@@ -369,7 +389,9 @@ def _certify(rows, directory, progress):
             decoded = xlsx_rows(content)
             assert next(decoded) == ["a_key", "a_value", "b_key", "b_value"]
             exported = rows_hash(decoded)
-            assert exported == rows_hash(islice(oracle_rows("INNER", rows), 50000))
+            assert_download_oracle(progress, 'XLSX', exported,
+                                   rows_hash(islice(oracle_rows("INNER", rows), 50000)),
+                                   client=client, execution_id=execution_id)
             transmission = client.call("/reports/executions/" + execution_id)
             progress.phase("XLSX_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"

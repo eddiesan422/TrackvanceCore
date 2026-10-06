@@ -662,6 +662,29 @@ def test_existing_project_is_never_cleaned_when_guard_fails(monkeypatch, tmp_pat
     assert json.loads((evidence / "result.json").read_text())["failed_stage"] == "freshness_guards"
 
 
+@pytest.mark.parametrize("code", ['LIVE_CREDENTIAL_INHERITANCE', 'APP_PROJECT_MARKER'])
+def test_native_preflight_failure_retains_closed_code_without_starting_or_cleaning(monkeypatch, tmp_path, code):
+    evidence, _, _, _ = setup_main(monkeypatch, tmp_path)
+    cleaned, started = [], []
+    monkeypatch.setattr(runner, 'assert_fresh', lambda project: None)
+    monkeypatch.setattr(runner, 'main_inventory', lambda run: [])
+    monkeypatch.setattr(runner, 'assert_main_unchanged', lambda before, run: None)
+    monkeypatch.setattr(runner, 'cleanup', lambda *args: cleaned.append(args))
+    monkeypatch.setattr(runner, 'execute', lambda *args, **kwargs: started.append(args))
+
+    def reject(*args, **kwargs):
+        raise runner.ComposePreflightError(code)
+
+    monkeypatch.setattr(runner, 'isolate_compose', reject)
+    assert runner.main() == 1
+    result = json.loads((evidence / 'result.json').read_text())
+    assert result['failed_stage'] == 'freshness_guards'
+    assert result['error_type'] == 'ComposePreflightError'
+    assert result['error_code'] == code
+    assert result['main_inventory'] == 'UNCHANGED'
+    assert not started and not cleaned
+
+
 @pytest.mark.parametrize("code", list(runner.DeliveryEvidenceError.messages))
 def test_recovery_report_emits_only_allowlisted_evidence_readiness_error_code(monkeypatch, tmp_path, code):
     evidence, _, _, _ = setup_main(monkeypatch, tmp_path)

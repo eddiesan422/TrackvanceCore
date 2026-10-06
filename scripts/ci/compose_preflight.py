@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN_PROJECT = "trackvance-certification"
@@ -26,10 +26,30 @@ PROJECT = re.compile(
     r"|(?:e2e|identity-e2e)-[a-f0-9]{8,32})")
 APP_SERVICES = {"api", "worker", "acquisition-worker", "delivery-worker", "report-worker",
                 "scheduler", "events-notifications", "events-chaining"}
+PREFLIGHT_CODES = frozenset({
+    "AMBIENT_ENV_FILE", "APP_PROJECT_MARKER", "AUTOMATIC_RESTART", "COMPOSE_ARGUMENTS",
+    "COMPOSE_PROJECT_ARGUMENT", "CONTAINER_NAMESPACE", "EMPTY_SERVICES", "EXISTING_CONTAINER_NOT_OWNED",
+    "EXISTING_PROTECTED_BIND", "EXISTING_PROTECTED_VOLUME", "EXISTING_RESOURCE_NOT_OWNED",
+    "EXISTING_SERVICE_NOT_OWNED", "EXISTING_UNOWNED_BIND", "EXISTING_UNOWNED_NETWORK", "EXPLICIT_PRIVATE_ENV",
+    "HOST_CONFIG_OR_SECRET", "HOST_CONTROL_SOCKET", "HOST_NAMESPACE", "HOST_NETWORK_DRIVER",
+    "IMPLICIT_MOCK_OIDC", "INVALID_MOCK_OIDC", "INVALID_OR_UNAVAILABLE_RESOLVED_CONFIG",
+    "LINKED_PRIVATE_CONTEXT", "LIVE_CREDENTIAL_INHERITANCE", "LIVE_DATABASE_IDENTITY", "LIVE_SMTP",
+    "LIVE_SMTP_CONFIGURATION", "LIVE_SSO", "LIVE_SSO_CONFIGURATION", "PRIVATE_CONTEXT_PATH",
+    "PRIVILEGED_SERVICE", "PROJECT_NAMESPACE", "PROTECTED_BIND_PATH", "READ_ONLY_DOCKER_COMMAND_FAILED",
+    "RESOURCE_LABEL", "SERVICE_LABEL", "SHARED_NETWORKS", "SHARED_OR_PUBLIC_PORT", "SHARED_VOLUMES",
+    "UNBOUNDED_MOUNT", "UNBOUNDED_SERVICE", "UNKNOWN_NETWORK", "UNKNOWN_OR_PROTECTED_VOLUME",
+    "UNOWNED_BIND_PATH", "UNRESOLVED_ENVIRONMENT",
+})
 
 
 class ComposePreflightError(ValueError):
     """A diagnostic code without resolved secrets or host paths."""
+
+    def __init__(self, code: str) -> None:
+        if code not in PREFLIGHT_CODES:
+            raise ValueError("UNKNOWN_PREFLIGHT_CODE")
+        self.code = code
+        super().__init__(code)
 
 
 def require(condition: Any, code: str) -> None:
@@ -61,6 +81,49 @@ def _inventory(run: Callable[[list[str]], str], project: str, *, existing: bool)
     return inventories
 
 
+def _credential_value(key: str, value: str) -> bool:
+    """Distinguish credential material from named location/configuration metadata.
+
+    The same logical key-file path is expected in separate private volumes.
+    Resource and mount isolation are validated independently below. Unknown
+    secret-related settings remain protected unless their metadata semantics
+    and literal value are both recognized.
+    """
+    key = key.upper()
+    if not re.search(r"PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|CLIENT_ID|API_KEY|ACCESS_KEY|AUTH_KEY", key):
+        return False
+    suffix = key.rsplit("_", 1)[-1]
+    if suffix in {"DIR", "DIRECTORY", "FILE", "PATH"} and (
+        value.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", value)
+    ):
+        return False
+    if suffix in {"ENABLED", "DISABLED", "REQUIRED"} and value.lower() in {"true", "false", "yes", "no", "on", "off", "0", "1"}:
+        return False
+    if suffix in {"TTL", "EXPIRY", "EXPIRES", "SECONDS", "TIMEOUT", "LIMIT", "COUNT", "LENGTH"} and re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
+        return False
+    if suffix == "SCHEME" and value.lower() in {"bearer", "basic", "digest", "none"}:
+        return False
+    return not (suffix == "MODE" and value.lower() in {"strict", "optional", "disabled", "enabled", "development", "production", "test", "local", "read", "write", "auto"})
+
+
+def _url_passwords(value: str) -> set[str]:
+    """Include decoded URL userinfo so renaming/encoding cannot hide reuse."""
+    if "://" not in value:
+        return set()
+    try:
+        password = urlparse(value).password
+    except ValueError:
+        return set()
+    if not password:
+        return set()
+    result = {password}
+    try:
+        result.add(unquote(password, errors="strict"))
+    except UnicodeDecodeError:
+        pass  # Preserve the encoded credential even when decoding is invalid.
+    return result
+
+
 def _protected(baseline: dict) -> tuple[set[str], set[str], set[int], list[Path], set[str]]:
     volumes = {item if isinstance(item, str) else item["Name"] for item in baseline.get("volumes", [])}
     networks = {item if isinstance(item, str) else item["Name"] for item in baseline.get("networks", [])}
@@ -78,14 +141,16 @@ def _protected(baseline: dict) -> tuple[set[str], set[str], set[int], list[Path]
                 paths.append(Path(source))
         for entry in container.get("Config", {}).get("Env", []):
             key, _, value = entry.partition("=")
-            if value and re.search(r"PASSWORD|SECRET|TOKEN|PRIVATE_KEY|CLIENT_ID", key):
+            if value and _credential_value(key, value):
                 secrets.add(value)
+            secrets.update(_url_passwords(value))
     return volumes, networks, ports, paths, secrets
 
 
 def _environment(service: str, values: dict, project: str, protected_secrets: set[str], *, mock: bool) -> None:
     require(isinstance(values, dict), "UNRESOLVED_ENVIRONMENT")
-    require(not any(str(value) in protected_secrets for value in values.values() if value), "LIVE_CREDENTIAL_INHERITANCE")
+    candidates = {str(value) for value in values.values() if value is not None and str(value)}
+    require(not any(({value} | _url_passwords(value)) & protected_secrets for value in candidates), "LIVE_CREDENTIAL_INHERITANCE")
     require(str(values.get("TRACKVANCE_SMTP_ENABLED", "false")).lower() == "false", "LIVE_SMTP")
     require(not any(value for key, value in values.items() if key.startswith("TRACKVANCE_SMTP_") and key != "TRACKVANCE_SMTP_ENABLED"), "LIVE_SMTP_CONFIGURATION")
     if service in APP_SERVICES:

@@ -297,3 +297,40 @@ def test_group_receipts_integrate_with_real_wrapper_and_reject_changed_result_at
     (receipt_path.parent / receipt["evidence"][0]["path"]).write_text("{}", encoding="utf-8")
     with pytest.raises(EvidenceError, match="XLSX_ATTACHMENT_HASH_MISMATCH"):
         wrap_group("corrections-acquisition", {"result": summary}, tmp_path / "tampered", **args)
+
+
+def test_native_failure_is_copied_as_closed_diagnostic_before_original_exception_escapes(tmp_path, monkeypatch):
+    original = RuntimeError("synthetic-private-cookie-query-and-password")
+    def child(arguments, directory, _name, **kwargs):
+        assert directory == tmp_path and kwargs == {"seconds": 1800}
+        native = Path(arguments[arguments.index("--evidence-dir") + 1])
+        native.mkdir()
+        runtime.atomic_json(native / "result.json", {"status": "FAIL", "failed_stage": "fresh_restore",
+            "error_type": "ValueError", "main_inventory": "UNCHANGED", "password": "synthetic-private-secret",
+            "source_project": "synthetic-private-project", "message": str(original)})
+        raise original
+    monkeypatch.setattr(cycle, "private_command", child)
+    with pytest.raises(RuntimeError) as caught:
+        cycle.native_recovery_with_diagnostic(tmp_path)
+    assert caught.value is original
+    result = read(tmp_path / "native-recovery-diagnostic.json")
+    assert result == {"schema_version": 1, "kind": "RECOVERY_PARTIAL_SUMMARY", "profile": "native",
+        "summary_present": True, "result": {"status": "FAIL", "failed_stage": "fresh_restore",
+            "error_type": "ValueError", "main_inventory": "UNCHANGED"}}
+    assert "synthetic-private" not in (tmp_path / "native-recovery-diagnostic.json").read_text()
+
+
+def test_native_diagnostic_write_failure_cannot_mask_original_child_error(tmp_path, monkeypatch):
+    original = TimeoutError("XLSX_PHASE_DEADLINE")
+    monkeypatch.setattr(cycle, "private_command", lambda *_a, **_k: (_ for _ in ()).throw(original))
+    monkeypatch.setattr(cycle, "atomic_json", lambda *_a, **_k: (_ for _ in ()).throw(OSError("diagnostic unavailable")))
+    with pytest.raises(TimeoutError) as caught:
+        cycle.native_recovery_with_diagnostic(tmp_path)
+    assert caught.value is original
+
+
+def test_native_exit_success_without_child_result_cannot_be_certified(tmp_path, monkeypatch):
+    monkeypatch.setattr(cycle, "private_command", lambda *_a, **_k: None)
+    with pytest.raises(ValueError, match="RESULT_UNAVAILABLE"):
+        cycle.native_recovery_with_diagnostic(tmp_path)
+    assert read(tmp_path / "native-recovery-diagnostic.json")["summary_present"] is False

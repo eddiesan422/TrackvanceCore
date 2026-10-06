@@ -457,6 +457,48 @@ def browser_group_fixture(api, directory, context, rows, destination, schema):
     return report
 
 
+def native_recovery_with_diagnostic(directory):
+    """Keep closed child failure facts before the owning fixture is cleaned."""
+    from ci.failure_diagnostics import MAX_BYTES, sanitize_recovery_summary
+    native = directory / ("corrections-native-recovery-" + uuid4().hex[:12])
+    path = native / "result.json"
+    failure = None
+
+    def read_result():
+        if (native.is_symlink() or path.is_symlink() or not path.is_file()
+                or path.stat().st_size > MAX_BYTES):
+            raise ValueError("XLSX_NATIVE_RESULT_UNAVAILABLE")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise TypeError("XLSX_NATIVE_RESULT_INVALID")
+        return value
+
+    try:
+        private_command([sys.executable, "scripts/tests/docker_backup_cycle.py", "--v070-context", str(directory),
+            "--evidence-dir", str(native)], directory, "corrections-native-recovery", seconds=1800)
+        result = read_result()
+        if result.get("status") != "PASS":
+            raise ValueError("XLSX_NATIVE_RESULT_NOT_PASS")
+        return result
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            try:
+                summary, present = sanitize_recovery_summary(read_result()), True
+            except (OSError, ValueError, TypeError, RecursionError):
+                summary, present = {"status": "FAIL"}, False
+            atomic_json(directory / "native-recovery-diagnostic.json", {"schema_version": 1,
+                "kind": "RECOVERY_PARTIAL_SUMMARY", "profile": "native", "summary_present": present,
+                "result": summary})
+        except (OSError, ValueError):
+            # The child exception remains authoritative even if its independent
+            # diagnostic cannot be persisted during cleanup or disk failure.
+            if failure is None:
+                raise
+
+
 def certify_group(directory, context, args, images, evidence):
     certification.assert_main_unchanged(context)
     docker = json.loads(certification.command(["docker", "info", "--format", "{{json .}}"] ))
@@ -528,10 +570,7 @@ def certify_group(directory, context, args, images, evidence):
                 certify_unread_restart(api, directory, context, chained["unread"]["notification_id"], result)
                 # The immutable backup contract requires all nine original consumers;
                 # unused web remains created/stopped, never an extra active workload.
-                native = directory / ("corrections-native-recovery-" + uuid4().hex[:12])
-                private_command([sys.executable, "scripts/tests/docker_backup_cycle.py", "--v070-context", str(directory),
-                    "--evidence-dir", str(native)], directory, "corrections-native-recovery", seconds=1800)
-                result["native_recovery_report"] = json.loads((native / "result.json").read_text(encoding="utf-8"))
+                result["native_recovery_report"] = native_recovery_with_diagnostic(directory)
                 notice = next(item for item in api.get("/api/v1/notifications/inbox?read_state=UNREAD&limit=100")["items"]
                     if item["id"] == chained["unread"]["notification_id"])
                 if notice["read_at"] is not None:

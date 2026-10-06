@@ -43,6 +43,7 @@ from isolation_profile import (
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import docker_state
+from ci.compose_preflight import PREFLIGHT_CODES, ComposePreflightError
 from migration_transport import migration_stdin_source
 
 PROJECT_PATTERN = re.compile(r"(?:trackvance-recovery-(?:src|dst)-[a-z0-9-]+|trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12})")
@@ -1299,6 +1300,8 @@ def main() -> int:
             subprocess.SubprocessError) as error:
         # Exception text may contain driver details. Report phase and class only.
         result.update({"failed_stage": stage, "error_type": type(error).__name__})
+        if isinstance(error, ComposePreflightError) and error.code in PREFLIGHT_CODES:
+            result['error_code'] = error.code
         if isinstance(error, RecoveryCheckError):
             result['error_code'] = error.code
         if source_api is not None and hasattr(source_api, 'last_request'):

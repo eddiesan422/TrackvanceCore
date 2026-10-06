@@ -57,7 +57,11 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
     images = verified_images(environment)
     services = {}
     for name in (*SERVICES, *(('report-worker',) if images else ())):
-        if name in {'scheduler', 'events-notifications', 'events-chaining', 'report-worker'}:
+        if name == 'report-worker':
+            # CI reuses images, but keeps the REPORT runtime bounds from the
+            # previously passing base Compose definition.
+            limits = {'cpus': 2, 'mem_limit': '3g', 'pids_limit': 128}
+        elif name in {'scheduler', 'events-notifications', 'events-chaining'}:
             limits = {'cpus': 0.25, 'mem_limit': '256m', 'pids_limit': 128}
         elif name == 'web':
             limits = {'cpus': 0.25, 'mem_limit': '128m', 'pids_limit': 64}
@@ -118,7 +122,7 @@ def runtime_diagnostics(project: str, run) -> list[dict]:
     diagnostics = []
     for row in inspected:
         service = row.get('Config', {}).get('Labels', {}).get('com.docker.compose.service')
-        if service not in {*SERVICES, 'mock-oidc'}:
+        if service not in {*SERVICES, 'mock-oidc', 'report-worker'}:
             continue
         state, limits = row.get('State', {}), row.get('HostConfig', {})
         health = state.get('Health', {})
