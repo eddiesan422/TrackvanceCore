@@ -60,11 +60,16 @@ def load_private_environment(path):
 
 
 def target_override(directory, project, *, backend_image='trackvance-v070-isolated:backend', web_image='trackvance-v070-isolated:web'):
+    from ci_images import verified_images
+    images = verified_images()
     guarded_project(project)
     for image, role in ((backend_image, 'backend'), (web_image, 'web')):
-        if image != 'trackvance-v070-isolated:' + role and not re.fullmatch(
+        verified_digest = images is not None and image == images[role]
+        if not verified_digest and image != 'trackvance-v070-isolated:' + role and not re.fullmatch(
                 r'trackvance-v070-test-[a-z0-9-]+-[a-f0-9]{12}:' + role, image):
             raise ValueError('La restauración sólo acepta imágenes privadas de certificación.')
+    if images:
+        backend_image, web_image = images['backend'], images['web']
     services = {}
     for name in RESTORED_SERVICES:
         if name in {'postgres', 'web'}:
@@ -103,9 +108,13 @@ def compose_adapter(project, env_file, override, environment):
         if requested_project != project:
             raise ValueError('El adaptador de restauración recibió otro proyecto.')
         child_environment = {**os.environ, **load_private_environment(env_file), **(environment or {})}
-        return execute(['docker', 'compose', '--env-file', str(env_file), '-p', project,
-            '-f', str(ROOT / 'compose.yml'), '-f', str(override), *arguments], child_environment,
-            credentials=credentials)
+        compose = ['docker', 'compose', '--env-file', str(env_file), '-p', project,
+                   '-f', str(ROOT / 'compose.yml'), '-f', str(override)]
+        if arguments and arguments[0] == 'up':
+            from ci.compose_preflight import preflight
+            preflight(compose, child_environment, project=project, directory=env_file.parent,
+                      run=lambda command: execute(command, child_environment, credentials=credentials))
+        return execute([*compose, *arguments], child_environment, credentials=credentials)
     return scoped
 
 

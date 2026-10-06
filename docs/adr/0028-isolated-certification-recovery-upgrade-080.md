@@ -29,6 +29,24 @@ Los fallos se conservan y se corrigen; no se eliminan suites ni se convierten sk
 en PASS. El PDF completo se genera desde fuente editable y se revisa visualmente.
 El SHA final y el upgrade se registran fuera del PDF para evitar una referencia circular.
 
+La CI vigente formaliza esa cobertura en un manifiesto de 19 grupos y 64
+escenarios. XLSX se divide en cuatro grupos independientes sin reducir sus
+poblaciones, negativos, cadenas, oráculos ni recuperación. La selección rápida
+es sólo desarrollo; incertidumbre o cambios transversales fuerzan el modo completo.
+El gate rechaza receipts ausentes/duplicados/incompletos, de otro SHA/run/intento,
+adjuntos alterados y resultados sin oráculos íntegros. La aceptación exige además
+el workflow y todos sus jobs aplicables completados SUCCESS del SHA final.
+
+Backend/web se construyen una vez por SHA y se transportan con archivos y digests
+verificados; los Compose usan IDs inmutables. Se cachean únicamente dependencias
+y capas con locks/plataforma pertinentes. No se cachea estado de aplicación ni
+resultados PASS. El opt-in CI histórico valida toda la configuración resuelta,
+incluidos servicios inactivos, contra el inventario habitual. Las fuentes legacy
+auténticas conservan su build deliberado. Los deadlines dejan margen para
+diagnóstico/artefactos/cleanup propios; un timeout sigue siendo fallo. Las medidas
+fría/caliente y la comparación transferencia/build requieren resultados reales,
+sin porcentajes derivados de una baseline cancelada. Ver [CI](../development/ci.md).
+
 Después de los gates se conserva el Compose realmente usado, incluidos overlays y
 .env privados. Se obtiene un respaldo fresco verificado y se restaura en aislamiento.
 Se construyen imágenes para todos los servicios afectados, se aplica sólo 0017 y se

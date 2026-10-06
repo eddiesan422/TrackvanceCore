@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import re
 import secrets
 import shutil
@@ -57,8 +58,11 @@ def load_context(directory):
 def compose(directory, context, arguments, *, capture=True):
     # Explicit env-file and -f suppress the repository's real .env/COMPOSE_FILE.
     args = ["docker", "compose", "--project-name", context["project"], "--env-file", str(directory / "test.env"),
-            "-f", str(ROOT / "compose.yml"), "-f", str(directory / "compose.json"), *arguments]
-    return command(args, capture=capture)
+            "-f", str(ROOT / "compose.yml"), "-f", str(directory / "compose.json")]
+    if arguments and arguments[0] == "up":
+        from ci.compose_preflight import preflight
+        preflight(args, dict(os.environ), project=context["project"], directory=directory)
+    return command([*args, *arguments], capture=capture)
 
 
 def assert_main_unchanged(context):
@@ -68,6 +72,8 @@ def assert_main_unchanged(context):
 
 
 def init(suite, port):
+    from ci_images import verified_images
+    images = verified_images()
     if not re.fullmatch(r"[a-z0-9-]{1,24}", suite) or not 32000 <= port <= 32999:
         raise RuntimeError("Usa una suite corta y un puerto exclusivo 32000..32999.")
     with socket.socket() as probe:
@@ -79,7 +85,8 @@ def init(suite, port):
     directory.mkdir(parents=True, exist_ok=False)
     main_project = "trackvance-certification"
     context = {"project": project, "port": port, "main_project": main_project,
-               "main_before": inventory(main_project), "image": "trackvance-v070-isolated:backend"}
+               "main_before": inventory(main_project),
+               "image": images['backend'] if images else "trackvance-v070-isolated:backend"}
     env = {"POSTGRES_USER": "tv_v070_test", "POSTGRES_DB": "tv_v070_test",
            "POSTGRES_PASSWORD": secrets.token_urlsafe(36), "WEB_PORT": str(port),
            "TRACKVANCE_WEB_ORIGIN": f"http://localhost:{port}", "DEMO_ACCESS_ENABLED": "true",
@@ -100,9 +107,18 @@ def init(suite, port):
             "volumes": [{"type": "bind", "source": str(ROOT / "backend" / "src"), "target": "/app/backend/src", "read_only": True},
                         {"type": "bind", "source": str(ROOT / "backend" / "migrations"), "target": "/app/backend/migrations", "read_only": True},
                         {"type": "bind", "source": str(ROOT / "scripts"), "target": "/app/scripts", "read_only": True}]}
-    override["services"]["web"] = {"image": "trackvance-v070-isolated:web", "pids_limit": 128,
+    override["services"]["web"] = {"image": images['web'] if images else "trackvance-v070-isolated:web", "pids_limit": 128,
                                      "mem_limit": "128m", "cpus": 0.5}
     override["services"]["postgres"] = {"pids_limit": 256, "mem_limit": "512m", "cpus": 1}
+    if images:
+        # Historical scenarios do not enqueue report work. Keep the inherited
+        # definition bounded without adding it to the explicitly started set.
+        override["services"]["report-worker"] = {
+            "image": images['backend'], "mem_limit": '256m', 'cpus': 0.25, 'pids_limit': 128,
+            "environment": {"PYTHONPATH": "/app/backend/src", "TRACKVANCE_CERTIFICATION_PROJECT": project},
+            "volumes": [{"type": "bind", "source": str(ROOT / relative),
+                         "target": '/app/' + relative, "read_only": True}
+                        for relative in ('backend/src', 'backend/migrations', 'scripts')]}
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
     print(json.dumps({"context": str(directory), "project": project, "port": port}))

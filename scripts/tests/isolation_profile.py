@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ SERVICES = ('postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker'
             'scheduler', 'events-notifications', 'events-chaining', 'web')
 MAIN_PROJECT = 'trackvance-certification'
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts'))
 
 
 def validate_project(project: str) -> str:
@@ -51,9 +53,11 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
         environment['TRACKVANCE_PUBLIC_URL'] = environment['TRACKVANCE_WEB_ORIGIN']
     image_prefix = ('trackvance-v070-isolated' if environment.get('TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES') == 'true'
                     else project)
+    from ci_images import verified_images
+    images = verified_images(environment)
     services = {}
-    for name in SERVICES:
-        if name in {'scheduler', 'events-notifications', 'events-chaining'}:
+    for name in (*SERVICES, *(('report-worker',) if images else ())):
+        if name in {'scheduler', 'events-notifications', 'events-chaining', 'report-worker'}:
             limits = {'cpus': 0.25, 'mem_limit': '256m', 'pids_limit': 128}
         elif name == 'web':
             limits = {'cpus': 0.25, 'mem_limit': '128m', 'pids_limit': 64}
@@ -62,7 +66,8 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
         else:
             limits = {'cpus': 1, 'mem_limit': '1g', 'pids_limit': 256}
         if name != 'postgres':
-            limits['image'] = f'{image_prefix}:{"web" if name == "web" else "backend"}'
+            role = "web" if name == "web" else "backend"
+            limits['image'] = images[role] if images else f'{image_prefix}:{role}'
         if name not in {'postgres', 'web'}:
             limits['environment'] = {'PYTHONPATH': '/app/backend/src', 'TRACKVANCE_CERTIFICATION_PROJECT': project}
             limits['volumes'] = [{'type': 'bind', 'source': str(ROOT / relative),
@@ -71,13 +76,16 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
         services[name] = limits
     if mock:
         services['mock-oidc'] = {'cpus': 0.5, 'mem_limit': '512m', 'pids_limit': 128,
-                                 'image': f'{image_prefix}:backend'}
+                                 'image': images['backend'] if images else f'{image_prefix}:backend'}
     evidence.mkdir(parents=True, exist_ok=True)
     empty = evidence / 'private.empty.env'
     overlay = evidence / 'private-compose.json'
     empty.write_text('', encoding='utf-8')
     overlay.write_text(json.dumps({'services': services}, indent=2), encoding='utf-8')
-    return [*compose[:2], '--env-file', str(empty), *compose[2:], '-f', str(overlay)]
+    scoped = [*compose[:2], '--env-file', str(empty), *compose[2:], '-f', str(overlay)]
+    from ci.compose_preflight import preflight
+    preflight(scoped, environment, project=project, directory=evidence, allow_mock_oidc=mock)
+    return scoped
 
 
 def main_inventory(run) -> list[dict]:

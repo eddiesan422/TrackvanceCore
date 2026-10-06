@@ -178,6 +178,8 @@ def preflight(directory: Path, context: dict[str, Any]) -> dict[str, Any]:
 
 
 def init(suite: str, port: int, main_project: str | None) -> Path:
+    from ci_images import verified_images
+    images = verified_images()
     if not re.fullmatch(r"[a-z0-9-]{1,24}", suite) or not 32000 <= port <= 32999:
         raise IsolationError("Suite/puerto fuera de la certificación aislada.")
     with socket.socket() as probe:
@@ -190,7 +192,8 @@ def init(suite: str, port: int, main_project: str | None) -> Path:
     directory.chmod(0o700)
     main_project = main_project or discover_main()
     context = {"project": project, "main_project": main_project, "port": port,
-               "main_before": inventory(main_project), "image": "trackvance-v080-isolated:backend"}
+               "main_before": inventory(main_project),
+               "image": images['backend'] if images else "trackvance-v080-isolated:backend"}
     env = {"POSTGRES_USER": "tv_v080_test", "POSTGRES_DB": "tv_v080_test",
            "POSTGRES_PASSWORD": secrets.token_urlsafe(36), "WEB_PORT": str(port),
            "TRACKVANCE_WEB_ORIGIN": f"http://localhost:{port}",
@@ -214,7 +217,7 @@ def init(suite: str, port: int, main_project: str | None) -> Path:
                 {"type": "bind", "source": str(ROOT / relative), "target": "/app/" + relative,
                  "read_only": True} for relative in ("backend/src", "backend/migrations", "scripts")]
         elif name == "web":
-            service["image"] = "trackvance-v080-isolated:web"
+            service["image"] = images['web'] if images else "trackvance-v080-isolated:web"
         override["services"][name] = service
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")

@@ -2386,8 +2386,11 @@ desarrollo ningún fixture/benchmark/fault injection usa sus recursos. Los guard
 comparan imagen/estado/restart/mounts antes y después de tests; el orden de mounts
 se normaliza, pero sus identidades/valores se comparan estrictamente.
 
-Después de aprobar código/E2E/recovery/documentos y todos los jobs CI del HEAD
-final, se pausa nuevo despacho, comprueba ausencia de trabajos activos, respalda
+Después de aprobar código/E2E/recovery/documentos y la certificación CI completa
+del HEAD final, se verifica el gate FULL_CERTIFICATION con certifies_final=true,
+los 19 grupos y 64 escenarios íntegros y el workflow/jobs aplicables terminados
+SUCCESS de esa revisión. El modo rápido de desarrollo no habilita esta etapa.
+Se pausa nuevo despacho, comprueba ausencia de trabajos activos, respalda
 consistentemente con herramientas compatibles, registra inventario y verifica
 el backup mediante restore aislado sin workers/dispatch ni conectividad a destinos
 reales. La revisión/migración aplicada se consulta del runtime: el tag histórico
@@ -2659,6 +2662,143 @@ La suite host no habilita los opt-ins JVM; esa omisión no es PASS.
 Las suites Docker dedicadas ejecutan los escenarios JVM obligatorios sin SKIP.
 Las pruebas E2E principales atraviesan navegador, API, PostgreSQL, workers,
 artefactos, Spark y SQL real; mocks de componente no las sustituyen.
+
+### Modos CI y selección conservadora
+
+Trackvance CI separa desarrollo rápido de certificación completa. Su checkout
+utiliza el SHA fuente exacto del push o de la rama del PR, sin atribuir resultados
+del merge sintético a otra revisión. El despacho manual permite elegir rama,
+modo full/auto/fast y caché cold/warm; full es el valor inicial. Un commit con
+[ci full] exige el recorrido completo. [ci cold] deshabilita la restauración
+de cachés en el primer intento del push. selection.json identifica revisión,
+paths/reglas, motivo, grupos y SHA-256 del manifiesto empleado.
+
+El selector sólo permite fast para cambios documentales acotados reconocidos.
+Código/tests, CI, Docker, dependencias/locks, migraciones, contratos, harnesses,
+documentación operativa/de arquitectura y cualquier incertidumbre fuerzan full,
+incluso si se solicitó fast. Los tres grupos rápidos reutilizan todas las
+comprobaciones backend, frontend y Compose crítico existentes: código/contratos,
+migraciones PostgreSQL y aislamiento Linux; lint/tipos/tests/build de UI; demo
+vacío y navegador con persistencia real después del reinicio. Un gate rápido es
+DEVELOPMENT_ONLY y certifies_final=false. No acredita volúmenes ni recuperación.
+
+El push ordinario evita duplicar la validación que recibirá un PR abierto del
+mismo SHA; despachos manuales y [ci full] conservan la ejecución explícita.
+La cancelación por rama sólo alcanza validaciones de desarrollo obsoletas.
+La certificación completa usa identidad por run y no se cancela por otro push.
+La matriz ejecuta como máximo cuatro grupos en paralelo, cada uno en su runner,
+con un stack pesado por runner, sin elevar los límites de producto. fail-fast
+está deshabilitado para conservar los resultados de los demás grupos.
+
+### Manifiesto completo y grupos de aceptación
+
+scripts/ci/scenarios.json declara 19 grupos y 64 escenarios obligatorios. Los
+16 jobs funcionales históricos continúan cubiertos; el job XLSX monolítico se
+reparte en cuatro grupos con prerrequisitos propios. Los jobs select/images/gate
+son coordinación, no grupos funcionales adicionales. No se transfieren bases,
+fixtures ni receipts PASS entre grupos para sustituir una ejecución necesaria.
+
+| Grupo | Escenarios | Cobertura exigida |
+| --- | --- | --- |
+| backend / frontend / compose-critical | 6 / 4 / 2 | Checks completos existentes, probe Linux, migraciones PostgreSQL, demo vacío y navegador/persistencia real. |
+| corrections-acquisition | 9 | Ocho adquisiciones 100k/100001/400k/1M inline/shared y rechazo 1M+1 conservando la versión anterior. |
+| corrections-browser | 2 | Navegador real 400k y 1M shared, cadena completa y oráculos de fuente, salida y SQL. |
+| corrections-dispatch | 3 | Cadena de 1M inline, despacho dos datasets de 1M con worker ocupado y no leída tras reinicio API. |
+| corrections-recovery | 3 | Cancelación durante lectura, crash/lease de 1M shared y backup/restore nativo con diagnóstico y no leída. |
+| identity-sso / connections / delivery | 1 / 1 / 1 | RBAC/OIDC sintético firmado/PKCE, motores reales y estrategias/auditoría con navegador. |
+| backup-restore | 4 | Recuperación nativa 0.8.0 y fuentes auténticas 0.5.1/0.6.0/0.6.1. |
+| catalog-reports | 8 | Tres fuentes de 120/400k/1M, navegador, snapshot conjunto, HTTP efímero y restore nativo/auténtico 0.7.0. |
+| benchmark-smoke / delivery-benchmark-smoke | 1 / 1 | Medición smoke real y ocho casos Delivery; no sustituyen benchmark de capacidad. |
+| spark-local / spark-standalone | 2 / 2 | Paridad real y tres módulos de 1M en ambos modos. |
+| async-volume-100 | 6 | CSV/JSONL/Parquet de 1M, automatización/negativos, navegador íntegro y recovery completo. |
+| async-volume-500 / async-volume-1024 | 4 / 4 | CSV/JSONL/Parquet de 1M y automatización/negativos en cada tier. |
+
+Los prerrequisitos de dispatch y recovery vuelven a adquirir su propia población
+de un millón. Sus receipts de preparación no cuentan como escenarios obligatorios
+de adquisición. Las comprobaciones usan fixtures sintéticas con oráculos
+independientes sobre todas las filas/valores, perfiles y numeración física, además
+de huellas completas de fuente, aceptados y destino. Una muestra, un conteo o
+una bandera PASS no los reemplaza. Se preservan decimales, IDs, null/vacío,
+fechas, tipos y casos negativos definidos por cada suite.
+
+### Imágenes, cachés, deadlines y evidencia CI
+
+images construye backend y web una vez para el SHA fuente en Linux amd64 con
+locks y etiqueta OCI de revisión. Transporta únicamente imágenes y un manifiesto
+con ID sha256, tamaño y SHA-256 de sus tar. Antes de cargar, cada suite verifica
+todos los bytes; después inspecciona la revisión y el ID cargado y los fija en
+su Compose privado. El tag es sólo alias de transporte. Las fuentes legacy
+auténticas se construyen deliberadamente desde sus propios commits conservados.
+TRACKVANCE_CI_IMAGE_MANIFEST activa esta ruta explícita y el preflight histórico,
+que valida toda la configuración resuelta, incluso servicios inactivos, y todos
+los volúmenes/redes contra el inventario habitual. El perfil 0.8.0 mantiene su
+preflight estricto y presupuesto conjunto de 9 GiB. Sólo se permite OIDC mock
+explícito de identidad; no se hereda SSO/SMTP ni credenciales reales.
+
+Las cachés admiten descargas uv/pnpm, Chromium y capas BuildKit, con claves de
+plataforma/herramientas/locks. Los entornos se reinstalan con locks congelados.
+cold no restaura cachés y puede guardarlas para warm. No se cachean DB, fixtures,
+datasets, backups, estado de negocio, resultados ni receipts PASS. Se miden
+construcción/exportación, bytes y descarga/verificación/carga; la reutilización
+no presume ventaja sobre reconstruir hasta comparar ambos costes reales.
+
+Cada grupo tiene un deadline inferior al timeout de job: Catálogo, 6.300 s frente
+a 120 min y márgenes propios para XLSX. El fallo/timeout registra causa saneada,
+conserva evidencia incremental y deja tiempo para subida/cleanup. El navegador
+acotado reclama únicamente sus procesos propios. El cleanup reconoce sólo
+recursos nuevos con ownership validado; no alcanza datos o imágenes habituales.
+Los receipts terminales por escenario tienen UUID, SHA/run/intento/job,
+filas/variante, timestamps/duración, recursos y adjuntos con hash. El progreso
+RUNNING, los prerrequisitos y los históricos no son terminales certificables.
+Los logs/dumps/queries/credenciales quedan privados. Los artifacts públicos sólo
+contienen reportes explícitos saneados y sus hashes, incluso cuando el job falla.
+
+final_gate.py exige modo full, selección/manifiesto exactos, needs reales
+exitosos, 64 receipts obligatorios únicos, SHA/run/intento/job, filas/variantes,
+tiempos, imágenes, hashes y contenido de cada evidencia. Rechaza ausencia,
+duplicados, extras, FAIL/CANCELLED/SKIP/RUNNING, otra revisión o adjuntos alterados.
+Las omisiones unitarias de plataforma permitidas se registran y no acreditan
+escenarios Linux/JVM. El cierre exige también run y todos los jobs aplicables
+completados SUCCESS del SHA final; después siguen backup fresco, restore
+aislado detenido, promoción protegida y verificación habitual.
+
+### Medición histórica parcial y mediciones pendientes
+
+La baseline saneada ci-optimization-baseline.json procede de logs/metadatos
+conservados, sin una nueva ejecución ni certificación. El run 37368090419/495f4eb,
+intento 4, terminó CANCELLED con 15 SUCCESS y XLSX cancelado al presupuesto de 90 min.
+La suma de intervalos de sus jobs es 303,35 min de runner, sin cola, incluyendo
+frontend reutilizado del mismo SHA y el job incompleto. No representa facturación
+ni coste completo de certificación. Sus tres intentos anteriores tuvieron
+backend sin runner ni steps durante 903/902/902 s: espera de asignación externa,
+separada del tiempo funcional.
+
+| Medición 495 | Tiempo | Alcance y límite |
+| --- | --- | --- |
+| Backend / frontend | 405 s / 57 s | Jobs reales; frontend 33 archivos/252 tests. |
+| XLSX | 5.425 s | Job cancelado; paso funcional 5.376 s, sin ciclo/restore integral acreditados. |
+| Catálogo/Reportes | 4.050 s job / 3.934,695 s ciclo | Componentes contenidos en el ciclo, no sumados como ejecución adicional. |
+| Catálogo API 120/400k/1M | 38,412/1.045,771/2.343,219 s | Fixtures y oráculos completos incluidos; no sólo motor SQL. |
+| Catálogo browser/HTTP/recovery | 36,009/95,360/243,209 s | Resultados reales de esos componentes. |
+| Backup | 655 s | Nativo y tres fuentes auténticas. |
+| Builds explícitos visibles | Al menos 180 s | 52+54+74 s; builds internos sin desglose exacto. |
+
+Los ocho intervalos de adquisición XLSX observados suman 1.393,372 s y excluyen
+fixture/oráculos completos. El navegador terminado midió 387,001 s; su población
+400k se infiere del orden del driver, no del summary. No acredita el navegador
+restante ni el restore integral. La revisión 630 amplió el presupuesto monolítico
+a 180 min y añadió checkpoints; permanece antecedente del reparto actual.
+El snapshot 630 disponible al auditar tenía 11 SUCCESS y cinco jobs no terminados de 16;
+sus duraciones completas y coste total siguen desconocidos. Las pruebas locales
+de esa revisión son frontend 252 PASS y backend Windows 1.269 PASS/46 SKIP, con alcances
+distintos del backend+scripts Linux que no se suman.
+
+Faltan ejecuciones completas fría y caliente del nuevo contrato. Deben medir
+preparación, builds/transferencia, fixtures/adquisiciones, oráculos, SQL, navegador,
+recovery, upload/cleanup, tiempos de cola y suma de ejecución sin solapamientos.
+No se atribuye una reducción porcentual ni coste final a una baseline truncada.
+Los resultados finales de CI, backup/promoción y el hash del PDF publicado se
+registran fuera de sus bytes para evitar referencias circulares.
 
 ### Corte de certificación actual 0.8.0
 

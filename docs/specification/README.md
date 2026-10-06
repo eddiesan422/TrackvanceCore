@@ -90,6 +90,7 @@ sobrescribirlo. La especificación actual no altera ese antecedente.
 
 La certificación vigente y el inventario de cambios están en
 [validación](../development/validation.md), la
+[guía CI](../development/ci.md), la
 [guía de Catálogo](../development/catalog-governance-0.8.0.md),
 [Reportes](../development/reports-0.8.0.md) y la
 [guía de uso](../development/catalog-reports-user-guide.md).

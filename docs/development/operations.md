@@ -590,6 +590,24 @@ requiere `delivery:repair_evidence`; la revisión externa requiere
 
 ### Simulacros aislados reproducibles
 
+La CI vigente está descrita en [la guía CI](ci.md). El modo `fast` valida
+desarrollo; sólo `full` con los 19 grupos y 64 escenarios completos, gate final
+PASS y todos los jobs aplicables SUCCESS del mismo SHA permite pasar a la
+promoción. Los modos frío/caliente cambian la restauración de dependencias y
+capas, nunca el contenido de las pruebas ni el estado de las fixtures.
+Los reportes de otra revisión o los escenarios cancelados/omitidos no habilitan
+una actualización. Las mediciones históricas parciales no acreditan una mejora
+de costes ni la nueva certificación completa.
+
+Los grupos CI usan imágenes backend/web construidas una vez para el SHA fuente,
+con revisión OCI, IDs inmutables y archivos de transporte verificados. El opt-in
+`TRACKVANCE_CI_IMAGE_MANIFEST` exige inspección de la configuración Compose
+resuelta y del inventario habitual antes del arranque histórico. Se validan
+todos los servicios, aunque el `up` seleccione menos, y todos los volúmenes/redes;
+los servicios inactivos quedan acotados. Las fuentes legacy auténticas conservan
+su construcción propia. Ninguna imagen, DB, backup o receipt PASS de una revisión
+anterior sustituye los resultados actuales.
+
 La certificación 0.8.0 utiliza proyectos `trackvance-v080-test-*-<12hex>`,
 PostgreSQL sintético `tv_v080_test`, un archivo privado explícito y contexto
 validado en `.codex-local/v080`. El ciclo integral ejecuta las consultas y
@@ -623,6 +641,35 @@ Estos comandos describen verificaciones del runner. Su disponibilidad y sus
 pruebas unitarias no certifican una recuperación ejecutada: el resultado de cada
 drill, su revisión y sus gates pendientes se registran por separado en
 [validación](validation.md).
+
+### Orden de promoción después de CI completo
+
+1. Verificar SHA fuente final, gate `FULL_CERTIFICATION` con
+   `certifies_final=true`, manifiesto íntegro y run/jobs aplicables completados
+   SUCCESS. Conservar el historial de intentos, incluidas fallas externas de runners.
+2. Inventariar el Compose habitual realmente resuelto, overlays, imágenes,
+   contenedores, health, volúmenes, red, puertos, límites, restart y configuración
+   de demo/SSO. El `.env` y los secretos se guardan sólo en evidencia privada.
+   Pausar nuevo despacho y esperar ausencia de jobs/leases activos antes del backup.
+3. Obtener un respaldo fresco consistente con herramientas compatibles y hashes.
+   Restaurarlo en otro proyecto privado y comprobar filas, archivos, secretos y
+   proyección de estado antes de activar cualquier worker/scheduler/consumer.
+   El destino permanece detenido y sin conexiones a los destinos reales.
+4. Verificar que las imágenes de todos los servicios afectados proceden del SHA
+   aprobado, con backend/web coherentes. Recrear el stack habitual conservando
+   los mismos volúmenes, datos, `.env`, puerto/origen, secretos, usuarios, SSO/demo,
+   pausas/zonas y políticas de reinicio. Aplicar sólo migraciones compatibles nuevas.
+5. Verificar health, versión API/UI, Alembic, cuatro lanes/workers, scheduler,
+   consumidores, storage y la preservación de la proyección histórica real.
+   No introducir datos demo, fixtures, entregas SQL ni logins SSO de prueba en real.
+6. Retirar únicamente proyectos/volúmenes/redes/temporales/imágenes propios de
+   los ensayos después de comprobar su ownership y que no son referencias de la
+   instalación ni del respaldo recuperable. Conservar imágenes previas y la
+   evidencia necesaria. No usar limpieza global, reset ni `down -v` en el principal.
+
+Cada paso conserva comando, revisión, duración y resultado real. Un backup
+antiguo, una restauración sólo preparada o un contenedor creado con un tag nuevo
+no demuestra el paso correspondiente. Un fallo mantiene abierta la promoción.
 
 ### Antecedentes de simulacros 0.7.0
 

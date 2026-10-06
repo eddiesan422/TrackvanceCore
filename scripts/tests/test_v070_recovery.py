@@ -147,3 +147,19 @@ def test_compose_adapter_uses_explicit_env_file_and_rejects_other_project(tmp_pa
     assert str(override) in arguments and 'private-test-secret' not in ' '.join(arguments)
     assert environment['POSTGRES_PASSWORD'] == 'private-test-secret'
     assert environment['DEMO_ACCESS_ENABLED'] == 'false'
+
+
+def test_ci_restore_accepts_only_verified_role_digest(tmp_path, monkeypatch):
+    import ci_images
+
+    images = {'backend': 'sha256:' + 'a' * 64, 'web': 'sha256:' + 'b' * 64}
+    monkeypatch.setattr(ci_images, 'verified_images', lambda: images)
+    project = 'trackvance-v070-test-recovery-0123456789ab'
+    path = recovery.target_override(tmp_path, project,
+        backend_image=images['backend'], web_image=images['web'])
+    services = yaml.safe_load(path.read_text().replace('!reset null', 'null'))['services']
+    assert services['api']['image'] == images['backend']
+    assert services['web']['image'] == images['web']
+    for rejected in (images['web'], 'sha256:' + 'c' * 64, 'trackvance-core:backend'):
+        with pytest.raises(ValueError, match='imágenes privadas'):
+            recovery.target_override(tmp_path, project, backend_image=rejected, web_image=images['web'])

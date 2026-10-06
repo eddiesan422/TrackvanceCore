@@ -24,6 +24,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 import certification_v070 as certification
 import volume_cycle as volume
 from browser_evidence import run_browser
+from corrections_runtime import (
+    GROUP_ALIASES,
+    GROUP_DEADLINES,
+    GROUP_SCENARIOS,
+    ScenarioEvidence,
+    atomic_json,
+    deadline,
+    immutable_image_pair,
+    private_command,
+    source_identity,
+)
 from v070_cycle import run
 from xlsx_fixtures import COLUMNS, HEADER_ROW, generate
 
@@ -201,7 +212,7 @@ def certify_inbox(api, source, report):
     report["unread"] = {"notification_id": item["id"], "read_unread_unread_read": "PASS", "counter_delta": 1}
 
 
-def cancel_and_recover(api, directory, context, fixture, report):
+def cancel_during_reading(api, directory, context, fixture, report):
     with volume.phase(report, "cancel_during_reading", directory, context):
         dataset, acquisition, _ = register(api, fixture, "XLSX cancel")
         active = volume.wait(api, "/acquisitions/" + acquisition["id"],
@@ -211,6 +222,9 @@ def cancel_and_recover(api, directory, context, fixture, report):
         if cancelled["status"] != "CANCELLED" or cancelled["output_version_id"] is not None or api.get("/api/v1/datasets/" + dataset["id"])["versions"]:
             raise AssertionError("La cancelación dejó una DatasetVersion parcial.")
         report["cancel"] = {"status": cancelled["status"], "observed_records_before_cancel": active["processed_rows"], "versions": 0}
+
+
+def recover_crashed_acquisition(api, directory, context, fixture, report):
     with volume.phase(report, "xlsx_crash_lease_recovery", directory, context):
         dataset, acquisition, _ = register(api, fixture, "XLSX crash")
         active = volume.wait(api, "/acquisitions/" + acquisition["id"],
@@ -226,6 +240,11 @@ def cancel_and_recover(api, directory, context, fixture, report):
             raise AssertionError("La recuperación no cercó el intento anterior y publicó una única versión completa.")
         report["recovery"] = {"attempts": recovered["attempts"], "versions": 1,
             "full_integrity": record_integrity(directory, context, recovered["output_version_id"], fixture)}
+
+
+def cancel_and_recover(api, directory, context, fixture, report):
+    cancel_during_reading(api, directory, context, fixture, report)
+    recover_crashed_acquisition(api, directory, context, fixture, report)
 
 
 def certify_row_limit_failure(api, directory, context, baseline, report):
@@ -373,7 +392,159 @@ def certify(directory, context, args):
         (directory / "corrections-evidence.json").write_text(encoded, encoding="utf-8")
 
 
-def main():
+def acquire_group_fixture(api, directory, context, rows, variant):
+    report, timeline = {}, []
+    began = time.monotonic()
+    fixture = generate(directory / "xlsx-fixtures", rows, strings=variant)
+    report.update(fixture=fixture, fixture_prepare_seconds=round(time.monotonic() - began, 6))
+    with volume.phase(report, "xlsx_acquisition_whole", directory, context) as metrics:
+        dataset, acquisition, transfer = register(api, fixture, f"XLSX {rows} {variant}")
+        completed = wait_acquisition(api, acquisition["id"], timeline)
+        if (completed["status"] != "SUCCESS" or completed["processed_rows"] != rows
+                or completed["processed_bytes"] != fixture["observed_utf8_bytes"]):
+            raise AssertionError("La adquisición completa no coincide con el oráculo XLSX.")
+        report.update(dataset=dataset, acquisition=completed, transfer=transfer)
+        began = time.monotonic()
+        report["integrity"] = record_integrity(directory, context, completed["output_version_id"], fixture)
+        report["full_integrity_verification_seconds"] = round(time.monotonic() - began, 6)
+        profile = api.get('/api/v1/dataset-versions/' + completed["output_version_id"] + '/profile')
+        report["profile"] = volume.validate_profile(profile, fixture)
+        report["column_types"] = {column["name"]: column["logical_type"] for column in profile["profile"]["columns"]}
+        if rows > 100000 and report["column_types"]["late_type"] != "STRING":
+            raise AssertionError("La inferencia no consideró los cambios posteriores a100k.")
+    report["observed_worker_stages"] = stage_resources(timeline, metrics.samples)
+    report.update(status="PASS", rows=rows, strings=variant)
+    return report
+
+
+def chain_group_fixture(api, directory, context, baseline, destination, schema):
+    report = {"fixture": baseline["fixture"], "acquisition": baseline["acquisition"], "dataset": baseline["dataset"]}
+    volume.chain(api, directory, context, baseline["fixture"], baseline["dataset"], baseline["acquisition"],
+        destination, schema, report, column_types=baseline["column_types"])
+    certify_inbox(api, baseline["acquisition"], report)
+    return report
+
+
+def browser_group_fixture(api, directory, context, rows, destination, schema):
+    report = {}
+    began = time.monotonic()
+    fixture = generate(directory / "xlsx-fixtures", rows, strings="shared")
+    report.update(fixture=fixture, fixture_prepare_seconds=round(time.monotonic() - began, 6))
+    environment = {**os.environ, "TV_E2E_URL": f'http://localhost:{context["port"]}', "TV_E2E_PRIVATE_ARTIFACTS": "1",
+        "TV_CORRECTIONS_E2E": "true", "TV_CORRECTIONS_PROJECT": context["project"], "TV_CORRECTIONS_FIXTURE": fixture["path"],
+        "TV_CORRECTIONS_METADATA": str(Path(fixture["path"]).with_suffix(".json")),
+        "TV_CORRECTIONS_DESTINATION": destination["id"], "TV_CORRECTIONS_SCHEMA": schema}
+    with volume.phase(report, "real_browser_and_whole_population_verification", directory, context):
+        checkpoint("browser", rows, "START")
+        browser = run_browser(shutil.which("pnpm"), ["tests-e2e/corrections-volume.spec.ts"], root=ROOT,
+            project=context["project"] + f"-xlsx-{rows}", environment=environment, evidence=directory,
+            timeout_seconds=2400)
+        if browser.get("skipped", 0) or browser.get("expected") != 1:
+            raise AssertionError("No se ejecutó la prueba de navegador XLSX obligatoria completa.")
+        reports = list((ROOT / ".codex-local" / "browser-results" / (context["project"] + f"-xlsx-{rows}")).rglob("corrections-ui.json"))
+        if len(reports) != 1:
+            raise AssertionError("Falta evidencia integral del navegador XLSX.")
+        report.update(browser=browser, ui=json.loads(reports[0].read_text(encoding="utf-8")))
+        for key, result_key in (("source_version_id", "source_integrity"), ("output_version_id", "output_integrity")):
+            began = time.monotonic()
+            report[result_key] = record_integrity(directory, context, report["ui"][key], fixture)
+            report[result_key + "_seconds"] = round(time.monotonic() - began, 6)
+        began = time.monotonic()
+        report["target"] = volume.target_hash(directory, context, schema, report["ui"]["table"])
+        report["target_verification_seconds"] = round(time.monotonic() - began, 6)
+        if report["target"]["rows"] != rows or report["target"]["canonical_rows_sha256"] != fixture["canonical_rows_sha256"]:
+            raise AssertionError("El navegador no conservó todas las filas/valores en SQL.")
+    return report
+
+
+def certify_group(directory, context, args, images, evidence):
+    certification.assert_main_unchanged(context)
+    docker = json.loads(certification.command(["docker", "info", "--format", "{{json .}}"] ))
+    if docker["MemTotal"] < 6 * volume.GIB or shutil.disk_usage(ROOT).free < 20 * volume.GIB:
+        evidence.write_group("FAIL", error={"code": "XLSX_RESOURCE_PREFLIGHT", "type": "RuntimeError"})
+        raise RuntimeError("Recursos insuficientes para la certificación real obligatoria.")
+    volume.RESOURCE_MEMORY_BUDGET = min(6 * volume.GIB, docker["MemTotal"] - 2 * volume.GIB)
+    api = volume.VolumeApi(f'http://127.0.0.1:{context["port"]}', 1800)
+    api.csrf = api.post("/api/v1/auth/demo", {}, expected=(200,))["csrf_token"]
+    limits = api.get("/api/v1/system/engines")["limits"]["acquisition"]
+    if limits["xlsx_max_rows"] != 1000000:
+        raise ValueError("Mandatory XLSX certification requires the unchanged1M row limit")
+    baseline = None
+    if args.group == "corrections-acquisition":
+        for rows in (100000, 100001, 400000, 1000000):
+            for variant in ("inline", "shared"):
+                result = evidence.scenario(f"acquisition-{rows}-{variant}", rows, variant,
+                    lambda rows=rows, variant=variant: acquire_group_fixture(api, directory, context, rows, variant), seconds=2400)
+                if rows == 1000000 and variant == "inline":
+                    baseline = result
+        def limit_case():
+            result = {"effective_limits": limits}
+            certify_row_limit_failure(api, directory, context, baseline, result)
+            return result["row_limit_failure"] | {"phases": result.get("phases", {}), "effective_limits": limits}
+        evidence.scenario("row-limit-preserves-version-1000001", 1000001, "inline", limit_case, seconds=1800)
+    elif args.group == "corrections-browser":
+        destination, _, schema, _ = volume.destination_fixture(api, directory, context, uuid4().hex[:8])
+        for rows in (400000, 1000000):
+            evidence.scenario(f"browser-{rows}-shared", rows, "shared",
+                lambda rows=rows: browser_group_fixture(api, directory, context, rows, destination, schema), seconds=3000)
+    else:
+        destination, _, schema, _ = volume.destination_fixture(api, directory, context, uuid4().hex[:8])
+        baseline = evidence.scenario("prerequisite-acquisition-1000000-inline", 1000000, "inline",
+            lambda: acquire_group_fixture(api, directory, context, 1000000, "inline"), seconds=2400, prerequisite=True)
+        if args.group == "corrections-dispatch":
+            chained = evidence.scenario("chain-1000000-inline", 1000000, "inline",
+                lambda: chain_group_fixture(api, directory, context, baseline, destination, schema), seconds=2400)
+            additional = evidence.scenario("prerequisite-acquisition-1000000-shared", 1000000, "shared",
+                lambda: acquire_group_fixture(api, directory, context, 1000000, "shared"), seconds=2400, prerequisite=True)
+            def dispatch_case():
+                result = {}
+                certify_dispatch(directory, context, baseline["acquisition"]["output_version_id"],
+                    additional["acquisition"]["output_version_id"], chained["delivery"]["configuration_id"], result)
+                return result["dispatch"] | {"phases": result.get("phases", {})}
+            evidence.scenario("dispatch-1000000-two-datasets", 1000000, "inline+shared", dispatch_case, seconds=2400)
+            def restart_case():
+                result = {}
+                certify_unread_restart(api, directory, context, chained["unread"]["notification_id"], result)
+                return result["unread_restart"] | {"phases": result.get("phases", {})}
+            evidence.scenario("unread-api-restart", 1000000, "inline", restart_case, seconds=600)
+        else:
+            chained = evidence.scenario("prerequisite-chain-1000000-inline", 1000000, "inline",
+                lambda: chain_group_fixture(api, directory, context, baseline, destination, schema), seconds=2400, prerequisite=True)
+            def cancel_case():
+                fixture = generate(directory / "xlsx-fixtures", 1000000, strings="shared")
+                result = {"fixture": fixture}
+                cancel_during_reading(api, directory, context, fixture, result)
+                return result["cancel"] | {"fixture": fixture, "phases": result.get("phases", {})}
+            cancelled = evidence.scenario("cancel-1000000-shared", 1000000, "shared", cancel_case, seconds=1200)
+            fixture = cancelled["fixture"]
+            def crash_case():
+                result = {"fixture": fixture}
+                recover_crashed_acquisition(api, directory, context, fixture, result)
+                return result["recovery"] | {"fixture": fixture, "phases": result.get("phases", {})}
+            evidence.scenario("crash-lease-1000000-shared", 1000000, "shared", crash_case, seconds=2400)
+            def native_case():
+                result = {"effective_limits": limits}
+                certify_row_limit_failure(api, directory, context, baseline, result)
+                certify_unread_restart(api, directory, context, chained["unread"]["notification_id"], result)
+                # The immutable backup contract requires all nine original consumers;
+                # unused web remains created/stopped, never an extra active workload.
+                native = directory / ("corrections-native-recovery-" + uuid4().hex[:12])
+                private_command([sys.executable, "scripts/tests/docker_backup_cycle.py", "--v070-context", str(directory),
+                    "--evidence-dir", str(native)], directory, "corrections-native-recovery", seconds=1800)
+                result["native_recovery_report"] = json.loads((native / "result.json").read_text(encoding="utf-8"))
+                notice = next(item for item in api.get("/api/v1/notifications/inbox?read_state=UNREAD&limit=100")["items"]
+                    if item["id"] == chained["unread"]["notification_id"])
+                if notice["read_at"] is not None:
+                    raise AssertionError("El backup/restore no conservó la transición personal no leída.")
+                result["unread_restart"]["native_state_fingerprint_comparison"] = "PASS"
+                return result
+            evidence.scenario("native-backup-restore", 1000000, "inline+shared", native_case, seconds=3000)
+    certification.assert_main_unchanged(context)
+    evidence.finish(runtime_images=images, main_inventory="UNCHANGED", xlsx_test_limit_overrides=False)
+    return evidence.directory
+
+
+def parse_arguments(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", type=Path)
     parser.add_argument("--port", type=int, default=32076)
@@ -382,29 +553,95 @@ def main():
     parser.add_argument("--with-recovery", action="store_true")
     parser.add_argument("--with-native-recovery", action="store_true")
     parser.add_argument("--with-dispatch", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--group", choices=["all", *GROUP_ALIASES, *GROUP_SCENARIOS], default="all")
+    parser.add_argument("--reuse-images", action="store_true", help="Require the verified same-SHA CI image manifest; never rebuild")
+    parser.add_argument("--backend-image", help="Reusable same-SHA backend image inspected to its immutable ID")
+    parser.add_argument("--web-image", help="Reusable same-SHA web image inspected to its immutable ID")
+    args = parser.parse_args(arguments)
+    args.group = GROUP_ALIASES.get(args.group, args.group)
+    if bool(args.backend_image) != bool(args.web_image):
+        parser.error("Reusable backend/web images must be supplied together")
     if args.with_dispatch and max(args.rows) < 1000000:
         parser.error("C05 exige una población publicada de al menos 1M.")
+    if args.group != "all" and args.rows != [100000, 100001, 400000, 1000000]:
+        parser.error("Independent mandatory groups retain every configured population")
+    if args.reuse_images and args.backend_image:
+        parser.error("CI manifest reuse cannot be mixed with explicit image arguments")
+    return args
+
+
+def services_for(group):
+    if group == "corrections-acquisition":
+        return ("postgres", "api", "web", "acquisition-worker", "events-notifications")
+    return certification.SERVICES
+
+
+def prepare_images(directory, context, args, sha):
+    if args.reuse_images:
+        from ci_images import verified_images
+        references = verified_images()
+        if not references:
+            raise ValueError("Image reuse requires the verified current-SHA manifest")
+        backend, web = references["backend"], references["web"]
+    elif args.backend_image:
+        backend, web = args.backend_image, args.web_image
+    else:
+        backend, web = context["project"] + ":backend", context["project"] + ":web"
+        private_command(["docker", "build", "--label", "org.opencontainers.image.revision=" + sha,
+            "-t", backend, "-f", "backend/Dockerfile", "."], directory, "backend-build")
+        private_command(["docker", "build", "--label", "org.opencontainers.image.revision=" + sha,
+            "-t", web, "-f", "deploy/docker/frontend.Dockerfile", "."], directory, "web-build")
+    images = immutable_image_pair(backend, web, sha, certification.command)
+    override = json.loads((directory / "compose.json").read_text(encoding="utf-8"))
+    for service in certification.SERVICES:
+        if service != "postgres":
+            override["services"][service]["image"] = images["web" if service == "web" else "backend"]["id"]
+    context["image"] = images["backend"]["id"]
+    atomic_json(directory / "compose.json", override)
+    atomic_json(directory / "isolation.json", context)
+    return images
+
+
+def main():
+    args = parse_arguments()
     managed = not args.context
     if managed:
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            certification.init("corrections", args.port)
+            certification.init("corrections" if args.group == "all" else args.group, args.port)
         args.context = Path(json.loads(output.getvalue())["context"])
     directory, context = certification.load_context(args.context)
     started = False
+    images = {}
+    sha = source_identity(certification.command)
+    evidence = ScenarioEvidence(directory, args.group, sha) if args.group != "all" else None
     try:
-        if managed:
-            run(["docker", "build", "-t", context["image"], "-f", "backend/Dockerfile", "."], directory, "backend-build")
-            run(["docker", "build", "-t", "trackvance-v070-isolated:web", "-f", "deploy/docker/frontend.Dockerfile", "."], directory, "web-build")
-            started = True
-            certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
-                                                        *certification.SERVICES])
-        certify(directory, context, args)
+        with deadline(GROUP_DEADLINES[args.group]) if evidence else contextlib.nullcontext():
+            if managed:
+                images = prepare_images(directory, context, args, sha)
+                started = True
+                certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
+                                                            *services_for(args.group)])
+            elif args.reuse_images:
+                # Existing private contexts cannot bypass image provenance.
+                images = prepare_images(directory, context, args, sha)
+            if args.group == "all":
+                certify(directory, context, args)
+            else:
+                certify_group(directory, context, args, images, evidence)
+    except BaseException as error:
+        if evidence:
+            evidence.failed = True
+            evidence.write_group("FAIL", error={"code": "XLSX_GROUP_DEADLINE" if isinstance(error, TimeoutError)
+                else "XLSX_GROUP_FAILED", "type": type(error).__name__}, runtime_images=images)
+        raise
     finally:
-        if started:
-            certification.compose(directory, context, ["down", "--volumes", "--remove-orphans"])
-        certification.assert_main_unchanged(context)
+        try:
+            if started:
+                with deadline(180):
+                    certification.compose(directory, context, ["down", "--volumes", "--remove-orphans"])
+        finally:
+            certification.assert_main_unchanged(context)
 
 
 if __name__ == "__main__":

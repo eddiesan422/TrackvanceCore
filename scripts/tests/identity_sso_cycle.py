@@ -58,7 +58,9 @@ def storage_snapshot(run, compose: list[str]) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args(argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--skip-build', action='store_true')
+    options = parser.parse_args(argv)
     project = validated_project(f"trackvance-v070-test-identity-{uuid4().hex[:12]}")
     port, oidc_port = (available_port() for _ in range(2))
     while port == oidc_port or port == 3100 or oidc_port == 3100:
@@ -75,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         "TV_E2E_URL": base_url, "PLAYWRIGHT_BASE_URL": base_url,
         "TV_IDENTITY_SSO_E2E": "true",
     }
+    environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
     compose = ["docker", "compose", "-p", project, "-f", "compose.yml", "-f",
                "deploy/docker/compose.identity-test.yml"]
     evidence = ROOT / ".codex-local" / "v070" / project
@@ -142,7 +145,8 @@ def main(argv: list[str] | None = None) -> int:
             if existing.strip():
                 raise RuntimeError("El proyecto de prueba ya contiene recursos.")
         started = True
-        run([*compose, "up", "--build", "-d", "--wait", "--wait-timeout", "300"])
+        run([*compose, "up", "--no-build" if options.skip_build else "--build",
+             "-d", "--wait", "--wait-timeout", "300"])
         with urllib.request.urlopen(base_url + "/api/v1/health", timeout=10) as response:
             health = json.load(response)
         if health.get("version") != "0.8.0":

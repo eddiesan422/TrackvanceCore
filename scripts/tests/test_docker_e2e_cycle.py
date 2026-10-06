@@ -91,17 +91,16 @@ def test_storage_snapshot_does_not_depend_on_an_old_container_file(monkeypatch):
 
 def test_ci_browser_upload_matches_guarded_runner_reports_and_excludes_private_files(tmp_path):
     workflow = (runner.ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    artifact = workflow.split("name: browser-evidence", 1)[1].split("include-hidden-files:", 1)[0]
+    artifact = workflow.split("name: ci-evidence-${{ matrix.group }}", 1)[1].split("include-hidden-files:", 1)[0]
     patterns = [line.strip() for line in artifact.splitlines() if line.strip().startswith(".codex-local/")]
     report_names = {"result.json", "browser-summary.json", "before.json", "after.json", "migrations.json"}
-    project = f"{runner.PROJECT_PREFIX}0123456789ab"
-    evidence = tmp_path / ".codex-local" / "v070" / project
+    evidence = tmp_path / ".codex-local" / "ci" / 'evidence' / 'attachments'
     evidence.mkdir(parents=True)
     for name in report_names | {"private.env", "server.log", "trace.zip"}:
         (evidence / name).write_text("{}", encoding="utf-8")
 
-    uploaded = {path.name for pattern in patterns for path in tmp_path.glob(pattern)}
-    assert len(patterns) == len(report_names)
+    uploaded = {path.name for pattern in patterns for candidate in tmp_path.glob(pattern)
+                for path in ([candidate] if candidate.is_file() else candidate.rglob('*')) if path.is_file()}
     assert uploaded == report_names
 
 

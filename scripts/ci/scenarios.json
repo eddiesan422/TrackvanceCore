@@ -1,0 +1,661 @@
+{
+  "schema_version": 1,
+  "version": "0.8.0",
+  "full_mode_required_for_final": true,
+  "fast_groups": [
+    "backend",
+    "frontend",
+    "compose-critical"
+  ],
+  "legacy_workflow_instances": 16,
+  "full_group_count": 19,
+  "groups": [
+    {
+      "id": "backend",
+      "job_key": "backend",
+      "covers_legacy_jobs": [
+        "backend"
+      ],
+      "required_sources": [
+        "checks",
+        "junit",
+        "runtime-probe"
+      ],
+      "scenarios": [
+        {
+          "id": "backend-unit",
+          "validator": "backend-check",
+          "check": "unit-tests"
+        },
+        {
+          "id": "backend-lint",
+          "validator": "backend-check",
+          "check": "lint"
+        },
+        {
+          "id": "backend-types",
+          "validator": "backend-check",
+          "check": "types"
+        },
+        {
+          "id": "backend-contracts",
+          "validator": "backend-check",
+          "check": "contracts"
+        },
+        {
+          "id": "backend-migrations",
+          "validator": "backend-check",
+          "check": "migrations"
+        },
+        {
+          "id": "backend-runtime-isolation",
+          "validator": "backend-check",
+          "check": "runtime-isolation"
+        }
+      ],
+      "timeout_minutes": 30
+    },
+    {
+      "id": "frontend",
+      "job_key": "frontend",
+      "covers_legacy_jobs": [
+        "frontend"
+      ],
+      "required_sources": [
+        "checks",
+        "unit-results"
+      ],
+      "scenarios": [
+        {
+          "id": "frontend-lint",
+          "validator": "frontend-check",
+          "check": "lint"
+        },
+        {
+          "id": "frontend-types",
+          "validator": "frontend-check",
+          "check": "types"
+        },
+        {
+          "id": "frontend-unit",
+          "validator": "frontend-check",
+          "check": "unit-tests"
+        },
+        {
+          "id": "frontend-build",
+          "validator": "frontend-check",
+          "check": "build"
+        }
+      ],
+      "timeout_minutes": 30
+    },
+    {
+      "id": "compose-critical",
+      "job_key": "suite-compose-critical",
+      "covers_legacy_jobs": [
+        "compose-e2e"
+      ],
+      "required_sources": [
+        "clean-demo",
+        "result",
+        "browser",
+        "before",
+        "after",
+        "migrations"
+      ],
+      "scenarios": [
+        {
+          "id": "compose-clean-demo",
+          "validator": "compose-clean"
+        },
+        {
+          "id": "compose-browser-persistence",
+          "validator": "compose-browser",
+          "browser_required_specs": [
+            "tests-e2e/advanced-rules.spec.ts",
+            "tests-e2e/catalog-reports.spec.ts",
+            "tests-e2e/corrections.spec.ts",
+            "tests-e2e/delivery-operations.spec.ts",
+            "tests-e2e/exception-validation.spec.ts",
+            "tests-e2e/local-identity-exceptions.spec.ts",
+            "tests-e2e/multiformat-navigation.spec.ts",
+            "tests-e2e/rule-builders.spec.ts",
+            "tests-e2e/sentinel-schedule.spec.ts"
+          ]
+        }
+      ],
+      "timeout_minutes": 35
+    },
+    {
+      "id": "corrections-acquisition",
+      "job_key": "suite-corrections-acquisition",
+      "covers_legacy_jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "required_sources": [],
+      "scenarios": [
+        {
+          "id": "acquisition-100000-inline",
+          "validator": "xlsx-acquisition",
+          "rows": 100000,
+          "variant": "inline"
+        },
+        {
+          "id": "acquisition-100000-shared",
+          "validator": "xlsx-acquisition",
+          "rows": 100000,
+          "variant": "shared"
+        },
+        {
+          "id": "acquisition-100001-inline",
+          "validator": "xlsx-acquisition",
+          "rows": 100001,
+          "variant": "inline"
+        },
+        {
+          "id": "acquisition-100001-shared",
+          "validator": "xlsx-acquisition",
+          "rows": 100001,
+          "variant": "shared"
+        },
+        {
+          "id": "acquisition-400000-inline",
+          "validator": "xlsx-acquisition",
+          "rows": 400000,
+          "variant": "inline"
+        },
+        {
+          "id": "acquisition-400000-shared",
+          "validator": "xlsx-acquisition",
+          "rows": 400000,
+          "variant": "shared"
+        },
+        {
+          "id": "acquisition-1000000-inline",
+          "validator": "xlsx-acquisition",
+          "rows": 1000000,
+          "variant": "inline"
+        },
+        {
+          "id": "acquisition-1000000-shared",
+          "validator": "xlsx-acquisition",
+          "rows": 1000000,
+          "variant": "shared"
+        },
+        {
+          "id": "row-limit-preserves-version-1000001",
+          "validator": "xlsx-limit",
+          "rows": 1000001,
+          "variant": "inline"
+        }
+      ],
+      "timeout_minutes": 70
+    },
+    {
+      "id": "corrections-browser",
+      "job_key": "suite-corrections-browser",
+      "covers_legacy_jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "required_sources": [],
+      "scenarios": [
+        {
+          "id": "browser-400000-shared",
+          "validator": "xlsx-browser",
+          "rows": 400000,
+          "variant": "shared"
+        },
+        {
+          "id": "browser-1000000-shared",
+          "validator": "xlsx-browser",
+          "rows": 1000000,
+          "variant": "shared"
+        }
+      ],
+      "timeout_minutes": 70
+    },
+    {
+      "id": "corrections-dispatch",
+      "job_key": "suite-corrections-dispatch",
+      "covers_legacy_jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "required_sources": [],
+      "scenarios": [
+        {
+          "id": "chain-1000000-inline",
+          "validator": "xlsx-chain",
+          "rows": 1000000,
+          "variant": "inline"
+        },
+        {
+          "id": "dispatch-1000000-two-datasets",
+          "validator": "xlsx-dispatch",
+          "rows": 1000000,
+          "variant": "inline+shared"
+        },
+        {
+          "id": "unread-api-restart",
+          "validator": "xlsx-unread",
+          "rows": 1000000,
+          "variant": "inline"
+        }
+      ],
+      "timeout_minutes": 50
+    },
+    {
+      "id": "corrections-recovery",
+      "job_key": "suite-corrections-recovery",
+      "covers_legacy_jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "required_sources": [],
+      "scenarios": [
+        {
+          "id": "cancel-1000000-shared",
+          "validator": "xlsx-cancel",
+          "rows": 1000000,
+          "variant": "shared"
+        },
+        {
+          "id": "crash-lease-1000000-shared",
+          "validator": "xlsx-crash",
+          "rows": 1000000,
+          "variant": "shared"
+        },
+        {
+          "id": "native-backup-restore",
+          "validator": "xlsx-native",
+          "rows": 1000000,
+          "variant": "inline+shared"
+        }
+      ],
+      "timeout_minutes": 65
+    },
+    {
+      "id": "identity-sso",
+      "job_key": "suite-identity-sso",
+      "covers_legacy_jobs": [
+        "identity-sso-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "browser"
+      ],
+      "scenarios": [
+        {
+          "id": "identity-rbac-sso-browser",
+          "validator": "identity"
+        }
+      ],
+      "timeout_minutes": 25
+    },
+    {
+      "id": "connections",
+      "job_key": "suite-connections",
+      "covers_legacy_jobs": [
+        "connections-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "browser"
+      ],
+      "scenarios": [
+        {
+          "id": "connections-real-engines-browser",
+          "validator": "connections",
+          "browser_required_specs": [
+            "tests-e2e/advanced-rules.spec.ts",
+            "tests-e2e/catalog-reports.spec.ts",
+            "tests-e2e/connections.spec.ts",
+            "tests-e2e/corrections.spec.ts",
+            "tests-e2e/delivery-operations.spec.ts",
+            "tests-e2e/exception-validation.spec.ts",
+            "tests-e2e/local-identity-exceptions.spec.ts",
+            "tests-e2e/multiformat-navigation.spec.ts",
+            "tests-e2e/roadmap-source-cycle.spec.ts",
+            "tests-e2e/rule-builders.spec.ts",
+            "tests-e2e/sentinel-schedule.spec.ts"
+          ]
+        }
+      ],
+      "timeout_minutes": 30
+    },
+    {
+      "id": "delivery",
+      "job_key": "suite-delivery",
+      "covers_legacy_jobs": [
+        "delivery-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "browser"
+      ],
+      "scenarios": [
+        {
+          "id": "delivery-strategies-audit-browser",
+          "validator": "delivery"
+        }
+      ],
+      "timeout_minutes": 35
+    },
+    {
+      "id": "backup-restore",
+      "job_key": "suite-backup-restore",
+      "covers_legacy_jobs": [
+        "backup-restore-e2e"
+      ],
+      "required_sources": [
+        "native",
+        "legacy051",
+        "legacy060",
+        "legacy061"
+      ],
+      "scenarios": [
+        {
+          "id": "backup-native080",
+          "validator": "restore",
+          "source": "native",
+          "version": "0.8.0"
+        },
+        {
+          "id": "backup-authentic051",
+          "validator": "restore",
+          "source": "legacy051",
+          "version": "0.5.1"
+        },
+        {
+          "id": "backup-authentic060",
+          "validator": "restore",
+          "source": "legacy060",
+          "version": "0.6.0"
+        },
+        {
+          "id": "backup-authentic061",
+          "validator": "restore",
+          "source": "legacy061",
+          "version": "0.6.1"
+        }
+      ],
+      "timeout_minutes": 45
+    },
+    {
+      "id": "catalog-reports",
+      "job_key": "suite-catalog-reports",
+      "covers_legacy_jobs": [
+        "catalog-reports-e2e"
+      ],
+      "required_sources": [
+        "result"
+      ],
+      "scenarios": [
+        {
+          "id": "catalog-reports-120",
+          "validator": "catalog-population",
+          "rows": 120
+        },
+        {
+          "id": "catalog-reports-400000",
+          "validator": "catalog-population",
+          "rows": 400000
+        },
+        {
+          "id": "catalog-reports-1000000",
+          "validator": "catalog-population",
+          "rows": 1000000
+        },
+        {
+          "id": "catalog-reports-browser",
+          "validator": "catalog-browser"
+        },
+        {
+          "id": "reports-postgres-joint-snapshot",
+          "validator": "catalog-snapshot"
+        },
+        {
+          "id": "reports-ephemeral-http",
+          "validator": "catalog-http"
+        },
+        {
+          "id": "catalog-native080-recovery",
+          "validator": "catalog-recovery",
+          "mode": "native"
+        },
+        {
+          "id": "catalog-authentic070-recovery",
+          "validator": "catalog-recovery",
+          "mode": "legacy"
+        }
+      ],
+      "timeout_minutes": 120
+    },
+    {
+      "id": "benchmark-smoke",
+      "job_key": "suite-benchmark-smoke",
+      "covers_legacy_jobs": [
+        "benchmark-smoke"
+      ],
+      "required_sources": [
+        "result"
+      ],
+      "scenarios": [
+        {
+          "id": "benchmark-real-smoke",
+          "validator": "benchmark",
+          "rows": 1000
+        }
+      ],
+      "timeout_minutes": 20
+    },
+    {
+      "id": "delivery-benchmark-smoke",
+      "job_key": "suite-delivery-benchmark-smoke",
+      "covers_legacy_jobs": [
+        "delivery-benchmark-smoke"
+      ],
+      "required_sources": [
+        "result"
+      ],
+      "scenarios": [
+        {
+          "id": "delivery-all-eight-smoke-cases",
+          "validator": "delivery-benchmark"
+        }
+      ],
+      "timeout_minutes": 25
+    },
+    {
+      "id": "spark-local",
+      "job_key": "suite-spark-local",
+      "covers_legacy_jobs": [
+        "spark-local-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "parity",
+        "million"
+      ],
+      "scenarios": [
+        {
+          "id": "spark-local-real-parity",
+          "validator": "spark-parity",
+          "mode": "LOCAL"
+        },
+        {
+          "id": "spark-local-million-three-modules",
+          "validator": "spark-million",
+          "rows": 1000000,
+          "mode": "LOCAL"
+        }
+      ],
+      "timeout_minutes": 35
+    },
+    {
+      "id": "spark-standalone",
+      "job_key": "suite-spark-standalone",
+      "covers_legacy_jobs": [
+        "spark-standalone-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "parity",
+        "million"
+      ],
+      "scenarios": [
+        {
+          "id": "spark-standalone-real-parity",
+          "validator": "spark-parity",
+          "mode": "STANDALONE_CLIENT"
+        },
+        {
+          "id": "spark-standalone-million-three-modules",
+          "validator": "spark-million",
+          "rows": 1000000,
+          "mode": "STANDALONE_CLIENT"
+        }
+      ],
+      "timeout_minutes": 35
+    },
+    {
+      "id": "async-volume-100",
+      "job_key": "suite-async-volume-100",
+      "covers_legacy_jobs": [
+        "async-volume-e2e (100)"
+      ],
+      "required_sources": [
+        "result",
+        "volume",
+        "automation",
+        "browser",
+        "browser-integrity",
+        "recovery"
+      ],
+      "scenarios": [
+        {
+          "id": "async-100-csv-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 100,
+          "format": "CSV"
+        },
+        {
+          "id": "async-100-jsonl-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 100,
+          "format": "JSONL"
+        },
+        {
+          "id": "async-100-parquet-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 100,
+          "format": "PARQUET"
+        },
+        {
+          "id": "async-100-automation-negative-integrated",
+          "validator": "async-automation",
+          "rows": 1000000,
+          "tier_mib": 100
+        },
+        {
+          "id": "async-100-browser-million-integrity",
+          "validator": "async-browser",
+          "rows": 1000000,
+          "tier_mib": 100
+        },
+        {
+          "id": "async-100-native-full-recovery",
+          "validator": "async-recovery",
+          "rows": 1000000,
+          "tier_mib": 100
+        }
+      ],
+      "timeout_minutes": 90
+    },
+    {
+      "id": "async-volume-500",
+      "job_key": "suite-async-volume-500",
+      "covers_legacy_jobs": [
+        "async-volume-e2e (500)"
+      ],
+      "required_sources": [
+        "result",
+        "volume",
+        "automation"
+      ],
+      "scenarios": [
+        {
+          "id": "async-500-csv-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 500,
+          "format": "CSV"
+        },
+        {
+          "id": "async-500-jsonl-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 500,
+          "format": "JSONL"
+        },
+        {
+          "id": "async-500-parquet-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 500,
+          "format": "PARQUET"
+        },
+        {
+          "id": "async-500-automation-negative-integrated",
+          "validator": "async-automation",
+          "rows": 1000000,
+          "tier_mib": 500
+        }
+      ],
+      "timeout_minutes": 90
+    },
+    {
+      "id": "async-volume-1024",
+      "job_key": "suite-async-volume-1024",
+      "covers_legacy_jobs": [
+        "async-volume-e2e (1024)"
+      ],
+      "required_sources": [
+        "result",
+        "volume",
+        "automation"
+      ],
+      "scenarios": [
+        {
+          "id": "async-1024-csv-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 1024,
+          "format": "CSV"
+        },
+        {
+          "id": "async-1024-jsonl-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 1024,
+          "format": "JSONL"
+        },
+        {
+          "id": "async-1024-parquet-million",
+          "validator": "async-population",
+          "rows": 1000000,
+          "tier_mib": 1024,
+          "format": "PARQUET"
+        },
+        {
+          "id": "async-1024-automation-negative-integrated",
+          "validator": "async-automation",
+          "rows": 1000000,
+          "tier_mib": 1024
+        }
+      ],
+      "timeout_minutes": 90
+    }
+  ]
+}

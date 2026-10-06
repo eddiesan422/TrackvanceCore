@@ -50,6 +50,8 @@ def test_unprepared_new_base_services_never_start_and_owned_cleanup_remains(monk
     monkeypatch.setattr(certification, "compose", compose)
     monkeypatch.setattr(certification, "assert_main_unchanged", lambda identity: main_checked.append(identity))
     monkeypatch.setattr(cycle, "run", lambda *_arguments, **_options: None)
+    if module_name == 'corrections_cycle':
+        monkeypatch.setattr(cycle, 'prepare_images', lambda *_arguments: {})
     arguments = [module_name]
     if module_name == "v070_cycle":
         arguments.extend(["--tier-mib", "1024", "--reuse-images"])

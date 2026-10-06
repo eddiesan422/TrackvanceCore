@@ -13,6 +13,48 @@ habitual. Las pruebas de desarrollo y los resultados de otra revisión no cierra
 esos gates. El registro final se conserva en
 [validation_results_0.8.0.json](../specification/validation_results_0.8.0.json).
 
+## Contrato CI actual y mediciones de optimización
+
+La [CI actual](ci.md) declara 19 grupos y 64 escenarios obligatorios en
+`scripts/ci/scenarios.json`. Conserva los 16 jobs funcionales anteriores y reparte
+el recorrido XLSX en adquisiciones/límites, navegador, despacho/cadena y
+recuperación. Los ocho tiers inline/shared, los navegadores de 400k/1M, la cadena,
+los negativos y los restores siguen siendo obligatorios. `fast` ejecuta tres
+grupos existentes de desarrollo y su gate indica `certifies_final=false`.
+Código, dependencias, migraciones, harnesses, CI y paths inciertos fuerzan `full`.
+La actualización habitual requiere el modo completo, evidencia y hashes del
+SHA final y todos los jobs aplicables completados SUCCESS.
+
+La [baseline de costes saneada](evidence/0.8.0/ci-optimization-baseline.json)
+se calculó sólo desde logs/metadatos ya conservados. El intento 4 del run
+37368090419/495f4eb terminó CANCELLED: 15 SUCCESS y un XLSX CANCELLED.
+Los intervalos de jobs suman 303,35 minutos de runner, sin cola, incluyendo el
+frontend reutilizado y el job incompleto; no son minutos facturados ni coste de
+certificación completa. Catálogo tomó 4.050 s de job y 3.934,695 s de ciclo;
+los tiers API 120/400k/1M tomaron 38,412/1.045,771/2.343,219 s con fixtures y
+oráculos completos. Los builds explícitos visibles suman al menos 180 s;
+los internos no tienen desglose exacto. Las esperas anteriores de backend sin
+runner ni steps, 903/902/902 s, son fallos de asignación externos separados del
+runtime funcional. El historial CANCELLED/FAIL permanece íntegro.
+
+El snapshot posterior conservado de 37388511854/63096e6 tenía 11 SUCCESS y cinco
+jobs sin terminar de 16. No permite cerrar ese run ni comparar su coste completo.
+Las verificaciones locales de ese SHA limpio pasaron: frontend 33 archivos/252
+tests, lint, tipos y build; backend Windows 1.269 PASS/46 SKIP en 330,30 s, Ruff y
+mypy75. Backend Windows sin scripts y Linux CI backend+scripts tienen alcances
+distintos; sus conteos no se suman ni las omisiones Windows acreditan aislamiento
+Linux o JVM.
+
+La nueva estructura y sus guardas se verifican con pruebas puras; todavía requiere
+ejecuciones completas fría y caliente del SHA que las versiona. Deben medir
+build/transferencia, instalación, fixtures, adquisiciones, oráculos, SQL, navegador,
+recuperación, subida/cleanup y esperas de runners por separado. No hay una mejora
+porcentual, presupuesto final ni certificación de la optimización acreditados.
+La fuente PDF se sincroniza con este contrato antes de generar un candidato
+nuevo, revisar todas sus páginas y hacer el commit documental final. Respaldo
+fresco, restore aislado, promoción verificada y cleanup propio siguen siendo
+gates distintos y pendientes hasta su ejecución real.
+
 ## Checkpoint de desarrollo del 5 de octubre de 2026
 
 La regresión Windows posterior produjo **1.857 PASS, 42 SKIP** en 340,54 segundos,
@@ -78,8 +120,10 @@ minutos; el log no muestra un fallo de assertion. Su único navegador completado
 pasó en 387,001 s y corresponde a 400.000 por inferencia del orden del driver,
 no por metadata del artefacto. Dispatch pasó; el ciclo XLSX integral y su
 recuperación nativa quedaron sin acreditar. [La evidencia real](evidence/0.8.0/ci-495f4eb-timeout.json)
-conserva hashes y estados. Sólo se amplía ese job a 180 minutos y se añaden
-checkpoints saneados, manteniendo poblaciones y límites. El nuevo CI íntegro y
+conserva hashes y estados. La revisión posterior 630 amplió ese job monolítico
+a 180 minutos y añadió checkpoints saneados, manteniendo poblaciones y límites;
+la estructura actual lo divide en cuatro grupos conforme al contrato anterior.
+El nuevo CI íntegro y
 la instalación habitual siguen pendientes; este intento no cierra la certificación.
 
 La revisión posterior del descriptor produjo **87 PASS / cero FAIL o SKIP** en
@@ -101,7 +145,7 @@ Origen destruido antes del restore fresco, destino STOPPED_VERIFIED, instalació
 habitual UNCHANGED y cleanup propio completo. [Su evidencia](evidence/0.8.0/authentic-061-current-restore.json)
 identifica la imagen y los bytes actuales montados; no certifica el SHA final de CI.
 
-El PDF 0.8.0 vigente se publicó tras revisar las **143 páginas**, con 280 marcadores
+El checkpoint PDF 0.8.0 anterior se publicó tras revisar las **143 páginas**, con 280 marcadores
 y 40 secciones principales. Las dos copias oficiales tienen el SHA-256
 `223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c`;
 fuente, generador, insumos y extracción coinciden. La [verificación de publicación](evidence/0.8.0/pdf-verification.json)

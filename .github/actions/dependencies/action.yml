@@ -1,0 +1,81 @@
+name: Locked CI dependencies
+description: Cache package downloads only; rebuild environments from committed locks.
+inputs:
+  cache-mode:
+    description: warm restores dependency caches; cold installs without restoration.
+    default: warm
+  python:
+    description: Install the locked Python environment.
+    default: 'false'
+  frontend:
+    description: Install the locked frontend environment.
+    default: 'false'
+  browser:
+    description: Install real Chromium and its operating system dependencies.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
+    - name: Install locked package manager
+      shell: bash
+      run: python -m pip install uv==0.12.13
+    - uses: actions/cache@v5
+      if: inputs.python == 'true' && inputs.cache-mode == 'warm'
+      with:
+        path: ~/.cache/uv
+        key: uv-${{ runner.os }}-${{ runner.arch }}-py312-uv01213-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}
+    - name: Install locked backend dependencies
+      if: inputs.python == 'true'
+      shell: bash
+      run: uv sync --project backend --frozen
+    - uses: actions/cache/save@v5
+      if: inputs.python == 'true' && inputs.cache-mode == 'cold'
+      with:
+        path: ~/.cache/uv
+        key: uv-${{ runner.os }}-${{ runner.arch }}-py312-uv01213-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}
+    - uses: actions/setup-node@v7
+      if: inputs.frontend == 'true'
+      with:
+        node-version: '22'
+    - name: Install pinned pnpm
+      if: inputs.frontend == 'true'
+      shell: bash
+      run: npm install --global pnpm@11.19.0
+    - name: Locate dependency store
+      if: inputs.frontend == 'true'
+      id: pnpm-store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v5
+      if: inputs.frontend == 'true' && inputs.cache-mode == 'warm'
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-node22-pnpm11190-${{ hashFiles('frontend/pnpm-lock.yaml', 'frontend/pnpm-workspace.yaml') }}
+    - name: Install locked frontend dependencies
+      if: inputs.frontend == 'true'
+      shell: bash
+      working-directory: frontend
+      run: pnpm install --frozen-lockfile
+    - uses: actions/cache/save@v5
+      if: inputs.frontend == 'true' && inputs.cache-mode == 'cold'
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-node22-pnpm11190-${{ hashFiles('frontend/pnpm-lock.yaml', 'frontend/pnpm-workspace.yaml') }}
+    - uses: actions/cache@v5
+      if: inputs.browser == 'true' && inputs.cache-mode == 'warm'
+      with:
+        path: ~/.cache/ms-playwright
+        key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+    - name: Install browser with operating system dependencies
+      if: inputs.browser == 'true'
+      shell: bash
+      working-directory: frontend
+      run: pnpm exec playwright install --with-deps chromium
+    - uses: actions/cache/save@v5
+      if: inputs.browser == 'true' && inputs.cache-mode == 'cold'
+      with:
+        path: ~/.cache/ms-playwright
+        key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
