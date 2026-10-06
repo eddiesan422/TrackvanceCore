@@ -546,3 +546,102 @@ def test_compose_partial_attachment_is_hashed_and_remains_failed_gate(tmp_path, 
     attachment = output / 'evidence' / record['evidence'][0]['path']
     assert diagnostics.hashlib.sha256(attachment.read_bytes()).hexdigest() == record['evidence'][0]['sha256']
     assert 'SECRET_TOKEN' not in attachment.read_text() and not list((output / 'evidence').glob('scenario-*.json'))
+
+
+def async_failure_context(root, tier=100):
+    context = root / '.codex-local/v070' / f'trackvance-v070-test-volume-{tier}-012345abcdef'
+    context.mkdir(parents=True)
+    (context / 'isolation.json').write_text(json.dumps({'project': context.name, 'main_before': 'SECRET_TOKEN'}))
+    cycle = context / 'cycle-summary.json'
+    cycle.write_text(json.dumps({'status': 'FAIL', 'project': context.name, 'tier_mib': tier, 'rows': 1000000,
+        'volume': 'PASS', 'automation': 'PASS', 'browser': 'PASS', 'cleanup': 'PASS',
+        'error_type': 'RuntimeError', 'message': 'SECRET_TOKEN', 'source_rows': ['PRIVATE_ROW']}))
+    native = context / 'native-recovery/result.json'
+    native.parent.mkdir()
+    native.write_text(json.dumps({'status': 'FAIL', 'source_project': context.name,
+        'target_project': 'trackvance-v070-test-recovery-fedcba987654', 'failed_stage': 'fresh_restore',
+        'error_type': 'ComposePreflightError', 'error_code': 'LIVE_CREDENTIAL_INHERITANCE',
+        'main_inventory': 'UNCHANGED', 'duration_seconds': 125, 'exit_code': 1,
+        'env': {'TOKEN': 'SECRET_TOKEN'}, 'sql': 'PRIVATE_ROW', 'source_state_sha256': 'SECRET_TOKEN'}))
+    return context, cycle, native
+
+
+@pytest.mark.parametrize('tier', [100, 500, 1024])
+def test_async_failure_keeps_exact_closed_native_result_without_payloads(tmp_path, tier):
+    async_failure_context(tmp_path, tier)
+    result = diagnostics.collect_child_failure(f'async-volume-{tier}', set(), root=tmp_path)
+    assert result == [{'kind': 'RECOVERY_PARTIAL_SUMMARY', 'profile': 'native', 'summary_present': True,
+        'result': {'status': 'FAIL', 'failed_stage': 'fresh_restore', 'error_type': 'ComposePreflightError',
+            'error_code': 'LIVE_CREDENTIAL_INHERITANCE', 'main_inventory': 'UNCHANGED', 'exit_code': 1, 'duration_seconds': 125}}]
+    assert all(value not in json.dumps(result) for value in ('SECRET_TOKEN', 'PRIVATE_ROW', 'source_project', 'source_state_sha256'))
+
+
+def test_async_missing_evidence_is_explicit_without_inventing_phase_or_pass(tmp_path):
+    _, _, native = async_failure_context(tmp_path)
+    native.unlink()
+    result = diagnostics.collect_child_failure('async-volume-100', set(), root=tmp_path)
+    assert result == [{'kind': 'RECOVERY_PARTIAL_SUMMARY', 'profile': 'native', 'summary_present': False, 'result': {}}]
+
+
+@pytest.mark.parametrize('damage', ['isolation-project',
+    'native-source', 'native-target-main', 'native-target-incomplete', 'unknown-status', 'wrong-tier-context'])
+def test_async_failure_rejects_foreign_malformed_or_wrong_tier_identity(tmp_path, damage):
+    context, _, native = async_failure_context(tmp_path, 500 if damage == 'wrong-tier-context' else 100)
+    if damage == 'wrong-tier-context':
+        assert diagnostics.collect_child_failure('async-volume-100', set(), root=tmp_path) == []
+        return
+    path = context / 'isolation.json' if damage.startswith('isolation') else native
+    raw = json.loads(path.read_text())
+    key, value = {'isolation-project': ('project', 'trackvance-certification'),
+        'native-source': ('source_project', 'trackvance-certification'),
+        'native-target-main': ('target_project', 'trackvance-certification'),
+        'native-target-incomplete': ('target_project', 'trackvance-v070-test-recovery-01234'),
+        'unknown-status': ('status', 'SECRET_TOKEN')}[damage]
+    raw[key] = value
+    path.write_text(json.dumps(raw))
+    assert diagnostics.collect_child_failure('async-volume-100', set(), root=tmp_path) == []
+
+
+@pytest.mark.parametrize('unsafe', ['base-link', 'context-link', 'isolation-link', 'native-dir-link',
+    'native-link', 'native-junction', 'isolation-old', 'native-old', 'oversized', 'malformed', 'baseline'])
+def test_async_failure_drops_linked_stale_unbounded_or_archived_evidence(tmp_path, monkeypatch, unsafe):
+    context, _, native = async_failure_context(tmp_path)
+    if unsafe.endswith('-link'):
+        linked = {'base-link': context.parent, 'context-link': context, 'isolation-link': context / 'isolation.json',
+                  'native-dir-link': native.parent, 'native-link': native}[unsafe]
+        original = Path.is_symlink
+        monkeypatch.setattr(Path, 'is_symlink', lambda self: self == linked or original(self))
+    elif unsafe == 'native-junction':
+        monkeypatch.setattr(Path, 'is_junction', lambda self: self == native.parent, raising=False)
+    elif unsafe.endswith('-old'):
+        old = {'isolation-old': context / 'isolation.json', 'native-old': native}[unsafe]
+        assert diagnostics.collect_child_failure('async-volume-100', {old.resolve()}, root=tmp_path) == []
+        return
+    elif unsafe == 'oversized':
+        native.write_text('x' * (diagnostics.MAX_BYTES + 1))
+    elif unsafe == 'malformed':
+        native.write_text('{bad-json')
+    else:
+        baseline = context / 'baseline'
+        baseline.mkdir()
+        native.replace(baseline / native.name)
+        result = diagnostics.collect_child_failure('async-volume-100', set(), root=tmp_path)
+        assert result[0]['summary_present'] is False and result[0]['result'] == {}
+        return
+    assert diagnostics.collect_child_failure('async-volume-100', set(), root=tmp_path) == []
+
+
+def test_async_failure_publishes_hashed_closed_attachments_and_never_certifies(tmp_path, monkeypatch):
+    async_failure_context(tmp_path)
+    monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: set())
+    output = tmp_path / 'ci'
+    path = diagnostics.publish_failure('async-volume-100', output, source_sha=SHA,
+        ci={**CI, 'job_id': 'suite-async-volume-100'}, phases=[], error=RuntimeError('SECRET_TOKEN'),
+        phase='volume', before=set(), root=tmp_path)
+    record = json.loads(path.read_text())
+    assert record['status'] == 'FAIL' and record['certifies_final'] is False
+    assert len(record['evidence']) == 1 and not list((output / 'evidence').glob('scenario-*.json'))
+    for reference in record['evidence']:
+        attachment = output / 'evidence' / reference['path']
+        assert diagnostics.hashlib.sha256(attachment.read_bytes()).hexdigest() == reference['sha256']
+        assert all(secret not in attachment.read_text() for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))

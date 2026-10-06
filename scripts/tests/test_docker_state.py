@@ -11,9 +11,212 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "docker_state.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("docker_state", SCRIPT)
 docker_state = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(docker_state)
+
+
+@pytest.fixture
+def ci_restore_target(monkeypatch, tmp_path, request):
+    from ci import image_bundle
+
+    family = getattr(request, "param", "070")
+    project = f"trackvance-v{family}-test-recovery-dst-0123456789ab"
+    directory = tmp_path / ".codex-local" / f"v{family}" / project
+    directory.mkdir(parents=True)
+    sha = "a" * 40
+    images = {"backend": "sha256:" + "b" * 64, "web": "sha256:" + "c" * 64}
+    manifest = {"schema_version": 1, "status": "PASS", "source_sha": sha,
+                "digest_kind": "DOCKER_CONFIGURATION_SHA256", "images": {
+                    role: {"image_id": image, "archive": role + ".tar", "archive_bytes": 1,
+                           "archive_sha256": "d" * 64} for role, image in images.items()}}
+    path = directory / "images.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("TRACKVANCE_CI_IMAGE_MANIFEST", str(path))
+    monkeypatch.setenv("CI_SOURCE_SHA", sha)
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(docker_state, "ROOT", tmp_path)
+    services = {}
+    for name in sorted(docker_state.PRIMARY_SERVICES | {"report-worker"}):
+        environment = {"TRACKVANCE_CERTIFICATION_PROJECT": project}
+        if name == "postgres":
+            environment = {"POSTGRES_USER": f"tv_v{family}_test", "POSTGRES_DB": f"tv_v{family}_test"}
+        services[name] = {"image": "postgres:16-alpine" if name == "postgres" else images[
+            "web" if name == "web" else "backend"], "cpus": 1, "mem_limit": 268435456,
+            "pids_limit": 128, "restart": "no", "environment": environment,
+            "networks": {"default": {}}, "volumes": [{"type": "volume", "source": "data", "target": "/data"}]}
+    services["web"]["ports"] = [{"host_ip": "127.0.0.1", "published": "32071", "target": 80}]
+    services["api"]["volumes"].append({"type": "bind", "source": str(tmp_path / "backend/src"),
+                                       "target": "/app/backend/src", "read_only": True})
+    config = {"name": project, "services": services,
+              "volumes": {"data": {"name": project + "_data"}},
+              "networks": {"default": {"name": project + "_default"}}}
+    fixture = {"project": project, "directory": directory, "sha": sha, "images": images,
+               "manifest": manifest, "path": path, "config": config, "root": tmp_path,
+               "head": sha, "inspected": [], "compose": [], "readonly": []}
+
+    def image_docker(*arguments):
+        assert arguments[:2] == ("image", "inspect")
+        image = arguments[2]
+        assert image in images.values()
+        fixture["inspected"].append(image)
+        return json.dumps([{"Id": image, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": {
+            "org.opencontainers.image.revision": fixture.get("image_sha", sha),
+            "org.opencontainers.image.version": "0.8.0"}}}])
+
+    def execute(arguments, **_kwargs):
+        fixture["readonly"].append(arguments)
+        if arguments == ["git", "rev-parse", "HEAD"]:
+            return fixture["head"]
+        assert arguments[:2] in (["docker", "ps"], ["docker", "volume"], ["docker", "network"])
+        assert "ls" in arguments or arguments[1] == "ps"
+        return ""
+
+    def compose(project, *arguments, **_kwargs):
+        assert project == fixture["project"]
+        fixture["compose"].append(arguments)
+        if arguments == ("config", "--format", "json"):
+            return json.dumps(config)
+        return ""
+
+    monkeypatch.setattr(image_bundle, "docker", image_docker)
+    monkeypatch.setattr(docker_state, "execute", execute)
+    monkeypatch.setattr(docker_state, "compose", compose)
+    monkeypatch.setattr(docker_state, "compose_services", lambda *_args: list(services))
+    monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _source: None)
+    monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _project: None)
+    return fixture
+
+
+@pytest.mark.parametrize("ci_restore_target", ["070", "080"], indirect=True)
+def test_ci_restore_checks_real_manifest_checkout_all_images_and_resolved_adapter(ci_restore_target):
+    target = ci_restore_target
+    options = docker_state._restore_creation_options(
+        target["project"], target["directory"], list(target["config"]["services"]), {}
+    )
+    assert options == ["--no-build", "--pull", "never"]
+    assert set(target["inspected"]) == set(target["images"].values())
+    assert target["compose"] == [("config", "--format", "json")]
+    assert target["readonly"][0] == ["git", "rev-parse", "HEAD"]
+    assert len(target["config"]["services"]) == 10
+
+
+@pytest.mark.parametrize("damage", ["checkout_sha", "manifest_sha", "image_revision", "missing_manifest",
+    "invalid_manifest", "boolean_opt_in", "backend_image", "web_image", "last_backend_image", "postgres_image", "context", "missing_context",
+    "namespace", "marker", "mount", "volume", "network", "port", "resource", "unexpected_service"])
+def test_ci_restore_rejects_unverified_or_unsafe_target_before_first_up(ci_restore_target, monkeypatch, damage):
+    target = ci_restore_target
+    config, directory = target["config"], target["directory"]
+    if damage == "checkout_sha":
+        target["head"] = "e" * 40
+    elif damage == "manifest_sha":
+        target["manifest"]["source_sha"] = "e" * 40
+        target["path"].write_text(json.dumps(target["manifest"]), encoding="utf-8")
+    elif damage == "image_revision":
+        target["image_sha"] = "e" * 40
+    elif damage == "missing_manifest":
+        target["path"].unlink()
+    elif damage == "invalid_manifest":
+        target["path"].write_text("{}", encoding="utf-8")
+    elif damage == "boolean_opt_in":
+        monkeypatch.setenv("TRACKVANCE_CI_IMAGE_MANIFEST", "true")
+    elif damage in {"backend_image", "web_image", "last_backend_image"}:
+        name = {"backend_image": "api", "web_image": "web", "last_backend_image": "report-worker"}[damage]
+        config["services"][name]["image"] = "sha256:" + "e" * 64
+    elif damage == "postgres_image":
+        config["services"]["postgres"]["image"] = "postgres:latest"
+    elif damage == "context":
+        directory = target["root"]
+    elif damage == "missing_context":
+        directory = directory / "absent"
+    elif damage == "namespace":
+        target["project"] = config["name"] = "trackvance-certification"
+    elif damage == "marker":
+        config["services"]["report-worker"]["environment"].clear()
+    elif damage == "mount":
+        config["services"]["api"]["volumes"][-1]["read_only"] = False
+    elif damage in {"volume", "network"}:
+        config[damage + "s"]["data" if damage == "volume" else "default"]["name"] = "trackvance-certification_data"
+    elif damage == "port":
+        config["services"]["web"]["ports"][0]["published"] = "3100"
+    elif damage == "resource":
+        del config["services"]["report-worker"]["pids_limit"]
+    else:
+        config["services"]["unowned"] = dict(config["services"]["api"])
+    monkeypatch.setattr(docker_state, "inventory", lambda *_: pytest.fail("Target creation was reached"))
+    if damage == "missing_context":
+        from ci.compose_preflight import ComposePreflightError
+        with pytest.raises(ComposePreflightError, match="PRIVATE_CONTEXT_PATH"):
+            docker_state._restore_creation_options(target["project"], directory, list(config["services"]), {})
+        assert target["compose"] == [("config", "--format", "json")]
+        return
+    with pytest.raises(docker_state.OperationError):
+        docker_state._restore_verified(directory / "backup", {"schema_version": 2}, directory, target["project"])
+    assert not any(arguments[0] in {"up", "create", "stop"} for arguments in target["compose"])
+
+
+@pytest.mark.parametrize("ci_restore_target", ["070", "080"], indirect=True)
+def test_ci_restore_validates_before_start_and_creates_without_build_or_pull(ci_restore_target, monkeypatch):
+    target = ci_restore_target
+    monkeypatch.setattr(docker_state, "inventory", lambda *_: (_ for _ in ()).throw(RuntimeError("after-create")))
+    with pytest.raises(docker_state.OperationError) as failure:
+        docker_state._restore_verified(target["directory"] / "backup", {"schema_version": 2},
+                                       target["directory"], target["project"])
+    assert isinstance(failure.value.__cause__, RuntimeError)
+    assert target["compose"][0] == ("config", "--format", "json")
+    assert target["compose"][1] == ("up", "-d", "--wait", "postgres")
+    assert target["compose"][2][:4] == ("create", "--no-build", "--pull", "never")
+    assert set(target["compose"][2][4:]) == set(target["config"]["services"]) - {"postgres"}
+    assert target["compose"][-1] == ("stop",)
+
+
+def test_ci_restore_github_sha_fallback_still_requires_real_checkout(ci_restore_target, monkeypatch):
+    target = ci_restore_target
+    monkeypatch.delenv("CI_SOURCE_SHA")
+    monkeypatch.setenv("GITHUB_SHA", target["sha"])
+    assert docker_state._restore_creation_options(
+        target["project"], target["directory"], list(target["config"]["services"]), {}
+    ) == ["--no-build", "--pull", "never"]
+    monkeypatch.setenv("CI_SOURCE_SHA", "e" * 40)
+    with pytest.raises(docker_state.OperationError, match="checkout"):
+        docker_state._restore_creation_options(
+            target["project"], target["directory"], list(target["config"]["services"]), {}
+        )
+
+
+def test_ci_restore_uses_original_private_receipt_context_through_verified_staging(ci_restore_target, monkeypatch):
+    target = ci_restore_target
+    source = target["directory"] / "backup"
+    _manifest, expected = write_pre_corrections_backup(source)
+    restored = json.loads(json.dumps(expected))
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES})
+    state = modern_inventory()
+    state["project"] = target["project"]
+    monkeypatch.setattr(docker_state, "inventory", lambda _: state)
+    monkeypatch.setattr(docker_state, "_extract_volume", lambda *_args: None)
+    monkeypatch.setattr(docker_state, "_copy_snapshot", lambda _api, _destination, *, command="snapshot":
+                        restored if command == "snapshot" else expected)
+    readonly = docker_state.execute
+
+    def execute(arguments, **kwargs):
+        if arguments[:2] in (["docker", "cp"], ["docker", "exec"]):
+            return ""
+        return readonly(arguments, **kwargs)
+
+    monkeypatch.setattr(docker_state, "execute", execute)
+    receipt = docker_state.restore(source, target["project"])
+    assert receipt["status"] == "STOPPED_VERIFIED"
+    assert target["compose"][2][:4] == ("create", "--no-build", "--pull", "never")
+    assert (target["directory"] / f"restore-{target['project']}.json").is_file()
+
+
+def test_restore_without_ci_manifest_retains_build_without_inspection(monkeypatch, tmp_path):
+    monkeypatch.delenv("TRACKVANCE_CI_IMAGE_MANIFEST", raising=False)
+    monkeypatch.setattr(docker_state, "execute", lambda *_args, **_kwargs: pytest.fail("Unexpected inspection"))
+    monkeypatch.setattr(docker_state, "compose", lambda *_args, **_kwargs: pytest.fail("Unexpected resolution"))
+    assert docker_state._restore_creation_options("trackvance-restore-test", tmp_path, [], {}) == ["--build"]
 
 
 def sample_inventory(project="trackvance-recovery-test"):
@@ -434,11 +637,12 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
     state = modern_inventory()
     state["project"] = "trackvance-restore-test"
-    commands, extracted = [], []
+    commands, extracted, compose_commands = [], [], []
+    monkeypatch.delenv("TRACKVANCE_CI_IMAGE_MANIFEST", raising=False)
     monkeypatch.setattr(docker_state, "validate_postgres_dump", lambda _: None)
     monkeypatch.setattr(docker_state, "ensure_fresh_project", lambda _: None)
     monkeypatch.setattr(docker_state, "compose_services", lambda *_: list(docker_state.PRIMARY_SERVICES))
-    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: "")
+    monkeypatch.setattr(docker_state, "compose", lambda *args, **kwargs: compose_commands.append(args) or "")
     monkeypatch.setattr(docker_state, "inventory", lambda _: state)
     monkeypatch.setattr(docker_state, "_extract_volume", lambda _root, archive, _volume, _image: extracted.append(archive))
 
@@ -452,6 +656,8 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     receipt = docker_state.restore(root, "trackvance-restore-test")
     assert receipt["status"] == "STOPPED_VERIFIED"
     assert commands == ["snapshot", "snapshot-legacy-v6"]
+    assert compose_commands[1][:3] == ("trackvance-restore-test", "create", "--build")
+    assert set(compose_commands[1][3:]) == docker_state.PRIMARY_SERVICES - {"postgres"}
     assert extracted == [f"volumes/{name}.tar.gz" for name in docker_state.ARCHIVED_VOLUMES]
     assert restored["tables"]["internal_notifications"] == expected["tables"]["internal_notifications"]
 

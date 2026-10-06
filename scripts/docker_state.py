@@ -1001,6 +1001,52 @@ def compose_services(project: str, environment: Mapping[str, str] | None = None)
     ]
 
 
+def _restore_creation_options(
+    project: str, directory: Path, services: Sequence[str], environment: Mapping[str, str]
+) -> list[str]:
+    """Reuse CI images only after the real checkout and resolved target are verified.
+
+    Resolve through the active adapter: historical recovery adapters carry their
+    own private env file and overlay, rather than exporting those paths globally.
+    The directory belongs to the original backup, not its temporary verified copy.
+    """
+    values = {**os.environ, **environment}
+    if not values.get("TRACKVANCE_CI_IMAGE_MANIFEST"):
+        return ["--build"]
+
+    from ci import compose_preflight
+    from ci_images import verified_images
+
+    sha = values.get("CI_SOURCE_SHA", values.get("GITHUB_SHA", ""))
+    head = str(execute(["git", "rev-parse", "HEAD"], environment=values)).strip()
+    if (not re.fullmatch(r"[0-9a-f]{40}", sha) or sha != head
+            or not re.fullmatch(r"trackvance-v0(?:70|80)-test-[a-z0-9-]+-[a-f0-9]{12}", project)):
+        raise OperationError("La restauración CI no coincide con el checkout y proyecto privados.")
+    images = verified_images(values)
+    if not images or set(images) != {"backend", "web"}:
+        raise OperationError("La restauración CI requiere ambas imágenes verificadas.")
+
+    config = json.loads(compose(project, "config", "--format", "json", environment=environment))
+    resolved_services = config.get("services", {})
+    permitted = PRIMARY_SERVICES | OPTIONAL_SERVICES
+    if (set(resolved_services) != set(services) or not PRIMARY_SERVICES.issubset(resolved_services)
+            or not set(resolved_services).issubset(permitted)):
+        raise OperationError("El inventario Compose de restauración CI no coincide.")
+    for name, service in resolved_services.items():
+        expected = "postgres:16-alpine" if name == "postgres" else images["web" if name == "web" else "backend"]
+        if service.get("image") != expected:
+            raise OperationError("Compose no reutiliza todas las imágenes CI verificadas.")
+
+    def inspect(arguments: list[str]) -> str:
+        return str(execute(arguments, environment=values))
+
+    baseline = compose_preflight._inventory(inspect, compose_preflight.MAIN_PROJECT, existing=False)
+    owned = compose_preflight._inventory(inspect, project, existing=True)
+    compose_preflight.validate_resolved(config, project=project, directory=directory,
+                                       main_inventory=baseline, existing=owned, root=ROOT)
+    return ["--no-build", "--pull", "never"]
+
+
 def _extract_volume(
     backup_root: Path, archive: str, volume: str, image_id: str
 ) -> None:
@@ -1058,12 +1104,15 @@ def _restore_verified(
         required = PRIMARY_SERVICES | OPTIONAL_SERVICES.intersection(available_services)
         if not PRIMARY_SERVICES.issubset(available_services):
             raise OperationError("Compose no declara todos los servicios base requeridos.")
+        creation_options = _restore_creation_options(
+            target_project, receipt_directory, available_services, environment
+        )
         compose(target_project, "up", "-d", "--wait", "postgres", environment=environment)
         created = True
         compose(
             target_project,
             "create",
-            "--build",
+            *creation_options,
             *(service for service in available_services if service != "postgres"),
             environment=environment,
         )

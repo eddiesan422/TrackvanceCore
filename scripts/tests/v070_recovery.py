@@ -100,7 +100,7 @@ def target_override(directory, project, *, backend_image='trackvance-v070-isolat
 
 def compose_adapter(project, env_file, override, environment):
     """Run real Compose with an explicit private scope; never infer .env."""
-    from docker_backup_cycle import execute
+    from docker_backup_cycle import assert_no_secrets, execute
 
     project = guarded_project(project)
     credentials = (environment['POSTGRES_PASSWORD'],)
@@ -110,10 +110,23 @@ def compose_adapter(project, env_file, override, environment):
         child_environment = {**os.environ, **load_private_environment(env_file), **(environment or {})}
         compose = ['docker', 'compose', '--env-file', str(env_file), '-p', project,
                    '-f', str(ROOT / 'compose.yml'), '-f', str(override)]
+        if arguments == ('config', '--format', 'json'):
+            from ci.compose_preflight import ComposePreflightError
+            # Resolved environments contain synthetic credentials by design.
+            # This exact read stays in memory; all other commands keep scans.
+            command = [*compose, *arguments]
+            assert_no_secrets(' '.join(command), credentials)
+            try:
+                result = subprocess.run(command, cwd=ROOT, env=child_environment, capture_output=True,
+                                        text=True, encoding='utf-8', check=False, timeout=60)
+            except (OSError, subprocess.SubprocessError):
+                raise ComposePreflightError('READ_ONLY_DOCKER_COMMAND_FAILED') from None
+            if result.returncode:
+                raise ComposePreflightError('READ_ONLY_DOCKER_COMMAND_FAILED')
+            return result.stdout
         if arguments and arguments[0] == 'up':
             from ci.compose_preflight import preflight
-            preflight(compose, child_environment, project=project, directory=env_file.parent,
-                      run=lambda command: execute(command, child_environment, credentials=credentials))
+            preflight(compose, child_environment, project=project, directory=env_file.parent)
         return execute([*compose, *arguments], child_environment, credentials=credentials)
     return scoped
 

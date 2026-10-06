@@ -78,6 +78,84 @@ def test_database_identity_cannot_be_inherited_for_postgres(resolved, field):
         validate(resolved)
 
 
+def v080_fixture(resolved):
+    """Synthetic resolved values follow the real certification_v080 namespace."""
+    config, _, baseline, root = resolved
+    project = "trackvance-v080-test-recovery-src-0123456789ab"
+    directory = root / ".codex-local/v080" / project
+    directory.mkdir(parents=True)
+    config["name"] = project
+    for descriptors in (config["volumes"], config["networks"]):
+        for descriptor in descriptors.values():
+            descriptor["name"] = descriptor["name"].replace(PROJECT, project)
+    for name, service in config["services"].items():
+        if name in guard.APP_SERVICES:
+            service["environment"]["TRACKVANCE_CERTIFICATION_PROJECT"] = project
+    config["services"]["postgres"]["environment"] = {"POSTGRES_USER": "tv_v080_test", "POSTGRES_DB": "tv_v080_test"}
+    config["services"]["api"]["environment"]["DATABASE_URL"] = "postgresql+psycopg://tv_v080_test:disposable@postgres:5432/tv_v080_test"
+    return config, project, directory, baseline, root
+
+
+def test_v080_real_namespace_database_and_owned_restart_are_accepted(resolved):
+    import certification_v080
+
+    config, project, directory, baseline, root = v080_fixture(resolved)
+    assert certification_v080.PROJECT.fullmatch(project)
+    existing = {"containers": [{"Name": "/" + project + "-api-1", "Config": {
+        "Labels": {"com.docker.compose.project": project, "com.docker.compose.service": "api"},
+        "Env": ["TRACKVANCE_CERTIFICATION_PROJECT=" + project,
+                "DATABASE_URL=postgresql+psycopg://tv_v080_test:disposable@postgres:5432/tv_v080_test"]}}]}
+    guard.validate_resolved(config, project=project, directory=directory, main_inventory=baseline, existing=existing, root=root)
+
+
+@pytest.mark.parametrize("version", ["v070", "v080"])
+@pytest.mark.parametrize("field", ["POSTGRES_USER", "POSTGRES_DB", "DATABASE_URL"])
+def test_database_identity_must_match_project_version_without_normalizing_values(resolved, version, field):
+    config, directory, baseline, root = resolved
+    project = PROJECT
+    if version == "v080":
+        config, project, directory, baseline, root = v080_fixture(resolved)
+    wrong = "tv_v070_test" if version == "v080" else "tv_v080_test"
+    if field == "DATABASE_URL":
+        config["services"]["api"]["environment"][field] = f"postgresql+psycopg://{wrong}:disposable@postgres:5432/{wrong}"
+    else:
+        config["services"]["postgres"]["environment"][field] = wrong
+    with pytest.raises(guard.ComposePreflightError, match="LIVE_DATABASE_IDENTITY"):
+        guard.validate_resolved(config, project=project, directory=directory, main_inventory=baseline, root=root)
+
+
+@pytest.mark.parametrize("suite,suffix", [("", "0123456789ab"), ("a" * 25, "0123456789ab"),
+    ("recovery-src", "0123456789a"), ("recovery-src", "0123456789abc"), ("recovery-src", "0123456789AB")])
+def test_v080_namespace_rejects_noncanonical_suite_or_uuid(resolved, suite, suffix):
+    config, _, directory, baseline, root = v080_fixture(resolved)
+    project = f"trackvance-v080-test-{suite}-{suffix}"
+    config["name"] = project
+    with pytest.raises(guard.ComposePreflightError, match="PROJECT_NAMESPACE"):
+        guard.validate_resolved(config, project=project, directory=directory, main_inventory=baseline, root=root)
+
+
+@pytest.mark.parametrize("damage", ["volume", "network", "port", "credential", "bind", "sso", "unbounded"])
+def test_v080_namespace_keeps_all_original_isolation_guards(resolved, damage):
+    config, project, directory, baseline, root = v080_fixture(resolved)
+    if damage == "volume":
+        config["volumes"]["data"]["name"] = baseline["volumes"][0]
+    elif damage == "network":
+        config["networks"]["default"]["name"] = baseline["networks"][0]
+    elif damage == "port":
+        config["services"]["web"]["ports"][0]["published"] = "3100"
+    elif damage == "credential":
+        config["services"]["api"]["environment"]["RENAMED_VARIABLE"] = "do-not-print-main-secret"
+    elif damage == "bind":
+        config["services"]["api"]["volumes"][-1]["source"] = str(root / "habitual-data")
+    elif damage == "sso":
+        config["services"]["api"]["environment"]["TRACKVANCE_SSO_GOOGLE_ENABLED"] = "true"
+    else:
+        del config["services"]["web"]["pids_limit"]
+    with pytest.raises(guard.ComposePreflightError) as raised:
+        guard.validate_resolved(config, project=project, directory=directory, main_inventory=baseline, root=root)
+    assert "do-not-print-main-secret" not in str(raised.value)
+
+
 def test_declared_owned_network_cannot_use_the_host_driver(resolved):
     resolved[0]["networks"]["default"]["driver"] = "host"
     with pytest.raises(guard.ComposePreflightError, match="HOST_NETWORK_DRIVER"):

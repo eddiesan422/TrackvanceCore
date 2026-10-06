@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MAIN_PROJECT = "trackvance-certification"
 PROJECT = re.compile(
     r"trackvance-(?:v070-test-[a-z0-9-]+-[a-f0-9]{12}"
+    r"|v080-test-[a-z0-9-]{1,24}-[a-f0-9]{12}"
     r"|connections-e2e-[0-9]+-[a-f0-9]{12}"
     r"|(?:delivery-e2e|bench)-[0-9]+-[a-f0-9]{6}"
     r"|delivery-bench-[0-9]+-[a-f0-9]{8}"
@@ -149,6 +150,7 @@ def _protected(baseline: dict) -> tuple[set[str], set[str], set[int], list[Path]
 
 def _environment(service: str, values: dict, project: str, protected_secrets: set[str], *, mock: bool) -> None:
     require(isinstance(values, dict), "UNRESOLVED_ENVIRONMENT")
+    database_identity = "tv_v080_test" if project.startswith("trackvance-v080-test-") else "tv_v070_test"
     candidates = {str(value) for value in values.values() if value is not None and str(value)}
     require(not any(({value} | _url_passwords(value)) & protected_secrets for value in candidates), "LIVE_CREDENTIAL_INHERITANCE")
     require(str(values.get("TRACKVANCE_SMTP_ENABLED", "false")).lower() == "false", "LIVE_SMTP")
@@ -156,12 +158,12 @@ def _environment(service: str, values: dict, project: str, protected_secrets: se
     if service in APP_SERVICES:
         require(values.get("TRACKVANCE_CERTIFICATION_PROJECT") == project, "APP_PROJECT_MARKER")
     if service == "postgres":
-        require(values.get("POSTGRES_USER") == "tv_v070_test"
-                and values.get("POSTGRES_DB") == "tv_v070_test", "LIVE_DATABASE_IDENTITY")
+        require(values.get("POSTGRES_USER") == database_identity
+                and values.get("POSTGRES_DB") == database_identity, "LIVE_DATABASE_IDENTITY")
     if values.get("DATABASE_URL"):
         database = urlparse(str(values["DATABASE_URL"]))
-        require(database.hostname == "postgres" and database.username == "tv_v070_test"
-                and database.path == "/tv_v070_test", "LIVE_DATABASE_IDENTITY")
+        require(database.hostname == "postgres" and database.username == database_identity
+                and database.path == "/" + database_identity, "LIVE_DATABASE_IDENTITY")
     for provider in ("MICROSOFT", "GOOGLE"):
         prefix = "TRACKVANCE_SSO_" + provider + "_"
         enabled = str(values.get(prefix + "ENABLED", "false")).lower() == "true"

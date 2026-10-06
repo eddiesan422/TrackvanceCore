@@ -232,6 +232,8 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
         return collect_recovery_failure(before, root=root)
     if group == 'corrections-recovery':
         return collect_corrections_recovery_failure(before, root=root)
+    if group in {'async-volume-100', 'async-volume-500', 'async-volume-1024'}:
+        return collect_async_failure(group, before, root=root)
     if group in {'compose-critical', 'identity-sso', 'connections'}:
         return collect_compose_failure(group, before, root=root)
     if group != 'catalog-reports':
@@ -282,6 +284,58 @@ def sanitize_recovery_summary(value):
     if number(value.get('duration_seconds')):
         result['duration_seconds'] = value['duration_seconds']
     return result
+
+
+def collect_async_failure(group: str, before: set[Path], *, root: Path = ROOT):
+    """Preserve the failed cycle's closed native receipt without guessing a phase."""
+    tier = {'async-volume-100': 100, 'async-volume-500': 500, 'async-volume-1024': 1024}[group]
+    base = root / '.codex-local/v070'
+    if (not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                               for part in (base, base.parent, base.parent.parent))):
+        return []
+    observations = []
+    for context in sorted(base.iterdir()):
+        if (not re.fullmatch(r'trackvance-v070-test-volume-' + str(tier) + r'-[a-f0-9]{12}', context.name)
+                or not context.is_dir() or context.is_symlink()
+                or getattr(context, 'is_junction', lambda: False)()):
+            continue
+        isolation = context / 'isolation.json'
+        native_directory = context / 'native-recovery'
+        paths = {'isolation': isolation, 'native': native_directory / 'result.json'}
+        if (native_directory.is_symlink() or getattr(native_directory, 'is_junction', lambda: False)()
+                or (native_directory.exists() and not native_directory.is_dir())
+                or not isolation.is_file()):
+            continue
+        documents = {}
+        invalid = False
+        for key, path in paths.items():
+            if (path.is_symlink() or getattr(path, 'is_junction', lambda: False)()
+                    or path.resolve() in before or (path.exists() and (not path.is_file() or path.stat().st_size > MAX_BYTES))):
+                invalid = True
+                break
+            if not path.exists():
+                documents[key] = None
+                continue
+            try:
+                value = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError, RecursionError):
+                invalid = True
+                break
+            if not isinstance(value, dict):
+                invalid = True
+                break
+            documents[key] = value
+        if invalid or not isinstance(documents.get('isolation'), dict) or documents['isolation'].get('project') != context.name:
+            continue
+        native = documents['native']
+        if native is not None and (native.get('source_project') != context.name
+                or not isinstance(native.get('target_project'), str)
+                or not re.fullmatch(r'trackvance-v070-test-recovery-[a-f0-9]{12}', native['target_project'])
+                or not allowed(native.get('status'), {'PASS', 'FAIL'})):
+            continue
+        observations.append({'kind': 'RECOVERY_PARTIAL_SUMMARY', 'profile': 'native', 'summary_present': native is not None,
+                             'result': sanitize_recovery_summary(native) if native is not None else {}})
+    return observations[:8]
 
 
 def collect_corrections_recovery_failure(before: set[Path], *, root: Path = ROOT):
