@@ -106,14 +106,20 @@ def test_local_build_is_bounded_unique_and_labels_the_version_before_verificatio
     assert json.loads(proof.read_text())["status"] == "PASS"
 
 
-def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_stacks(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed", [False, True])
+def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_stacks(tmp_path, monkeypatch, changed):
     from types import SimpleNamespace
 
     from ci import owned_cleanup, run_local
     executed = []
-    protected = {"trackvance-certification": [{"memory_limit_bytes": 15 * run_local.GIB}]}
+    protected = {"trackvance-certification": [{"id": "protected-container", "started_at": "initial", "memory_limit_bytes": 15 * run_local.GIB}]}
     monkeypatch.setattr(run_local, "ROOT", tmp_path)
-    monkeypatch.setattr(run_local, "protected_inventory", lambda: protected)
+    readings = iter([protected, {"trackvance-certification": [protected["trackvance-certification"][0] | {"started_at": "changed"}]} if changed else protected])
+    monkeypatch.setattr(run_local, "protected_inventory", lambda: next(readings))
+    monkeypatch.setattr(run_local, "limit_cpu_affinity", lambda cpus: {"status": "PASS", "original_logical_processors": [0, 1],
+        "effective_logical_processors": [0], "effective_processor_count": 1, "requested_cpus": cpus})
+    restored = []
+    monkeypatch.setattr(run_local, "set_cpu_affinity", lambda processors: restored.append(processors))
     monkeypatch.setattr(owned_cleanup, "snapshot", lambda: {"containers": set(), "networks": set(), "volumes": set()})
     monkeypatch.setattr(run_local, "prepare_images", lambda *_a, **_k: pytest.fail("Pending groups must not prepare Docker images"))
     def command(*args):
@@ -139,7 +145,58 @@ def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_sta
     assert run_local.main(["--all", "--max-cpus", "1", "--max-memory-gib", "1"]) == 1
     assert len(executed) == 1 and executed[0][executed[0].index("--group") + 1] == "frontend"
     summary = json.loads(next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json")).read_text())
-    assert summary["status"] == "INCOMPLETE" and summary["closure"] == "PARTIAL_DEEP_EXECUTION"
+    assert summary["status"] == ("FAIL" if changed else "INCOMPLETE") and summary["closure"] == "PARTIAL_DEEP_EXECUTION"
     assert len(summary["groups"]) == 19
     assert sum(row["status"] == "PENDING_CAPACITY" for row in summary["groups"]) == 18
-    assert summary["protected_inventory_unchanged"] is True
+    assert summary["protected_inventory_unchanged"] is not changed
+    assert summary["environment"]["host_cpu_affinity"]["effective_processor_count"] == 1
+    assert restored == [[0, 1]] and summary["host_cpu_affinity_restored"] is True
+    report_directory = next((tmp_path / ".codex-local/local-deep").iterdir())
+    assert json.loads((report_directory / "protected-inventory.before.json").read_text()) == protected
+    assert (report_directory / "protected-inventory.after.json").is_file()
+    assert [row["field"] for row in summary["protected_inventory_differences"]] == (["started_at"] if changed else [])
+
+
+def test_protected_inventory_canonicalizes_mount_order_and_hashes_private_configuration(monkeypatch):
+    from ci import run_local
+    row = {"Id": "protected-container", "Image": "protected-image", "State": {"Status": "running", "StartedAt": "initial"},
+        "Config": {"Env": ["PASSWORD=PRIVATE_VALUE"], "Labels": {}}, "HostConfig": {"Memory": 1024},
+        "Mounts": [{"Type": "volume", "Source": "second", "Destination": "/second"},
+            {"Type": "bind", "Source": "first", "Destination": "/first"}]}
+    inspected = []
+    def command(*args):
+        if args[:3] == ("docker", "compose", "ls"):
+            return json.dumps([{"Name": "trackvance-certification"}])
+        if args[:2] == ("docker", "ps"):
+            return "protected-container" if args[-1].endswith("trackvance-certification") else ""
+        inspected.append(True)
+        return json.dumps([row | {"Mounts": row["Mounts"] if len(inspected) == 1 else list(reversed(row["Mounts"]))}])
+    monkeypatch.setattr(run_local, "command", command)
+    before, after = run_local.protected_inventory(), run_local.protected_inventory()
+    assert before == after and run_local.inventory_differences(before, after) == []
+    assert "PRIVATE_VALUE" not in json.dumps(before)
+    after["trackvance-certification"][0]["image"] = "changed-image"
+    assert run_local.inventory_differences(before, after)[0]["field"] == "image"
+
+
+def test_host_cpu_affinity_floors_fractional_budget_and_verifies_applied_processors(monkeypatch):
+    from ci import host_resources
+    reads = iter([[2, 4, 6, 8], [2, 4]])
+    written = []
+    monkeypatch.setattr(host_resources, "current_cpu_affinity", lambda: next(reads))
+    monkeypatch.setattr(host_resources, "set_cpu_affinity", lambda processors: written.append(processors))
+    proof = host_resources.limit_cpu_affinity(2.9)
+    assert proof["effective_processor_count"] == 2 and written == [[2, 4]]
+    with pytest.raises(ValueError):
+        host_resources.limit_cpu_affinity(0.5)
+
+
+def test_host_cpu_affinity_failure_restores_original_and_prevents_false_proof(monkeypatch):
+    from ci import host_resources
+    reads = iter([[0, 1], [0, 1]])
+    written = []
+    monkeypatch.setattr(host_resources, "current_cpu_affinity", lambda: next(reads))
+    monkeypatch.setattr(host_resources, "set_cpu_affinity", lambda processors: written.append(processors))
+    with pytest.raises(OSError):
+        host_resources.limit_cpu_affinity(1)
+    assert written == [[0], [0, 1]]

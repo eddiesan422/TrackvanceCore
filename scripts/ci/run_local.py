@@ -7,6 +7,7 @@ Use --plan for the exact historical sizes and capacity reservations without Dock
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -24,6 +25,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from ci.common import load_manifest, profile_groups
+from ci.host_resources import limit_cpu_affinity, set_cpu_affinity
 from ci.image_bundle import inspect_image
 from ci.local_resources import memory_bytes
 from ci.run_suite import execute
@@ -79,9 +81,32 @@ def protected_inventory():
         ids = command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=" + project).split()
         rows = json.loads(command("docker", "inspect", *ids)) if ids else []
         result[project] = sorted([{"id": r["Id"], "image": r["Image"], "status": r["State"]["Status"],
-            "mounts": [{"type": m["Type"], "source": m["Source"], "target": m["Destination"]} for m in r["Mounts"]],
+            "started_at": r["State"].get("StartedAt"),
+            "config_sha256": hashlib.sha256(json.dumps(r["Config"], sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "host_config_sha256": hashlib.sha256(json.dumps(r["HostConfig"], sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "mounts": sorted([{"type": m["Type"], "source": m["Source"], "target": m["Destination"]} for m in r["Mounts"]],
+                key=lambda m: (m["type"], m["source"], m["target"])),
             "memory_limit_bytes": r["HostConfig"].get("Memory", 0)} for r in rows], key=lambda r: r["id"])
     return result
+
+
+def inventory_differences(before, after):
+    differences = []
+    for project in sorted(before.keys() | after.keys()):
+        if project not in before or project not in after:
+            differences.append({"project": project, "field": "project_presence", "before": project in before, "after": project in after})
+        old = {row["id"]: row for row in before.get(project, [])}
+        new = {row["id"]: row for row in after.get(project, [])}
+        for identifier in sorted(old.keys() | new.keys()):
+            if identifier not in old or identifier not in new:
+                differences.append({"project": project, "container_id": identifier, "field": "container_presence",
+                    "before": identifier in old, "after": identifier in new})
+                continue
+            for field in sorted(old[identifier].keys() | new[identifier].keys()):
+                if old[identifier].get(field) != new[identifier].get(field):
+                    differences.append({"project": project, "container_id": identifier, "field": field,
+                        "before": old[identifier].get(field), "after": new[identifier].get(field)})
+    return differences
 
 
 class ResourceMonitor:
@@ -225,6 +250,7 @@ def retain_reports(base, current, count):
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
                 for report in path.rglob("*"):
                     if report.is_file() and not report.is_symlink() and (report == path / "local-summary.json"
+                            or report.name in {"protected-inventory.before.json", "protected-inventory.after.json"}
                             or "evidence" in report.relative_to(path).parts or report.name.endswith("-timing.json")):
                         zipped.write(report, report.relative_to(path))
             shutil.rmtree(path)
@@ -248,8 +274,8 @@ def main(arguments=None):
     available = profile_groups(manifest, "deep")
     if bool(args.groups) == args.all or (args.groups and not set(args.groups) <= set(available)):
         parser.error("Choose --all or --groups with valid deep group IDs")
-    if not 0.5 <= args.max_cpus <= 8 or not 1 <= args.max_memory_gib <= 16 or args.reserve_memory_gib < 2 or not 1 <= args.retain_runs <= 30:
-        parser.error("Resource budgets and retention must remain bounded; reserve at least 2 GiB")
+    if not 1 <= args.max_cpus <= 8 or not 1 <= args.max_memory_gib <= 16 or args.reserve_memory_gib < 2 or not 1 <= args.retain_runs <= 30:
+        parser.error("Resource budgets and retention must remain bounded; use at least one CPU and reserve at least 2 GiB")
     groups = available if args.all else list(dict.fromkeys(args.groups))
     selected = plan(manifest, groups)
     if args.plan:
@@ -276,9 +302,14 @@ def main(arguments=None):
     target = directory / "local-summary.json"
     write(target, summary)
     began = time.monotonic()
-    before = owned_before = None
+    before = owned_before = affinity = None
     try:
+        affinity = limit_cpu_affinity(args.max_cpus)
+        summary["environment"]["host_cpu_affinity"] = affinity
         before = protected_inventory()
+        write(directory / "protected-inventory.before.json", before)
+        summary["protected_inventory_proof"] = {"before": "protected-inventory.before.json", "after": "protected-inventory.after.json",
+            "scope": "Container identity, image, lifecycle, canonical mounts and configuration hashes; excludes environment/configuration values"}
         from ci.owned_cleanup import snapshot
         owned_before = snapshot()
         docker_info = json.loads(command("docker", "info", "--format", "{{json .}}"))
@@ -343,11 +374,20 @@ def main(arguments=None):
                         check=False, timeout=180)
         if before is not None:
             try:
-                summary["protected_inventory_unchanged"] = protected_inventory() == before
+                after = protected_inventory()
+                write(directory / "protected-inventory.after.json", after)
+                summary["protected_inventory_differences"] = inventory_differences(before, after)
+                summary["protected_inventory_unchanged"] = not summary["protected_inventory_differences"]
                 if not summary["protected_inventory_unchanged"]:
                     summary["status"] = "FAIL"
             except Exception as error:  # noqa: BLE001 -- unavailable protection proof must prevent local approval.
                 summary.update(status="FAIL", protection_check_error=type(error).__name__)
+        if affinity is not None:
+            try:
+                set_cpu_affinity(affinity["original_logical_processors"])
+                summary["host_cpu_affinity_restored"] = True
+            except OSError as error:
+                summary.update(status="FAIL", affinity_restore_error=type(error).__name__)
         summary.update(completed_at=stamp(), duration_seconds=round(time.monotonic() - began, 3))
         summary["closure"] = "DEEP_CERTIFICATION_APPROVED" if summary["status"] == "PASS" and args.all else "PARTIAL_DEEP_EXECUTION"
         write(target, summary)

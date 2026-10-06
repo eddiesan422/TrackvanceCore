@@ -1,7 +1,63 @@
 """Sample only this runner and its descendant processes; never inspect user data."""
 from __future__ import annotations
 
+import math
 import os
+
+
+def current_cpu_affinity() -> list[int]:
+    """Read only this process's allowed logical processors."""
+    if os.name != "nt":
+        if not hasattr(os, "sched_getaffinity"):
+            raise OSError("This platform has no supported process CPU affinity API")
+        return sorted(os.sched_getaffinity(0))
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.GetProcessAffinityMask.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_size_t)]
+    process_mask, system_mask = ctypes.c_size_t(), ctypes.c_size_t()
+    if not kernel.GetProcessAffinityMask(kernel.GetCurrentProcess(), ctypes.byref(process_mask), ctypes.byref(system_mask)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return [index for index in range(ctypes.sizeof(process_mask) * 8) if process_mask.value & (1 << index)]
+
+
+def set_cpu_affinity(processors: list[int]) -> None:
+    """Change only this process; subsequently created children inherit affinity."""
+    if not processors or min(processors) < 0:
+        raise ValueError("CPU affinity must contain allowed logical processors")
+    if os.name != "nt":
+        if not hasattr(os, "sched_setaffinity"):
+            raise OSError("This platform has no supported process CPU affinity API")
+        os.sched_setaffinity(0, processors)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.SetProcessAffinityMask.argtypes = [wintypes.HANDLE, ctypes.c_size_t]
+    mask = sum(1 << index for index in set(processors))
+    if not kernel.SetProcessAffinityMask(kernel.GetCurrentProcess(), mask):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def limit_cpu_affinity(max_cpus: float) -> dict:
+    """Conservatively floor fractional budgets and verify the actual restriction."""
+    if not math.isfinite(max_cpus) or max_cpus < 1:
+        raise ValueError("Host affinity requires a CPU budget of at least one logical processor")
+    original = current_cpu_affinity()
+    selected = original[:math.floor(max_cpus)]
+    set_cpu_affinity(selected)
+    effective = current_cpu_affinity()
+    if effective != selected:
+        set_cpu_affinity(original)
+        raise OSError("The operating system did not apply the requested CPU affinity")
+    return {"status": "PASS", "original_logical_processors": original,
+        "effective_logical_processors": effective, "effective_processor_count": len(effective),
+        "requested_cpus": max_cpus, "scope": "This runner and inherited child processes only",
+        "mechanism": "SetProcessAffinityMask" if os.name == "nt" else "sched_setaffinity"}
 
 
 def sample_process_tree(root_pid: int) -> dict:
