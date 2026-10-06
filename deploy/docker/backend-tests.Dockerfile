@@ -10,6 +10,7 @@ RUN mv /app/source/.ci-source-git /app/source/.git \
     && uv sync --frozen --project /app/source/backend --group dev --no-editable \
     && chown -R trackvance:trackvance /app/source
 ENV PATH="/app/source/backend/.venv/bin:$PATH" \
+    UV_CACHE_DIR=/tmp/uv-cache \
     TRACKVANCE_BACKEND_DIR=/app/source/backend \
     PYTHONPATH=/app/source/scripts
 WORKDIR /app/source/backend

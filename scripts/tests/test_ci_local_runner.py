@@ -243,6 +243,8 @@ def test_linux_backend_requires_verified_test_role_and_shares_total_budget(tmp_p
     command = observed[0]
     assert command[command.index("--memory") + 1] == str(int(3.5 * 1024**3))
     assert command[command.index("--cpus") + 1] == "1.5"
+    assert "UV_CACHE_DIR=/tmp/uv-cache" in command
+    assert "TRACKVANCE_SPARK_TESTS=1" in command and "TRACKVANCE_SPARK_MASTER=local[1]" in command
     assert result["CI_MIGRATION_DATABASE_URL"] == "postgresql://own-db"
     assert "src=" + str(tmp_path) in command[command.index("--mount") + 1]
     monkeypatch.setattr(image_bundle, "inspect_image", lambda *_a: {"Config": {"Labels": {"io.trackvance.local-role": "backend"}}})
@@ -302,3 +304,63 @@ def test_controlled_failure_probe_requires_actual_exit_23_and_zero_owned_leftove
     result = json.loads((tmp_path / "probe/result.json").read_text())
     assert result["observed_phase"]["status"] == "FAIL" and cleaned
     assert result["status"] == ("FAIL" if leftover else "PASS")
+
+
+def test_local_only_actual_startup_dependency_closure_receives_entire_bounded_budget(tmp_path, monkeypatch):
+    from ci.local_resources import apply_limits, service_closure
+    project = "trackvance-v070-test-topology-" + "a" * 12
+    monkeypatch.setenv("TRACKVANCE_LOCAL_EXECUTION_ID", "local-" + "b" * 32)
+    monkeypatch.setenv("TRACKVANCE_LOCAL_PROJECT_REGISTRY", str(tmp_path / "registry.json"))
+    monkeypatch.setenv("TRACKVANCE_LOCAL_MAX_CPUS", "2")
+    monkeypatch.setenv("TRACKVANCE_LOCAL_MAX_MEMORY_BYTES", str(4 * 1024**3))
+    services = {"api": {"depends_on": {"postgres": {}}, "cpus": 1, "mem_limit": "1g"},
+                "postgres": {"cpus": 1, "mem_limit": "1g"},
+                "unused-sqlserver": {"profiles": ["local-unused"], "cpus": 8, "mem_limit": "8g"}}
+    closure = service_closure(services, {"api"})
+    assert closure == {"api", "postgres"}
+    apply_limits({"services": services}, project, active_services=closure)
+    assert sum(services[name]["cpus"] for name in closure) == 2
+    assert services["api"]["mem_limit"] == 1024**3
+    assert services["unused-sqlserver"]["profiles"] == ["local-unused"]
+    with pytest.raises(ValueError, match="absent"):
+        service_closure(services, {"not-a-service"})
+
+
+def test_partially_failed_builder_creation_still_cleans_fresh_owned_builder(tmp_path, monkeypatch):
+    from ci import run_local, run_suite
+    directory = tmp_path / ("local-" + "a" * 32)
+    directory.mkdir()
+    monkeypatch.setattr(run_local, "command", lambda *_a: "")
+    observed = []
+    def execute(command, *_args, **_kwargs):
+        observed.append(command)
+        if command[:3] == ["docker", "buildx", "create"]:
+            raise run_suite.PhaseFailed({"status": "FAIL"})
+    monkeypatch.setattr(run_local, "execute", execute)
+    with pytest.raises(run_suite.PhaseFailed):
+        run_local.prepare_images(directory, "b" * 40, True, max_memory_bytes=4 * 1024**3, max_cpus=2)
+    assert observed[-1][:3] == ["docker", "buildx", "rm"]
+
+
+@pytest.mark.parametrize("preexisting,consumer", [(False, False), (True, False), (False, True)])
+def test_builder_infrastructure_image_removal_requires_new_identity_and_zero_consumers(tmp_path, monkeypatch, preexisting, consumer):
+    from ci import run_local
+    identifier = "sha256:" + "a" * 64
+    tag = "moby/buildkit:buildx-stable-1"
+    (tmp_path / "builder-images.before.json").write_text(json.dumps([identifier] if preexisting else []))
+    removed = []
+    def command(*args):
+        if args[:3] == ("docker", "image", "ls"):
+            return identifier
+        if args[:3] == ("docker", "image", "inspect"):
+            return json.dumps([{"Id": identifier, "RepoTags": [tag]}])
+        if args[:2] == ("docker", "ps"):
+            return "foreign-builder" if consumer else ""
+        assert args == ("docker", "image", "rm", tag)
+        removed.append(tag)
+        return ""
+    monkeypatch.setattr(run_local, "command", command)
+    result = run_local.cleanup_builder_images(tmp_path)
+    assert bool(removed) is (not preexisting and not consumer)
+    if preexisting or consumer:
+        assert result["skipped"][0]["reason"] == ("PREEXISTING_NOT_OWNED" if preexisting else "CONTAINER_CONSUMER")
