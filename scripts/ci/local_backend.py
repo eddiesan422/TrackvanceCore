@@ -44,7 +44,8 @@ def launch(directory: Path, environment: dict[str, str], execute) -> dict[str, s
     values = {"DATABASE_URL": "sqlite:////tmp/unit.sqlite", "CI_MIGRATION_DATABASE_URL": internal_database,
               "TRACKVANCE_STORAGE_DIR": "/tmp/storage", "TRACKVANCE_STORAGE_ROOT": "/tmp/storage",
               "DEMO_SEED_ENABLED": "false", "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
-              "POLARS_MAX_THREADS": "1", "PYTHONPATH": "/app/source/scripts"}
+              "POLARS_MAX_THREADS": "1", "PYTHONPATH": "/app/source/scripts", "UV_CACHE_DIR": "/tmp/uv-cache",
+              "TRACKVANCE_SPARK_TESTS": "1", "TRACKVANCE_SPARK_MASTER": "local[1]"}
     for key in ("TRACKVANCE_SPARK_TESTS", "TRACKVANCE_SPARK_MASTER"):
         if key in environment:
             values[key] = environment[key]
@@ -63,6 +64,8 @@ def launch(directory: Path, environment: dict[str, str], execute) -> dict[str, s
 def commands(commands, root: Path, directory: Path, environment: dict[str, str]):
     result = []
     for phase, arguments, cwd in commands:
+        if arguments[:2] == ["uv", "run"]:
+            arguments = [*arguments[:2], "--frozen", "--no-sync", *arguments[2:]]
         converted = [argument.replace(str(directory), "/evidence").replace("\\", "/")
                      if str(directory) in argument else argument for argument in arguments]
         prefix = ["docker", "exec", "--workdir", "/app/source/" + cwd.relative_to(root).as_posix()]

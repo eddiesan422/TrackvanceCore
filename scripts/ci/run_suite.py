@@ -84,13 +84,14 @@ def execute(command: list[str], directory: Path, phase: str, remaining: float,
             timed_out = isinstance(error, subprocess.TimeoutExpired)
             protection_changed = isinstance(error, RuntimeError)
             interruption = error if isinstance(error, KeyboardInterrupt) else None
-            if os.name == "nt":
+            running = getattr(process, "poll", lambda: None)() is None
+            if running and os.name == "nt":
                 if getattr(process, "args", None):
                     subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                         stdout=output, stderr=subprocess.STDOUT, check=False, timeout=30)
                 else:
                     process.terminate()
-            else:
+            elif running:
                 os.killpg(process.pid, signal.SIGTERM)
             try:
                 code = process.wait(timeout=30)

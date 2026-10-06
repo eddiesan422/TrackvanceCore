@@ -30,16 +30,34 @@ def memory_bytes(value):
     return int(float(match[1]) * 1024 ** {"": 0, "k": 1, "m": 2, "g": 3}[match[2]])
 
 
-def apply_limits(override: dict, project: str) -> None:
-    """Serial runner caps the sum of all declared core service limits.
+def service_closure(services: dict, requested) -> set[str]:
+    pending, closure = list(requested), set()
+    while pending:
+        name = pending.pop()
+        if name in closure:
+            continue
+        if name not in services:
+            raise ValueError("Selected local service/dependency is absent from resolved Compose")
+        closure.add(name)
+        pending.extend(services[name].get("depends_on", {}))
+    return closure
+
+
+def apply_limits(override: dict, project: str, *, active_services=None) -> None:
+    """Serial runner caps all services in the actual startup dependency closure.
 
     Every resolved connector database is included before applying this cap.
+    When a caller selects a subset, its generated profile disables the rest.
     Limits affect only generated test Compose.
     """
     if not os.environ.get("TRACKVANCE_LOCAL_EXECUTION_ID"):
         return
     register_project(project)
     services = override["services"]
+    if active_services is not None:
+        if not set(active_services) <= services.keys():
+            raise ValueError("The selected resource topology must be complete")
+        services = {name: service for name, service in services.items() if name in active_services}
     cpu_budget = float(os.environ["TRACKVANCE_LOCAL_MAX_CPUS"])
     memory_budget = int(os.environ["TRACKVANCE_LOCAL_MAX_MEMORY_BYTES"])
     if os.environ.get("TRACKVANCE_LOCAL_GROUP") == "backup-restore":

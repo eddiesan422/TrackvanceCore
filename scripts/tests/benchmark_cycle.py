@@ -952,7 +952,9 @@ def main() -> int:
             "-f",
             str(ROOT / "deploy" / "docker" / "compose.benchmark.yml"),
         ]
-        compose = isolate_compose(compose, environment, evidence, project)
+        file_services = {"postgres", "api", "worker", "delivery-worker", "scheduler", "web"}
+        compose = isolate_compose(compose, environment, evidence, project,
+                                  active_services=file_services if options.file_only else None)
         up = [*compose, "up", "-d", "--wait"]
         if not options.skip_build:
             up.append("--build")
@@ -966,7 +968,7 @@ def main() -> int:
             up.extend(
                 service
                 for service in available
-                if service in {"postgres", "api", "worker", "delivery-worker", "scheduler", "web"}
+                if service in file_services
             )
         execute(up, environment, credentials, timeout=1800, label="start isolated benchmark")
         memory_stop = max(

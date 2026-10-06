@@ -25,7 +25,7 @@ def validate_project(project: str) -> str:
 
 
 def isolate_compose(compose: list[str], environment: dict[str, str], evidence: Path,
-                    project: str) -> list[str]:
+                    project: str, *, active_services=None) -> list[str]:
     """Suppress .env, pin private image tags and add limits; mutate child env only.
 
     The caller must prove project freshness before creating or deleting resources.
@@ -93,13 +93,18 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
         # The private config can contain secrets, so publish only the limit map.
         resolved = subprocess.run([*scoped, 'config', '--format', 'json'], cwd=ROOT, env=environment,
             capture_output=True, text=True, encoding='utf-8', check=True, timeout=90)
-        from ci.local_resources import apply_limits
+        from ci.local_resources import apply_limits, service_closure
         config = json.loads(resolved.stdout)
         for name, service in config['services'].items():
             if name not in services:
                 services[name] = {key: service[key] for key in ('cpus', 'mem_limit', 'pids_limit') if key in service}
         profile = {'services': services}
-        apply_limits(profile, project)
+        closure = service_closure(config['services'], active_services) if active_services is not None else None
+        if closure is not None:
+            for name, service in services.items():
+                if name not in closure:
+                    service['profiles'] = ['local-unused']
+        apply_limits(profile, project, active_services=closure)
         overlay.write_text(json.dumps(profile, indent=2), encoding='utf-8')
     from ci.compose_preflight import preflight
     preflight(scoped, environment, project=project, directory=evidence, allow_mock_oidc=mock)

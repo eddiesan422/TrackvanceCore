@@ -102,3 +102,24 @@ def test_protected_start_transition_aborts_only_owned_child_and_retains_failure(
     proof = json.loads((tmp_path / "guarded.json").read_text())
     assert proof["status"] == "FAIL" and proof["protected_state_changed"] is True
     assert stopped == [123] and proof["timed_out"] is False
+
+
+def test_protection_change_after_child_exit_does_not_kill_any_process(tmp_path, monkeypatch):
+    from ci import run_local
+    baseline = tmp_path / "protected.json"
+    baseline.write_text("{}")
+    readings = iter([{}, {"changed": []}])
+    monkeypatch.setattr(run_local, "protected_inventory", lambda: next(readings))
+    class Process:
+        pid = 123
+        def wait(self, **_kwargs):
+            return 0
+        def poll(self):
+            return 0
+    monkeypatch.setattr(run_suite.subprocess, "Popen", lambda *_a, **_k: Process())
+    monkeypatch.setattr(run_suite.os, "killpg", lambda *_a: pytest.fail("Exited process must not be killed"), raising=False)
+    with pytest.raises(run_suite.PhaseFailed):
+        run_suite.execute(["owned"], tmp_path, "completed", 60,
+                          environment={"TRACKVANCE_LOCAL_PROTECTED_INVENTORY": str(baseline)})
+    proof = json.loads((tmp_path / "completed.json").read_text())
+    assert proof["protected_state_changed"] and proof["exit_code"] == 0 and proof["status"] == "FAIL"

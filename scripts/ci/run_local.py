@@ -48,6 +48,8 @@ def command(*args):
 def capacity(group):
     if group == "backend":
         return {"memory_bytes": 4 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
+    if group == "benchmark-smoke":
+        return {"memory_bytes": 4 * GIB, "cpus": 3, "disk_bytes": 20 * GIB}
     if group == "frontend":
         return {"memory_bytes": int(0.75 * GIB), "cpus": 1, "disk_bytes": GIB}
     if group.startswith("async-volume-"):
@@ -177,6 +179,7 @@ class ResourceMonitor:
 
 def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend_tests=False, environment=None):
     images = {}
+    write(directory / "builder-images.before.json", command("docker", "image", "ls", "-aq", "--no-trunc").split())
     builder = "tv-local-build-" + directory.name.removeprefix("local-")[:12]
     builder_created = False
     config = directory / "buildkit.toml"
@@ -193,13 +196,20 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                 if not build:
                     raise ValueError("Verified current-SHA local images are absent; pass --build-images once")
                 if not builder_created:
+                    if builder in command("docker", "buildx", "ls", "--format", "{{.Name}}").split():
+                        raise ValueError("The owned builder namespace is not fresh")
+                    registry_path = (environment or os.environ).get("TRACKVANCE_LOCAL_BUILDER_REGISTRY")
+                    if registry_path:
+                        registry = Path(registry_path)
+                        names = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else []
+                        write(registry, [*names, builder])
+                    builder_created = True  # Attempt may partially create state before failing.
                     execute(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container",
                         "--buildkitd-config", str(config), "--driver-opt", "memory=" + str(min(3 * GIB, max_memory_bytes)),
                         "--driver-opt", "memory-swap=" + str(min(3 * GIB, max_memory_bytes)),
                         "--driver-opt", "cpu-quota=" + str(int(min(2, max_cpus) * 100000)),
                         "--driver-opt", "cpu-period=100000", "--driver-opt", "restart-policy=no"],
                         directory, "build-builder-create", 180, environment=environment)
-                    builder_created = True
                 context = ROOT
                 if role == "backend-tests":
                     from ci.local_backend import test_context
@@ -218,6 +228,7 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
             execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
                     environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
         shutil.rmtree(directory / "backend-test-context", ignore_errors=True)
+        write(directory / "builder-image-cleanup.json", cleanup_builder_images(directory))
     proof = directory / "local-images.json"
     write(proof, {"schema_version": 1, "kind": "LOCAL_IMAGE_PROOF", "status": "PASS", "source_sha": sha,
         "verified_at": stamp(), "images": {role: image for role, image in images.items() if role != "backend-tests"},
@@ -226,6 +237,33 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
         "builder_memory_limit_bytes": min(3 * GIB, max_memory_bytes),
         "retention": "Ephemeral: remove verified unused local proof images after evidence and owned containers; retain only real container references"})
     return proof
+
+
+def cleanup_builder_images(directory):
+    before_path = directory / "builder-images.before.json"
+    if not before_path.is_file():
+        return {"status": "PASS", "removed": [], "skipped": []}
+    before = set(json.loads(before_path.read_text(encoding="utf-8")))
+    tag = "moby/buildkit:buildx-stable-1"
+    identifiers = list(dict.fromkeys(command("docker", "image", "ls", "-q", "--no-trunc", tag).split()))
+    removed, skipped = [], []
+    for identifier in identifiers:
+        if identifier in before:
+            skipped.append({"image_id": identifier, "reason": "PREEXISTING_NOT_OWNED"})
+            continue
+        row = json.loads(command("docker", "image", "inspect", identifier))[0]
+        if row.get("Id") != identifier or row.get("RepoTags") != [tag]:
+            skipped.append({"image_id": identifier, "reason": "REFERENCES_UNCERTAIN"})
+            continue
+        if command("docker", "ps", "-aq", "--filter", "ancestor=" + identifier).strip():
+            skipped.append({"image_id": identifier, "reason": "CONTAINER_CONSUMER"})
+            continue
+        check = json.loads(command("docker", "image", "inspect", identifier))[0]
+        if check.get("Id") != identifier or check.get("RepoTags") != [tag]:
+            raise ValueError("Builder image references changed before scoped removal")
+        command("docker", "image", "rm", tag)
+        removed.append({"image_id": identifier, "tags": [tag]})
+    return {"status": "PASS", "removed": removed, "skipped": skipped, "purpose": "Newly pulled infrastructure for this owned builder only"}
 
 
 def cleanup_fixture_images(source_sha, retain_for_seconds=0):
@@ -407,10 +445,14 @@ def main(arguments=None):
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary.update(status="FAIL", cleanup_error=type(error).__name__)
         for builder in json.loads(builder_registry.read_text(encoding="utf-8")):
-            if re.fullmatch(r"tv-local-legacy-[a-f0-9]{24}", builder):
+            if re.fullmatch(r"tv-local-(?:legacy-[a-f0-9]{24}|build-[a-f0-9]{12})", builder) and builder in command("docker", "buildx", "ls", "--format", "{{.Name}}").split():
                 with (directory / "legacy-builder-cleanup.private.log").open("a", encoding="utf-8") as output:
                     subprocess.run(["docker", "buildx", "rm", builder], stdout=output, stderr=subprocess.STDOUT,
                         check=False, timeout=180)
+        try:
+            summary["builder_image_cleanup"] = cleanup_builder_images(directory)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            summary.update(status="FAIL", builder_image_cleanup_error=type(error).__name__)
         if before is not None:
             try:
                 after = protected_inventory()
@@ -435,7 +477,9 @@ def main(arguments=None):
                 summary["fixture_image_cleanup"] = cleanup_fixture_images(sha)
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary["retention_image_error"] = type(error).__name__
+                summary.update(status="FAIL", closure="PARTIAL_DEEP_EXECUTION")
         summary["retention_removed_reports"] = retain_reports(base, directory, args.retain_runs)
+        summary.update(completed_at=stamp(), duration_seconds=round(time.monotonic() - began, 3))
         write(target, summary)
         print(json.dumps({"status": summary["status"], "profile": "deep", "execution_id": execution, "report": str(target)}))
     return 0 if summary["status"] == "PASS" else 1
