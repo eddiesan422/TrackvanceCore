@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 
 
-def register_project(project: str) -> None:
-    registry = os.environ.get("TRACKVANCE_LOCAL_PROJECT_REGISTRY")
+def register_project(project: str, environment=None) -> None:
+    registry = (environment or os.environ).get("TRACKVANCE_LOCAL_PROJECT_REGISTRY")
     if not registry:
         return
     if not re.fullmatch(r"trackvance-[a-z0-9-]+-[a-f0-9]{12}", project):

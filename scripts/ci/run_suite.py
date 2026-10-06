@@ -42,22 +42,48 @@ class PhaseFailed(RuntimeError):
         self.record = record
 
 
+class ProtectedStateChanged(RuntimeError):
+    """Only owned work may be stopped when the habitual installation changes."""
+
+
 def execute(command: list[str], directory: Path, phase: str, remaining: float,
             *, cwd: Path = ROOT, environment: dict[str, str] | None = None) -> dict:
     if remaining <= 0:
         raise TimeoutError("Group deadline expired before the next phase.")
     began, stamp = time.monotonic(), now()
     log = directory / (phase + ".private.log")
+    baseline = (environment or os.environ).get("TRACKVANCE_LOCAL_PROTECTED_INVENTORY")
     with log.open("wb") as output:
+        protection_changed = False
+        def check_protection():
+            if baseline:
+                from ci.run_local import protected_inventory
+                try:
+                    unchanged = protected_inventory() == json.loads(Path(baseline).read_text(encoding="utf-8"))
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    raise ProtectedStateChanged("Protected installation could not be verified") from error
+                if not unchanged:
+                    raise ProtectedStateChanged("Protected installation changed during local execution")
+        check_protection()
         process = subprocess.Popen(command, cwd=cwd, env=environment, stdout=output,
             stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
         timed_out = False
         interruption = None
         try:
-            code = process.wait(timeout=remaining)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+            deadline = began + remaining
+            while True:
+                try:
+                    code = process.wait(timeout=min(2, max(0, deadline - time.monotonic())) if baseline else remaining)
+                    check_protection()
+                    break
+                except subprocess.TimeoutExpired:
+                    check_protection()
+                    if not baseline or time.monotonic() >= deadline:
+                        raise
+        except (subprocess.TimeoutExpired, KeyboardInterrupt, RuntimeError) as error:
             timed_out = isinstance(error, subprocess.TimeoutExpired)
-            interruption = error if not timed_out else None
+            protection_changed = isinstance(error, RuntimeError)
+            interruption = error if isinstance(error, KeyboardInterrupt) else None
             if os.name == "nt":
                 if getattr(process, "args", None):
                     subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -74,8 +100,9 @@ def execute(command: list[str], directory: Path, phase: str, remaining: float,
                 else:
                     os.killpg(process.pid, signal.SIGKILL)
                 code = process.wait(timeout=10)
-    record = {"name": phase, "status": "PASS" if code == 0 and not timed_out and not interruption else "FAIL",
+    record = {"name": phase, "status": "PASS" if code == 0 and not timed_out and not interruption and not protection_changed else "FAIL",
         "exit_code": code, "timed_out": timed_out, "started_at": stamp,
+        "protected_state_changed": protection_changed,
         "completed_at": now(), "duration_seconds": round(time.monotonic() - began, 3)}
     (directory / (phase + ".json")).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(record), flush=True)
@@ -205,6 +232,8 @@ def local_backend_database(directory: Path, environment: dict[str, str]) -> dict
             capture_output=True, check=False, timeout=15)
         if ready.returncode == 0:
             return {**environment, "CI_MIGRATION_DATABASE_URL": f"postgresql+psycopg://tv_local_test:{password}@127.0.0.1:{port}/tv_local_test",
+                "TRACKVANCE_LOCAL_BACKEND_PROJECT": project,
+                "TRACKVANCE_LOCAL_BACKEND_DATABASE_URL": f"postgresql+psycopg://tv_local_test:{password}@{container}:5432/tv_local_test",
                 "DATABASE_URL": "sqlite:///" + str(directory / "unit.sqlite"), "DEMO_SEED_ENABLED": "false",
                 "TRACKVANCE_STORAGE_DIR": str(directory / "storage"), "TRACKVANCE_STORAGE_ROOT": str(directory / "storage")}
         time.sleep(1)
@@ -242,7 +271,14 @@ def main() -> None:
     try:
         if local and args.group == "backend":
             environment = local_backend_database(directory, environment)
-        for phase, command, cwd in commands_for(args.group, directory, profile=args.profile):
+            from ci.local_backend import launch, requires_linux
+            if requires_linux(environment):
+                environment = launch(directory, environment, execute)
+        commands = commands_for(args.group, directory, profile=args.profile)
+        if environment.get("TRACKVANCE_LOCAL_BACKEND_CONTAINER"):
+            from ci.local_backend import commands as linux_commands
+            commands = linux_commands(commands, ROOT, directory, environment)
+        for phase, command, cwd in commands:
             phase_environment = environment
             if phase.startswith('migration-'):
                 phase_environment = {**environment, 'DATABASE_URL': environment['CI_MIGRATION_DATABASE_URL'],
@@ -258,6 +294,9 @@ def main() -> None:
             checks_path.write_text(json.dumps({"status": "PASS", "checks": checks}, indent=2) + "\n", encoding="utf-8")
             sources["checks"] = checks_path
         resources = {"profile": args.profile, "heavy_stacks_per_runner": 1, "group_deadline_seconds": DEADLINES[args.group]}
+        if environment.get("TRACKVANCE_LOCAL_BACKEND_CONTAINER"):
+            resources.update(backend_execution="ISOLATED_LINUX_CONTAINER", backend_test_image=json.loads(
+                Path(environment["TRACKVANCE_LOCAL_IMAGE_MANIFEST"]).read_text(encoding="utf-8"))["backend_tests_image"])
         if local and args.group not in {"backend", "frontend"}:
             from ci_images import verified_images
             resources["runtime_images"] = verified_images(environment)
