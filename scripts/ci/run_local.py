@@ -46,6 +46,8 @@ def command(*args):
 
 
 def capacity(group):
+    if group == "backend":
+        return {"memory_bytes": 4 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     if group == "frontend":
         return {"memory_bytes": int(0.75 * GIB), "cpus": 1, "disk_bytes": GIB}
     if group.startswith("async-volume-"):
@@ -74,9 +76,10 @@ def plan(manifest, groups):
 
 
 def protected_inventory():
+    from ci.owned_cleanup import PROJECT
     result = {}
     projects = json.loads(command("docker", "compose", "ls", "--all", "--format", "json"))
-    protected = {"trackvance-certification", "bikerwash"} | {row["Name"] for row in projects if row["Name"].startswith("bikerwash")}
+    protected = {"trackvance-certification", "bikerwash"} | {row["Name"] for row in projects if not PROJECT.fullmatch(row["Name"])}
     for project in sorted(protected):
         ids = command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=" + project).split()
         rows = json.loads(command("docker", "inspect", *ids)) if ids else []
@@ -107,6 +110,13 @@ def inventory_differences(before, after):
                     differences.append({"project": project, "container_id": identifier, "field": field,
                         "before": old[identifier].get(field), "after": new[identifier].get(field)})
     return differences
+
+
+def active_memory_reservation(inventory, minimum, total):
+    active = [r for rows in inventory.values() for r in rows if r.get("status") in {"running", "restarting", "paused"}]
+    if any(not r.get("memory_limit_bytes") for r in active):
+        return total  # An active unbounded service cannot promise spare capacity.
+    return max(minimum, sum(r["memory_limit_bytes"] for r in active))
 
 
 class ResourceMonitor:
@@ -165,14 +175,17 @@ class ResourceMonitor:
                 "scope": "This runner and descendants only; sum of process RSS can count shared pages more than once; sampled peaks"}}
 
 
-def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus):
+def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend_tests=False, environment=None):
     images = {}
     builder = "tv-local-build-" + directory.name.removeprefix("local-")[:12]
     builder_created = False
     config = directory / "buildkit.toml"
     config.write_text('[worker.oci]\n  max-parallelism = 1\n  gc = true\n  reservedSpace = "512MB"\n  maxUsedSpace = "4GB"\n', encoding="utf-8")
     try:
-        for role, dockerfile in (("backend", "backend/Dockerfile"), ("web", "deploy/docker/frontend.Dockerfile")):
+        roles = [("backend", "backend/Dockerfile"), ("web", "deploy/docker/frontend.Dockerfile")]
+        if backend_tests:
+            roles.append(("backend-tests", "LocalBackend.Dockerfile"))
+        for role, dockerfile in roles:
             identifiers = command("docker", "image", "ls", "-q", "--no-trunc", "--filter", "label=io.trackvance.local-proof=true",
                 "--filter", "label=org.opencontainers.image.revision=" + sha, "--filter", "label=io.trackvance.local-role=" + role).split()
             row = inspect_image(identifiers[0], sha) if identifiers else None
@@ -185,57 +198,71 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus):
                         "--driver-opt", "memory-swap=" + str(min(3 * GIB, max_memory_bytes)),
                         "--driver-opt", "cpu-quota=" + str(int(min(2, max_cpus) * 100000)),
                         "--driver-opt", "cpu-period=100000", "--driver-opt", "restart-policy=no"],
-                        directory, "build-builder-create", 180)
+                        directory, "build-builder-create", 180, environment=environment)
                     builder_created = True
+                context = ROOT
+                if role == "backend-tests":
+                    from ci.local_backend import test_context
+                    context = test_context(ROOT, directory, sha, execute, environment)
                 reference = f"trackvance-local-proof:{sha[:12]}-{directory.name[-12:]}-{role}"
                 execute(["docker", "buildx", "build", "--builder", builder, "--load", "--platform", "linux/amd64",
                     "--label", "org.opencontainers.image.revision=" + sha, "--label", "io.trackvance.local-proof=true",
                     "--label", "org.opencontainers.image.version=0.8.0",
                     "--label", "io.trackvance.local-role=" + role, "-t", reference, "-f", dockerfile, "."],
-                    directory, "build-" + role, 1800)
+                    directory, "build-" + role, 1800, cwd=context, environment=environment)
                 row = inspect_image(reference, sha)
             images[role] = row["Id"]
     finally:
         if builder_created:
             # The builder name is unique to this local execution; no current/default builder is changed.
-            execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180)
+            execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
+                    environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
+        shutil.rmtree(directory / "backend-test-context", ignore_errors=True)
     proof = directory / "local-images.json"
     write(proof, {"schema_version": 1, "kind": "LOCAL_IMAGE_PROOF", "status": "PASS", "source_sha": sha,
-        "verified_at": stamp(), "images": images, "builder_cpu_limit": min(2, max_cpus),
+        "verified_at": stamp(), "images": {role: image for role, image in images.items() if role != "backend-tests"},
+        **({"backend_tests_image": images["backend-tests"]} if backend_tests else {}),
+        "builder_cpu_limit": min(2, max_cpus),
         "builder_memory_limit_bytes": min(3 * GIB, max_memory_bytes),
-        "retention": "Keep the most recent three SHA pairs; retain current referenced images; no global image pruning"})
+        "retention": "Ephemeral: remove verified unused local proof images after evidence and owned containers; retain only real container references"})
     return proof
 
 
-def retain_images(current_sha, pairs=3):
+def cleanup_fixture_images(source_sha, retain_for_seconds=0):
+    if not re.fullmatch(r"[a-f0-9]{40}", source_sha) or not 0 <= retain_for_seconds <= 86400:
+        raise ValueError("Image retention requires an exact SHA and an explicit bounded duration")
     identifiers = list(dict.fromkeys(command("docker", "image", "ls", "-q", "--no-trunc", "--filter",
         "label=io.trackvance.local-proof=true").split()))
     rows = json.loads(command("docker", "image", "inspect", *identifiers)) if identifiers else []
-    candidates = []
+    removed, skipped = [], []
     for row in rows:
         labels = row.get("Config", {}).get("Labels") or {}
         sha = labels.get("org.opencontainers.image.revision", "")
         tags = row.get("RepoTags") or []
         if (labels.get("io.trackvance.local-proof") == "true" and re.fullmatch(r"[a-f0-9]{40}", sha)
-                and tags and all(re.fullmatch(r"trackvance-local-proof:[a-f0-9]{12}-[a-f0-9]{12}-(?:backend|web)", tag) for tag in tags)):
-            candidates.append(row)
-    revisions = []
-    for row in sorted(candidates, key=lambda value: value["Created"], reverse=True):
-        sha = row["Config"]["Labels"]["org.opencontainers.image.revision"]
-        if sha not in revisions:
-            revisions.append(sha)
-    retained = {current_sha, *revisions[:pairs]}
-    removed = []
-    for row in candidates:
-        if row["Config"]["Labels"]["org.opencontainers.image.revision"] in retained:
+                and labels.get("org.opencontainers.image.version") == "0.8.0"
+                and tags and all(re.fullmatch(r"trackvance-local-proof:[a-f0-9]{12}-[a-f0-9]{12}-(?:backend|web|backend-tests)", tag) for tag in tags)):
+            owned = True
+        else:
+            owned = False
+        if not owned:
+            skipped.append({"image_id": row["Id"], "reason": "OWNERSHIP_OR_REFERENCES_UNCERTAIN"})
+            continue
+        if sha == source_sha and retain_for_seconds:
+            skipped.append({"image_id": row["Id"], "reason": "EXPLICIT_TEMPORARY_REUSE", "expires_at_unix": int(time.time()) + retain_for_seconds,
+                            "purpose": "Reuse this exact source SHA in local development; removal on the next zero-retention cleanup"})
             continue
         if command("docker", "ps", "-aq", "--filter", "ancestor=" + row["Id"]).strip():
+            skipped.append({"image_id": row["Id"], "reason": "CONTAINER_CONSUMER"})
             continue
         check = json.loads(command("docker", "image", "inspect", row["Id"]))[0]
         if check.get("RepoTags") == row.get("RepoTags") and check.get("Id") == row["Id"]:
             command("docker", "image", "rm", *row["RepoTags"])
-            removed.append(row["Id"])
-    return removed
+            removed.append({"image_id": row["Id"], "tags": row["RepoTags"], "source_sha": sha})
+        else:
+            skipped.append({"image_id": row["Id"], "reason": "REFERENCES_CHANGED_DURING_CLEANUP"})
+    return {"status": "PASS", "removed": removed, "skipped": skipped, "retain_for_seconds": retain_for_seconds,
+            "policy": "No force, no global pruning, exclude every container-consumed or uncertain image"}
 
 
 def retain_reports(base, current, count):
@@ -268,6 +295,7 @@ def main(arguments=None):
     parser.add_argument("--reserve-memory-gib", type=float, default=2)
     parser.add_argument("--concurrency", type=int, choices=[1], default=1, help="One stack at a time protects active certification")
     parser.add_argument("--build-images", action="store_true")
+    parser.add_argument("--exercise-failure-cleanup", action="store_true", help="Also run an explicit owned exit-23 fault and verify Docker cleanup")
     parser.add_argument("--retain-runs", type=int, default=7)
     args = parser.parse_args(arguments)
     manifest = load_manifest()
@@ -315,18 +343,23 @@ def main(arguments=None):
         docker_info = json.loads(command("docker", "info", "--format", "{{json .}}"))
         summary["environment"].update(docker_context=command("docker", "context", "show").strip(),
             docker_version=docker_info["ServerVersion"], docker_memory_bytes=docker_info["MemTotal"])
-        reserved = max(int(args.reserve_memory_gib * GIB), sum(r["memory_limit_bytes"] for rows in before.values() for r in rows))
+        reserved = active_memory_reservation(before, int(args.reserve_memory_gib * GIB), docker_info["MemTotal"])
+        summary["limits"].update(protected_active_reservation_bytes=reserved,
+            reservation_policy="Only running/restarting/paused protected containers reserve declared limits; minimum reserve remains; lifecycle changes abort owned work")
         permitted = min(int(args.max_memory_gib * GIB), max(0, docker_info["MemTotal"] - reserved))
         runnable = [g for g in groups if capacity(g)["memory_bytes"] <= permitted
             and capacity(g)["cpus"] <= args.max_cpus and capacity(g)["disk_bytes"] <= shutil.disk_usage(ROOT).free]
-        images = prepare_images(directory, sha, args.build_images, max_memory_bytes=permitted, max_cpus=args.max_cpus) if any(g not in {"backend", "frontend"} for g in runnable) else None
         environment = {key: value for key, value in os.environ.items() if not key.startswith(("GITHUB_", "CI_", "TRACKVANCE_LOCAL_", "TRACKVANCE_CI_"))}
         environment.update(TRACKVANCE_LOCAL_EXECUTION_ID=execution, TRACKVANCE_SOURCE_SHA=sha,
             TRACKVANCE_LOCAL_PROJECT_REGISTRY=str(registry), TRACKVANCE_LOCAL_MAX_CPUS=str(args.max_cpus),
             TRACKVANCE_LOCAL_BUILDER_REGISTRY=str(builder_registry),
-            TRACKVANCE_LOCAL_MAX_MEMORY_BYTES=str(permitted), PYTHONPATH=str(ROOT / "scripts"))
+            TRACKVANCE_LOCAL_MAX_MEMORY_BYTES=str(permitted), PYTHONPATH=str(ROOT / "scripts"),
+            TRACKVANCE_LOCAL_PROTECTED_INVENTORY=str(directory / "protected-inventory.before.json"))
         environment.update(NODE_OPTIONS="--max-old-space-size=384", UV_THREADPOOL_SIZE="1", OMP_NUM_THREADS="1",
             OPENBLAS_NUM_THREADS="1", POLARS_MAX_THREADS="1", GOMAXPROCS="1")
+        need_backend_tests = "backend" in runnable and os.name == "nt"
+        images = prepare_images(directory, sha, args.build_images, max_memory_bytes=permitted, max_cpus=args.max_cpus,
+            backend_tests=need_backend_tests, environment=environment) if need_backend_tests or args.exercise_failure_cleanup or any(g not in {"backend", "frontend"} for g in runnable) else None
         if images:
             environment["TRACKVANCE_LOCAL_IMAGE_MANIFEST"] = str(images)
         for group in groups:
@@ -348,16 +381,22 @@ def main(arguments=None):
                 row.update(status="FAIL", error_type=type(error).__name__)
                 if isinstance(error, KeyboardInterrupt):
                     raise
+                if getattr(error, "record", {}).get("protected_state_changed") or type(error).__name__ == "ProtectedStateChanged":
+                    raise
             finally:
                 row.update(completed_at=stamp(), duration_seconds=round(time.monotonic() - group_start, 3), resources=monitor.finish())
                 write(target, summary)
+        if args.exercise_failure_cleanup:
+            from ci.local_failure_probe import run as failure_probe
+            summary["controlled_failure_cleanup"] = failure_probe(directory / "controlled-failure", environment)
         summary["status"] = "PASS" if all(r["status"] == "PASS" for r in summary["groups"] if r["status"] != "NOT_SELECTED") else "INCOMPLETE"
         summary["closure"] = "DEEP_CERTIFICATION_APPROVED" if summary["status"] == "PASS" and args.all else "PARTIAL_DEEP_EXECUTION"
     except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- persist setup failures and explicit unexecuted groups.
         summary.update(status="FAIL", error_type=type(error).__name__)
         for group in groups:
             if not any(row["group"] == group for row in summary["groups"]):
-                summary["groups"].append({"group": group, "status": "NOT_RUN_SETUP_FAILED"})
+                protection_changed = getattr(error, "record", {}).get("protected_state_changed") or type(error).__name__ == "ProtectedStateChanged"
+                summary["groups"].append({"group": group, "status": "NOT_RUN_PROTECTION_CHANGED" if protection_changed else "NOT_RUN_SETUP_FAILED"})
     finally:
         # Retain the result before removing only registered, newly created resources.
         write(target, summary)
@@ -393,7 +432,7 @@ def main(arguments=None):
         write(target, summary)
         if summary.get("environment", {}).get("docker_memory_bytes"):
             try:
-                summary["retention_removed_images"] = retain_images(sha)
+                summary["fixture_image_cleanup"] = cleanup_fixture_images(sha)
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary["retention_image_error"] = type(error).__name__
         summary["retention_removed_reports"] = retain_reports(base, directory, args.retain_runs)

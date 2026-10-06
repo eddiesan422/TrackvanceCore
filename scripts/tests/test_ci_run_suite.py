@@ -74,3 +74,31 @@ def test_phase_timeout_terminates_only_its_process_and_cannot_be_pass(tmp_path, 
         run_suite.execute(["unused"], tmp_path, "timeout", 0.01)
     proof = json.loads((tmp_path / "timeout.json").read_text())
     assert proof["timed_out"] is True and proof["status"] == "FAIL" and stopped == [123]
+
+
+def test_protected_start_transition_aborts_only_owned_child_and_retains_failure(tmp_path, monkeypatch):
+    from ci import run_local
+    protected = {"trackvance-certification": [{"id": "original", "status": "exited"}]}
+    baseline = tmp_path / "protected.json"
+    baseline.write_text(json.dumps(protected))
+    readings = iter([protected, {"trackvance-certification": [{"id": "original", "status": "running"}]}])
+    monkeypatch.setattr(run_local, "protected_inventory", lambda: next(readings))
+    stopped = []
+    class Process:
+        pid = 123
+        calls = 0
+        def wait(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired("owned", 2)
+            return -15
+        def terminate(self):
+            stopped.append(self.pid)
+    monkeypatch.setattr(run_suite.subprocess, "Popen", lambda *_a, **_k: Process())
+    monkeypatch.setattr(run_suite.os, "killpg", lambda pid, _: stopped.append(pid), raising=False)
+    with pytest.raises(run_suite.PhaseFailed):
+        run_suite.execute(["owned"], tmp_path, "guarded", 60,
+                          environment={"TRACKVANCE_LOCAL_PROTECTED_INVENTORY": str(baseline)})
+    proof = json.loads((tmp_path / "guarded.json").read_text())
+    assert proof["status"] == "FAIL" and proof["protected_state_changed"] is True
+    assert stopped == [123] and proof["timed_out"] is False

@@ -112,7 +112,7 @@ def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_sta
 
     from ci import owned_cleanup, run_local
     executed = []
-    protected = {"trackvance-certification": [{"id": "protected-container", "started_at": "initial", "memory_limit_bytes": 15 * run_local.GIB}]}
+    protected = {"trackvance-certification": [{"id": "protected-container", "status": "running", "started_at": "initial", "memory_limit_bytes": 15 * run_local.GIB}]}
     monkeypatch.setattr(run_local, "ROOT", tmp_path)
     readings = iter([protected, {"trackvance-certification": [protected["trackvance-certification"][0] | {"started_at": "changed"}]} if changed else protected])
     monkeypatch.setattr(run_local, "protected_inventory", lambda: next(readings))
@@ -200,3 +200,105 @@ def test_host_cpu_affinity_failure_restores_original_and_prevents_false_proof(mo
     with pytest.raises(OSError):
         host_resources.limit_cpu_affinity(1)
     assert written == [[0], [0, 1]]
+
+
+def test_stopped_protected_data_does_not_reserve_active_memory():
+    from ci.run_local import GIB, active_memory_reservation
+    inventory = {"trackvance-certification": [{"status": "exited", "memory_limit_bytes": 14 * GIB}],
+                 "bikerwash": [{"status": "running", "memory_limit_bytes": 3 * GIB}]}
+    assert active_memory_reservation(inventory, 2 * GIB, 15 * GIB) == 3 * GIB
+    inventory["bikerwash"][0]["status"] = "exited"
+    assert active_memory_reservation(inventory, 2 * GIB, 15 * GIB) == 2 * GIB
+    inventory["bikerwash"][0].update(status="running", memory_limit_bytes=0)
+    assert active_memory_reservation(inventory, 2 * GIB, 15 * GIB) == 15 * GIB
+
+
+def test_windows_linux_commands_preserve_all_backend_phases_and_internal_migrations(tmp_path):
+    from ci.local_backend import commands
+    from ci.run_suite import ROOT, commands_for
+    environment = {"TRACKVANCE_LOCAL_BACKEND_CONTAINER": "owned-checks", "CI_MIGRATION_DATABASE_URL": "postgresql://owned-db"}
+    original = commands_for("backend", tmp_path)
+    converted = commands(original, ROOT, tmp_path, environment)
+    assert [phase for phase, _, _ in converted] == [phase for phase, _, _ in original]
+    for phase, command, _ in converted:
+        assert command[:2] == ["docker", "exec"] and "owned-checks" in command
+        assert str(tmp_path) not in " ".join(command)
+        if phase.startswith("migration-"):
+            assert "DATABASE_URL=postgresql://owned-db" in command
+    assert any("--junitxml=/evidence/pytest-junit.xml" in command for _, command, _ in converted)
+
+
+def test_linux_backend_requires_verified_test_role_and_shares_total_budget(tmp_path, monkeypatch):
+    from ci import image_bundle, local_backend
+    manifest = tmp_path / "images.json"
+    manifest.write_text(json.dumps({"backend_tests_image": "sha256:" + "a" * 64}))
+    environment = {"TRACKVANCE_LOCAL_IMAGE_MANIFEST": str(manifest), "TRACKVANCE_SOURCE_SHA": "b" * 40,
+                   "TRACKVANCE_LOCAL_BACKEND_PROJECT": "trackvance-v070-test-unitdb-" + "c" * 12,
+                   "TRACKVANCE_LOCAL_MAX_MEMORY_BYTES": str(4 * 1024**3), "TRACKVANCE_LOCAL_MAX_CPUS": "2",
+                   "TRACKVANCE_LOCAL_BACKEND_DATABASE_URL": "postgresql://own-db",
+                   "TRACKVANCE_LOCAL_EXECUTION_ID": "local-" + "d" * 32}
+    observed = []
+    monkeypatch.setattr(image_bundle, "inspect_image", lambda *_a: {"Config": {"Labels": {"io.trackvance.local-role": "backend-tests"}}})
+    result = local_backend.launch(tmp_path, environment, lambda command, *_a, **_k: observed.append(command))
+    command = observed[0]
+    assert command[command.index("--memory") + 1] == str(int(3.5 * 1024**3))
+    assert command[command.index("--cpus") + 1] == "1.5"
+    assert result["CI_MIGRATION_DATABASE_URL"] == "postgresql://own-db"
+    assert "src=" + str(tmp_path) in command[command.index("--mount") + 1]
+    monkeypatch.setattr(image_bundle, "inspect_image", lambda *_a: {"Config": {"Labels": {"io.trackvance.local-role": "backend"}}})
+    with pytest.raises(ValueError, match="own verified"):
+        local_backend.launch(tmp_path, environment, lambda *_a, **_k: pytest.fail("Wrong image must not start"))
+
+
+def test_ephemeral_image_cleanup_removes_current_sha_but_preserves_consumed_and_uncertain_images(monkeypatch):
+    from ci import run_local
+    sha = "a" * 40
+    labels = {"io.trackvance.local-proof": "true", "org.opencontainers.image.revision": sha,
+              "org.opencontainers.image.version": "0.8.0"}
+    rows = [{"Id": name, "Config": {"Labels": labels}, "RepoTags": tags} for name, tags in (
+        ("unused", ["trackvance-local-proof:" + "a" * 12 + "-" + "b" * 12 + "-backend-tests"]),
+        ("consumed", ["trackvance-local-proof:" + "a" * 12 + "-" + "b" * 12 + "-backend"]),
+        ("unknown", ["shared-other-project:latest"]))]
+    removed = []
+    def command(*args):
+        if args[:3] == ("docker", "image", "ls"):
+            return "unused consumed unknown"
+        if args[:3] == ("docker", "image", "inspect"):
+            return json.dumps(rows if len(args) > 4 else [next(row for row in rows if row["Id"] == args[-1])])
+        if args[:2] == ("docker", "ps"):
+            return "protected-container" if args[-1] == "ancestor=consumed" else ""
+        assert args[:3] == ("docker", "image", "rm") and "--force" not in args
+        removed.extend(args[3:])
+        return ""
+    monkeypatch.setattr(run_local, "command", command)
+    audit = run_local.cleanup_fixture_images(sha)
+    assert [row["image_id"] for row in audit["removed"]] == ["unused"]
+    assert {row["reason"] for row in audit["skipped"]} == {"CONTAINER_CONSUMER", "OWNERSHIP_OR_REFERENCES_UNCERTAIN"}
+    assert removed == rows[0]["RepoTags"] and audit["retain_for_seconds"] == 0
+
+
+@pytest.mark.parametrize("leftover", [False, True])
+def test_controlled_failure_probe_requires_actual_exit_23_and_zero_owned_leftovers(tmp_path, monkeypatch, leftover):
+    import ci_images
+    from ci import local_failure_probe, owned_cleanup, run_suite
+
+    monkeypatch.setattr(ci_images, "verified_images", lambda _e: {"backend": "sha256:" + "a" * 64})
+    monkeypatch.setattr(owned_cleanup, "snapshot", dict)
+    cleaned = []
+    monkeypatch.setattr(owned_cleanup, "cleanup", lambda _b, **kwargs: cleaned.append(kwargs["projects"]) or {"status": "PASS"})
+    monkeypatch.setattr(owned_cleanup, "docker", lambda *args: "remaining" if leftover and args[0] == "volume" else "")
+    def execute(_command, _directory, phase, *_args, **_kwargs):
+        if phase == "probe-expected-failure":
+            raise run_suite.PhaseFailed({"name": phase, "status": "FAIL", "exit_code": 23,
+                                         "timed_out": False, "protected_state_changed": False})
+    monkeypatch.setattr(run_suite, "execute", execute)
+    environment = {"TRACKVANCE_LOCAL_EXECUTION_ID": "local-" + "b" * 32, "TRACKVANCE_SOURCE_SHA": "c" * 40,
+                   "TRACKVANCE_LOCAL_PROJECT_REGISTRY": str(tmp_path / "registry.json")}
+    if leftover:
+        with pytest.raises(ValueError, match="incomplete"):
+            local_failure_probe.run(tmp_path / "probe", environment)
+    else:
+        assert local_failure_probe.run(tmp_path / "probe", environment)["status"] == "PASS"
+    result = json.loads((tmp_path / "probe/result.json").read_text())
+    assert result["observed_phase"]["status"] == "FAIL" and cleaned
+    assert result["status"] == ("FAIL" if leftover else "PASS")
