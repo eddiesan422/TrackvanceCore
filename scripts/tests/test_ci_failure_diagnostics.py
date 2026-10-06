@@ -549,6 +549,104 @@ def test_compose_partial_attachment_is_hashed_and_remains_failed_gate(tmp_path, 
     assert 'SECRET_TOKEN' not in attachment.read_text() and not list((output / 'evidence').glob('scenario-*.json'))
 
 
+COMPOSE_BROWSER_SOURCE = 'frontend/tests-e2e/identity-sso.spec.ts'
+
+
+def compose_browser_failure(root, group='identity-sso'):
+    path = compose_failure_result(root, group)
+    isolation = path.parent / 'isolation.json'
+    isolation.write_text(json.dumps({'project': path.parent.name, 'environment': 'SECRET_TOKEN'}))
+    browser = path.parent / 'browser-summary.json'
+    browser.write_text(json.dumps({'status': 'FAIL', 'expected': 1, 'unexpected': 1, 'skipped': 0, 'flaky': 0,
+        'duration': 1234, 'credential_privacy_probes': [{'raw': 'SECRET_TOKEN'}],
+        'failures': [{'test': 'PRIVATE_ROW', 'status': 'timedOut', 'message': 'SECRET_TOKEN',
+                      'location': {'file': '/checkout/' + COMPOSE_BROWSER_SOURCE, 'line': 1, 'column': 1}}]}))
+    return path, isolation, browser
+
+
+@pytest.mark.parametrize('group', ['compose-critical', 'identity-sso', 'connections'])
+def test_compose_browser_failure_keeps_only_fresh_owned_counters_and_verified_source_location(tmp_path, group):
+    compose_browser_failure(tmp_path, group)
+    value = diagnostics.collect_child_failure(group, set(), root=tmp_path, sources={COMPOSE_BROWSER_SOURCE})
+    browser = value[0]['result']['browser_failure']
+    assert browser == {'status': 'FAIL', 'expected': 1, 'unexpected': 1, 'skipped': 0, 'flaky': 0, 'duration': 1234,
+        'failures': [{'location_present': True, 'status': 'timedOut',
+                      'location': {'file': COMPOSE_BROWSER_SOURCE, 'line': 1, 'column': 1}}],
+        'failure_location_present': True}
+    assert all(secret not in json.dumps(value) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW', 'credential_privacy_probes'))
+
+
+@pytest.mark.parametrize('damage', ['old-browser', 'old-isolation', 'linked-browser', 'junction-browser',
+    'linked-isolation', 'wrong-owner', 'missing-isolation', 'browser-malformed', 'browser-oversized',
+    'isolation-malformed', 'browser-pass', 'archived'])
+def test_compose_browser_summary_cannot_import_old_linked_foreign_or_unbounded_evidence(tmp_path, monkeypatch, damage):
+    _, isolation, browser = compose_browser_failure(tmp_path)
+    before = set()
+    if damage.startswith('old-'):
+        before.add((browser if damage == 'old-browser' else isolation).resolve())
+    elif damage.startswith('linked-'):
+        linked = browser if damage == 'linked-browser' else isolation
+        original = Path.is_symlink
+        monkeypatch.setattr(Path, 'is_symlink', lambda self: self == linked or original(self))
+    elif damage == 'junction-browser':
+        monkeypatch.setattr(Path, 'is_junction', lambda self: self == browser, raising=False)
+    elif damage == 'wrong-owner':
+        isolation.write_text(json.dumps({'project': 'trackvance-certification'}))
+    elif damage == 'missing-isolation':
+        isolation.unlink()
+    elif damage.endswith('-malformed'):
+        (browser if damage == 'browser-malformed' else isolation).write_text('{invalid')
+    elif damage == 'browser-oversized':
+        browser.write_text('x' * (diagnostics.MAX_BYTES + 1))
+    elif damage == 'browser-pass':
+        browser.write_text(json.dumps({'status': 'PASS', 'unexpected': 0}))
+    else:
+        archive = browser.parent / 'baseline'
+        archive.mkdir()
+        browser.replace(archive / browser.name)
+    value = diagnostics.collect_child_failure('identity-sso', before, root=tmp_path, sources={COMPOSE_BROWSER_SOURCE})
+    assert len(value) == 1 and 'browser_failure' not in value[0]['result']
+
+
+@pytest.mark.parametrize('damage', ['untracked-source', 'foreign-path', 'out-of-range-line', 'linked-source'])
+def test_compose_browser_drops_unverified_failure_locations_without_publishing_messages(tmp_path, monkeypatch, damage):
+    _, _, path = compose_browser_failure(tmp_path)
+    value = json.loads(path.read_text())
+    location = value['failures'][0]['location']
+    sources = {COMPOSE_BROWSER_SOURCE}
+    if damage == 'untracked-source':
+        sources = set()
+    elif damage == 'foreign-path':
+        location['file'] = '/outside/PRIVATE_ROW.ts'
+    elif damage == 'out-of-range-line':
+        location['line'] = 1000000
+    else:
+        source = diagnostics.ROOT / COMPOSE_BROWSER_SOURCE
+        original = Path.is_symlink
+        monkeypatch.setattr(Path, 'is_symlink', lambda self: self == source or original(self))
+    path.write_text(json.dumps(value))
+    result = diagnostics.collect_child_failure('identity-sso', set(), root=tmp_path, sources=sources)
+    assert result[0]['result']['browser_failure']['failure_location_present'] is False
+    assert all(secret not in json.dumps(result) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+
+
+def test_identity_browser_failure_is_hashed_in_failed_diagnostic_only(tmp_path, monkeypatch):
+    compose_browser_failure(tmp_path)
+    monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: {COMPOSE_BROWSER_SOURCE})
+    output = tmp_path / 'ci'
+    path = diagnostics.publish_failure('identity-sso', output, source_sha=SHA,
+        ci={**CI, 'job_id': 'suite-identity-sso'}, phases=[], error=RuntimeError('SECRET_TOKEN'),
+        phase='identity', before=set(), root=tmp_path)
+    record = json.loads(path.read_text())
+    ref = record['evidence'][0]
+    attached = output / 'evidence' / ref['path']
+    assert diagnostics.hashlib.sha256(attached.read_bytes()).hexdigest() == ref['sha256']
+    assert json.loads(attached.read_text())['result']['browser_failure']['failure_location_present'] is True
+    assert record['status'] == 'FAIL' and record['certifies_final'] is False
+    assert all(secret not in attached.read_text() for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+    assert not list((output / 'evidence').glob('scenario-*.json'))
+
+
 def async_failure_context(root, tier=100):
     context = root / '.codex-local/v070' / f'trackvance-v070-test-volume-{tier}-012345abcdef'
     context.mkdir(parents=True)

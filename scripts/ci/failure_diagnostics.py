@@ -239,7 +239,7 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
     if group in {'async-volume-100', 'async-volume-500', 'async-volume-1024'}:
         return collect_async_failure(group, before, root=root)
     if group in {'compose-critical', 'identity-sso', 'connections'}:
-        return collect_compose_failure(group, before, root=root)
+        return collect_compose_failure(group, before, root=root, sources=sources)
     if group != 'catalog-reports':
         return []
     sources = trusted_sources() if sources is None else sources
@@ -626,7 +626,7 @@ def sanitize_runtime_diagnostics(value):
     return results
 
 
-def collect_compose_failure(group, before, *, root=ROOT):
+def collect_compose_failure(group, before, *, root=ROOT, sources=None):
     """Read only the exact fresh disposable child namespace for this group."""
     folder, pattern = {
         'compose-critical': ('v070', r'trackvance-v070-test-e2e-[a-f0-9]{12}'),
@@ -674,6 +674,20 @@ def collect_compose_failure(group, before, *, root=ROOT):
                 pass
         if runtime:
             summary['runtime'] = runtime
+        # The reporter already emits a safe summary; filter it again and bind
+        # it to this invocation's newly created disposable project. Raw browser
+        # output, test titles, messages and credential probes never survive.
+        browser_path, isolation_path = context / 'browser-summary.json', context / 'isolation.json'
+        if fresh_catalog_file(browser_path, before) and fresh_catalog_file(isolation_path, before):
+            try:
+                isolation = json.loads(isolation_path.read_text(encoding='utf-8'))
+                browser = json.loads(browser_path.read_text(encoding='utf-8'))
+                if (isinstance(isolation, dict) and isolation.get('project') == context.name
+                        and isinstance(browser, dict) and browser.get('status') == 'FAIL'):
+                    summary['browser_failure'] = sanitize_browser_failure(
+                        browser, trusted_sources() if sources is None else sources)
+            except (OSError, ValueError, RecursionError):
+                pass
         results.append({'kind': 'COMPOSE_PARTIAL_SUMMARY', 'profile': group, 'result': summary})
     return results[:4]
 
