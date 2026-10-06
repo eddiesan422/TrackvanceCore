@@ -7,7 +7,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY . /app/source/
 RUN mv /app/source/.ci-source-git /app/source/.git \
+    && python /app/source/scripts/ci/restore_source_modes.py \
     && uv sync --frozen --project /app/source/backend --group dev --no-editable \
+    && cd /app/source/backend \
+    && uv run --frozen --no-sync ruff check src tests ../scripts \
+    && uv run --frozen --no-sync mypy src/trackvance --check-untyped-defs --ignore-missing-imports \
     && chown -R trackvance:trackvance /app/source
 ENV PATH="/app/source/backend/.venv/bin:$PATH" \
     UV_CACHE_DIR=/tmp/uv-cache \
