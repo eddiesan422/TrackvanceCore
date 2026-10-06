@@ -6,6 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.ci.common import EvidenceError, load_manifest
 from scripts.ci.validators import (
+    SPARK_REAL_CASES,
     integrity,
     native_fixture_restore,
     validate_content,
@@ -46,6 +47,47 @@ def test_new_skips_cannot_impersonate_the_known_opt_in_spark_reason():
             "failure": False, "error": False, "skip": "NOT_RUN_OPT_IN: dedicated suite requires TRACKVANCE_SPARK_TESTS=1"}
     with pytest.raises(EvidenceError, match="UNEXPECTED_TEST_SKIP"):
         validate_junit({"cases": [case]}, allow_spark_opt_in=True)
+
+
+def spark_backend_documents():
+    cases = [{"id": f"tests.{module}.{name}", "classname": f"tests.{module}", "name": name,
+              "failure": False, "error": False, "skip": None} for module, name in sorted(SPARK_REAL_CASES)]
+    cases += [{"id": f"tests.ordinary.case_{index}", "classname": "tests.ordinary", "name": f"case_{index}",
+               "failure": False, "error": False, "skip": None} for index in range(1800)]
+    return {"documents": {"checks": {"checks": [{"name": "unit-tests", "status": "PASS", "exit_code": 0,
+                                               "duration_seconds": 1}]}, "junit": {"cases": cases}}}
+
+
+@pytest.mark.parametrize("case", sorted(SPARK_REAL_CASES))
+def test_functional_backend_requires_every_real_spark_case_even_with_sufficient_unit_coverage(case):
+    result = spark_backend_documents()
+    spec = {"validator": "backend-check", "check": "unit-tests"}
+    validate_content(spec, result, execution_profile="functional")
+    result["documents"]["junit"]["cases"] = [value for value in result["documents"]["junit"]["cases"]
+        if (value["classname"].split(".")[-1], value["name"]) != case]
+    with pytest.raises(EvidenceError, match="SPARK_FUNCTIONAL_COVERAGE_MISSING"):
+        validate_content(spec, result, execution_profile="functional")
+
+
+@pytest.mark.parametrize("damage,code", [("skip", "SPARK_FUNCTIONAL_CASE_SKIPPED"),
+                                        ("failure", "TEST_FAILURE_OR_ERROR"), ("error", "TEST_FAILURE_OR_ERROR")])
+def test_functional_backend_rejects_skipped_or_failed_real_spark_publication(damage, code):
+    result = spark_backend_documents()
+    case = next(value for value in result["documents"]["junit"]["cases"]
+                if value["classname"] == "tests.test_spark_service_e2e")
+    case[damage] = "NOT_RUN_OPT_IN: real local Spark publication suite" if damage == "skip" else True
+    with pytest.raises(EvidenceError, match=code):
+        validate_content({"validator": "backend-check", "check": "unit-tests"}, result, execution_profile="functional")
+
+
+def test_deep_backend_retains_dedicated_spark_opt_in_contract():
+    result = spark_backend_documents()
+    for case in result["documents"]["junit"]["cases"]:
+        if case["classname"] == "tests.test_spark_engine":
+            case["skip"] = "NOT_RUN_OPT_IN: dedicated suite requires TRACKVANCE_SPARK_TESTS=1"
+        elif case["classname"] == "tests.test_spark_service_e2e":
+            case["skip"] = "NOT_RUN_OPT_IN: real local Spark publication suite"
+    validate_content({"validator": "backend-check", "check": "unit-tests"}, result, execution_profile="deep")
 
 
 def test_browser_requires_actual_cases_and_zero_skip_or_flakiness():

@@ -46,6 +46,9 @@ def utc_now() -> str:
 
 
 def ci_context() -> dict[str, str]:
+    if os.environ.get("TRACKVANCE_LOCAL_EXECUTION_ID"):
+        return {"kind": "LOCAL", "execution_id": os.environ["TRACKVANCE_LOCAL_EXECUTION_ID"],
+                "group": os.environ.get("TRACKVANCE_LOCAL_GROUP", "standalone")}
     result = {"run_id": os.environ.get("GITHUB_RUN_ID", ""),
               "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
               "job_id": os.environ.get("CI_JOB_ID") or os.environ.get("GITHUB_JOB", "")}
@@ -92,7 +95,9 @@ def write_receipt(output_dir: Path, *, group: str, scenario_id: str,
     source_sha = source_sha or source_head()
     require(bool(SHA.fullmatch(source_sha)), "INVALID_SOURCE_SHA")
     ci = ci or ci_context()
-    require(set(ci) == {"run_id", "run_attempt", "job_id"} and all(str(v) for v in ci.values()), "INVALID_CI_IDENTITY")
+    local = ci.get("kind") == "LOCAL"
+    require((set(ci) == {"kind", "execution_id", "group"} if local else
+             set(ci) == {"run_id", "run_attempt", "job_id"}) and all(str(v) for v in ci.values()), "INVALID_CI_IDENTITY")
     output_dir.mkdir(parents=True, exist_ok=True)
     token = uuid4().hex
     result_path = output_dir / f"result-{scenario_id}-{token}.json"
@@ -102,7 +107,8 @@ def write_receipt(output_dir: Path, *, group: str, scenario_id: str,
     finish = completed_at or (now if status != "RUNNING" else None)
     elapsed = duration_seconds if duration_seconds is not None else (datetime.fromisoformat(finish) - datetime.fromisoformat(start)).total_seconds() if finish else None
     record = {"schema_version": 1, "kind": kind, "group": group, "scenario_id": scenario_id,
-              "source_sha": source_sha, "ci": {key: str(value) for key, value in ci.items()},
+              "source_sha": source_sha, "ci": None if local else {key: str(value) for key, value in ci.items()},
+              **({"execution": ci} if local else {}),
               "status": status, "rows": rows, "variant": variant, "started_at": start,
               "completed_at": finish, "duration_seconds": elapsed, "resources": resources or {},
               "result": result, "evidence": [artifact_ref(result_path, output_dir), *(attachments or [])]}
@@ -144,9 +150,10 @@ def wrap_group(group: str, sources: dict[str, Path], output_dir: Path, *, source
     original_meta: dict[str, dict[str, Any]] = {}
     if isinstance(original, dict) and original.get("kind") == "XLSX_GROUP":
         require(original.get("group") == group and original.get("source_sha") == source_sha
-                and original.get("status") == "PASS" and original.get("xlsx_test_limit_overrides") is False,
+                and original.get("status") == "PASS" and original.get("xlsx_test_limit_overrides") is (group == "corrections-functional"),
                 "INVALID_XLSX_GROUP")
-        require({k: str(v) for k, v in original.get("ci", {}).items()} == {k: str(v) for k, v in ci.items()}, "XLSX_CI_IDENTITY_MISMATCH")
+        identity = original.get("execution") if ci.get("kind") == "LOCAL" else original.get("ci")
+        require({k: str(v) for k, v in (identity or {}).items()} == {k: str(v) for k, v in ci.items()}, "XLSX_CI_IDENTITY_MISMATCH")
         required = {s["id"] for s in spec["scenarios"]}
         entries = original.get("scenario_results", [])
         require(len(entries) == len(required) and {e.get("scenario_id") for e in entries} == required,
@@ -162,7 +169,8 @@ def wrap_group(group: str, sources: dict[str, Path], output_dir: Path, *, source
             expected_scenario = next(s for s in spec["scenarios"] if s["id"] == entry["scenario_id"])
             require(record.get("rows") == expected_scenario.get("rows")
                     and record.get("variant") == expected_scenario.get("variant"), "XLSX_ROWS_OR_VARIANT_MISMATCH")
-            require({k: str(v) for k, v in record.get("ci", {}).items()} == {k: str(v) for k, v in ci.items()}, "XLSX_CI_IDENTITY_MISMATCH")
+            identity = record.get("execution") if ci.get("kind") == "LOCAL" else record.get("ci")
+            require({k: str(v) for k, v in (identity or {}).items()} == {k: str(v) for k, v in ci.items()}, "XLSX_CI_IDENTITY_MISMATCH")
             attachments = record.get("evidence", [])
             require(isinstance(attachments, list) and attachments, "XLSX_ATTACHMENT_MISSING")
             for attachment in attachments:
@@ -181,7 +189,7 @@ def wrap_group(group: str, sources: dict[str, Path], output_dir: Path, *, source
     paths = []
     for scenario in spec["scenarios"]:
         result = results[scenario["id"]]
-        validate_content(scenario, result)
+        validate_content(scenario, result, execution_profile=(resources or {}).get("profile"))
         meta = original_meta.get(scenario["id"], {})
         paths.append(write_receipt(output_dir, group=group, scenario_id=scenario["id"], result=result,
             attachments=refs, rows=scenario.get("rows"), variant=scenario.get("variant"),

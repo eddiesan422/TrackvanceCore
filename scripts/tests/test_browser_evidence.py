@@ -194,13 +194,44 @@ def test_opt_in_values_follow_existing_spec_exact_true_condition(real_spec_names
 
 @pytest.mark.parametrize("arguments,environment", [
     ([], {}), ([], {"TRACKVANCE_CI_IMAGE_MANIFEST": ""}),
-    (["tests-e2e/volume.spec.ts"], {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}),
     (["--grep", "local test"], {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}),
 ])
 def test_explicit_arguments_and_non_ci_discovery_remain_unchanged(tmp_path, arguments, environment):
     selected, metadata = browser_evidence.ci_spec_selection(arguments, tmp_path, environment)
     assert selected is arguments
     assert metadata is None
+
+
+@pytest.mark.parametrize("group", ["compose-functional", "connections-functional"])
+def test_functional_explicit_browser_proof_reaches_the_real_gate_validator(real_spec_names, tmp_path, monkeypatch, group):
+    from ci.common import group_spec, load_manifest
+    from ci.validators import browser_selection
+    root, _ = real_spec_names
+    spec = next(value for value in group_spec(load_manifest(), group)["scenarios"] if "browser_required_specs" in value)
+    for name in spec["browser_required_specs"]:
+        (root / "frontend" / name).write_text("// owned test fixture\n", encoding="utf-8")
+    report = {"stats": {"expected": 1, "unexpected": 0, "skipped": 0, "flaky": 0}}
+    commands = []
+    def run(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(report), stderr="")
+    monkeypatch.setattr(browser_evidence.subprocess, "run", run)
+    evidence = tmp_path / "published"; evidence.mkdir()
+    summary = browser_evidence.run_browser("pnpm", spec["browser_required_specs"], root=root,
+        project="owned-browser-functional", environment={"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}, evidence=evidence)
+    browser_selection(summary, spec)
+    assert summary["selected_spec_files"] == spec["browser_required_specs"]
+    assert summary["browser_selection_mode"] == "explicit"
+    command = commands[0]
+    assert {value for value in command if value.endswith(".spec.ts")} == set(spec["browser_required_specs"])
+
+
+def test_explicit_browser_duplicate_or_missing_file_never_produces_pass_metadata(real_spec_names):
+    root, _ = real_spec_names
+    environment = {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}
+    for arguments in (["tests-e2e/catalog-reports.spec.ts"] * 2, ["tests-e2e/missing.spec.ts"]):
+        with pytest.raises(RuntimeError, match="CI_BROWSER_EXPLICIT_SELECTION_INVALID"):
+            browser_evidence.ci_spec_selection(arguments, root, environment)
 
 
 def test_empty_ci_selection_cannot_fall_back_to_unrestricted_discovery(tmp_path):

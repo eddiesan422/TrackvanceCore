@@ -67,3 +67,42 @@ def test_implicit_volume_image_is_rejected_before_container_creation(tmp_path, m
     monkeypatch.setattr(image_bundle, 'docker', lambda *_: pytest.fail('Implicit volumes reached Docker create'))
     with pytest.raises(ValueError, match='implicit volumes'):
         frontend_build_proof.export_proof(tmp_path, 'a' * 40, 'build-tag')
+
+
+@pytest.mark.parametrize('tamper', [None, 'source', 'asset', 'escape', 'duplicate', 'bytes'])
+def test_reusing_build_proof_validates_exact_source_assets_and_archive_without_docker(tmp_path, monkeypatch, tamper):
+    sha = 'a' * 40
+    expected = {'package.json': b'{"version":"0.8.0"}', 'src/app/App.tsx': b'version0.8.0'}
+    contents = {'source/' + name: value for name, value in expected.items()}
+    contents.update({'dist/index.html': b'<app/>', 'dist/assets/index.js': b'built'})
+    if tamper == 'source':
+        contents['source/src/app/App.tsx'] = b'other-source'
+    if tamper == 'asset':
+        contents.pop('dist/index.html')
+    if tamper == 'escape':
+        contents['dist/../../outside.txt'] = b'escape'
+    archive_path = tmp_path / 'frontend-build-proof.zip'
+    with zipfile.ZipFile(archive_path, 'w') as archive:
+        for name, content in contents.items():
+            archive.writestr(name, content)
+        if tamper == 'duplicate':
+            archive.writestr('source/package.json', expected['package.json'])
+    descriptor = {'schema_version': 1, 'source_sha': sha, 'build_image_id': 'sha256:' + 'b' * 64,
+                  'archive': archive_path.name, 'archive_sha256': image_bundle.file_digest(archive_path),
+                  'archive_bytes': archive_path.stat().st_size, 'source_prefix': 'source/', 'dist_prefix': 'dist/'}
+    manifest = {'schema_version': 1, 'source_sha': sha, 'status': 'PASS',
+                'digest_kind': 'DOCKER_CONFIGURATION_SHA256', 'frontend_build_proof': descriptor,
+                'images': {role: {'image_id': 'sha256:' + 'c' * 64, 'archive': role + '.tar',
+                    'archive_sha256': 'd' * 64, 'archive_bytes': 1} for role in ('backend', 'web')}}
+    path = tmp_path / 'images.json'; path.write_text(json.dumps(manifest), encoding='utf-8')
+    monkeypatch.setattr(frontend_build_proof, 'tracked_sources', lambda *_: expected)
+    monkeypatch.setattr(image_bundle, 'docker', lambda *_: pytest.fail('Proof reuse reached Docker'))
+    if tamper == 'bytes':
+        archive_path.write_bytes(b'corrupt')
+    if tamper is None:
+        result = frontend_build_proof.verify_proof(path, sha)
+        assert result['status'] == 'PASS' and result['source_count'] == result['asset_count'] == 2
+        assert result['rebuilds'] == 0 and result['archive_sha256'] == descriptor['archive_sha256']
+    else:
+        with pytest.raises(ValueError):
+            frontend_build_proof.verify_proof(path, sha)

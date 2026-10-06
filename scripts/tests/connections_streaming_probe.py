@@ -125,8 +125,10 @@ def require_fixture_scope(host):
     return project
 
 
-def certify_sqlserver_streaming(host, admin_password, reader_password):
+def certify_sqlserver_streaming(host, admin_password, reader_password, rows=ROWS):
     project = require_fixture_scope(host)
+    if rows not in (1028, ROWS):
+        raise ValueError('Streaming population must cover at least four real batches or historical30k rows')
     import pymssql
 
     from trackvance.acquisition_config import AcquisitionLimits
@@ -140,20 +142,20 @@ def certify_sqlserver_streaming(host, admin_password, reader_password):
     try:
         with admin.cursor() as cursor:
             cursor.execute(f'CREATE TABLE source_data.[{table}] (record_id nvarchar(20) NOT NULL PRIMARY KEY, amount decimal(18,4), note nvarchar(100), payload nvarchar(2048))')
-            for start in range(0, ROWS, BATCH_ROWS):
+            for start in range(0, rows, BATCH_ROWS):
                 cursor.executemany(f'INSERT INTO source_data.[{table}] VALUES (%s,%s,%s,%s)',
-                    [(row[0], Decimal(row[1]), row[2], row[3]) for row in (fixture_row(i) for i in range(start, min(start + BATCH_ROWS, ROWS)))])
+                    [(row[0], Decimal(row[1]), row[2], row[3]) for row in (fixture_row(i) for i in range(start, min(start + BATCH_ROWS, rows)))])
             cursor.execute(f'GRANT SELECT ON source_data.[{table}] TO tv_reader')
         admin.commit()
         settings = ConnectionSettings('SQLSERVER', host, 1433, 'trackvance_source', 'tv_reader', reader_password,
                                       {'encryption': 'require', 'connect_timeout': 5, 'query_timeout': 60})
         source = SQLServerDatasetSource(settings, schema_name='source_data', object_name=table)
-        limits = replace(AcquisitionLimits(), batch_rows=BATCH_ROWS, max_rows=ROWS + 1)
+        limits = replace(AcquisitionLimits(), batch_rows=BATCH_ROWS, max_rows=rows + 1)
         metrics = CursorMetrics(table)
         def connect(**keywords):
             assert keywords['read_only'] is True and keywords['user'] == 'tv_reader'
             return ConnectionSpy(actual_connect(**keywords), metrics)
-        expected = fingerprint(fixture_row(index) for index in range(ROWS))
+        expected = fingerprint(fixture_row(index) for index in range(rows))
         first_fetched, max_batch, nulls, empties = None, 0, 0, 0
         baseline_rss, peak_rss = rss_bytes(), rss_bytes()
         def records():
@@ -161,7 +163,7 @@ def certify_sqlserver_streaming(host, admin_password, reader_password):
             for batch in source.read_batches(limits=limits):
                 if first_fetched is None:
                     first_fetched = metrics.fetched
-                    assert first_fetched < ROWS
+                    assert first_fetched < rows
                 assert batch.metadata['driver_buffering'] == 'FREETDS_DBNEXTROW'
                 assert batch.metadata['snapshot_policy'] == 'SERIALIZABLE_READ_LOCKS_V2'
                 assert batch.row_numbering == 'SNAPSHOT_ROW'
@@ -199,10 +201,10 @@ def certify_sqlserver_streaming(host, admin_password, reader_password):
                 pass
             else:
                 raise AssertionError('No se ejercitó cancelación sobre el cursor real.')
-        assert 0 < metrics.fetched < ROWS
+        assert 0 < metrics.fetched < rows
         assert metrics.population_cursors == metrics.population_cursors_closed == metrics.connections_closed == 1
-        return {'status': 'PASS', 'project': project, 'source_type': 'SQLSERVER', 'rows': ROWS,
-            'observed_fixture_payload_bytes': ROWS * 2048, 'snapshot_policy': 'SERIALIZABLE_READ_LOCKS_V2',
+        return {'status': 'PASS', 'project': project, 'source_type': 'SQLSERVER', 'rows': rows,
+            'observed_fixture_payload_bytes': rows * 2048, 'snapshot_policy': 'SERIALIZABLE_READ_LOCKS_V2',
             'driver_buffering': 'FREETDS_DBNEXTROW', 'full_scan': full,
             'cancellation': {'status': 'PASS', 'driver_rows': metrics.fetched, 'cursor_closed': True, 'connection_closed': True},
             'elapsed_seconds': round(time.monotonic() - began, 3), 'business_writes_by_reader': 0}

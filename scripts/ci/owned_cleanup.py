@@ -29,7 +29,7 @@ def owner(labels: dict | None) -> str | None:
     return project if isinstance(project, str) and PROJECT.fullmatch(project) else None
 
 
-def cleanup(before: dict[str, set[str]]) -> dict:
+def cleanup(before: dict[str, set[str]], *, projects: set[str] | None = None) -> dict:
     after = snapshot()
     removed = {"containers": [], "volumes": [], "networks": []}
     for identifier in sorted(after["containers"] - before["containers"]):
@@ -37,7 +37,7 @@ def cleanup(before: dict[str, set[str]]) -> dict:
         if len(rows) != 1 or rows[0].get("Id") != identifier:
             raise ValueError("Container identity changed during cleanup.")
         project = owner(rows[0].get("Config", {}).get("Labels"))
-        if not project:
+        if not project or (projects is not None and project not in projects):
             continue
         # Recheck immediately before mutation; source/habitual resources cannot
         # match the UUID ownership namespace and preexisting IDs are excluded.
@@ -53,7 +53,7 @@ def cleanup(before: dict[str, set[str]]) -> dict:
         if len(rows) != 1 or rows[0].get("Name") != name:
             raise ValueError("Volume identity changed during cleanup.")
         project = owner(rows[0].get("Labels"))
-        if not project or not name.startswith(project):
+        if not project or not name.startswith(project) or (projects is not None and project not in projects):
             continue
         if docker("ps", "-aq", "--filter", "volume=" + name).strip():
             raise ValueError("Owned volume still has a container consumer.")
@@ -67,7 +67,7 @@ def cleanup(before: dict[str, set[str]]) -> dict:
         if len(rows) != 1 or rows[0].get("Id") != identifier:
             raise ValueError("Network identity changed during cleanup.")
         project = owner(rows[0].get("Labels"))
-        if not project or not rows[0].get("Name", "").startswith(project):
+        if not project or not rows[0].get("Name", "").startswith(project) or (projects is not None and project not in projects):
             continue
         if rows[0].get("Containers"):
             raise ValueError("Owned network still has live endpoints.")

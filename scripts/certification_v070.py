@@ -119,6 +119,8 @@ def init(suite, port):
             "volumes": [{"type": "bind", "source": str(ROOT / relative),
                          "target": '/app/' + relative, "read_only": True}
                         for relative in ('backend/src', 'backend/migrations', 'scripts')]}
+    from ci.local_resources import apply_limits
+    apply_limits(override, project)
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
     print(json.dumps({"context": str(directory), "project": project, "port": port}))

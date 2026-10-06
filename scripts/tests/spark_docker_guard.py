@@ -7,10 +7,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
 IMAGE = "trackvance-v070-isolated:backend"
 OWNER_LABEL = "io.trackvance.spark-proof-owner"
 

@@ -1,7 +1,11 @@
 """Export committed frontend source and built assets from a stopped build image."""
 from __future__ import annotations
 
+import argparse
+import io
+import json
 import re
+import stat
 import subprocess
 import tempfile
 import zipfile
@@ -10,16 +14,20 @@ from uuid import uuid4
 
 
 def tracked_sources(root: Path, sha: str) -> dict[str, bytes]:
-    listed = subprocess.run(["git", "ls-tree", "-r", "--name-only", sha, "--", "frontend"],
-                            cwd=root, capture_output=True, text=True, check=True).stdout.splitlines()
+    # One immutable Git archive avoids launching git once for every source file.
+    payload = subprocess.run(["git", "archive", "--format=zip", sha, "frontend"],
+                             cwd=root, capture_output=True, check=True).stdout
     result = {}
-    for name in listed:
-        relative = PurePosixPath(name).relative_to("frontend")
-        if (relative.is_absolute() or ".." in relative.parts
-                or any(p in {"node_modules", ".env", ".codex-local", "dist"} for p in relative.parts)):
-            raise ValueError("Unsafe committed frontend proof source.")
-        result[relative.as_posix()] = subprocess.run(["git", "show", sha + ":" + name],
-            cwd=root, capture_output=True, check=True).stdout
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            relative = PurePosixPath(info.filename).relative_to("frontend")
+            if (relative.is_absolute() or ".." in relative.parts
+                    or stat.S_ISLNK(info.external_attr >> 16)
+                    or any(p in {"node_modules", ".env", ".codex-local", "dist"} for p in relative.parts)):
+                raise ValueError("Unsafe committed frontend proof source.")
+            result[relative.as_posix()] = archive.read(info)
     if not result or "package.json" not in result or "src/app/App.tsx" not in result:
         raise ValueError("Incomplete committed frontend proof source.")
     return result
@@ -73,10 +81,63 @@ def export_proof(directory: Path, sha: str, reference: str) -> dict:
                 "archive": archive.name, "archive_sha256": file_digest(archive),
                 "archive_bytes": archive.stat().st_size, "source_prefix": "source/", "dist_prefix": "dist/"}
     finally:
-        import json
         rows = json.loads(docker("inspect", identifier))
         if (len(rows) != 1 or rows[0].get("Id") != identifier or rows[0].get("Image") != row["Id"]
                 or rows[0].get("State", {}).get("Running") is not False
                 or rows[0].get("Config", {}).get("Labels", {}).get("trackvance.ci.proof.owner") != owner):
             raise ValueError("Stopped proof container ownership changed; cleanup refused.")
         docker("rm", identifier)
+
+
+def verify_proof(manifest_path: Path, sha: str) -> dict:
+    """Verify the original build artifacts without loading or rebuilding images."""
+    try:
+        from .image_bundle import ROOT, file_digest, validate_manifest
+    except ImportError:
+        from image_bundle import ROOT, file_digest, validate_manifest
+
+    manifest = validate_manifest(manifest_path, sha, archives=False)
+    descriptor = manifest.get("frontend_build_proof")
+    if descriptor is None:
+        raise ValueError("Missing committed frontend build proof.")
+    path = manifest_path.parent / descriptor["archive"]
+    if (path.is_symlink() or not path.is_file() or path.stat().st_size != descriptor["archive_bytes"]
+            or file_digest(path) != descriptor["archive_sha256"]):
+        raise ValueError("Missing or altered frontend build proof archive.")
+    expected = tracked_sources(ROOT, sha)
+    with zipfile.ZipFile(path) as archive:
+        infos = archive.infolist()
+        names = [info.filename for info in infos]
+        if (len(set(names)) != len(names) or len(names) > 20000
+                or sum(info.file_size for info in infos) > 512 * 1024**2):
+            raise ValueError("Duplicate or excessive frontend proof inventory.")
+        for info in infos:
+            parsed = PurePosixPath(info.filename)
+            if (parsed.is_absolute() or ".." in parsed.parts or "\\" in info.filename
+                    or not parsed.parts or parsed.parts[0] not in {"source", "dist"}
+                    or info.is_dir() or stat.S_ISLNK(info.external_attr >> 16)):
+                raise ValueError("Unsafe frontend proof entry.")
+        sources = {name.removeprefix("source/") for name in names if name.startswith("source/")}
+        assets = {name for name in names if name.startswith("dist/")}
+        if sources != expected.keys() or "dist/index.html" not in assets or not assets:
+            raise ValueError("Incomplete committed frontend proof source or assets.")
+        for name, content in expected.items():
+            if archive.read("source/" + name) != content:
+                raise ValueError("The build proof frontend source differs from committed bytes.")
+        if archive.testzip() is not None:
+            raise ValueError("Corrupt frontend build proof asset.")
+    return {"status": "PASS", "source_sha": sha, "archive_sha256": descriptor["archive_sha256"],
+            "build_image_id": descriptor["build_image_id"], "source_count": len(expected),
+            "asset_count": len(assets), "rebuilds": 0}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--sha", required=True)
+    args = parser.parse_args()
+    print(json.dumps(verify_proof(args.manifest, args.sha)))
+
+
+if __name__ == "__main__":
+    main()

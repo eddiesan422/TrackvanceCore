@@ -4,11 +4,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Full certification is required before updating Docker.
+      profile:
+        description: Complete functional regression. Intensive deep certification runs locally.
         type: choice
-        options: [full, auto, fast]
-        default: full
+        options: [functional]
+        default: functional
       cache_mode:
         description: Cold disables cache restoration; warm reuses dependencies and layers.
         type: choice
@@ -17,8 +17,14 @@ on:
 permissions:
   contents: read
   pull-requests: read
+concurrency:
+  # A duplicate push must never cancel the authoritative PR regression.
+  # Ordinary older runs of each branch/event are cancelled as a whole.
+  group: trackvance-ci-${{ github.event_name == 'workflow_dispatch' && github.run_id || format('{0}-{1}', github.event_name, github.head_ref || github.ref_name) }}
+  cancel-in-progress: true
 env:
   CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  CI_PROFILE: functional
   CI_CACHE_MODE: ${{ inputs.cache_mode || (github.run_attempt == 1 && contains(github.event.head_commit.message, '[ci cold]') && 'cold' || 'warm') }}
 jobs:
   select:
@@ -38,33 +44,25 @@ jobs:
         with:
           script: |
             let run = true;
-            const explicit = context.eventName === 'workflow_dispatch' ||
-              (context.payload.head_commit?.message || '').includes('[ci full]');
-            if (context.eventName === 'push' && !explicit) {
+            if (context.eventName === 'push') {
               const prs = await github.paginate(github.rest.pulls.list, {
                 ...context.repo, state: 'open',
                 head: context.repo.owner + ':' + context.ref.replace('refs/heads/', '')
               });
               run = !prs.some(pr => pr.head.sha === context.sha);
             }
-            if (context.eventName === 'pull_request') {
-              const head = await github.rest.repos.getCommit({
-                ...context.repo, ref: context.payload.pull_request.head.sha
-              });
-              run = !head.data.commit.message.includes('[ci full]');
-            }
             core.setOutput('run', String(run));
-      - name: Select conservative impact or explicit full certification
+      - name: Select complete functional coverage or documentation validation
         id: select
         if: steps.duplicate.outputs.run == 'true'
         env:
-          REQUESTED_MODE: ${{ inputs.mode || 'auto' }}
+          REQUESTED_PROFILE: ${{ inputs.profile || 'auto' }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
           CI_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          python scripts/ci/select_suites.py --mode "$REQUESTED_MODE" --base "$BASE_SHA" \
-            --head "$CI_SOURCE_SHA" --event "$GITHUB_EVENT_NAME" --branch "$CI_BRANCH" \
+          python scripts/ci/select_suites.py --profile "$REQUESTED_PROFILE" --base "$BASE_SHA" \
+            --head "$CI_SOURCE_SHA" --event "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --branch "$CI_BRANCH" \
             --commit-message "$COMMIT_MESSAGE" --cache-mode "$CI_CACHE_MODE" \
             --output .codex-local/ci/selection.json --github-output "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
@@ -75,14 +73,38 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  documentation:
+    if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'docs'
+    needs: [select]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-selection-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
+          path: .codex-local/ci
+      - name: Validate changed documents and local links without product setup
+        run: |
+          python scripts/ci/check_documentation.py --selection .codex-local/ci/selection.json \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output .codex-local/ci/documentation-result.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-documentation-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
+          path: .codex-local/ci/documentation-result.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   backend:
-    if: needs.select.outputs.run == 'true'
+    if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
     needs: [select]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    concurrency:
-      group: backend-${{ needs.select.outputs.mode == 'full' && github.run_id || github.ref }}
-      cancel-in-progress: ${{ needs.select.outputs.mode != 'full' }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -97,10 +119,18 @@ jobs:
     env:
       CI_JOB_ID: backend
       CI_MIGRATION_DATABASE_URL: postgresql+psycopg://trackvance_ci:disposable-ci-password@127.0.0.1:5432/trackvance_ci
+      TRACKVANCE_SPARK_TESTS: '1'
+      TRACKVANCE_SPARK_MASTER: local[2]
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
+      - name: Pin Java for real Spark parity and publication
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17.0.17+10'
+          check-latest: false
       - uses: ./.github/actions/dependencies
         with:
           python: 'true'
@@ -108,7 +138,7 @@ jobs:
       - name: Install syscall verification tools
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y strace libseccomp2
       - name: Run all existing backend checks
-        run: python scripts/ci/run_suite.py --group backend
+        run: python scripts/ci/run_suite.py --profile functional --group backend
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -124,15 +154,13 @@ jobs:
           if-no-files-found: error
 
   frontend:
-    if: needs.select.outputs.run == 'true'
-    needs: [select]
+    if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
+    needs: [select, images]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    concurrency:
-      group: frontend-${{ needs.select.outputs.mode == 'full' && github.run_id || github.ref }}
-      cancel-in-progress: ${{ needs.select.outputs.mode != 'full' }}
     env:
       CI_JOB_ID: frontend
+      TRACKVANCE_CI_FRONTEND_BUILD_PROOF_MANIFEST: ${{ github.workspace }}/.codex-local/ci/frontend-proof/images.json
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,8 +169,12 @@ jobs:
         with:
           frontend: 'true'
           cache-mode: ${{ env.CI_CACHE_MODE }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-frontend-proof-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
+          path: .codex-local/ci/frontend-proof
       - name: Run all existing frontend checks
-        run: python scripts/ci/run_suite.py --group frontend
+        run: python scripts/ci/run_suite.py --profile functional --group frontend
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -158,13 +190,10 @@ jobs:
           if-no-files-found: error
 
   images:
-    if: needs.select.outputs.run == 'true'
+    if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
     needs: [select]
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    concurrency:
-      group: images-${{ needs.select.outputs.mode == 'full' && github.run_id || github.ref }}
-      cancel-in-progress: ${{ needs.select.outputs.mode != 'full' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -230,20 +259,26 @@ jobs:
           path: .codex-local/ci/images/images.json
           include-hidden-files: true
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ci-frontend-proof-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
+          path: |
+            .codex-local/ci/images/images.json
+            .codex-local/ci/images/frontend-build-proof.zip
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   suites:
     name: ${{ matrix.job_key }}
-    if: needs.select.outputs.run == 'true'
-    needs: [select, backend, frontend, images]
+    if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
+    needs: [select, images]
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 9
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
-    concurrency:
-      group: suite-${{ matrix.group }}-${{ needs.select.outputs.mode == 'full' && github.run_id || github.ref }}
-      cancel-in-progress: ${{ needs.select.outputs.mode != 'full' }}
     env:
       CI_JOB_ID: suite-${{ matrix.group }}
       PLAYWRIGHT_CHANNEL: chromium
@@ -255,9 +290,9 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/dependencies
         with:
-          python: ${{ startsWith(matrix.group, 'async-volume-') && 'true' || 'false' }}
-          frontend: ${{ contains(fromJSON('["compose-critical","identity-sso","connections","delivery","catalog-reports","corrections-browser","async-volume-100"]'), matrix.group) && 'true' || 'false' }}
-          browser: ${{ contains(fromJSON('["compose-critical","identity-sso","connections","delivery","catalog-reports","corrections-browser","async-volume-100"]'), matrix.group) && 'true' || 'false' }}
+          python: ${{ matrix.python && 'true' || 'false' }}
+          frontend: ${{ matrix.browser && 'true' || 'false' }}
+          browser: ${{ matrix.browser && 'true' || 'false' }}
           cache-mode: ${{ env.CI_CACHE_MODE }}
       - name: Start image transfer measurement
         run: |
@@ -275,7 +310,7 @@ jobs:
       - name: Run exact selected group
         env:
           CI_GROUP: ${{ matrix.group }}
-        run: python scripts/ci/run_suite.py --group "$CI_GROUP"
+        run: python scripts/ci/run_suite.py --profile functional --group "$CI_GROUP"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -291,27 +326,48 @@ jobs:
           if-no-files-found: error
 
   gate:
-    if: always() && needs.select.outputs.run == 'true'
-    needs: [select, backend, frontend, images, suites]
+    # Keep this required check name stable, including docs-only and failed selection.
+    if: always()
+    needs: [select, documentation, backend, frontend, images, suites]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Reject missing, failed or cancelled selection
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          SELECT_RUN: ${{ needs.select.outputs.run }}
+        run: |
+          test "$SELECT_RESULT" = success
+          test "$SELECT_RUN" = true -o "$SELECT_RUN" = false
+      - name: Record duplicate push deferred to the authoritative PR check
+        if: needs.select.outputs.run == 'false'
+        run: echo 'Duplicate push; the same SHA is validated by the pull request workflow. This run grants no functional or deep approval.'
       - uses: actions/checkout@v7
+        if: needs.select.outputs.run == 'true'
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
       - uses: actions/download-artifact@v8
+        if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
         with:
           pattern: ci-evidence-*-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
           path: .codex-local/ci/downloaded
       - uses: actions/download-artifact@v8
+        if: needs.select.outputs.run == 'true'
         with:
           name: ci-selection-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
           path: .codex-local/ci
       - uses: actions/download-artifact@v8
+        if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
         with:
           name: ci-image-proof-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
           path: .codex-local/ci/images
+      - uses: actions/download-artifact@v8
+        if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'docs'
+        with:
+          name: ci-documentation-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
+          path: .codex-local/ci
       - name: Validate groups, scenario contents, hashes, SHA and run identity
+        if: needs.select.outputs.run == 'true'
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           SELECTED_MODE: ${{ needs.select.outputs.mode }}
@@ -326,14 +382,14 @@ jobs:
             'needs': json.loads(os.environ['NEEDS_JSON'])}))
           PY
           extra=()
-          if [ "$SELECTED_MODE" = fast ]; then extra+=(--development-only); fi
+          if [ "$SELECTED_MODE" = docs ]; then extra+=(--documentation-evidence .codex-local/ci/documentation-result.json); fi
           python scripts/ci/final_gate.py --manifest scripts/ci/scenarios.json \
             --selection .codex-local/ci/selection.json --evidence-dir .codex-local/ci/downloaded \
             --jobs .codex-local/ci/jobs.json --sha "$CI_SOURCE_SHA" --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" --image-manifest .codex-local/ci/images/images.json \
             --output .codex-local/ci/gate-result.json "${extra[@]}"
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: always() && needs.select.outputs.run == 'true'
         with:
           name: ci-gate-${{ env.CI_SOURCE_SHA }}-${{ github.run_attempt }}
           path: |

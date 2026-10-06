@@ -455,6 +455,8 @@ def main() -> int:
     parser.add_argument("--project", default=f"{PREFIX}{os.getpid()}-{uuid.uuid4().hex[:12]}")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--streaming-rows", type=int, choices=(1028, 30000), default=30000,
+                        help="Owned streaming fixture; four real batches for functional, historical30k for deep")
     parser.add_argument("--skip-playwright", action="store_true")
     parser.add_argument("--full-playwright", action="store_true",
                         help="Ejecutar también todos los flujos de regresión del navegador.")
@@ -500,6 +502,8 @@ def main() -> int:
     for name, memory in limits.items():
         if name in profile["services"]:
             profile["services"][name]["mem_limit"] = memory
+    from ci.local_resources import apply_limits
+    apply_limits(profile, project)
     private_profile.write_text(json.dumps(profile, indent=2), encoding="utf-8")
 
     def command(arguments, **kwargs):
@@ -552,11 +556,11 @@ def main() -> int:
         streaming_probe = (ROOT / "scripts/tests/connections_streaming_probe.py").read_text(encoding="utf-8")
         streaming = json.loads(run(["exec", "-T", "api", "python", "-"],
             input_text=streaming_probe + "\nprint(json.dumps(certify_sqlserver_streaming("
-                + f"'source-sqlserver', {admin_password!r}, {password!r})))\n",
+                + f"'source-sqlserver', {admin_password!r}, {password!r}, rows={args.streaming_rows})))\n",
             capture=True))
         assert_no_credentials(streaming, credentials, "Una credencial apareció en la sonda de streaming.")
-        checks.verify(streaming["status"] == "PASS" and streaming["rows"] == 30_000
-                      and streaming["full_scan"]["row_count"] == 30_000
+        checks.verify(streaming["status"] == "PASS" and streaming["rows"] == args.streaming_rows
+                      and streaming["full_scan"]["row_count"] == args.streaming_rows
                       and streaming["cancellation"]["status"] == "PASS",
                       "SQL Server: FreeTDS incremental, valores completos, memoria acotada y cierre al cancelar")
         api = smoke.Api(base_url, timeout=60)

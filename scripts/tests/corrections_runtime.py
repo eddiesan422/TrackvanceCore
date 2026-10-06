@@ -14,16 +14,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from ci.evidence import write_receipt
+from ci.common import EvidenceError
+from ci.evidence import ci_context, write_receipt
 
 GROUP_SCENARIOS = {
+    "corrections-functional": ["acquisition-120-inline", "acquisition-120-shared",
+        "row-limit-preserves-version-121", "chain-120-inline", "cancel-120-shared",
+        "crash-lease-120-shared", "unread-api-restart-functional", "automation-integrated-functional"],
     "corrections-acquisition": [f"acquisition-{rows}-{variant}" for rows in (100000, 100001, 400000, 1000000)
         for variant in ("inline", "shared")] + ["row-limit-preserves-version-1000001"],
     "corrections-browser": ["browser-400000-shared", "browser-1000000-shared"],
     "corrections-dispatch": ["chain-1000000-inline", "dispatch-1000000-two-datasets", "unread-api-restart"],
     "corrections-recovery": ["cancel-1000000-shared", "crash-lease-1000000-shared", "native-backup-restore"],
 }
-GROUP_DEADLINES = {"corrections-acquisition": 3600, "corrections-browser": 3600,
+GROUP_DEADLINES = {"corrections-functional": 1800, "corrections-acquisition": 3600, "corrections-browser": 3600,
                    "corrections-dispatch": 2400, "corrections-recovery": 3300}
 GROUP_ALIASES = {group.removeprefix("corrections-"): group for group in GROUP_SCENARIOS}
 
@@ -105,9 +109,15 @@ class ScenarioEvidence:
         self.directory = self.base / ("xlsx-scenarios-" + group + "-" + uuid4().hex[:12])
         self.directory.mkdir(parents=True, exist_ok=False)
         self.group, self.source_sha = group, source_sha
-        self.ci = ci or {"run_id": os.environ.get("GITHUB_RUN_ID", "LOCAL"),
-            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "LOCAL"),
-            "job_id": os.environ.get("CI_JOB_ID", os.environ.get("GITHUB_JOB", "LOCAL"))}
+        if ci:
+            self.ci = ci
+        else:
+            try:
+                self.ci = ci_context()
+            except EvidenceError:
+                if os.environ.get("GITHUB_RUN_ID"):
+                    raise
+                self.ci = {"kind": "LOCAL", "execution_id": "local-" + uuid4().hex, "group": group}
         self.required, self.completed, self.failed = GROUP_SCENARIOS[group], {}, False
         self.seen, self.prerequisites = set(), []
         self.started = datetime.now(UTC).isoformat()
@@ -116,7 +126,9 @@ class ScenarioEvidence:
 
     def write_group(self, status, **extra):
         value = {"schema_version": 1, "kind": "XLSX_GROUP",
-            "group": self.group, "source_sha": self.source_sha, "ci": self.ci, "status": status,
+            "group": self.group, "source_sha": self.source_sha,
+            "ci": None if self.ci.get("kind") == "LOCAL" else self.ci,
+            **({"execution": self.ci} if self.ci.get("kind") == "LOCAL" else {}), "status": status,
             "started_at": self.started, "completed_at": datetime.now(UTC).isoformat() if status != "RUNNING" else None,
             "duration_seconds": round(time.monotonic() - self.began, 6),
             "required_scenarios": self.required, "scenario_results": list(self.completed.values()),
@@ -136,7 +148,9 @@ class ScenarioEvidence:
         kind = "XLSX_PREREQUISITE" if prerequisite else "XLSX_SCENARIO"
         started, began = datetime.now(UTC).isoformat(), time.monotonic()
         value = {"schema_version": 1, "kind": "XLSX_PROGRESS",
-            "group": self.group, "scenario_id": scenario_id, "source_sha": self.source_sha, "ci": self.ci,
+            "group": self.group, "scenario_id": scenario_id, "source_sha": self.source_sha,
+            "ci": None if self.ci.get("kind") == "LOCAL" else self.ci,
+            **({"execution": self.ci} if self.ci.get("kind") == "LOCAL" else {}),
             "status": "RUNNING", "rows": rows, "variant": variant, "started_at": started,
             "completed_at": None, "duration_seconds": 0, "result": {}, "resources": {}, "evidence": [],
             "deadline_seconds": seconds, "deadline_method": "POSIX_ALARM" if hasattr(signal, "SIGALRM") else "TRANSPORT_AND_ELAPSED"}

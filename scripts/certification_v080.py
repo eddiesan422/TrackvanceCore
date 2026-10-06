@@ -219,6 +219,8 @@ def init(suite: str, port: int, main_project: str | None) -> Path:
         elif name == "web":
             service["image"] = images['web'] if images else "trackvance-v080-isolated:web"
         override["services"][name] = service
+    from ci.local_resources import apply_limits
+    apply_limits(override, project)
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
     preflight(directory, context)

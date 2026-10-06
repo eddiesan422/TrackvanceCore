@@ -26,15 +26,20 @@ from spark_docker_guard import (
 
 
 def execute(evidence: Path, rows: int, *, parity_only=False):
+    from ci_images import verified_images
+    images = verified_images()
+    image = images["backend"] if images else IMAGE
     evidence = prepare_evidence(evidence)
     context = docker("context", "show").strip()
     baseline = protected_inventory()
     prefix = "trackvance-v070-test-spark-" + uuid4().hex[:12]
+    from ci.local_resources import register_project
+    register_project(prefix)
     network, volume, driver = prefix + "-network", prefix + "-data", prefix + "-driver"
     containers: list[str] = []
     made_network = made_volume = False
     summary = {"status": "FAILED", "deployment_mode": "LOCAL", "prefix": prefix,
-               "image": IMAGE, "image_id": docker("image", "inspect", "--format", "{{.Id}}", IMAGE).strip(),
+               "image": image, "image_id": docker("image", "inspect", "--format", "{{.Id}}", image).strip(),
                "source_fingerprint": source_fingerprint(), "rows": rows, "parity_only": parity_only,
                "memory_limit_bytes": 3 * 1024**3, "cpu_limit": 2, "pids_limit": 512,
                "sampled_docker_working_set_peak_bytes": 0, "cgroup_peak_bytes": 0,
@@ -59,7 +64,7 @@ def execute(evidence: Path, rows: int, *, parity_only=False):
                "--mount", f"type=volume,src={volume},dst=/var/lib/trackvance",
                "-e", "TRACKVANCE_SPARK_TESTS=1", "-e", "TRACKVANCE_SPARK_MASTER=local[2]",
                "-e", "PYTHONPATH=/app/backend/src", "-e", "POLARS_MAX_THREADS=1", "-e", "TMPDIR=/var/lib/trackvance",
-               IMAGE, "bash", "-c", command)
+               image, "bash", "-c", command)
         deadline, last_update = time.monotonic() + 3600, 0.0
         while time.monotonic() < deadline:
             if docker("context", "show").strip() != context:

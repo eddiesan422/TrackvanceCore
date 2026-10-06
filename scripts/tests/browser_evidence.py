@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -24,7 +25,16 @@ CI_OPT_IN_SPECS = {
 
 def ci_spec_selection(arguments: list[str], root: Path, environment: dict[str, str]) -> tuple[list[str], dict | None]:
     """Select all actual specs except named opt-ins lacking their exact flag."""
-    if arguments or not environment.get("TRACKVANCE_CI_IMAGE_MANIFEST"):
+    if not environment.get("TRACKVANCE_CI_IMAGE_MANIFEST"):
+        return arguments, None
+    if arguments:
+        if all(re.fullmatch(r"tests-e2e/[a-z0-9-]+\.spec\.ts", name) for name in arguments):
+            if len(set(arguments)) != len(arguments) or any(
+                not (root / "frontend" / name).is_file() or (root / "frontend" / name).is_symlink()
+                for name in arguments
+            ):
+                raise RuntimeError("CI_BROWSER_EXPLICIT_SELECTION_INVALID")
+            return arguments, {"selected_spec_files": arguments, "browser_selection_mode": "explicit"}
         return arguments, None
     selected, excluded = [], []
     frontend = root / "frontend"

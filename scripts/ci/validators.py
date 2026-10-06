@@ -46,12 +46,18 @@ def junit_document(path: Path) -> dict[str, Any]:
                       for c in cases]}
 
 
-def validate_junit(data: dict[str, Any], *, minimum: int = 1, allow_spark_opt_in: bool = False) -> None:
+def validate_junit(data: dict[str, Any], *, minimum: int = 1, allow_spark_opt_in: bool = False,
+                   require_spark_real: bool = False) -> None:
     cases = data.get("cases", [])
     require(isinstance(cases, list) and len(cases) >= minimum, "INSUFFICIENT_TEST_COVERAGE")
     require(len({c.get("id") for c in cases}) == len(cases), "DUPLICATE_TEST_CASE")
+    if require_spark_real:
+        observed = {(case.get("classname", "").split(".")[-1], case.get("name")) for case in cases}
+        require(SPARK_REAL_CASES <= observed, "SPARK_FUNCTIONAL_COVERAGE_MISSING")
     for case in cases:
         require(case.get("failure") is False and case.get("error") is False, "TEST_FAILURE_OR_ERROR")
+        if require_spark_real and (case.get("classname", "").split(".")[-1], case.get("name")) in SPARK_REAL_CASES:
+            require(case.get("skip") is None, "SPARK_FUNCTIONAL_CASE_SKIPPED")
         if case.get("skip") is not None:
             allowed = {"test_spark_engine": "NOT_RUN_OPT_IN: dedicated suite requires TRACKVANCE_SPARK_TESTS=1",
                        "test_spark_service_e2e": "NOT_RUN_OPT_IN: real local Spark publication suite"}
@@ -108,6 +114,11 @@ def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
     selected = value.get('selected_spec_files')
     require(isinstance(selected, list) and sorted(selected) == sorted(required)
             and len(set(selected)) == len(selected), 'BROWSER_APPLICABLE_SPEC_SELECTION')
+    if spec.get('browser_selection_mode') == 'explicit':
+        require(value.get('browser_selection_mode') == 'explicit'
+                and all((ROOT / 'frontend' / file).is_file() for file in required),
+                'BROWSER_EXPLICIT_SELECTION_PROOF')
+        return
     inventory = {'tests-e2e/' + path.name for path in (ROOT / 'frontend/tests-e2e').glob('*.spec.ts')}
     expected_exclusions = [{'file': 'tests-e2e/' + name, 'required_flag': flag, 'covered_by_group': group}
                            for name, (flag, group) in sorted(opt_ins.items()) if 'tests-e2e/' + name not in required]
@@ -240,7 +251,7 @@ def valid_fingerprint(value: Any) -> bool:
     return hashlib.sha256(encoded).hexdigest() == value["sha256"]
 
 
-def validate_content(spec: dict[str, Any], result: dict[str, Any]) -> None:
+def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_profile: str | None = None) -> None:
     """No profile succeeds on a standalone {status: PASS}."""
     require(isinstance(result, dict), "INVALID_CONTENT")
     documents = result.get("documents", {})
@@ -256,7 +267,8 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any]) -> None:
                 "COMMAND_TIMING_MISSING")
         if spec["check"] == "unit-tests":
             if profile == "backend-check":
-                validate_junit(documents.get("junit", {}), minimum=1800, allow_spark_opt_in=True)
+                validate_junit(documents.get("junit", {}), minimum=1800, allow_spark_opt_in=True,
+                               require_spark_real=execution_profile == "functional")
             else:
                 unit = documents.get("unit-results", {})
                 require(unit.get("success") is True and unit.get("numTotalTests", 0) > 0
@@ -330,7 +342,9 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any]) -> None:
                     and value.get("kept_unread_for_native_backup") is True, "UNREAD_RESTART_INCOMPLETE")
         elif profile == "xlsx-cancel":
             require(value.get("status") == "CANCELLED" and value.get("versions") == 0
-                    and value.get("observed_records_before_cancel", 0) >= 5000, "CANCEL_PARTIAL_OUTPUT_OR_UNOBSERVED")
+                    and value.get("observed_records_before_cancel", 0) >= spec.get("min_observed_rows", 5000), "CANCEL_PARTIAL_OUTPUT_OR_UNOBSERVED")
+            if spec.get("min_observed_rows"):
+                require(value.get("controlled_checkpoint") is True, "FUNCTIONAL_CANCEL_SYNCHRONIZATION_MISSING")
             require(fixture.get("rows") == rows and fixture.get("strings") == "shared", "CANCEL_VARIANT_OR_POPULATION")
         elif profile == "xlsx-crash":
             require(value.get("attempts", 0) >= 2 and value.get("versions") == 1, "CRASH_LEASE_RECOVERY_INCOMPLETE")
@@ -341,6 +355,11 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any]) -> None:
             native_fixture_restore(native_restore)
             require(value.get("unread_restart", {}).get("native_state_fingerprint_comparison") == "PASS",
                     "XLSX_NATIVE_UNREAD_NOT_PRESERVED")
+    elif profile == "automation-functional":
+        passing(value)
+        require(all(value.get(k) == "PASS" for k in ("request_idempotency", "lease_recovery", "target_concurrency",
+            "cross_user_read_denied", "cursor_occurrence_unique", "no_repeat", "deliberate_repeat"))
+            and value.get("sql_rows") == 6 and value.get("chain_decisions"), "AUTOMATION_SECURITY_OR_DEDUPE_INCOMPLETE")
     elif profile == "identity":
         passing(value)
         browser(documents.get("browser", value.get("playwright", {})))
@@ -356,7 +375,7 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any]) -> None:
                 and value.get("playwright") == "PASS" and value.get("regression_smoke") == "PASS", "CONNECTOR_COVERAGE_INCOMPLETE")
         streaming = value.get("sqlserver_streaming_probe", {})
         passing(streaming)
-        require(streaming.get("rows") == 30000 and streaming.get("cancellation", {}).get("status") == "PASS"
+        require(streaming.get("rows") == spec.get("streaming_rows", 30000) and streaming.get("cancellation", {}).get("status") == "PASS"
                 and bool(value.get("temporal_regressions")) and bool(value.get("checks")), "CONNECTOR_STREAMING_OR_TEMPORAL_MISSING")
     elif profile == "delivery":
         passing(value)

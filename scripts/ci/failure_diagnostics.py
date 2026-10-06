@@ -228,6 +228,8 @@ def extract_log_facts(path: Path, sources: set[str]):
 
 
 def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, sources=None, source_sha=None, ci=None):
+    group = {"compose-functional": "compose-critical", "connections-functional": "connections",
+             "backup-basic": "backup-restore", "catalog-reports-functional": "catalog-reports"}.get(group, group)
     if group == 'corrections-browser':
         return collect_corrections_browser_failure(before, root=root, sources=sources, source_sha=source_sha, ci=ci)
     if group == 'backup-restore':

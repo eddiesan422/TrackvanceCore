@@ -166,7 +166,10 @@ def main() -> int:
     source_services["web"] = {"cpus": 0.25, "mem_limit": "128m", "pids_limit": 64}
     for name in ("api", "worker", "delivery-worker", "web"):
         source_services[name]["image"] = f'{source}:{"web" if name == "web" else "backend"}'
-    profile.write_text(json.dumps({"services": source_services}), encoding="utf-8")
+    from ci.local_resources import apply_limits
+    local_profile = {"services": source_services}
+    apply_limits(local_profile, source)
+    profile.write_text(json.dumps(local_profile), encoding="utf-8")
     override = target_override(evidence, target)
     compose = ["docker", "compose", "--env-file", str(source_env_file), "-p", source,
                "-f", str(baseline / "compose.yml"), "-f", str(profile)]
@@ -204,7 +207,12 @@ def main() -> int:
                     raise ValueError("Ruta de baseline fuera del directorio privado.")
             bundle.extractall(baseline)
         started = True
-        run([*compose, "up", "--build", "-d", "--wait", "--wait-timeout", "300"], cwd=baseline)
+        if os.environ.get("TRACKVANCE_LOCAL_EXECUTION_ID"):
+            from ci.local_resources import build_legacy
+            build_legacy(compose, evidence, source, environment)
+            run([*compose, "up", "--no-build", "-d", "--wait", "--wait-timeout", "300"], cwd=baseline)
+        else:
+            run([*compose, "up", "--build", "-d", "--wait", "--wait-timeout", "300"], cwd=baseline)
         if health_version(port) != options.source_version:
             raise ValueError("El runtime fuente no corresponde a la versión auténtica solicitada.")
         stage = "source_fixtures"

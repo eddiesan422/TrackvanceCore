@@ -85,6 +85,8 @@ def target_override(directory, project, *, backend_image='trackvance-v070-isolat
             services[name].update(mem_limit='256m', cpus=0.5, pids_limit=128)
     services['web'] = {'build': None, 'image': web_image, 'pids_limit': 128}
     services['postgres'] = {'pids_limit': 256}
+    from ci.local_resources import apply_limits
+    apply_limits({'services': services}, project)
     # Compose ignores a plain JSON null when merging build. The reset tag
     # removes it so restore --build cannot rebuild or retag private images.
     lines = ['services:']
@@ -307,7 +309,10 @@ def authentic_061_cycle(commit, evidence_path=None):
     source_services['web'] = {'cpus': 0.25, 'mem_limit': '128m', 'pids_limit': 64}
     for name in ('api', 'worker', 'delivery-worker', 'web'):
         source_services[name]['image'] = f'{source}:{"web" if name == "web" else "backend"}'
-    source_profile.write_text(json.dumps({'services': source_services}, indent=2), encoding='utf-8')
+    from ci.local_resources import apply_limits
+    local_profile = {'services': source_services}
+    apply_limits(local_profile, source)
+    source_profile.write_text(json.dumps(local_profile, indent=2), encoding='utf-8')
     source_compose.extend(['-f', str(source_profile)])
     override = target_override(evidence, target)
     target_environment = {**environment, 'WEB_PORT': str(target_port), 'DEMO_ACCESS_ENABLED': 'false',
@@ -338,7 +343,11 @@ def authentic_061_cycle(commit, evidence_path=None):
         source_claimed = True
         # Build each distinct image once before starting its services. The three
         # backend services use the same private image produced by the api build.
-        run([*source_compose, 'build', 'api', 'web'])
+        if os.environ.get('TRACKVANCE_LOCAL_EXECUTION_ID'):
+            from ci.local_resources import build_legacy
+            build_legacy(source_compose, evidence, source, {**os.environ, **environment})
+        else:
+            run([*source_compose, 'build', 'api', 'web'])
         stage = 'authentic_source_start'
         run([*source_compose, 'up', '--no-build', '-d', '--wait', '--wait-timeout', '300'])
         if health_version(source_port) != '0.6.1':

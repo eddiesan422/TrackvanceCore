@@ -214,9 +214,12 @@ def certify_inbox(api, source, report):
 
 def cancel_during_reading(api, directory, context, fixture, report):
     with volume.phase(report, "cancel_during_reading", directory, context):
+        controlled = context.get("profile") == "functional"
+        if controlled:
+            arm_reader(directory, context)
         dataset, acquisition, _ = register(api, fixture, "XLSX cancel")
         active = volume.wait(api, "/acquisitions/" + acquisition["id"],
-            predicate=lambda value: value["status"] == "RUNNING" and value["processed_rows"] >= 5000)
+            predicate=lambda value: value["status"] == "RUNNING" and value["processed_rows"] >= (20 if controlled else 5000))
         api.post("/api/v1/acquisitions/" + acquisition["id"] + "/cancel", {}, expected=(200,))
         cancelled = volume.wait(api, "/acquisitions/" + acquisition["id"])
         if cancelled["status"] != "CANCELLED" or cancelled["output_version_id"] is not None or api.get("/api/v1/datasets/" + dataset["id"])["versions"]:
@@ -226,9 +229,12 @@ def cancel_during_reading(api, directory, context, fixture, report):
 
 def recover_crashed_acquisition(api, directory, context, fixture, report):
     with volume.phase(report, "xlsx_crash_lease_recovery", directory, context):
+        controlled = context.get("profile") == "functional"
+        if controlled:
+            arm_reader(directory, context)
         dataset, acquisition, _ = register(api, fixture, "XLSX crash")
         active = volume.wait(api, "/acquisitions/" + acquisition["id"],
-            predicate=lambda value: value["status"] == "RUNNING" and value["processed_rows"] >= 10000)
+            predicate=lambda value: value["status"] == "RUNNING" and value["processed_rows"] >= (20 if controlled else 10000))
         certification.assert_main_unchanged(context)
         certification.compose(directory, context, ["kill", "--signal", "SIGKILL", "acquisition-worker"])
         try:
@@ -583,6 +589,71 @@ def certify_group(directory, context, args, images, evidence):
     return evidence.directory
 
 
+def arm_reader(directory, context):
+    certification.compose(directory, context, ["exec", "-T", "acquisition-worker", "python", "-c",
+        ("from pathlib import Path; Path('/tmp/trackvance-reader-reached').unlink(missing_ok=True); "
+         "Path('/tmp/trackvance-reader-arm').write_text('ONE_SHOT')")])
+
+
+def prepare_functional(directory, context):
+    context["profile"] = "functional"
+    override = json.loads((directory / "compose.json").read_text(encoding="utf-8"))
+    for name in certification.SERVICES:
+        if name not in {"postgres", "web"}:
+            override["services"][name].setdefault("environment", {}).update(
+                TRACKVANCE_ACQUISITION_BATCH_ROWS="20", TRACKVANCE_ACQUISITION_XLSX_MAX_ROWS="120")
+    override["services"]["acquisition-worker"]["command"] = ["python", "/app/scripts/tests/controlled_acquisition_worker.py"]
+    atomic_json(directory / "compose.json", override)
+    atomic_json(directory / "isolation.json", context)
+
+
+def certify_functional(directory, context, images, evidence):
+    api = volume.VolumeApi(f'http://127.0.0.1:{context["port"]}', 180)
+    api.csrf = api.post("/api/v1/auth/demo", {}, expected=(200,))["csrf_token"]
+    limits = api.get("/api/v1/system/engines")["limits"]["acquisition"]
+    if limits["xlsx_max_rows"] != 120 or limits["batch_rows"] != 20:
+        raise ValueError("Functional fixture bounds were not applied to the private test context")
+    acquired = {}
+    for variant in ("inline", "shared"):
+        acquired[variant] = evidence.scenario(f"acquisition-120-{variant}", 120, variant,
+            lambda variant=variant: acquire_group_fixture(api, directory, context, 120, variant), seconds=180)
+    baseline = acquired["inline"]
+    def limit_case():
+        result = {"effective_limits": limits}
+        certify_row_limit_failure(api, directory, context, baseline, result)
+        return result["row_limit_failure"]
+    evidence.scenario("row-limit-preserves-version-121", 121, "inline", limit_case, seconds=180)
+    destination, _, schema, _ = volume.destination_fixture(api, directory, context, uuid4().hex[:8])
+    chained = evidence.scenario("chain-120-inline", 120, "inline",
+        lambda: chain_group_fixture(api, directory, context, baseline, destination, schema), seconds=240)
+    fixture = acquired["shared"]["fixture"]
+    def cancel_case():
+        result = {}
+        cancel_during_reading(api, directory, context, fixture, result)
+        return result["cancel"] | {"fixture": fixture, "controlled_checkpoint": True}
+    evidence.scenario("cancel-120-shared", 120, "shared", cancel_case, seconds=180)
+    def crash_case():
+        result = {}
+        recover_crashed_acquisition(api, directory, context, fixture, result)
+        return result["recovery"] | {"fixture": fixture, "controlled_checkpoint": True}
+    evidence.scenario("crash-lease-120-shared", 120, "shared", crash_case, seconds=240)
+    def restart_case():
+        result = {}
+        certify_unread_restart(api, directory, context, chained["unread"]["notification_id"], result)
+        return result["unread_restart"]
+    evidence.scenario("unread-api-restart-functional", 120, "inline", restart_case, seconds=180)
+    def automation_case():
+        certification.compose(directory, context, ["exec", "-T", "api", "python",
+            "/app/scripts/tests/automation_cycle.py", "--evidence", "/tmp/functional-automation"])
+        certification.compose(directory, context, ["cp", "api:/tmp/functional-automation/automation-results.json",
+            str(directory / "automation-results.json")])
+        return json.loads((directory / "automation-results.json").read_text(encoding="utf-8"))
+    evidence.scenario("automation-integrated-functional", None, None, automation_case, seconds=240)
+    certification.assert_main_unchanged(context)
+    evidence.finish(runtime_images=images, main_inventory="UNCHANGED", xlsx_test_limit_overrides=True,
+        profile="functional", effective_limits=limits, product_default_xlsx_max_rows=1000000)
+
+
 def parse_arguments(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", type=Path)
@@ -658,6 +729,8 @@ def main():
         with deadline(GROUP_DEADLINES[args.group]) if evidence else contextlib.nullcontext():
             if managed:
                 images = prepare_images(directory, context, args, sha)
+                if args.group == "corrections-functional":
+                    prepare_functional(directory, context)
                 started = True
                 certification.compose(directory, context, ["up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
                                                             *services_for(args.group)])
@@ -666,6 +739,8 @@ def main():
                 images = prepare_images(directory, context, args, sha)
             if args.group == "all":
                 certify(directory, context, args)
+            elif args.group == "corrections-functional":
+                certify_functional(directory, context, images, evidence)
             else:
                 certify_group(directory, context, args, images, evidence)
     except BaseException as error:

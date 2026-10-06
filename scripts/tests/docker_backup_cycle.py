@@ -1183,6 +1183,8 @@ def main() -> int:
     try:
         for project in (source, target, database):
             assert_fresh(project)
+        from ci.local_resources import register_project
+        register_project(database)
         main_before = main_inventory(lambda arguments: execute(arguments, environment, credentials=credentials))
         compose = isolate_compose(['docker', 'compose', '-p', source, '-f', str(ROOT / 'compose.yml')],
                                   environment, evidence / 'source-profile', source)

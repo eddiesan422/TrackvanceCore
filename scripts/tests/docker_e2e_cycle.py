@@ -85,12 +85,17 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--clean-demo", action="store_true", help="Certifica acceso demo sin datos sembrados.")
     parser.add_argument("--skip-playwright", action="store_true")
+    parser.add_argument("--browser-spec", action="append", default=[],
+                        help="Explicit tests-e2e/*.spec.ts paths; empty runs the full browser matrix")
     parser.add_argument("--evidence-dir", type=Path, help="Directorio para las instantáneas de persistencia.")
     parser.add_argument(
         "--project",
         default=f"{PROJECT_PREFIX}{uuid.uuid4().hex[:12]}",
     )
     options = parser.parse_args()
+    if any(not re.fullmatch(r"tests-e2e/[a-z0-9-]+\.spec\.ts", path)
+           or not (ROOT / "frontend" / path).is_file() for path in options.browser_spec):
+        parser.error("Browser specs must name existing tests-e2e/*.spec.ts files")
     try:
         project = validated_project_name(options.project)
     except ValueError as error:
@@ -175,6 +180,8 @@ def main() -> int:
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
             arguments = ["tests-e2e/demo-access-clean.spec.ts"] if options.clean_demo else []
+            if not options.clean_demo:
+                arguments = options.browser_spec or arguments
             browser = run_browser(pnpm, arguments, root=ROOT, project=project,
                                   environment=environment, evidence=evidence)
             result["browser"] = browser

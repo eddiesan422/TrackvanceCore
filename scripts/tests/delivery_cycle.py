@@ -1059,6 +1059,8 @@ def main() -> int:
     for name, memory in limits.items():
         if name in profile["services"]:
             profile["services"][name]["mem_limit"] = memory
+    from ci.local_resources import apply_limits
+    apply_limits(profile, project)
     private_profile.write_text(json.dumps(profile, indent=2), encoding="utf-8")
 
     def command(arguments, **kwargs):

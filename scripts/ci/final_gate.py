@@ -1,4 +1,4 @@
-"""Fail closed on incomplete certification; fast validation cannot certify a release."""
+"""Fail closed on missing functional evidence; document and deep approvals differ."""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +17,7 @@ try:
         EvidenceError,
         load_json,
         load_manifest,
+        profile_groups,
         relative_file,
         require,
         sha256,
@@ -30,6 +31,7 @@ except ImportError:
         EvidenceError,
         load_json,
         load_manifest,
+        profile_groups,
         relative_file,
         require,
         sha256,
@@ -53,13 +55,37 @@ def validate_images(path: Path, source_sha: str) -> dict[str, str]:
     return roles
 
 
-def validate_jobs(jobs: dict[str, Any], source_sha: str, run_id: str, run_attempt: str) -> None:
+def validate_jobs(jobs: dict[str, Any], source_sha: str, run_id: str, run_attempt: str,
+                  *, documentation_only: bool = False) -> None:
     require(jobs.get("source_sha") == source_sha and str(jobs.get("run_id")) == run_id
             and str(jobs.get("run_attempt")) == run_attempt, "JOBS_COMMIT_OR_RUN_MISMATCH")
     require(isinstance(jobs.get("needs"), dict), "MISSING_NEEDS_SNAPSHOT")
-    for name in ("backend", "frontend", "images", "suites"):
+    required = ("select", "documentation") if documentation_only else ("select", "backend", "frontend", "images", "suites")
+    for name in required:
         entry = jobs["needs"].get(name)
         require(isinstance(entry, dict) and entry.get("result") == "success", "JOB_INCOMPLETE_FAILED_CANCELLED_OR_SKIPPED")
+    if documentation_only:
+        require(all(jobs["needs"].get(name, {}).get("result") == "skipped"
+                    for name in ("backend", "frontend", "images", "suites")), "PRODUCT_JOBS_IN_DOCUMENTATION_ONLY_RUN")
+
+
+def validate_documentation_evidence(path: Path, selection: dict[str, Any], selection_path: Path,
+                                    source_sha: str, run_id: str, run_attempt: str) -> list[dict]:
+    try:
+        from .check_documentation import validate_documentation
+        from .common import ROOT
+    except ImportError:
+        from check_documentation import validate_documentation
+        from common import ROOT
+    data = load_json(path)
+    require(data.get("schema_version") == 1 and data.get("kind") == "DOCUMENTATION_EVIDENCE"
+            and data.get("status") == "PASS" and not data.get("error_code"), "DOCUMENTATION_FAILED_OR_MISSING")
+    require(data.get("source_sha") == source_sha and data.get("selection_sha256") == sha256(selection_path)
+            and data.get("ci") == {"run_id": run_id, "run_attempt": run_attempt, "job_id": "documentation"},
+            "DOCUMENTATION_COMMIT_OR_RUN_MISMATCH")
+    expected = validate_documentation(ROOT, [item["path"] for item in selection["changed_files"]])
+    require(data.get("documents") == expected, "DOCUMENTATION_CONTENT_OR_COVERAGE_MISMATCH")
+    return expected
 
 
 def validate_timing(record: dict[str, Any]) -> None:
@@ -108,7 +134,8 @@ def validate_attachments(record: dict[str, Any], receipt: Path) -> dict[str, str
 
 def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
              jobs_path: Path, image_manifest_path: Path, source_sha: str,
-             run_id: str, run_attempt: str, development_only: bool = False) -> dict[str, Any]:
+             run_id: str, run_attempt: str, development_only: bool = False,
+             documentation_path: Path | None = None) -> dict[str, Any]:
     require(bool(SHA.fullmatch(source_sha)) and run_id.isdigit() and int(run_id) > 0
             and run_attempt.isdigit() and int(run_attempt) > 0, "INVALID_EXPECTED_CI_IDENTITY")
     manifest = load_manifest(manifest_path)
@@ -117,12 +144,22 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
     require(selection.get("schema_version") == 1 and selection.get("source_sha") == source_sha
             and selection.get("manifest_sha256") == manifest_hash, "SELECTION_COMMIT_OR_MANIFEST_MISMATCH")
     mode = selection.get("mode")
-    if development_only:
-        require(mode == "fast", "DEVELOPMENT_FLAG_WITH_FULL_MODE")
-        groups = manifest["fast_groups"]
-    else:
-        require(mode == "full", "FAST_IS_NOT_FINAL_CERTIFICATION")
-        groups = [g["id"] for g in manifest["groups"]]
+    require(not development_only, "LEGACY_DEVELOPMENT_GATE_REMOVED")
+    if mode == "docs":
+        require(selection.get("groups") == [] and selection.get("scope") == "DOCUMENTATION_ONLY",
+                "INVALID_DOCUMENTATION_ONLY_SELECTION")
+        validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt, documentation_only=True)
+        require(documentation_path is not None, "MISSING_DOCUMENTATION_EVIDENCE")
+        documents = validate_documentation_evidence(documentation_path, selection, selection_path,
+                                                   source_sha, run_id, run_attempt)
+        return {"schema_version": 1, "status": "PASS", "scope": "DOCUMENTATION_APPROVED", "profile": "functional",
+                "certifies_final": False, "functional_approved": False, "deep_approved": False,
+                "source_sha": source_sha, "run_id": run_id, "run_attempt": run_attempt,
+                "manifest_sha256": manifest_hash, "groups": [], "scenario_count": 0, "documents": documents}
+    # Deep certification is local and must use its own execution identity. A
+    # GitHub status cannot approve intensive work that was not executed there.
+    require(mode == "functional" and selection.get("profile") == "functional", "NON_FUNCTIONAL_GITHUB_SELECTION")
+    groups = profile_groups(manifest, "functional")
     require(selection.get("groups") == groups, "INCOMPLETE_OR_DUPLICATE_SELECTION_GROUPS")
     validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt)
     roles = validate_images(image_manifest_path, source_sha)
@@ -152,27 +189,28 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
         require(record.get("source_sha") == source_sha, "SCENARIO_COMMIT_MISMATCH")
         require(record.get("ci") == {"run_id": run_id, "run_attempt": run_attempt, "job_id": group["job_key"]},
                 "SCENARIO_RUN_ATTEMPT_OR_JOB_MISMATCH")
+        require(not record.get("execution"), "LOCAL_EVIDENCE_CANNOT_APPROVE_GITHUB")
         require(record.get("status") == "PASS" and not record.get("error"), "SCENARIO_FAILED_CANCELLED_SKIPPED_OR_RUNNING")
         require(record.get("rows") == spec.get("rows") and record.get("variant") == spec.get("variant"), "SCENARIO_ROWS_OR_VARIANT_MISMATCH")
         validate_timing(record)
         resources = record.get("resources")
-        require(isinstance(resources, dict), "SCENARIO_RESOURCE_METADATA_MISSING")
+        require(isinstance(resources, dict) and resources.get("profile") == "functional", "SCENARIO_PROFILE_METADATA_MISMATCH")
         if group["id"] not in {"backend", "frontend"}:
             require(resources.get("image_bundle_sha256") == image_hash and resources.get("runtime_images") == roles,
                     "SCENARIO_IMAGE_BUNDLE_MISMATCH")
         attachments = validate_attachments(record, path)
-        validate_content(spec, record["result"])
+        validate_content(spec, record["result"], execution_profile="functional")
         found[scenario_id] = record
         receipts.append({"scenario_id": scenario_id, "group": group["id"], "path": path.relative_to(evidence_dir).as_posix(),
                          "sha256": sha256(path), "rows": record.get("rows"),
                          "duration_seconds": record["duration_seconds"], "attachments": attachments})
     missing = sorted(set(expected) - found.keys())
     require(not missing, "MISSING_MANDATORY_SCENARIOS")
-    return {"schema_version": 1, "status": "PASS", "scope": "DEVELOPMENT_ONLY" if development_only else "FULL_CERTIFICATION",
-            "certifies_final": not development_only, "source_sha": source_sha,
+    return {"schema_version": 1, "status": "PASS", "scope": "CI_FUNCTIONAL_APPROVED", "profile": "functional",
+            "certifies_final": False, "functional_approved": True, "deep_approved": False, "source_sha": source_sha,
             "run_id": run_id, "run_attempt": run_attempt, "manifest_sha256": manifest_hash,
             "image_manifest_sha256": image_hash, "runtime_images": roles, "groups": groups,
-            "scenario_count": len(found), "receipts": receipts}
+            "scenario_count": len(found), "module_coverage": manifest["profiles"]["functional"]["module_coverage"], "receipts": receipts}
 
 
 def main() -> int:
@@ -181,7 +219,8 @@ def main() -> int:
     parser.add_argument("--selection", required=True, type=Path)
     parser.add_argument("--evidence-dir", required=True, type=Path)
     parser.add_argument("--jobs", required=True, type=Path)
-    parser.add_argument("--image-manifest", required=True, type=Path)
+    parser.add_argument("--image-manifest", type=Path, default=Path(".codex-local/ci/images/images.json"))
+    parser.add_argument("--documentation-evidence", type=Path)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
@@ -191,7 +230,8 @@ def main() -> int:
     try:
         result = evaluate(manifest_path=args.manifest, selection_path=args.selection, evidence_dir=args.evidence_dir,
                           jobs_path=args.jobs, image_manifest_path=args.image_manifest, source_sha=args.sha,
-                          run_id=args.run_id, run_attempt=args.run_attempt, development_only=args.development_only)
+                          run_id=args.run_id, run_attempt=args.run_attempt, development_only=args.development_only,
+                          documentation_path=args.documentation_evidence)
         exit_code = 0
     except (EvidenceError, OSError, ValueError, KeyError, TypeError) as error:
         result = {"schema_version": 1, "status": "FAIL", "certifies_final": False, "source_sha": args.sha,

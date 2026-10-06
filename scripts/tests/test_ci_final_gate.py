@@ -1,15 +1,17 @@
 import json
 import shutil
 import sys
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.ci.common import EvidenceError, sha256
+from scripts.ci.common import FUNCTIONAL_MODULES, EvidenceError, sha256
 from scripts.ci.evidence import write_receipt
 from scripts.ci.final_gate import evaluate
+from scripts.ci.validators import SPARK_REAL_CASES, junit_document
 
 SHA = "a" * 40
 
@@ -21,13 +23,16 @@ def save(path, value):
 
 @pytest.fixture
 def gate_case(tmp_path):
-    manifest = save(tmp_path / "manifest.json", {"schema_version": 1, "fast_groups": ["backend"],
+    manifest = save(tmp_path / "manifest.json", {"schema_version": 1, "profiles": {
+        "functional": {"groups": ["backend"], "module_coverage": {
+            name: {"scenario_ids": ["backend-lint"]} for name in FUNCTIONAL_MODULES}},
+        "deep": {"groups": ["backend"]}},
         "groups": [{"id": "backend", "job_key": "backend", "required_sources": [],
                     "scenarios": [{"id": "backend-lint", "validator": "backend-check", "check": "lint"}]}]})
     selection = save(tmp_path / "selection.json", {"schema_version": 1, "source_sha": SHA, "manifest_sha256": sha256(manifest),
-        "mode": "full", "groups": ["backend"]})
+        "mode": "functional", "profile": "functional", "groups": ["backend"]})
     jobs = save(tmp_path / "jobs.json", {"source_sha": SHA, "run_id": "123", "run_attempt": "1", "needs": {
-        name: {"result": "success"} for name in ("backend", "frontend", "images", "suites")}})
+        name: {"result": "success"} for name in ("select", "backend", "frontend", "images", "suites")}})
     images = save(tmp_path / "images.json", {"schema_version": 1, "source_sha": SHA, "status": "PASS",
         "digest_kind": "DOCKER_CONFIGURATION_SHA256", "images": {
             role: {"image_id": "sha256:" + digit * 64, "archive": role + ".tar", "archive_sha256": digit * 64, "archive_bytes": 1}
@@ -36,7 +41,8 @@ def gate_case(tmp_path):
     now = datetime.now(UTC).isoformat()
     receipt = write_receipt(evidence, group="backend", scenario_id="backend-lint", source_sha=SHA,
         ci={"run_id": "123", "run_attempt": "1", "job_id": "backend"}, started_at=now, completed_at=now,
-        duration_seconds=0, result={"documents": {"checks": {"checks": [{"name": "lint", "status": "PASS", "exit_code": 0, "duration_seconds": 0}]}}})
+        duration_seconds=0, resources={"profile": "functional"},
+        result={"documents": {"checks": {"checks": [{"name": "lint", "status": "PASS", "exit_code": 0, "duration_seconds": 0}]}}})
     # Original command output is hashed separately from the normalized result.
     content = json.loads(receipt.read_text())
     source = save(evidence / "original-checks.json", content["result"]["documents"]["checks"])
@@ -49,8 +55,47 @@ def gate_case(tmp_path):
 def test_complete_same_commit_gate_passes_and_binds_every_receipt(gate_case):
     args, _ = gate_case
     result = evaluate(**args)
-    assert result["status"] == "PASS" and result["certifies_final"] is True
+    assert result["status"] == "PASS" and result["functional_approved"] is True
+    assert result["scope"] == "CI_FUNCTIONAL_APPROVED" and not result["deep_approved"] and not result["certifies_final"]
     assert result["scenario_count"] == 1 and result["receipts"][0]["sha256"]
+
+
+@pytest.mark.parametrize("damage,code", [(None, None), ("missing", "SPARK_FUNCTIONAL_COVERAGE_MISSING"),
+                                        ("skipped", "SPARK_FUNCTIONAL_CASE_SKIPPED"),
+                                        ("failure", "TEST_FAILURE_OR_ERROR")])
+def test_gate_independently_requires_actual_spark_cases_in_backend_original_junit(gate_case, damage, code):
+    args, receipt = gate_case
+    manifest = json.loads(args["manifest_path"].read_text())
+    manifest["groups"][0]["scenarios"][0]["check"] = "unit-tests"
+    save(args["manifest_path"], manifest)
+    selection = json.loads(args["selection_path"].read_text())
+    selection["manifest_sha256"] = sha256(args["manifest_path"])
+    save(args["selection_path"], selection)
+    suite = ET.Element("testsuite")
+    for index in range(1800):
+        ET.SubElement(suite, "testcase", classname="tests.ordinary", name=f"case_{index}")
+    for module, name in sorted(SPARK_REAL_CASES):
+        if damage == "missing" and module == "test_spark_service_e2e":
+            continue
+        case = ET.SubElement(suite, "testcase", classname="tests." + module, name=name)
+        if damage and module == "test_spark_service_e2e":
+            ET.SubElement(case, damage, message="NOT_RUN_OPT_IN: real local Spark publication suite")
+    original = args["evidence_dir"] / "original-junit.xml"
+    ET.ElementTree(suite).write(original, encoding="utf-8")
+    data = json.loads(receipt.read_text())
+    data["result"]["documents"]["checks"]["checks"][0]["name"] = "unit-tests"
+    data["result"]["documents"]["junit"] = junit_document(original)
+    save(args["evidence_dir"] / "original-checks.json", data["result"]["documents"]["checks"])
+    save(args["evidence_dir"] / data["evidence"][0]["path"], data["result"])
+    for ref in data["evidence"]:
+        ref["sha256"] = sha256(args["evidence_dir"] / ref["path"])
+    data["evidence"].append({"kind": "source-junit", "path": original.name, "sha256": sha256(original)})
+    save(receipt, data)
+    if code:
+        with pytest.raises(EvidenceError, match=code):
+            evaluate(**args)
+    else:
+        assert evaluate(**args)["functional_approved"]
 
 
 def test_failure_diagnostic_cannot_replace_a_missing_scenario_or_failed_job(gate_case):
@@ -126,14 +171,12 @@ def test_status_pass_with_missing_real_command_content_is_not_evidence(gate_case
     with pytest.raises(EvidenceError, match="COMMAND_CHECK_MISSING_OR_FAILED"): evaluate(**args)
 
 
-def test_fast_is_only_green_as_development_and_never_final(gate_case):
+@pytest.mark.parametrize("mode", ["fast", "full", "deep", None])
+def test_github_gate_cannot_certify_fast_or_local_deep_work(gate_case, mode):
     args, _ = gate_case
-    data = json.loads(args["selection_path"].read_text()); data["mode"] = "fast"; save(args["selection_path"], data)
-    with pytest.raises(EvidenceError, match="FAST_IS_NOT_FINAL_CERTIFICATION"): evaluate(**args)
-    result = evaluate(**args, development_only=True)
-    assert result["status"] == "PASS" and result["scope"] == "DEVELOPMENT_ONLY" and not result["certifies_final"]
-    data["mode"] = "full"; save(args["selection_path"], data)
-    with pytest.raises(EvidenceError, match="DEVELOPMENT_FLAG_WITH_FULL_MODE"): evaluate(**args, development_only=True)
+    data = json.loads(args["selection_path"].read_text()); data["mode"] = mode; save(args["selection_path"], data)
+    with pytest.raises(EvidenceError, match="NON_FUNCTIONAL_GITHUB_SELECTION"): evaluate(**args)
+    with pytest.raises(EvidenceError, match="LEGACY_DEVELOPMENT_GATE_REMOVED"): evaluate(**args, development_only=True)
 
 
 def test_manifest_and_image_metadata_are_commit_bound(gate_case):
@@ -153,14 +196,15 @@ def test_every_compose_receipt_binds_the_verified_image_bundle_and_both_roles(ga
     args, receipt = gate_case
     manifest = json.loads(args["manifest_path"].read_text())
     manifest["groups"][0].update(id="fixture-heavy", job_key="suite-fixture-heavy")
-    manifest["fast_groups"] = ["fixture-heavy"]
+    for profile in manifest["profiles"].values():
+        profile["groups"] = ["fixture-heavy"]
     save(args["manifest_path"], manifest)
     selection = json.loads(args["selection_path"].read_text())
     selection.update(groups=["fixture-heavy"], manifest_sha256=sha256(args["manifest_path"]))
     save(args["selection_path"], selection)
     data = json.loads(receipt.read_text())
     data.update(group="fixture-heavy", ci={"run_id": "123", "run_attempt": "1", "job_id": "suite-fixture-heavy"},
-                resources={"image_bundle_sha256": sha256(args["image_manifest_path"]),
+                resources={"profile": "functional", "image_bundle_sha256": sha256(args["image_manifest_path"]),
                            "runtime_images": {"backend": "sha256:" + "1" * 64, "web": "sha256:" + "2" * 64}})
     save(receipt, data)
     assert evaluate(**args)["status"] == "PASS"
@@ -181,3 +225,77 @@ def test_downloaded_artifact_subdirectories_keep_receipt_relative_attachment_pat
     shutil.move(str(args["evidence_dir"]), str(nested))
     args["evidence_dir"] = base
     assert evaluate(**args)["receipts"][0]["path"].startswith("artifact-suite/ci/evidence/")
+
+
+@pytest.mark.parametrize("resources", [{}, {"profile": "deep"}, {"profile": "docs"}, None])
+def test_gate_requires_functional_provenance_even_for_static_checks(gate_case, resources):
+    args, receipt = gate_case
+    data = json.loads(receipt.read_text()); data["resources"] = resources; save(receipt, data)
+    with pytest.raises(EvidenceError, match="SCENARIO_PROFILE_METADATA_MISMATCH"):
+        evaluate(**args)
+
+
+def test_local_receipts_cannot_be_relabelled_as_github_approval(gate_case):
+    args, receipt = gate_case
+    data = json.loads(receipt.read_text())
+    data["execution"] = {"kind": "LOCAL", "execution_id": "local-" + "a" * 32, "group": "backend"}
+    data["ci"] = None; save(receipt, data)
+    with pytest.raises(EvidenceError, match="SCENARIO_RUN_ATTEMPT_OR_JOB_MISMATCH"):
+        evaluate(**args)
+    data["ci"] = {"run_id": "123", "run_attempt": "1", "job_id": "backend"}; save(receipt, data)
+    with pytest.raises(EvidenceError, match="LOCAL_EVIDENCE_CANNOT_APPROVE_GITHUB"):
+        evaluate(**args)
+
+
+@pytest.mark.parametrize("job", ["select", "backend", "frontend", "images", "suites"])
+def test_every_required_product_job_must_be_present(gate_case, job):
+    args, _ = gate_case
+    data = json.loads(args["jobs_path"].read_text()); data["needs"].pop(job); save(args["jobs_path"], data)
+    with pytest.raises(EvidenceError, match="JOB_INCOMPLETE_FAILED_CANCELLED_OR_SKIPPED"):
+        evaluate(**args)
+
+
+@pytest.fixture
+def documentation_case(gate_case, monkeypatch):
+    from scripts.ci import common
+    from scripts.ci.check_documentation import validate_documentation
+    args, _ = gate_case
+    root = args["selection_path"].parent
+    (root / "README.md").write_text("# Documentation\n", encoding="utf-8")
+    monkeypatch.setattr(common, "ROOT", root)
+    selection = json.loads(args["selection_path"].read_text())
+    selection.update(mode="docs", scope="DOCUMENTATION_ONLY", groups=[], changed_files=[{"path": "README.md", "rule": "documentation"}])
+    save(args["selection_path"], selection)
+    jobs = json.loads(args["jobs_path"].read_text())
+    for job in ("backend", "frontend", "images", "suites"):
+        jobs["needs"][job] = {"result": "skipped"}
+    jobs["needs"]["documentation"] = {"result": "success"}; save(args["jobs_path"], jobs)
+    args["documentation_path"] = save(root / "documentation.json", {
+        "schema_version": 1, "kind": "DOCUMENTATION_EVIDENCE", "status": "PASS", "source_sha": SHA,
+        "selection_sha256": sha256(args["selection_path"]),
+        "ci": {"run_id": "123", "run_attempt": "1", "job_id": "documentation"},
+        "documents": validate_documentation(root, ["README.md"])})
+    # A documentation-only run creates neither images nor scenario evidence.
+    shutil.rmtree(args["evidence_dir"]); args["image_manifest_path"].unlink()
+    return args
+
+
+def test_docs_only_gate_passes_without_product_artifacts(documentation_case):
+    result = evaluate(**documentation_case)
+    assert result["status"] == "PASS" and result["scope"] == "DOCUMENTATION_APPROVED"
+    assert result["scenario_count"] == 0 and not result["functional_approved"] and not result["deep_approved"]
+
+
+@pytest.mark.parametrize("status", ["failure", "cancelled", "skipped", None])
+def test_docs_only_gate_rejects_missing_failed_or_cancelled_documentation(documentation_case, status):
+    args = documentation_case
+    jobs = json.loads(args["jobs_path"].read_text()); jobs["needs"]["documentation"] = {"result": status}; save(args["jobs_path"], jobs)
+    with pytest.raises(EvidenceError, match="JOB_INCOMPLETE_FAILED_CANCELLED_OR_SKIPPED"):
+        evaluate(**args)
+
+
+def test_docs_only_status_pass_cannot_replace_content_verification(documentation_case):
+    args = documentation_case
+    data = json.loads(args["documentation_path"].read_text()); data["documents"] = []; save(args["documentation_path"], data)
+    with pytest.raises(EvidenceError, match="DOCUMENTATION_CONTENT_OR_COVERAGE_MISMATCH"):
+        evaluate(**args)

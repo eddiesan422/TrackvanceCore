@@ -183,7 +183,7 @@ def test_nested_phase_deadline_cannot_extend_parent_and_restores_remaining_time(
     assert timer[0] == 0
 
 
-@pytest.mark.parametrize("group", list(runtime.GROUP_SCENARIOS))
+@pytest.mark.parametrize("group", [group for group in runtime.GROUP_SCENARIOS if group != "corrections-functional"])
 def test_independent_groups_execute_every_mandatory_case_without_legacy_opt_in_flags(tmp_path, monkeypatch, group):
     calls = []
     monkeypatch.setattr(cycle.certification, "assert_main_unchanged", lambda _context: None)
@@ -235,7 +235,7 @@ def test_independent_groups_execute_every_mandatory_case_without_legacy_opt_in_f
     assert report["status"] == "PASS" and report["main_inventory"] == "UNCHANGED"
     assert report["xlsx_test_limit_overrides"] is False
     assert {row["scenario_id"] for row in report["scenario_results"]} == set(runtime.GROUP_SCENARIOS[group])
-    assert sum(len(ids) for ids in runtime.GROUP_SCENARIOS.values()) == 17
+    assert sum(len(ids) for group, ids in runtime.GROUP_SCENARIOS.items() if group != "corrections-functional") == 17
     manifest = next(item for item in load_manifest()["groups"] if item["id"] == group)
     specifications = {item["id"]: item for item in manifest["scenarios"]}
     assert set(specifications) == set(runtime.GROUP_SCENARIOS[group])

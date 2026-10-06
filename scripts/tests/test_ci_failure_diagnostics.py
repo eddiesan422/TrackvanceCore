@@ -243,14 +243,14 @@ def test_failed_execute_exception_preserves_the_terminal_phase_for_group_timing(
 def test_failed_group_still_uploads_failure_diagnostic_and_failed_phase_timing(tmp_path, monkeypatch):
     root = tmp_path / 'root'; root.mkdir()
     monkeypatch.setattr(run_suite, 'ROOT', root)
-    monkeypatch.setattr(sys, 'argv', ['run_suite.py', '--group', 'catalog-reports', '--output-dir', str(tmp_path / 'ci')])
+    monkeypatch.setattr(sys, 'argv', ['run_suite.py', '--profile', 'deep', '--group', 'catalog-reports', '--output-dir', str(tmp_path / 'ci')])
     for key, value in {'CI_SOURCE_SHA': SHA, 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '2',
                        'CI_JOB_ID': 'suite-catalog-reports'}.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv('TRACKVANCE_CI_IMAGE_MANIFEST', raising=False)
     monkeypatch.setattr(run_suite.subprocess, 'run', lambda *_a, **_k: type('Git', (), {'stdout': SHA})())
     monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: set())
-    monkeypatch.setattr(run_suite, 'commands_for', lambda *_a: [('catalog', ['unused'], root)])
+    monkeypatch.setattr(run_suite, 'commands_for', lambda *_a, **_k: [('catalog', ['unused'], root)])
     record = {'name': 'catalog', 'status': 'FAIL', 'exit_code': 1, 'timed_out': False, 'duration_seconds': 5}
 
     def failed(*_args, **_kwargs):

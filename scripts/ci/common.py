@@ -12,6 +12,11 @@ DIGEST = re.compile(r"[0-9a-f]{64}")
 IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,160}")
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(__file__).with_name("scenarios.json")
+FUNCTIONAL_MODULES = frozenset({
+    "identity_rbac", "acquisitions_multiformat", "transformations", "connections",
+    "delivery_audit", "automations", "catalog_governance", "joins", "reports",
+    "dataset_generation", "basic_recovery",
+})
 
 
 class EvidenceError(ValueError):
@@ -80,7 +85,21 @@ def load_manifest(path: Path = MANIFEST) -> dict[str, Any]:
             require(scenario["id"] not in scenarios, "DUPLICATE_MANIFEST_SCENARIO")
             require(isinstance(scenario.get("validator"), str), "MISSING_CONTENT_VALIDATOR")
             scenarios.add(scenario["id"])
-    require(set(data.get("fast_groups", [])) <= ids, "INVALID_FAST_GROUP")
+    profiles = data.get("profiles")
+    require(isinstance(profiles, dict) and set(profiles) == {"functional", "deep"}, "MISSING_EXPLICIT_PROFILES")
+    for profile in profiles.values():
+        selected = profile.get("groups") if isinstance(profile, dict) else None
+        require(isinstance(selected, list) and selected and all(isinstance(g, str) for g in selected)
+                and len(set(selected)) == len(selected) and set(selected) <= ids, "INVALID_PROFILE_GROUPS")
+    require(set().union(*(set(p["groups"]) for p in profiles.values())) == ids, "UNASSIGNED_MANIFEST_GROUP")
+    functional = profile_manifest(data, "functional")
+    functional_scenarios = {s["id"] for g in functional["groups"] for s in g["scenarios"]}
+    coverage = profiles["functional"].get("module_coverage")
+    require(isinstance(coverage, dict) and set(coverage) == FUNCTIONAL_MODULES, "INCOMPLETE_FUNCTIONAL_MODULE_COVERAGE")
+    for entry in coverage.values():
+        selected = entry.get("scenario_ids") if isinstance(entry, dict) else None
+        require(isinstance(selected, list) and selected and len(set(selected)) == len(selected)
+                and set(selected) <= functional_scenarios, "INVALID_FUNCTIONAL_MODULE_SCENARIOS")
     return data
 
 
@@ -88,3 +107,18 @@ def group_spec(manifest: dict[str, Any], group: str) -> dict[str, Any]:
     values = [item for item in manifest["groups"] if item["id"] == group]
     require(len(values) == 1, "UNKNOWN_GROUP")
     return values[0]
+
+
+def profile_groups(manifest: dict[str, Any], profile: str) -> list[str]:
+    """Return the explicit ordered groups; never infer coverage from a group name."""
+    require(profile in {"functional", "deep"}, "INVALID_PROFILE")
+    value = manifest.get("profiles", {}).get(profile, {}).get("groups")
+    require(isinstance(value, list) and value, "MISSING_PROFILE_GROUPS")
+    return list(value)
+
+
+def profile_manifest(manifest: dict[str, Any], profile: str) -> dict[str, Any]:
+    selected = profile_groups(manifest, profile)
+    indexed = {g["id"]: g for g in manifest["groups"]}
+    require(set(selected) <= indexed.keys(), "INVALID_PROFILE_GROUPS")
+    return {**manifest, "profile": profile, "groups": [indexed[g] for g in selected]}

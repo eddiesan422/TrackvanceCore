@@ -50,16 +50,21 @@ def observed_population_mode(measured):
 
 
 def execute(evidence: Path, rows: int, *, parity_only: bool = False):
+    from ci_images import verified_images
+    images = verified_images()
+    image = images["backend"] if images else IMAGE
     evidence = prepare_evidence(evidence)
     context = docker("context", "show").strip()
     baseline = protected_inventory()
     prefix = "trackvance-v070-test-spark-" + uuid4().hex[:12]
+    from ci.local_resources import register_project
+    register_project(prefix)
     network, volume = prefix + "-network", prefix + "-data"
     created_containers = []
     made_network = made_volume = False
-    summary = {"status": "FAILED", "prefix": prefix, "image": IMAGE, "rows": rows,
+    summary = {"status": "FAILED", "prefix": prefix, "image": image, "rows": rows,
                "parity_only": parity_only,
-               "image_id": docker("image", "inspect", "--format", "{{.Id}}", IMAGE).strip(),
+               "image_id": docker("image", "inspect", "--format", "{{.Id}}", image).strip(),
                "source_fingerprint": source_fingerprint(),
                "protected_main_inventory_unchanged": False, "cleanup_finished": False,
                "memory_limits_bytes": {"master": 512 * 1024**2, "executor1": 1536 * 1024**2,
@@ -87,7 +92,7 @@ def execute(evidence: Path, rows: int, *, parity_only: bool = False):
                 arguments.extend(["--mount", f"type=bind,src={ROOT / 'backend' / 'tests'},dst=/app/backend/tests,readonly",
                                   "--mount", f"type=bind,src={ROOT / 'scripts' / 'tests' / 'spark_cycle.py'},dst=/runner.py,readonly"])
             created_containers.append(name)
-            docker(*arguments, IMAGE, *command)
+            docker(*arguments, image, *command)
             return name
 
         java_launch = "import os,pyspark; os.execv(pyspark.__path__[0]+'/bin/spark-class', ['spark-class',"

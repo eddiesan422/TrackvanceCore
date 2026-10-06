@@ -1,14 +1,7 @@
 {
   "schema_version": 1,
   "version": "0.8.0",
-  "full_mode_required_for_final": true,
-  "fast_groups": [
-    "backend",
-    "frontend",
-    "compose-critical"
-  ],
   "legacy_workflow_instances": 16,
-  "full_group_count": 19,
   "groups": [
     {
       "id": "backend",
@@ -656,6 +649,328 @@
         }
       ],
       "timeout_minutes": 90
+    },
+    {
+      "id": "compose-functional",
+      "job_key": "suite-compose-functional",
+      "covers_legacy_jobs": [
+        "compose-e2e"
+      ],
+      "required_sources": [
+        "clean-demo",
+        "result",
+        "browser",
+        "before",
+        "after",
+        "migrations"
+      ],
+      "scenarios": [
+        {
+          "id": "functional-compose-clean-demo",
+          "validator": "compose-clean"
+        },
+        {
+          "id": "functional-compose-browser-persistence",
+          "validator": "compose-browser",
+          "browser_selection_mode": "explicit",
+          "browser_required_specs": [
+            "tests-e2e/advanced-rules.spec.ts",
+            "tests-e2e/corrections.spec.ts",
+            "tests-e2e/exception-validation.spec.ts",
+            "tests-e2e/local-identity-exceptions.spec.ts",
+            "tests-e2e/multiformat-navigation.spec.ts",
+            "tests-e2e/rule-builders.spec.ts",
+            "tests-e2e/sentinel-schedule.spec.ts"
+          ]
+        }
+      ],
+      "timeout_minutes": 30,
+      "variant_of": "compose-critical"
+    },
+    {
+      "id": "connections-functional",
+      "job_key": "suite-connections-functional",
+      "covers_legacy_jobs": [
+        "connections-e2e"
+      ],
+      "required_sources": [
+        "result",
+        "browser"
+      ],
+      "scenarios": [
+        {
+          "id": "functional-connections-real-engines-browser",
+          "validator": "connections",
+          "browser_selection_mode": "explicit",
+          "streaming_rows": 1028,
+          "browser_required_specs": [
+            "tests-e2e/connections.spec.ts"
+          ]
+        }
+      ],
+      "timeout_minutes": 30,
+      "variant_of": "connections"
+    },
+    {
+      "id": "backup-basic",
+      "job_key": "suite-backup-basic",
+      "covers_legacy_jobs": [
+        "backup-restore-e2e"
+      ],
+      "required_sources": [
+        "native"
+      ],
+      "scenarios": [
+        {
+          "id": "functional-backup-native080",
+          "validator": "restore",
+          "source": "native",
+          "version": "0.8.0"
+        }
+      ],
+      "timeout_minutes": 25,
+      "variant_of": "backup-restore"
+    },
+    {
+      "id": "catalog-reports-functional",
+      "job_key": "suite-catalog-reports-functional",
+      "covers_legacy_jobs": [
+        "catalog-reports-e2e"
+      ],
+      "required_sources": [
+        "result"
+      ],
+      "scenarios": [
+        {
+          "id": "functional-catalog-reports-120",
+          "validator": "catalog-population",
+          "rows": 120
+        },
+        {
+          "id": "functional-catalog-reports-browser",
+          "validator": "catalog-browser"
+        },
+        {
+          "id": "functional-reports-postgres-joint-snapshot",
+          "validator": "catalog-snapshot"
+        },
+        {
+          "id": "functional-reports-ephemeral-http",
+          "validator": "catalog-http"
+        }
+      ],
+      "timeout_minutes": 30,
+      "variant_of": "catalog-reports"
+    },
+    {
+      "id": "corrections-functional",
+      "job_key": "suite-corrections-functional",
+      "covers_legacy_jobs": [
+        "xlsx-corrections-e2e"
+      ],
+      "required_sources": [
+        "result"
+      ],
+      "timeout_minutes": 35,
+      "test_parameters": {
+        "rows": 120,
+        "worker_batch_rows": 20,
+        "xlsx_max_rows": 120,
+        "controlled_worker_barrier": true
+      },
+      "scenarios": [
+        {
+          "id": "acquisition-120-inline",
+          "validator": "xlsx-acquisition",
+          "rows": 120,
+          "variant": "inline"
+        },
+        {
+          "id": "acquisition-120-shared",
+          "validator": "xlsx-acquisition",
+          "rows": 120,
+          "variant": "shared"
+        },
+        {
+          "id": "row-limit-preserves-version-121",
+          "validator": "xlsx-limit",
+          "rows": 121,
+          "variant": "inline"
+        },
+        {
+          "id": "chain-120-inline",
+          "validator": "xlsx-chain",
+          "rows": 120,
+          "variant": "inline"
+        },
+        {
+          "id": "cancel-120-shared",
+          "validator": "xlsx-cancel",
+          "rows": 120,
+          "variant": "shared",
+          "min_observed_rows": 20
+        },
+        {
+          "id": "crash-lease-120-shared",
+          "validator": "xlsx-crash",
+          "rows": 120,
+          "variant": "shared"
+        },
+        {
+          "id": "unread-api-restart-functional",
+          "validator": "xlsx-unread",
+          "rows": 120,
+          "variant": "inline"
+        },
+        {
+          "id": "automation-integrated-functional",
+          "validator": "automation-functional"
+        }
+      ]
     }
-  ]
+  ],
+  "profiles": {
+    "functional": {
+      "groups": [
+        "backend",
+        "frontend",
+        "compose-functional",
+        "identity-sso",
+        "connections-functional",
+        "delivery",
+        "backup-basic",
+        "catalog-reports-functional",
+        "corrections-functional",
+        "benchmark-smoke",
+        "delivery-benchmark-smoke"
+      ],
+      "module_coverage": {
+        "identity_rbac": {
+          "scenario_ids": [
+            "identity-rbac-sso-browser",
+            "functional-compose-browser-persistence"
+          ],
+          "browser_specs": [
+            "tests-e2e/local-identity-exceptions.spec.ts"
+          ]
+        },
+        "acquisitions_multiformat": {
+          "scenario_ids": [
+            "functional-compose-browser-persistence",
+            "acquisition-120-inline",
+            "acquisition-120-shared",
+            "row-limit-preserves-version-121",
+            "cancel-120-shared",
+            "crash-lease-120-shared"
+          ],
+          "browser_specs": [
+            "tests-e2e/multiformat-navigation.spec.ts"
+          ]
+        },
+        "transformations": {
+          "scenario_ids": [
+            "functional-compose-browser-persistence",
+            "chain-120-inline"
+          ],
+          "browser_specs": [
+            "tests-e2e/advanced-rules.spec.ts",
+            "tests-e2e/rule-builders.spec.ts"
+          ]
+        },
+        "connections": {
+          "scenario_ids": [
+            "functional-connections-real-engines-browser"
+          ]
+        },
+        "delivery_audit": {
+          "scenario_ids": [
+            "delivery-strategies-audit-browser",
+            "delivery-all-eight-smoke-cases"
+          ]
+        },
+        "automations": {
+          "scenario_ids": [
+            "automation-integrated-functional",
+            "chain-120-inline",
+            "unread-api-restart-functional",
+            "functional-compose-browser-persistence"
+          ],
+          "browser_specs": [
+            "tests-e2e/sentinel-schedule.spec.ts"
+          ]
+        },
+        "catalog_governance": {
+          "scenario_ids": [
+            "functional-catalog-reports-120",
+            "functional-catalog-reports-browser"
+          ]
+        },
+        "joins": {
+          "scenario_ids": [
+            "functional-catalog-reports-120",
+            "functional-reports-postgres-joint-snapshot"
+          ]
+        },
+        "reports": {
+          "scenario_ids": [
+            "functional-catalog-reports-120",
+            "functional-catalog-reports-browser",
+            "functional-reports-ephemeral-http"
+          ]
+        },
+        "dataset_generation": {
+          "scenario_ids": [
+            "functional-catalog-reports-120",
+            "functional-catalog-reports-browser",
+            "benchmark-real-smoke"
+          ]
+        },
+        "basic_recovery": {
+          "scenario_ids": [
+            "functional-compose-browser-persistence",
+            "functional-backup-native080",
+            "crash-lease-120-shared",
+            "unread-api-restart-functional"
+          ]
+        }
+      },
+      "runner": "github-actions",
+      "target_wall_minutes": [
+        15,
+        20
+      ]
+    },
+    "deep": {
+      "groups": [
+        "backend",
+        "frontend",
+        "compose-critical",
+        "corrections-acquisition",
+        "corrections-browser",
+        "corrections-dispatch",
+        "corrections-recovery",
+        "identity-sso",
+        "connections",
+        "delivery",
+        "backup-restore",
+        "catalog-reports",
+        "benchmark-smoke",
+        "delivery-benchmark-smoke",
+        "spark-local",
+        "spark-standalone",
+        "async-volume-100",
+        "async-volume-500",
+        "async-volume-1024"
+      ],
+      "runner": "local",
+      "historical_group_count": 19,
+      "historical_scenario_count": 64
+    }
+  },
+  "closure_policy": {
+    "functional_approval": "CI_FUNCTIONAL_APPROVED",
+    "deep_approval": "DEEP_CERTIFICATION_APPROVED",
+    "documentation_only": "DOCUMENTATION_APPROVED",
+    "functional_does_not_certify_deep": true
+  }
 }

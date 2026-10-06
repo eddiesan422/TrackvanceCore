@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -87,6 +88,19 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
     empty.write_text('', encoding='utf-8')
     overlay.write_text(json.dumps({'services': services}, indent=2), encoding='utf-8')
     scoped = [*compose[:2], '--env-file', str(empty), *compose[2:], '-f', str(overlay)]
+    if environment.get('TRACKVANCE_LOCAL_EXECUTION_ID'):
+        # Include every resolved connector/backup sidecar in the aggregate cap.
+        # The private config can contain secrets, so publish only the limit map.
+        resolved = subprocess.run([*scoped, 'config', '--format', 'json'], cwd=ROOT, env=environment,
+            capture_output=True, text=True, encoding='utf-8', check=True, timeout=90)
+        from ci.local_resources import apply_limits
+        config = json.loads(resolved.stdout)
+        for name, service in config['services'].items():
+            if name not in services:
+                services[name] = {key: service[key] for key in ('cpus', 'mem_limit', 'pids_limit') if key in service}
+        profile = {'services': services}
+        apply_limits(profile, project)
+        overlay.write_text(json.dumps(profile, indent=2), encoding='utf-8')
     from ci.compose_preflight import preflight
     preflight(scoped, environment, project=project, directory=evidence, allow_mock_oidc=mock)
     return scoped
