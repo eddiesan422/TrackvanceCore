@@ -53,6 +53,19 @@ def test_complete_same_commit_gate_passes_and_binds_every_receipt(gate_case):
     assert result["scenario_count"] == 1 and result["receipts"][0]["sha256"]
 
 
+def test_failure_diagnostic_cannot_replace_a_missing_scenario_or_failed_job(gate_case):
+    args, receipt = gate_case
+    save(args['evidence_dir'] / 'failure-catalog.json', {'kind': 'FAILURE_DIAGNOSTIC', 'status': 'FAIL',
+                                                       'certifies_final': False})
+    receipt.unlink()
+    with pytest.raises(EvidenceError, match='MISSING_MANDATORY_SCENARIOS'):
+        evaluate(**args)
+    data = json.loads(args['jobs_path'].read_text())
+    data['needs']['suites']['result'] = 'failure'; save(args['jobs_path'], data)
+    with pytest.raises(EvidenceError, match='JOB_INCOMPLETE_FAILED_CANCELLED_OR_SKIPPED'):
+        evaluate(**args)
+
+
 @pytest.mark.parametrize("field,value,code", [
     ("status", "RUNNING", "SCENARIO_FAILED_CANCELLED_SKIPPED_OR_RUNNING"),
     ("status", "FAIL", "SCENARIO_FAILED_CANCELLED_SKIPPED_OR_RUNNING"),

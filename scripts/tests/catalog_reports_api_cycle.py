@@ -20,9 +20,54 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 from xml.etree.ElementTree import iterparse
+
+
+class CertificationProgress:
+    """Incremental fixture evidence; errors expose only closed identifiers."""
+
+    def __init__(self, rows, directory):
+        self.directory, self.began = directory, time.monotonic()
+        self.result = {"version": "0.8.0", "status": "RUNNING", "rows_per_source": rows,
+                       "sources": [], "joins": [], "active_phase": "SCOPE_VALIDATION"}
+
+    def save(self):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.result["duration_seconds"] = round(time.monotonic() - self.began, 3)
+        temporary = self.directory / "result.partial.json"
+        temporary.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(self.directory / "result.json")
+
+    def phase(self, name, terminal=None):
+        assert re.fullmatch(r"[A-Z][A-Z0-9_]{0,80}", name)
+        self.result["active_phase"] = name
+        self.result["phase_started_at"] = datetime.now(UTC).isoformat()
+        if terminal is not None:
+            allowed = {}
+            for key in ("status", "decision", "error_code", "generation_status", "transmission_status"):
+                value = terminal.get(key)
+                if not isinstance(value, str):
+                    continue
+                allowed_value = value in {"SUCCESS", "FAILED", "RUNNING", "QUEUED", "CANCELLED", "INTERRUPTED",
+                    "COMPLETE", "COMPLETED", "PENDING", "APPROVED", "REJECTED"} if key != "error_code" else re.fullmatch(r"(?:REPORT|INTAKE|ACQUISITION)_[A-Z0-9_]{1,110}", value)
+                if allowed_value:
+                    allowed[key] = value
+            self.result["last_terminal"] = allowed
+        self.save()
+        print(json.dumps({"stage": name, "rows_per_source": self.result["rows_per_source"]}), flush=True)
+
+    def fail(self, error):
+        message = str(error)
+        code = message if re.fullmatch(r"(?:REPORT|INTAKE|ACQUISITION)_[A-Z0-9_]{1,110}", message) else None
+        match = re.search(r"\bcode=((?:REPORT|INTAKE|ACQUISITION)_[A-Z0-9_]{1,110})\b", message)
+        self.result.update(status="FAIL", error={"type": type(error).__name__,
+            "code": code or (match[1] if match else "CERTIFICATION_ASSERTION_FAILED" if isinstance(error, AssertionError)
+                              else "CERTIFICATION_EXCEPTION")})
+        self.result["completed_at"] = datetime.now(UTC).isoformat()
+        self.save()
 
 
 class Client:
@@ -132,7 +177,12 @@ def xlsx_rows(content):
                 element.clear()
 
 
-def acquire(client, directory, alias, rows, macro, domain):
+def acquire(client, directory, alias, rows, macro, domain, progress=None):
+    def phase(suffix, terminal=None):
+        if progress is not None:
+            progress.phase("SOURCE_" + alias.upper() + "_" + suffix, terminal)
+
+    phase("FIXTURE_WRITE")
     first = rows // 2 if alias == "b" else 0
     path = directory / f"source-{alias}-{rows}.csv"
     with path.open("w", encoding="utf-8", newline="") as output:
@@ -140,20 +190,30 @@ def acquire(client, directory, alias, rows, macro, domain):
         writer.writerow(["key", "zone", "value", "amount"])
         for index in range(first, first + rows):
             writer.writerow([source_key(index), f"z{index % 7}", source_value(alias, index), f"{index + 1}.12345678"])
+    phase("UPLOAD")
     upload_id = client.upload(path)
+    phase("DATASET_CREATE")
     dataset = client.call("/datasets", {"name": f"Certificación {alias} {rows} {uuid4().hex[:8]}"}, expected=201)
     # Optional classification permits upload, while reporting stays unavailable.
     assert dataset.get("macro_domain_id") is None and dataset.get("domain_id") is None
+    phase("ACQUISITION_ENQUEUE")
     acquisition = client.call(f"/datasets/{dataset['id']}/acquisitions", {"upload_id": upload_id}, expected=202)
+    phase("ACQUISITION_WAIT")
     acquired = wait(client, "/acquisitions/" + acquisition["id"])
+    phase("ACQUISITION_ASSERT", acquired)
     assert acquired["status"] == "SUCCESS" and acquired["processed_rows"] == rows
+    phase("GOVERNANCE")
     client.call(f"/datasets/{dataset['id']}/governance", {"expected_version": 1,
                 "macro_domain_id": macro, "domain_id": domain, "information_classification": "INTERNAL"}, method="PATCH")
+    phase("CONTRACT_CREATE")
     contract = client.call("/intake/contracts", {"name": f"Contrato {alias} {uuid4().hex[:8]}", "dataset_id": dataset["id"],
         "config": {"required_columns": ["key", "zone"], "positive_columns": ["amount"], "max_error_rate": 0}}, expected=201)
+    phase("INTAKE_ENQUEUE")
     run = client.call("/intake/runs", {"contract_id": contract["id"], "dataset_version_id": acquired["output_version_id"],
         "requested_engine": "AUTO"}, expected=202)
+    phase("INTAKE_WAIT")
     approved = wait(client, "/runs/" + run["id"])
+    phase("INTAKE_ASSERT", approved)
     assert approved["status"] == "SUCCESS" and approved["decision"] == "APPROVED" and approved["metrics"]["total_rows"] == rows, {
         "status": approved["status"], "decision": approved.get("decision"),
         "total_rows": approved.get("metrics", {}).get("total_rows"), "expected_rows": rows}
@@ -214,23 +274,26 @@ def decode_csv(value):
     return value
 
 
-def certify(rows, directory):
+def _certify(rows, directory, progress):
     from sqlalchemy.engine import make_url
     project = os.environ.get("TRACKVANCE_CERTIFICATION_PROJECT", "")
     url = make_url(os.environ.get("DATABASE_URL", ""))
     assert re.fullmatch(r"trackvance-v080-test-[a-z0-9-]+-[a-f0-9]{12}", project)
     assert url.get_backend_name() == "postgresql" and url.username == url.database == "tv_v080_test"
     directory.mkdir(parents=True, exist_ok=True)
+    result = progress.result
+    result["project"] = project
+    progress.phase("AUTHENTICATION")
     client = Client()
     client.call("/auth/demo", {})
+    progress.phase("CATALOG_FIXTURE")
     macro = client.call("/catalog/macrodomains", {"name": "Certificación " + uuid4().hex[:8]}, expected=201)
     domain = client.call("/catalog/domains", {"name": "Reportes", "macro_domain_id": macro["id"]}, expected=201)
     sources, approvals = [], []
-    result = {"version": "0.8.0", "status": "FAIL", "project": project, "rows_per_source": rows, "sources": [], "joins": []}
     began = time.monotonic()
     for alias in ("a", "b", "c"):
         source_started = time.monotonic()
-        source, approval = acquire(client, directory, alias, rows, macro["id"], domain["id"])
+        source, approval = acquire(client, directory, alias, rows, macro["id"], domain["id"], progress)
         sources.append(source)
         approvals.append(approval)
         result["sources"].append({"alias": alias, "rows": rows, "approval_id": approval["id"], "status": "PASS",
@@ -241,10 +304,13 @@ def certify(rows, directory):
     for kind in ("INNER", "LEFT", "RIGHT", "FULL"):
         started = time.monotonic()
         query = draft(sources[:2], kind)
+        progress.phase(kind + "_RESOLVE")
         context = client.call("/reports/resolve", {"draft": query})
+        progress.phase(kind + "_PREVIEW")
         preview = client.call("/reports/preview", {"context_id": context["context_id"]})
         assert preview["status"] == "SUCCESS" and len(preview["rows"]) == min(10, rows // 2)
         # Explicit ordering puts unmatched right rows after the matching rows.
+        progress.phase(kind + "_FULL_POPULATION_ORACLE")
         expected_rows = list(oracle_rows(kind, rows)) if rows <= 2000 else None
         expected = rows_hash(iter(expected_rows) if expected_rows is not None else oracle_rows(kind, rows))
         preview_values = [[r[n] for n in ("a_key", "a_value", "b_key", "b_value")] for r in preview["rows"]]
@@ -256,10 +322,14 @@ def certify(rows, directory):
         assert preview_values == first_expected
         body = {"context_id": context["context_id"], "idempotency_key": "cert-" + uuid4().hex,
                 "name": f"Resultado {kind} {rows} {uuid4().hex[:8]}", "macro_domain_id": macro["id"], "domain_id": domain["id"]}
+        progress.phase(kind + "_DATASET_ENQUEUE_IDEMPOTENCE")
         generation = client.call("/reports/datasets", body)
         assert client.call("/reports/datasets", body)["id"] == generation["id"]
+        progress.phase(kind + "_DATASET_WAIT")
         complete = wait(client, "/reports/executions/" + generation["id"])
+        progress.phase(kind + "_DATASET_ASSERT", complete)
         assert complete["status"] == "SUCCESS", complete.get("error_code")
+        progress.phase(kind + "_MATERIALIZED_FULL_ORACLE")
         integrity = verify_materialized(complete, expected)
         measured = {key: value for key, value in complete["metrics"].items() if isinstance(value, (int, float, bool))}
         sample_execution = client.call("/reports/executions/" + preview["execution_id"])
@@ -271,34 +341,42 @@ def certify(rows, directory):
         if kind == "INNER":
             # SQL and guided mode share the same frozen inputs and join policy.
             sql = {**query, "mode": "SQL", "sql": 'SELECT a.key AS a_key,a.value AS a_value,b.key AS b_key,b.value AS b_value FROM a INNER JOIN b ON a.key=b.key AND a.zone=b.zone ORDER BY a.key,b.key'}
+            progress.phase("SQL_GUIDED_PARITY")
             sql_context = client.call("/reports/resolve", {"draft": sql})
             assert client.call("/reports/preview", {"context_id": sql_context["context_id"]})["rows"] == preview["rows"]
             limited = {**sql, "sql": sql["sql"] + " LIMIT 100000"}
             download_context = client.call("/reports/resolve", {"draft": limited})
+            progress.phase("CSV_DOWNLOAD")
             with client.stream(download_context["context_id"]) as response:
                 execution_id = response.headers["X-Report-Execution-Id"]
                 reader = csv.reader(io.TextIOWrapper(response, encoding="utf-8", newline=""))
                 assert next(reader) == ["a_key", "a_value", "b_key", "b_value"]
                 downloaded = rows_hash([decode_csv(v) for v in row] for row in reader)
+            progress.phase("CSV_FULL_ORACLE")
             from itertools import islice
             assert downloaded == rows_hash(islice(oracle_rows("INNER", rows), 100000))
             transmission = client.call("/reports/executions/" + execution_id)
+            progress.phase("CSV_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"
             result["csv"] = {"status": "PASS", **downloaded, "max_rows": 100000, "generation": transmission["generation_status"], "transmission": transmission["transmission_status"]}
             xlsx_context = client.call("/reports/resolve", {"draft": {**sql, "sql": sql["sql"] + " LIMIT 50000"}})
+            progress.phase("XLSX_DOWNLOAD")
             with client.stream(xlsx_context["context_id"], "XLSX") as response:
                 execution_id = response.headers["X-Report-Execution-Id"]
                 content = response.read(64 * 1024**2 + 1)
                 assert len(content) <= 64 * 1024**2
+            progress.phase("XLSX_FULL_ORACLE")
             decoded = xlsx_rows(content)
             assert next(decoded) == ["a_key", "a_value", "b_key", "b_value"]
             exported = rows_hash(decoded)
             assert exported == rows_hash(islice(oracle_rows("INNER", rows), 50000))
             transmission = client.call("/reports/executions/" + execution_id)
+            progress.phase("XLSX_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"
             result["xlsx"] = {"status": "PASS", **exported, "bytes": len(content), "max_rows": 50000,
                               "generation": transmission["generation_status"], "transmission": transmission["transmission_status"]}
             for export_format, limit in (("CSV", 100000), ("XLSX", 50000)) if rows > 200000 else ():
+                progress.phase(export_format + "_ABOVE_LIMIT_NEGATIVE")
                 excessive = {**sql, "sql": sql["sql"] + f" LIMIT {limit + 1}"}
                 exceeded = client.call("/reports/resolve", {"draft": excessive})
                 execution_id = None
@@ -314,15 +392,20 @@ def certify(rows, directory):
                 assert failed["status"] == "FAILED" and failed["generation_status"] == "FAILED" and failed["transmission_status"] == "INTERRUPTED"
                 assert failed["output_version_id"] is None and failed["error_code"] == "REPORT_RESULT_LIMIT"
                 result[export_format.lower() + "_above_limit"] = {"status": "PASS", "requested_rows": limit + 1, "execution_status": failed["status"], "error_code": failed["error_code"]}
+    progress.phase("TRIPLE_RESOLVE_PREVIEW")
     triple = draft(sources, "LEFT", triple=True)
     context = client.call("/reports/resolve", {"draft": triple})
     assert len(client.call("/reports/preview", {"context_id": context["context_id"]})["rows"]) == 10
     generated = client.call("/reports/datasets", {"context_id": context["context_id"], "idempotency_key": "cert-" + uuid4().hex,
         "name": "Resultado triple " + uuid4().hex[:8], "macro_domain_id": macro["id"], "domain_id": domain["id"]})
+    progress.phase("TRIPLE_DATASET_WAIT")
     complete = wait(client, "/reports/executions/" + generated["id"])
+    progress.phase("TRIPLE_DATASET_ASSERT", complete)
     assert complete["status"] == "SUCCESS", complete.get("error_code")
+    progress.phase("TRIPLE_FULL_ORACLE")
     triple_expected = rows_hash([*row, source_value("c", index)] for index, row in enumerate(oracle_rows("LEFT", rows)))
     result["three_sources"] = verify_materialized(complete, triple_expected)
+    progress.phase("MANY_TO_MANY_POLICY")
     nm = draft(sources[:2])
     nm["joins"][0].update({"keys": [{"left_column": "zone", "right_column": "zone"}],
                            "expected_cardinality": "N:M", "allow_many_to_many": True})
@@ -340,6 +423,7 @@ def certify(rows, directory):
         assert code in {"REPORT_JOIN_LIMIT", "REPORT_JOIN_EXPANSION"}, code
         result["many_to_many_expansion_rejected"] = {"status": "PASS", "error_code": code}
     # Current parent blocks revoke already-frozen contexts and native derived reads.
+    progress.phase("TRANSITIVE_PARENT_BLOCK")
     block = client.call(f"/catalog/datasets/{sources[0]['input_dataset_id']}/blocks", {"scope": "CONTENT", "reason": "Prueba de propagación"}, expected=201)
     rejected = client.call("/reports/preview", {"context_id": context["context_id"]}, expected=403)
     assert (rejected.get("error") or {}).get("code")
@@ -349,6 +433,22 @@ def certify(rows, directory):
     result["duration_seconds"] = round(time.monotonic() - began, 3)
     result["status"] = "PASS"
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
+def certify(rows, directory):
+    progress = CertificationProgress(rows, directory)
+    try:
+        result = _certify(rows, directory, progress)
+    except BaseException as error:
+        try:
+            progress.fail(error)
+        except (OSError, TypeError, ValueError):
+            # An evidence-volume failure must not replace the original failure.
+            print(json.dumps({"stage": "EVIDENCE_WRITE_FAILED", "rows_per_source": rows}), flush=True)
+        raise
+    result["active_phase"] = "COMPLETE"
+    progress.save()
     return result
 
 

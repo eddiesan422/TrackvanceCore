@@ -16,6 +16,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from ci.evidence import wrap_group
+from ci.failure_diagnostics import publish_failure
 
 DEADLINES = {"backend": 1200, "frontend": 600, "compose-critical": 1500,
     "identity-sso": 1200, "connections": 1500, "delivery": 1800,
@@ -28,6 +29,12 @@ DEADLINES = {"backend": 1200, "frontend": 600, "compose-critical": 1500,
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+class PhaseFailed(RuntimeError):
+    def __init__(self, record: dict):
+        super().__init__("Certification phase failed; sanitized diagnostic retained.")
+        self.record = record
 
 
 def execute(command: list[str], directory: Path, phase: str, remaining: float,
@@ -62,7 +69,7 @@ def execute(command: list[str], directory: Path, phase: str, remaining: float,
     (directory / (phase + ".json")).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(record), flush=True)
     if record["status"] != "PASS":
-        raise RuntimeError("Certification phase failed; sanitized diagnostic retained.")
+        raise PhaseFailed(record)
     return record
 
 
@@ -149,6 +156,9 @@ def main() -> None:
     from ci.owned_cleanup import cleanup, snapshot
     owned_before = snapshot() if environment.get("TRACKVANCE_CI_IMAGE_MANIFEST") else None
     checks_path = directory / (args.group + "-checks.json")
+    ci = {"run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+          "job_id": os.environ.get("CI_JOB_ID", os.environ.get("GITHUB_JOB", ""))}
+    phase = 'source-collection'
     try:
         for phase, command, cwd in commands_for(args.group, directory):
             phase_environment = environment
@@ -159,6 +169,7 @@ def main() -> None:
                              cwd=cwd, environment=phase_environment)
             records.append(record)
             checks_path.write_text(json.dumps({"status": "RUNNING", "checks": records}, indent=2) + "\n", encoding="utf-8")
+        phase = 'source-collection'
         sources = collect_sources(args.group, directory, before)
         if args.group in {"backend", "frontend"}:
             checks = normalize_checks(args.group, records)
@@ -171,18 +182,31 @@ def main() -> None:
                 raise ValueError("Missing actual same-commit image load proof.")
             resources.update(image_bundle_sha256=proof["manifest_sha256"],
                 runtime_images={row["role"]: row["image_id"] for row in proof["measurements"]})
+        phase = 'evidence-validation'
         wrap_group(args.group, sources, args.output_dir / "evidence", source_sha=sha,
-            ci={"run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
-                "job_id": os.environ.get("CI_JOB_ID", os.environ.get("GITHUB_JOB", ""))},
+            ci=ci,
             started_at=stamp, completed_at=now(), duration_seconds=round(time.monotonic() - began, 3),
             resources=resources)
+    except Exception as error:
+        if isinstance(error, PhaseFailed):
+            records.append(error.record)
+        checks_path.write_text(json.dumps({"status": "FAIL", "checks": records}, indent=2) + "\n", encoding="utf-8")
+        publish_failure(args.group, args.output_dir, source_sha=sha, ci=ci, phases=records,
+                        error=error, phase=phase, before=before)
+        raise
     finally:
-        if owned_before is not None:
-            cleanup_result = cleanup(owned_before)
-            (directory / "owned-cleanup.json").write_text(json.dumps(cleanup_result, indent=2) + "\n", encoding="utf-8")
-        (directory / "group-timing.json").write_text(json.dumps({"group": args.group,
-            "source_sha": sha, "started_at": stamp, "completed_at": now(),
-            "duration_seconds": round(time.monotonic() - began, 3), "phases": records}, indent=2) + "\n", encoding="utf-8")
+        try:
+            if owned_before is not None:
+                cleanup_result = cleanup(owned_before)
+                (directory / "owned-cleanup.json").write_text(json.dumps(cleanup_result, indent=2) + "\n", encoding="utf-8")
+        except Exception as error:
+            publish_failure(args.group, args.output_dir, source_sha=sha, ci=ci, phases=records,
+                            error=error, phase='owned-cleanup', before=before)
+            raise
+        finally:
+            (directory / "group-timing.json").write_text(json.dumps({"group": args.group,
+                "source_sha": sha, "started_at": stamp, "completed_at": now(),
+                "duration_seconds": round(time.monotonic() - began, 3), "phases": records}, indent=2) + "\n", encoding="utf-8")
 
 
 def normalize_checks(group: str, records: list[dict]) -> list[dict]:

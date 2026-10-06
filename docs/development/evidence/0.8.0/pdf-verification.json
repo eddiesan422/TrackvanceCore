@@ -3,22 +3,22 @@
   "status": "PASS",
   "scope": "PDF_PUBLICATION_ONLY; final documentary SHA CI and habitual promotion remain independent required gates",
   "edition": "Especificación técnica v1.1 — IMPLEMENTACIÓN 0.8.0",
-  "published_at_utc": "2026-10-05T19:38:47.438756+00:00",
-  "implementation_source_cut": "000e1bc1db497ea56ad5ddef19d454428a847fb8",
+  "published_at_utc": "2026-10-06T01:07:34.953778+00:00",
+  "implementation_source_cut": "c77d8f36423d4ba8edf5f461a2575ce47fc36097",
   "final_documentary_commit_and_ci": "Recorded externally after this reviewed PDF is committed; no circular self-certification",
   "pdf": {
-    "bytes": 667582,
-    "sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
-    "pages": 143,
-    "bookmarks": 280,
+    "bytes": 684046,
+    "sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
+    "pages": 146,
+    "bookmarks": 284,
     "top_level_sections": 40,
     "selectable_text": true
   },
   "inputs": {
     "docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md": {
-      "bytes": 270185,
-      "sha256": "0383058f81f37a79ebd0666fddfd2fb78d7e63940852e1b2c37c951673c261fb",
-      "sha256_utf8_lf": "a79911e666723c290acba9a577e4cdc71e6fb798fee218382920cfee980b9d12"
+      "bytes": 280759,
+      "sha256": "3cee1059e7adc58f82a91cf0a941f4393138593110b1c37a7b04b4dc7c0a081e",
+      "sha256_utf8_lf": "3cee1059e7adc58f82a91cf0a941f4393138593110b1c37a7b04b4dc7c0a081e"
     },
     "docs/specification/build_specification.py": {
       "bytes": 38723,
@@ -26,9 +26,9 @@
       "sha256_utf8_lf": "9e170c84b2863b637b4d36106381d5fd6b391b2639d06a8f5995dee78eb9ebda"
     },
     "docs/specification/validation_results_0.8.0.json": {
-      "bytes": 6895,
-      "sha256": "f806f1e2a5cd7fa92742b2aedcd596f5b30a82b87b3874303d20f5df316a798a",
-      "sha256_utf8_lf": "266951dfe527729c9367e7347443a163ac6eb24cfc7e6a88a4494a3a408c24be"
+      "bytes": 7947,
+      "sha256": "ff36860abf8093e5decbb272a9eb91f76386ad2be698baa21bffc9d0f7bab14f",
+      "sha256_utf8_lf": "778d265841e7290e0a9378b06d9244d5149b1ad64e90fdc491a1c0d877f35265"
     },
     "docs/specification/corrections_results_0.8.0.json": {
       "bytes": 1945,
@@ -76,9 +76,9 @@
     }
   },
   "extraction": {
-    "bytes": 457400,
-    "sha256": "62a024ca69eddfb267c760b244fab6bcf586c01e07036431603b599933845aec",
-    "sha256_utf8_lf": "252269d6ff659fc2e39458bf2e215dc9275b810e90dd35d545b21f5c79bf47ca"
+    "bytes": 474110,
+    "sha256": "9580d4941fbf160485d42303da95a18267279076a292d4d300ed2afd1fa499fc",
+    "sha256_utf8_lf": "4010c0855e06fea00d7c57e7fa65b000c0fff8f415233d778ee3110b9513491e"
   },
   "runtime": {
     "python": "3.12.14",
@@ -247,297 +247,116 @@
       140,
       141,
       142,
-      143
+      143,
+      144,
+      145,
+      146
     ],
     "review_partitions": [
       {
         "status": "PASS",
+        "artifact_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
         "reviewer": "root",
-        "artifact": "docs/specification/tmp/pdfs/specification-candidate.pdf",
-        "artifact_sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
-        "implementation_source_cut": "000e1bc1db497ea56ad5ddef19d454428a847fb8",
-        "rendered_document_pages": 143,
         "reviewed_range": [
           1,
-          30
+          36
         ],
-        "reviewed_page_count": 30,
-        "method": [
-          "Inspected all thirty pages in five fresh PNG contact sheets from the immutable candidate's full 110 dpi render",
-          "Inspected individual original-detail pages 10, 12, 16, 23, 27, 29 and 30 for implementation source cut, diagrams, tables and monospace legibility",
-          "Verified cover, two-level contents, current implementation source cut 000e1bc, four-worker architecture, arrows, margins and pagination"
-        ],
-        "checks": {
-          "overlaps": "PASS",
-          "clipping": "PASS",
-          "tables": "PASS",
-          "diagrams": "PASS",
-          "fonts_and_glyphs": "PASS",
-          "headers_footers_and_margins": "PASS"
-        },
-        "issues": [],
-        "source_or_generator_edits": false
-      },
-      {
-        "tables_and_diagrams": "PASS",
-        "pdf_page_count": 143,
-        "status": "PASS",
-        "dpi": 110,
-        "original_source_or_pdf_modified": false,
-        "render_directory": "docs/specification/tmp/pdfs/final-223175c92b9a-110",
-        "overlaps": "NONE_OBSERVED",
-        "issues": [],
-        "contact_sheets_reviewed": 5,
-        "pages_reviewed": 30,
-        "pdf_sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
-        "glyphs": "PASS",
-        "method": [
-          "All five contact PNG sheets at original resolution from new hash-specific render paths",
-          "All thirty individual page PNGs at original resolution for readability, diagrams, tables, code, accents, wrapping, overlap, margins and clipping",
-          "Read-only PDF hash/page-count verification plus per-page PNG SHA256 and header/footer pixel checks",
-          "Independent fresh private crops verified actual page32 header and page53 complete artifact table; header pixel bytes identical across all thirty originals"
-        ],
-        "clipping": "NONE_OBSERVED",
-        "range": {
-          "first": 31,
-          "last": 60
-        },
-        "completed_utc": "2026-10-05T19:37:58.2764257Z",
-        "render_contact_sha256": {
-          "pages-043-048.png": "8bcc7089c3bffcf8d5dcd5a7c178b80ec0719d1b74df42183615a6c5e023b1fc",
-          "pages-055-060.png": "08b6d23ee22d636179e7b725c28bbb3315fe80c4e296da6ce33e14c030e7b85f",
-          "pages-049-054.png": "d096685f19c7115d6b8943fd776b9d71a78af16f17c6994a4df3831dc7cd9ee5",
-          "pages-037-042.png": "50df7411f82751f32111321c0f14b4358c7c5c2442ccfddba98646f5dfc7e304",
-          "pages-031-036.png": "777fa8a9100d87efd93d165708fb8243d71c6293b0e406eac1f0f798f4e0e016"
-        },
-        "per_page": [
-          {
-            "page": 31,
-            "png_sha256": "a32abfee21cd7a671c44fe912133c46360771a24ca8f13bc1a49068b897a8364",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 666,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 32,
-            "png_sha256": "cbf7988d255160f6551d81d014592930055b1ae3fe0362913121d6b22798a39d",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 679,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 33,
-            "png_sha256": "ae7a6cbf4a8a48032af1daed9914c3f5c721764ba356c096bb8248f7f222804e",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 675,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 34,
-            "png_sha256": "cea16991feddeef0c97a8c795906148f0a1acbe03ae1a0b4c8aae79f9339003b",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 675,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 35,
-            "png_sha256": "929e36efe2fea4187888bb5b93e1a078b6c7c661faeba4b53cb5a12d3a8d4cbc",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 678,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 36,
-            "png_sha256": "0dfa7dd52285e251b59678447650eee76cda0cc81cb563f00d92fd696a8072e4",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 681,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 37,
-            "png_sha256": "d6ad8a1de56914122badd8732d7253b0aebcadb6c0f3139d490a2f5405f07fde",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 673,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 38,
-            "png_sha256": "5fc0b05216391868c9a078b04c71d8413e529021425ed6fb021f4fd9df739900",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 681,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 39,
-            "png_sha256": "36f781c66a6452b12d027a3617d8d363b8d63c81ee663b18b8bba2e1d021a57d",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 682,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 40,
-            "png_sha256": "eb850c2fe5280349d8abefa1f2a786e9b2c4bd6e64dd7915f47a0d8122a748ae",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 679,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 41,
-            "png_sha256": "4a07b05c0aa36ba68096a279526c81d76f316dd537c8236d83a94b3628532178",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 666,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 42,
-            "png_sha256": "7595fe9745a1f1f0e9937053610b805476929c8ced6d1c640da235b2f9f2d91c",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 679,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 43,
-            "png_sha256": "1e8643d00349f830218571d9bb184bf29d25d536b2b14504383019c1a57e32ce",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 675,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 44,
-            "png_sha256": "be816dac4157e71af920686055b41e1e1dd6e595bac40389666963a79ce4b300",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 675,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 45,
-            "png_sha256": "c116ed419d10000fa2c827a8ff95bea249d5da42eccf67496b562a01ff2d6480",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 678,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 46,
-            "png_sha256": "f66746024515853bb95cc36bb38e1267cd3ab32be08a503eec8b4dd71cdedfd9",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 681,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 47,
-            "png_sha256": "f72d909295fb9f900112cb385fd9a64c3a566a8558181433abef157e1ffc5e29",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 673,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 48,
-            "png_sha256": "9b9d043bb059e31f929b87b8f757ba6eab27dca8238013df91e1cf289871837e",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 681,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 49,
-            "png_sha256": "f138f300e86507c49de26aa9264dcc8854864b43953f068dbbaa0b1ca0f29212",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 682,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 50,
-            "png_sha256": "9817b5230f7030a76939cb920861349372e87f04373a6261712d2a5f1bb3bf76",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 682,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 51,
-            "png_sha256": "81f7c4b35fa44d27465d884ed0c2d9cbc2ad741682e94f40b1a11ae293c68dad",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 669,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 52,
-            "png_sha256": "e605c485f51469ecb39ceea0bf9f7dfa40dacfaa1d0bc637bef900bedb9e6960",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 682,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 53,
-            "png_sha256": "a3af22de0450122fa6c918f09b937606845c357846e9707dd02cb44bae4beda3",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 678,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 54,
-            "png_sha256": "dfdab79be1a470c6a8b45bf760daa6e1cbae09cb983cbf6e5b9c7b3da0a0b939",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 678,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 55,
-            "png_sha256": "4358d44843111948efa97a34d83a7030735eb869bbf53bf7489543a3fa611701",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 681,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 56,
-            "png_sha256": "2b0685a206567edcb0b113c82181ba2643898f6ee927c28b734110f15f15a77a",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 684,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 57,
-            "png_sha256": "709c973c8b4754903e2bb1af849555c08d6f0e9f77016e9b9739d3f24e22e4f2",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 676,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 58,
-            "png_sha256": "daa47b9542258d880a8cf5ef268d5d625b4850c5c7142911ba1bd652daaf4359",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 684,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 59,
-            "png_sha256": "326204433994be672501a48b459ee529179870aed9ee7b27060d888002c861fa",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 685,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          },
-          {
-            "page": 60,
-            "png_sha256": "16a2fdad3b247f549e982777e026b9abaed3b53831e97f2c5f4c7adee24d62fa",
-            "header_dark_pixels": 1249,
-            "footer_dark_pixels": 685,
-            "header_pixel_sha256": "1c48f884edbcbdb6c5106ffcc34c2748365a45ee0db36c95c86ed7ef47e3afb9"
-          }
-        ]
-      },
-      {
-        "status": "PASS",
-        "reviewer": "governance",
-        "reviewed_at_utc": "2026-10-05T19:36:59.596873+00:00",
-        "pdf_sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
-        "pdf_bytes": 667582,
-        "pdf_pages": 143,
-        "bookmarks": 280,
-        "top_sections": 40,
-        "range": [
-          61,
-          108
-        ],
-        "count": 48,
         "reviewed_pages": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36
+        ],
+        "count": 36,
+        "dpi": 110,
+        "method": "Actual original-resolution view_image review of every fresh six-page contact plus individual dense diagrams/tables/index pages; no old artifact QA reused",
+        "contacts": [
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-001-006.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-007-012.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-013-018.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-019-024.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-025-030.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-031-036.png"
+        ],
+        "individual_pages": [
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-007.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-011.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-023.png",
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-031.png"
+        ],
+        "issues": [],
+        "findings": "Readable accents/glyphs; headers, footers, index, diagrams, tables and page transitions have no overlaps, cropped text or accidental blank pages."
+      },
+      {
+        "status": "PASS",
+        "scope": "VISUAL_QA_ONLY of exact PDF pages37-78; not CI certification or publication approval for other pages",
+        "artifact_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
+        "pdf_path": "docs/specification/tmp/pdfs/specification-candidate.pdf",
+        "total_pages": 146,
+        "bookmarks": 284,
+        "top_level_sections": 40,
+        "reviewed_at_utc": "2026-10-06T01:02:37.728631+00:00",
+        "reviewed_range": [
+          37,
+          78
+        ],
+        "reviewed_pages": [
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
           61,
           62,
           63,
@@ -555,7 +374,99 @@
           75,
           76,
           77,
-          78,
+          78
+        ],
+        "count": 42,
+        "dpi": 110,
+        "method": "Inspected all42 pages through seven new six-page contact sheets with view_image detail=original. Independently opened ten dense diagram/table/code pages38,43,46,48,51,58,63,67,73,78 at original110DPI. Checked headers, footers, accents, arrows, typography, tables/constraint wrapping and page breaks; no prior PDF QA reused. Afterwards verified exact candidate hash and every42 reviewed page PNG against the new render manifest.",
+        "contactpaths": [
+          "render-09505726ed08-110/contacts/pages-037-042.png",
+          "render-09505726ed08-110/contacts/pages-043-048.png",
+          "render-09505726ed08-110/contacts/pages-049-054.png",
+          "render-09505726ed08-110/contacts/pages-055-060.png",
+          "render-09505726ed08-110/contacts/pages-061-066.png",
+          "render-09505726ed08-110/contacts/pages-067-072.png",
+          "render-09505726ed08-110/contacts/pages-073-078.png"
+        ],
+        "individualpaths": [
+          "render-09505726ed08-110/page-038.png",
+          "render-09505726ed08-110/page-043.png",
+          "render-09505726ed08-110/page-046.png",
+          "render-09505726ed08-110/page-048.png",
+          "render-09505726ed08-110/page-051.png",
+          "render-09505726ed08-110/page-058.png",
+          "render-09505726ed08-110/page-063.png",
+          "render-09505726ed08-110/page-067.png",
+          "render-09505726ed08-110/page-073.png",
+          "render-09505726ed08-110/page-078.png"
+        ],
+        "contact_sha256": {
+          "render-09505726ed08-110/contacts/pages-037-042.png": "50df7411f82751f32111321c0f14b4358c7c5c2442ccfddba98646f5dfc7e304",
+          "render-09505726ed08-110/contacts/pages-043-048.png": "8bcc7089c3bffcf8d5dcd5a7c178b80ec0719d1b74df42183615a6c5e023b1fc",
+          "render-09505726ed08-110/contacts/pages-049-054.png": "d096685f19c7115d6b8943fd776b9d71a78af16f17c6994a4df3831dc7cd9ee5",
+          "render-09505726ed08-110/contacts/pages-055-060.png": "08b6d23ee22d636179e7b725c28bbb3315fe80c4e296da6ce33e14c030e7b85f",
+          "render-09505726ed08-110/contacts/pages-061-066.png": "86c8355232c7ab52ae464b5746051ad4ccd1bd2cbcf9b198db82da97c0fbfa33",
+          "render-09505726ed08-110/contacts/pages-067-072.png": "b63bf08de0cfcf889d01085bcb08298ea207376f090da52d8684b409bda63dc1",
+          "render-09505726ed08-110/contacts/pages-073-078.png": "6f2a3951e4cedc7d55edc3d132d20b50070bde2402730eca91ed7602d4422a88"
+        },
+        "reviewed_page_sha256": {
+          "page-037.png": "d6ad8a1de56914122badd8732d7253b0aebcadb6c0f3139d490a2f5405f07fde",
+          "page-038.png": "5fc0b05216391868c9a078b04c71d8413e529021425ed6fb021f4fd9df739900",
+          "page-039.png": "36f781c66a6452b12d027a3617d8d363b8d63c81ee663b18b8bba2e1d021a57d",
+          "page-040.png": "eb850c2fe5280349d8abefa1f2a786e9b2c4bd6e64dd7915f47a0d8122a748ae",
+          "page-041.png": "4a07b05c0aa36ba68096a279526c81d76f316dd537c8236d83a94b3628532178",
+          "page-042.png": "7595fe9745a1f1f0e9937053610b805476929c8ced6d1c640da235b2f9f2d91c",
+          "page-043.png": "1e8643d00349f830218571d9bb184bf29d25d536b2b14504383019c1a57e32ce",
+          "page-044.png": "be816dac4157e71af920686055b41e1e1dd6e595bac40389666963a79ce4b300",
+          "page-045.png": "c116ed419d10000fa2c827a8ff95bea249d5da42eccf67496b562a01ff2d6480",
+          "page-046.png": "f66746024515853bb95cc36bb38e1267cd3ab32be08a503eec8b4dd71cdedfd9",
+          "page-047.png": "f72d909295fb9f900112cb385fd9a64c3a566a8558181433abef157e1ffc5e29",
+          "page-048.png": "9b9d043bb059e31f929b87b8f757ba6eab27dca8238013df91e1cf289871837e",
+          "page-049.png": "f138f300e86507c49de26aa9264dcc8854864b43953f068dbbaa0b1ca0f29212",
+          "page-050.png": "9817b5230f7030a76939cb920861349372e87f04373a6261712d2a5f1bb3bf76",
+          "page-051.png": "81f7c4b35fa44d27465d884ed0c2d9cbc2ad741682e94f40b1a11ae293c68dad",
+          "page-052.png": "e605c485f51469ecb39ceea0bf9f7dfa40dacfaa1d0bc637bef900bedb9e6960",
+          "page-053.png": "a3af22de0450122fa6c918f09b937606845c357846e9707dd02cb44bae4beda3",
+          "page-054.png": "dfdab79be1a470c6a8b45bf760daa6e1cbae09cb983cbf6e5b9c7b3da0a0b939",
+          "page-055.png": "4358d44843111948efa97a34d83a7030735eb869bbf53bf7489543a3fa611701",
+          "page-056.png": "2b0685a206567edcb0b113c82181ba2643898f6ee927c28b734110f15f15a77a",
+          "page-057.png": "709c973c8b4754903e2bb1af849555c08d6f0e9f77016e9b9739d3f24e22e4f2",
+          "page-058.png": "daa47b9542258d880a8cf5ef268d5d625b4850c5c7142911ba1bd652daaf4359",
+          "page-059.png": "326204433994be672501a48b459ee529179870aed9ee7b27060d888002c861fa",
+          "page-060.png": "16a2fdad3b247f549e982777e026b9abaed3b53831e97f2c5f4c7adee24d62fa",
+          "page-061.png": "b32d4b7aed370fb8d506cd0ed4a977e7e995d7217a25670d0cbc51539ed59d2f",
+          "page-062.png": "89726e8b4e626d8922294819984dd38e017e17f6e68c1585db5fcc43d119def5",
+          "page-063.png": "afb75b6c2b3b9fd9e5d0c2d5c0a2085f6ea3791539b314544bc27b1b24e4ea74",
+          "page-064.png": "a398ace0181de0bbf374a43744ddae986d0a04445c4853627a87536148c5a3e0",
+          "page-065.png": "53921d2f4200d8b8af75e3349d7aa7cc2c34bc054792951cf001f3623300c216",
+          "page-066.png": "d1d6590068ae7acf47f48bc6ef5ce501a4eb151e6d04d2b89de322e9882f5670",
+          "page-067.png": "aaede40ff3de7d0c776489b018f2b292c63e0b8597d57aafda1a784901d9e0c6",
+          "page-068.png": "2ab8c88924e5eaf1e92f55c0adc87d17e2a1162cf3a0fbb79f1af75cceb07363",
+          "page-069.png": "f26202b527ef83967f988127b3a31bab30d217a29bff6869b4ddca93a6beb4fd",
+          "page-070.png": "884ac9243995ef4077a3a50698f0c6a279eb0f19d689cc44d3574c4468cef2f5",
+          "page-071.png": "5404f132c706cecb0378f2b93686bdce07ea849b8edeaf998f2e4b91ba5e3534",
+          "page-072.png": "12b93135864482c7fd016edae8f0dce7d569c9773d3537c40d8155aa3162b0d0",
+          "page-073.png": "704e9d56a627d0b69cfb0e6edc79ef40fa25b3097a0ee69411d2c704667de505",
+          "page-074.png": "29b3467e4723144783649996f6417aa69c5575fc94c08ef184cb1153160cd506",
+          "page-075.png": "f8119a68a683fedd162966a26a8d3255a49f03b4e2f2e293d5539925caca8579",
+          "page-076.png": "99ba72eb626cf83200438ffe43ef4f81cbc87e3c82486089bab46dbf2fca97fd",
+          "page-077.png": "e08fc8df6304ac88d3a6707a9a117df3b9ac7644d15ab8420389c5850a2a46d5",
+          "page-078.png": "3a504d8935e31e1b9b52e374402890bb46d9d2592fa126e749d7cb4166922a36"
+        },
+        "issues": [],
+        "candidate_bytes_unchanged": true,
+        "frozen_inputs_changed": false,
+        "prior_revision_qa_reused": false
+      },
+      {
+        "status": "PASS",
+        "scope": "VISUAL_LAYOUT_ONLY; no final CI or promotion certification",
+        "artifact_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
+        "reviewed_range": [
+          79,
+          114
+        ],
+        "reviewed_pages": [
           79,
           80,
           81,
@@ -585,82 +496,74 @@
           105,
           106,
           107,
-          108
-        ],
-        "method": "Viewed all 48 pages at original detail across the eight newly rendered six-page PNG contact sheets. Viewed the 12 listed dense table, constraint, API inventory, recovery, certification and diagram pages individually at original 110 DPI. Independently rerendered all 48 pages from this exact candidate with Poppler at 110 DPI and verified every PNG byte-identical to the supplied new render. No prior revision PASS was reused.",
-        "contact_sheets_viewed": [
-          "pages-061-066.png",
-          "pages-067-072.png",
-          "pages-073-078.png",
-          "pages-079-084.png",
-          "pages-085-090.png",
-          "pages-091-096.png",
-          "pages-097-102.png",
-          "pages-103-108.png"
-        ],
-        "individual_pages_viewed": [
-          63,
-          67,
-          73,
-          86,
-          95,
-          98,
-          101,
-          102,
-          105,
-          106,
-          107,
-          108
-        ],
-        "independent_render_dpi": 110,
-        "identical_page_png_count": 48,
-        "checks": {
-          "clipped_text": false,
-          "overlapping_text_or_elements": false,
-          "unexpected_blank_pages": false,
-          "missing_or_square_glyphs": false,
-          "illegible_headers_or_footers": false,
-          "table_borders_or_content_overflow": false,
-          "diagram_label_or_connector_overlap": false,
-          "page_numbering_consistent": true,
-          "margins_and_section_transitions_consistent": true,
-          "tables_legible_at_individual_original_detail": true
-        },
-        "observations": [
-          "Continued schema and endpoint tables repeat their headers and keep every row inside the page margins.",
-          "Long constraints on pages 63 and 73 remain readable and fit or wrap without overflow.",
-          "Dense benchmark and certification tables on pages 101 and 105–108 are readable when enlarged; every row is separated and every footer remains clear.",
-          "Diagram on page 102 has readable box labels, connector arrows and explanatory paragraphs with clear separation.",
-          "Sparse pages 85, 104 and 106 contain intentional subsection or table transitions; none is blank."
-        ],
-        "issues": [],
-        "previous_revision_reused": false,
-        "candidate_bytes_unchanged": true,
-        "source_or_pdf_edits": false,
-        "main_operations": false,
-        "certifies_github_actions": false
-      },
-      {
-        "status": "PASS",
-        "scope": "Visual QA of all pages109–143 of the exact final candidate; CI completion remains separate",
-        "pdf_path": "docs/specification/tmp/pdfs/specification-candidate.pdf",
-        "pdf_sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
-        "total_pages": 143,
-        "bookmarks": 280,
-        "top_sections": 40,
-        "source_cut": "000e1bc",
-        "reviewed_range": {
-          "first": 109,
-          "last": 143,
-          "count": 35
-        },
-        "reviewed_pages": [
+          108,
           109,
           110,
           111,
           112,
           113,
-          114,
+          114
+        ],
+        "count": 36,
+        "dpi": 110,
+        "method": "All six unique frozen contact sheets inspected at original detail, plus nine individual dense tables, diagram and small-type pages at original detail. Checked header/footer, continuity, text/table clipping, overlaps, diagram arrows and glyph legibility.",
+        "individual_pages": [
+          90,
+          95,
+          96,
+          102,
+          105,
+          108,
+          111,
+          113,
+          114
+        ],
+        "paths": [
+          "render-09505726ed08-110/contacts/pages-079-084.png",
+          "render-09505726ed08-110/contacts/pages-085-090.png",
+          "render-09505726ed08-110/contacts/pages-091-096.png",
+          "render-09505726ed08-110/contacts/pages-097-102.png",
+          "render-09505726ed08-110/contacts/pages-103-108.png",
+          "render-09505726ed08-110/contacts/pages-109-114.png",
+          "render-09505726ed08-110/page-090.png",
+          "render-09505726ed08-110/page-095.png",
+          "render-09505726ed08-110/page-096.png",
+          "render-09505726ed08-110/page-102.png",
+          "render-09505726ed08-110/page-105.png",
+          "render-09505726ed08-110/page-108.png",
+          "render-09505726ed08-110/page-111.png",
+          "render-09505726ed08-110/page-113.png",
+          "render-09505726ed08-110/page-114.png"
+        ],
+        "render_sha256": {
+          "render-09505726ed08-110/contacts/pages-079-084.png": "7e58817373456af4d9fc5065d227340f733dbd34b26b1c38e85643a56d9c23ba",
+          "render-09505726ed08-110/contacts/pages-085-090.png": "65fc596a26bdc1e2613dbc4b320d7e6d0302fa77c9e794809d189ce233fd5040",
+          "render-09505726ed08-110/contacts/pages-091-096.png": "3948fdfb5ae8295071c43bf9dffcd93ff60895502fe8eaafdfcdb18eb21f7470",
+          "render-09505726ed08-110/contacts/pages-097-102.png": "bfece419e8d31936c620e78d0a11dda29db37551685a9a74ccfb1dc94f5b9492",
+          "render-09505726ed08-110/contacts/pages-103-108.png": "5ea8aa41a489f695abdab3e1241690c34ea71634f53923d5024d120d49a62eeb",
+          "render-09505726ed08-110/contacts/pages-109-114.png": "bcb39aa2ff4359bf05abc27901455a148c160a6d68cf9e74bb6afb608205dca1",
+          "render-09505726ed08-110/page-090.png": "e3af075f5cf2584b13213bccb42fdb351ddfeb8bbd9730089e9dee1ed8217550",
+          "render-09505726ed08-110/page-095.png": "db54fc82659c1b03bfd9a8a63b1c5e75d1a235e66d11ea4da72fb86219d36502",
+          "render-09505726ed08-110/page-096.png": "cca5e00af5f5caf44b478c8884d7a35c0db219f71a34392ee064c6bd2a84dfa1",
+          "render-09505726ed08-110/page-102.png": "74d09cfb90b79c7eaaf028e04dc3163c075c7629b9c001c06ede1466171bc69f",
+          "render-09505726ed08-110/page-105.png": "4251a8fe433ab313078785a2d6e669a9aa83c8adff74d7f4330e364ae88a8c30",
+          "render-09505726ed08-110/page-108.png": "6a83d0446b93f26c5312a0c589baa629fcc1270596babbc86eb6f875777252d4",
+          "render-09505726ed08-110/page-111.png": "ea1d43a24935a9922289c5eedd02f7431dcdeab074acd43db50f596d33bc2b3f",
+          "render-09505726ed08-110/page-113.png": "b630eb88711e27fe7011cafc6b3f61eaeede3bb0c96b886e256dab3d720f384a",
+          "render-09505726ed08-110/page-114.png": "e4008f7b1b796544212efe6c6990f994993c0930af0dd25771e822f9fd71af63"
+        },
+        "issues": []
+      },
+      {
+        "status": "PASS",
+        "scope": "VISUAL_LAYOUT_ONLY; no final CI or promotion certification",
+        "artifact_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
+        "artifact_path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\docs\\specification\\tmp\\pdfs\\specification-candidate.pdf",
+        "reviewed_range": [
+          115,
+          144
+        ],
+        "reviewed_pages": [
           115,
           116,
           117,
@@ -689,60 +592,162 @@
           140,
           141,
           142,
-          143
+          143,
+          144
         ],
-        "render_directory": "docs/specification/tmp/pdfs/final-223175c92b9a-110",
-        "render_dpi": 110,
-        "method": "Original-resolution view_image of all six fresh PNG contact sheets and thirteen dense individual pages, plus independently generated header-strip contact proof from current page pixels. Every page inspected again; no prior PDF QA reused.",
-        "contacts": [
-          "109-114",
-          "115-120",
-          "121-126",
-          "127-132",
-          "133-138",
-          "139-143"
+        "count": 30,
+        "dpi": 110,
+        "method": "view_image original: all five six-page contact sheets reviewed, followed by fourteen individual dense/table/diagram pages at original resolution",
+        "paths": [
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-115-120.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-121-126.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-127-132.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-133-138.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-139-144.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-116.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-117.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-118.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-129.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-131.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-133.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-134.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-138.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-139.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-140.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-141.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-142.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-143.png",
+          "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-144.png"
         ],
-        "individual_pages": [
-          109,
-          110,
-          112,
-          113,
-          120,
-          121,
-          126,
-          130,
-          132,
-          136,
-          137,
+        "viewed_contacts": 5,
+        "individual_pages_reviewed": [
+          116,
+          117,
+          118,
+          129,
+          131,
+          133,
+          134,
+          138,
+          139,
+          140,
           141,
-          143
+          142,
+          143,
+          144
         ],
-        "pixel_proof": ".codex-local/v080/pdf-final-page-proof-223175-109-143.json",
-        "header_visual_proof": ".codex-local/v080/pdf-final-header-proof-223175-109-143.png",
-        "checks": {
-          "all_35_pages_seen": true,
-          "no_missing_glyph_boxes": true,
-          "no_clipped_content": true,
-          "no_overlapping_text": true,
-          "no_truly_blank_pages": true,
-          "dense_tables_legible": true,
-          "monospace_examples_legible": true,
-          "header_footer_consistent": true,
-          "all_header_bands_present": true,
-          "all_footer_bands_present": true,
-          "header_min_nonwhite_pixels": 3047,
-          "footer_min_nonwhite_pixels": 2434,
-          "pdf_hash_before_after_matches": true
-        },
-        "issues": [],
-        "observations": [
+        "rendered_total_pages": 146,
+        "images": [
           {
-            "page": 112,
-            "severity": "INFORMATIONAL",
-            "text": "One final historical verification row continues on a mostly white page. Row complete and legible; page113 has the full requirements matrix. No content loss or truly blank page."
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-115-120.png",
+            "sha256": "bd5f0afa74bc21fcf083a837a10bf90e7d8e76ee6471a8f35eebd0fb38c91c8b"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-121-126.png",
+            "sha256": "0f9c7d24aaa1875d2478e4ef01f03e433f9fe5c00892437aba3af9dc0713ef35"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-127-132.png",
+            "sha256": "4ed2e2c74ed798400d21fbbaf1dbb10eb8f2473ecf09159359708a84d8ee4c8a"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-133-138.png",
+            "sha256": "e1b86df7918eb9f1b5d29a74358c26c52c01f388904dce467a2c770a4ac94e96"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-139-144.png",
+            "sha256": "6bc4cd36349ecf2af65c5b2b1aafdd507873603c0987cedf18ab370fe467cbc0"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-116.png",
+            "sha256": "ceaaa804117ab4174a171c4f78e9cf2696e8bc999f5e0d80f247ff8bbd5501de"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-117.png",
+            "sha256": "82d3a9284d603c8412a8447633f476f840884d711c489323450b5825491a7070"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-118.png",
+            "sha256": "12fb896776c6eb5803e67a21815222ba03666909419454ed1609626f93d44c47"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-129.png",
+            "sha256": "3d7a0a1884aef54535b1964ec2b461b7560d8a4f4f297826feaab0ffa1670560"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-131.png",
+            "sha256": "7ac2f2af9b97563e5078d40179762c28fba333e72c3af3f5b1555c8e414c6c90"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-133.png",
+            "sha256": "9f9a007b7a8f38bea1c86c8dd96ce2af1e66a7944e76e526310552d9f3794c21"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-134.png",
+            "sha256": "077570d30cd3b5a5d3d5d59df8a4b8ada9dac626f37afdf12180cd1d9c15f896"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-138.png",
+            "sha256": "9328f09381b839319110baaebdaa1a80579f181673ce54827cae7c731712b849"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-139.png",
+            "sha256": "6fe83ea84bd26cc8ad6e4efeb29b2dedbcf4d84ca61c387e2c87f725a83bf35e"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-140.png",
+            "sha256": "c2c00d29b05f942f0c57d5063fa43cc491da2b9c3783f1313b12be5e5a648a9a"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-141.png",
+            "sha256": "57262eeb5370efb002cf11ea51c5263d3414fa763d559481eb2e9ed392590e76"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-142.png",
+            "sha256": "22c2f51759bf0e3ce67ea699eae33ab591d888f9c3169ea5298c1bee04c09444"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-143.png",
+            "sha256": "74f904063c260ce2f315a3e45830355bf772b266b97fc5316402eb2c9a5af044"
+          },
+          {
+            "path": "C:\\Users\\eddie\\Documents\\trackvance\\ProductOne\\Sistema\\TrackvanceCore\\.codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\page-144.png",
+            "sha256": "9ce7d717e447c80c96b08514703a678629f9a07d5ea950856b2533d03ef95a7a"
           }
         ],
-        "ci_approval": false
+        "checks": [
+          "No clipping, overlapping text, blank pages or missing glyph squares",
+          "All headings, footers and page numbers present and legible",
+          "Table cells, row boundaries and wrapped paths fit their columns",
+          "Diagrams and code blocks fit within page margins"
+        ],
+        "observations": [
+          "Page 115 is a sparse table continuation containing its final row; content is present and fits without clipping."
+        ],
+        "issues": [],
+        "reviewed_at": "2026-10-06T01:06:56.986324+00:00"
+      },
+      {
+        "status": "PASS",
+        "artifact_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
+        "reviewer": "root",
+        "reviewed_range": [
+          145,
+          146
+        ],
+        "reviewed_pages": [
+          145,
+          146
+        ],
+        "count": 2,
+        "dpi": 110,
+        "method": "Actual original-resolution view_image review of every fresh six-page contact plus individual dense diagrams/tables/index pages; no old artifact QA reused",
+        "contacts": [
+          ".codex-local\\v080\\pdf-ci-frozen-202610060100\\render-09505726ed08-110\\contacts\\pages-145-146.png"
+        ],
+        "individual_pages": [],
+        "issues": [],
+        "findings": "Readable accents/glyphs; headers, footers, index, diagrams, tables and page transitions have no overlaps, cropped text or accidental blank pages."
       }
     ],
     "render_sha256": {
@@ -752,9 +757,9 @@
       "page-004.png": "b9e21722ce4f67a733676e4afa01c3fa97a0efd9802ad756a9ca1f34f5d2881a",
       "page-005.png": "adf0d56c40b4d7f8a5901c3907808757dce8753f75b9da7f653f0a9abe98cb22",
       "page-006.png": "5ed7c9b678570ae8a83500bdd112f3316716a98d158382ef420dd096f0e730c0",
-      "page-007.png": "33af4f2057c50506a71268a0aebc753e53c26fe2340a6c61245bc9f7fa08b10b",
-      "page-008.png": "fa5b914e6c9521d6c869f3f8457c444cb42b964d851a9ed7fb499291c3ac8cbc",
-      "page-009.png": "29091381232e13ac8495db6b2c47ca6401a004633d347b9d708a94cfa7463072",
+      "page-007.png": "0be140f8655dd59014a4d587f48d94237445ae91064e0bd17c97dffebecc79e6",
+      "page-008.png": "16e7510e6ca8b1304aaff92d4e298d4489316f54b3cae54c60d619751383eb7d",
+      "page-009.png": "51edf755841c3de59584301b3032d55ef2d0b53cd49c37dbfab847e94a98dc19",
       "page-010.png": "b14f6a865f206458df2b5ee36d8f7eff1525e37199922d1e0e60c8f0de978a18",
       "page-011.png": "fc45d1e6deb17996b1b347bc2876a20d4b74cde483a1704296221d6580eccb60",
       "page-012.png": "fc12bcfb742bcbab82e9481480a9bebec1c3d28b2585e6e5d43f415073ea4342",
@@ -844,62 +849,65 @@
       "page-096.png": "cca5e00af5f5caf44b478c8884d7a35c0db219f71a34392ee064c6bd2a84dfa1",
       "page-097.png": "6a1d455aa05836c7f7a546d0c497db6ab37e3d994940b3e8387ed39fa48a508f",
       "page-098.png": "c2b29f976f3fb54183b5a00ef08ecbfeed9a63aeae1f60e557c76efb2ccca4d7",
-      "page-099.png": "986a0c0e9d37e9ec1e1d1ff6ec28d20f3cf170b99444cfef37d90ebf08fa45af",
+      "page-099.png": "bc03a16d4ae77b4da1bc54193f1556f5763980f00f374f19b7aec8fe7fbde368",
       "page-100.png": "c59aa423a055d47f150274e0c07e943ca8dd1c189e2ba7c832067c0a06e548f2",
       "page-101.png": "57946487c643876e1540f5e90ba301f571038c2760eb4719c5a8eeb07853a83d",
       "page-102.png": "74d09cfb90b79c7eaaf028e04dc3163c075c7629b9c001c06ede1466171bc69f",
       "page-103.png": "3871c2c242e7443067915eb6b7ea45e51282560ffbf83ae284631f5cf789fd4c",
-      "page-104.png": "1d0cba0f4a46aa840b65fb314c85a1cb7abdbd7707bdfe248b777678e710042c",
-      "page-105.png": "264d9dfa92259f0f0790323f134ca9c905acd504b5f8872968a1116543aa692a",
-      "page-106.png": "05cbd15f3751829d64f79c0c73ba7d13a86c912b413f71c809e5124d0a597e62",
-      "page-107.png": "6c755077cc30cc96fa6bca71090b3c102457c2380e095b567a215ceecc9b3f35",
-      "page-108.png": "0c1ebca88fdf9501f74d75055cfb860d29e82d76569d9b292ff0540ecc3e7914",
-      "page-109.png": "81ff786a81ca47c3053499a5cd462541e1c80828464f2ee630848370ac92ddeb",
-      "page-110.png": "cdfd793679417bc47951626cf33c4b7e9b9b0ff1fb626e27f5cf6c1d8f652be2",
-      "page-111.png": "e9e4a2423fe330216c1df062e14aea3f53d43b2ce6c1c741751d2a117429dc90",
-      "page-112.png": "69ab87f2eaec1824a93e04e06b96fc470d903ab733db011bafc8259c9e1b5e14",
-      "page-113.png": "24e441734ffbb770e4027cb9e4f56fe0316245f5cb6ddcf726cac99da7d6fc23",
-      "page-114.png": "3f59655eeaea769730d8219c86dbdaacea13892f80982178a5fcfcfbf9212b93",
-      "page-115.png": "45dbed09e0e328ac32671519fdf87b66de77c92ff65f1102a41a336fa7f3da51",
-      "page-116.png": "57818ede85dc05b78dcf2beb21e2a2431aaa1cc106cb701184d74b9822a60e18",
-      "page-117.png": "a6bc764678159c0ef9aba7060d6ad8424b609f89a11b3be59e787a64871bfab2",
-      "page-118.png": "3f150ba6f3abc8bac04fd5e082b0121141145b73b3b4994274dd3b1d28705530",
-      "page-119.png": "8b88aa03cdc1145a6cb7580ca84dfcd0378f478bf053c197bf3e264b5bfaa6c1",
-      "page-120.png": "8bc08933d91759d1c87a580334760e2d9126a4a54d06113ba0ae08db84bf5e34",
-      "page-121.png": "a6177956d68d42f18a1038ec82b412fd20e9182b0f850d2c7765c2f6da910518",
-      "page-122.png": "6df062b8b0b2e9163c80897fd8747a35c7197576fd4fd89936641861cc026ff8",
-      "page-123.png": "5114b21158785545db724dbaaeeb4f5824454d54fe8c035eb71f6c02d8bb4457",
-      "page-124.png": "83aa194501805784e702d4f42db563d5bae01cd1cee3c7ffdc53e887ae2be5c1",
-      "page-125.png": "c429408bad42aa4580bde51a592d7836875dd72fb5ee8130682e3be6064200cb",
-      "page-126.png": "a7a2494a9e68f8ede691904a5a23edea2003b4acb7b383fc973158a0a2107a89",
-      "page-127.png": "6f628ba8584199b2e2229849f335b0150a5687a0f5402682e428cb6a90fe7415",
-      "page-128.png": "fcc789aeb07dba6cf7da452b79b6512db5e4d80d9c6bb1f4e994de0b894ed4d3",
-      "page-129.png": "a59d32463473e7b55a256458f8505493814eb572f456282ed689fc7f5e1f7a8a",
-      "page-130.png": "a5c6878cbd87e6ee87edd637d6e79f068242c37e02179dadc1ffbf9b215895ce",
-      "page-131.png": "5271640e0255146febd48933e82f7e068c005214d0eb0f130511c322f45732ad",
-      "page-132.png": "a723dd67f0b69a43349ac7bcc208898fc74f29bcd14c8df32478e68a997ae0ac",
-      "page-133.png": "04486acf43dbb731a05f93cdc839e0a8d33421f620ae93abcdbc7c0ef54701d5",
-      "page-134.png": "7cd334c267b01baa40440c348767413a9ca8f1ef123476d773a8253dfad2ace8",
-      "page-135.png": "c6c73896804e43d69dc0a5f7bf70f8983b327317f97abd74260e14e80b44c050",
-      "page-136.png": "2bb7cba41b1a603531cec05c5c5a6e2c683d4ac9b749ca463d7d5d5616bab95f",
-      "page-137.png": "0ae1937e4d49a1afaa9bae18334dfc6e01b91b75b12f440999c3aabc9dd1f6bb",
-      "page-138.png": "ced19aefc2839b199e6541baefb91c2f4eedc0daaf91e63a38c2e30fae94220b",
-      "page-139.png": "2371e3a70651161a362289ca4e7c85f3844d5dc48cef530f1f5d2ca764544443",
-      "page-140.png": "70bad92e5ef5dca172808cb6b2f2b96bad00f015946b486288ae35a9b0bb11aa",
-      "page-141.png": "19cdeace9167a66b06e75d58b769a2d373523d2bf3496f3c983d20546b673751",
-      "page-142.png": "06f486514cf0467c48f4d3b17c2aa9661c9259c1cd6f070a061c273b0bfb12b2",
-      "page-143.png": "94a01fd184824a9be2e1d7d907f4ba112a67029958c804111cd158012457a00e"
+      "page-104.png": "0b83f57cf2db23e9673e3b0797bde58ab4a72ee7ed7fb60e19c767bb8d9c284c",
+      "page-105.png": "4251a8fe433ab313078785a2d6e669a9aa83c8adff74d7f4330e364ae88a8c30",
+      "page-106.png": "c3050c3a83f78e7ada056ad38847de085b4f3dbac4b3a39595b18d75cb2e491a",
+      "page-107.png": "d8e502e5b8bc40a535216fc944ee67592e993c0992befe02df74cf0c2a49c10b",
+      "page-108.png": "6a83d0446b93f26c5312a0c589baa629fcc1270596babbc86eb6f875777252d4",
+      "page-109.png": "9e280b4b1719a28d678ec0a6dc801b52c4c6dc0cf58bee93d4dbfdd8564eecb9",
+      "page-110.png": "8361d071e4c4247a9a64023bb2bb95ede6b53f2fa835307206a69a56ded0f028",
+      "page-111.png": "ea1d43a24935a9922289c5eedd02f7431dcdeab074acd43db50f596d33bc2b3f",
+      "page-112.png": "aae40e62941f18ed76539fdbcd02d729052be3a31b22bcd39f28e4120c887b76",
+      "page-113.png": "b630eb88711e27fe7011cafc6b3f61eaeede3bb0c96b886e256dab3d720f384a",
+      "page-114.png": "e4008f7b1b796544212efe6c6990f994993c0930af0dd25771e822f9fd71af63",
+      "page-115.png": "4abe2ed3e2e95abea138a61910ba809cc93590e5ed022b78dbdb93c7eaa998e9",
+      "page-116.png": "ceaaa804117ab4174a171c4f78e9cf2696e8bc999f5e0d80f247ff8bbd5501de",
+      "page-117.png": "82d3a9284d603c8412a8447633f476f840884d711c489323450b5825491a7070",
+      "page-118.png": "12fb896776c6eb5803e67a21815222ba03666909419454ed1609626f93d44c47",
+      "page-119.png": "e705be8cebb336de825a33c0dd7599373b1acc11107ee7bb89939e1877fb5f6f",
+      "page-120.png": "eadb999df13d4a2ff42bae012e09c3a9dec0b2444c7c431151c96437e4974e29",
+      "page-121.png": "eca7896b9271655e1759b90717ae1a4a75a843a83ef9e3d10761b9ee322e3f9b",
+      "page-122.png": "22fff85a42adb5e2d59b9bd7496f71bdf7707284fb4d076a539759b9fc951523",
+      "page-123.png": "ce7ee7d49177220c03898c0d15a83ce403b4b6ef7dad8f92056b137045a26ece",
+      "page-124.png": "f3ef80b1e02c60029c44e7aa6c3062127aa5a1e7a97ceec61d13c2bb014efe9d",
+      "page-125.png": "935a9a5fe5575c60f375edfb22b101d99313a55f786b7bef1469c51564edade1",
+      "page-126.png": "0489225442c2cf1ff81a40ef27b849f8612b70d232099342fbb102e2814a10d7",
+      "page-127.png": "2da75d5109b490e6fef4d0c23ac51cb4e13aa522afbd129b60a3057f4687bf0d",
+      "page-128.png": "be4d9521de8aa745fc4639cdb445bb1045beed3b1ceb996ab8d26ef633448333",
+      "page-129.png": "3d7a0a1884aef54535b1964ec2b461b7560d8a4f4f297826feaab0ffa1670560",
+      "page-130.png": "c7b013964b53dc8ca23e35396f7aec593f285e2624abbe7d6cd50767819f0ea3",
+      "page-131.png": "7ac2f2af9b97563e5078d40179762c28fba333e72c3af3f5b1555c8e414c6c90",
+      "page-132.png": "2b99c593692fa49bd809afb39891aaa9256e63bcd8c24e10c06285d347c0cc42",
+      "page-133.png": "9f9a007b7a8f38bea1c86c8dd96ce2af1e66a7944e76e526310552d9f3794c21",
+      "page-134.png": "077570d30cd3b5a5d3d5d59df8a4b8ada9dac626f37afdf12180cd1d9c15f896",
+      "page-135.png": "3b9c10e4b08d104fc708c663c5a71ffbe2b2032404335defae60a8bded65a67d",
+      "page-136.png": "63c2e393aa8b294e926e5c3a65ca6a4ade893d3913b2456c6f3941998bd8d191",
+      "page-137.png": "b8720c5e8b93f9e9294fb757f37243b8a3300605a1b855c285e7a10b1f08b5b3",
+      "page-138.png": "9328f09381b839319110baaebdaa1a80579f181673ce54827cae7c731712b849",
+      "page-139.png": "6fe83ea84bd26cc8ad6e4efeb29b2dedbcf4d84ca61c387e2c87f725a83bf35e",
+      "page-140.png": "c2c00d29b05f942f0c57d5063fa43cc491da2b9c3783f1313b12be5e5a648a9a",
+      "page-141.png": "57262eeb5370efb002cf11ea51c5263d3414fa763d559481eb2e9ed392590e76",
+      "page-142.png": "22c2f51759bf0e3ce67ea699eae33ab591d888f9c3169ea5298c1bee04c09444",
+      "page-143.png": "74f904063c260ce2f315a3e45830355bf772b266b97fc5316402eb2c9a5af044",
+      "page-144.png": "9ce7d717e447c80c96b08514703a678629f9a07d5ea950856b2533d03ef95a7a",
+      "page-145.png": "4af4dc233211f9f84b0aa9db2a0cd30c426172583b5566b99bcaa5c302caf3fe",
+      "page-146.png": "6899ab13765f8c668534a28080bf56613bb3d72ec000e3caf8382f7fa25a2116"
     },
     "unresolved_findings": [],
     "render_warnings": [
       {
         "message": "No display font for 'Symbol' / 'ArialUnicode'",
-        "disposition": "Poppler configuration warnings; neither font used in PDF resources. All143 pages visually inspected with no missing glyphs."
+        "disposition": "Poppler configuration warnings; neither font used in PDF resources. All146 pages visually inspected with no missing glyphs."
       }
     ]
   },
   "official_copies": {
-    "pdf_sha256": "223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c",
+    "pdf_sha256": "09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61",
     "source_generator_inputs_pdf_extraction": "BYTE_IDENTICAL",
     "productone_directory": "ProductOne/Documentación",
     "previous_070_pdf_sha256": "493c0d37fd087c70d667832d896b90ade4202d618e99874e73b23bb90812b476"

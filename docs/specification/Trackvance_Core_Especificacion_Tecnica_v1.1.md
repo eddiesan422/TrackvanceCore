@@ -2686,9 +2686,11 @@ El push ordinario evita duplicar la validación que recibirá un PR abierto del
 mismo SHA; despachos manuales y [ci full] conservan la ejecución explícita.
 La cancelación por rama sólo alcanza validaciones de desarrollo obsoletas.
 La certificación completa usa identidad por run y no se cancela por otro push.
-La matriz ejecuta como máximo cuatro grupos en paralelo, cada uno en su runner,
+La matriz ejecuta como máximo 16 grupos en paralelo, cada uno en su runner,
 con un stack pesado por runner, sin elevar los límites de producto. fail-fast
 está deshabilitado para conservar los resultados de los demás grupos.
+La capacidad efectiva depende de cuota y disponibilidad; no garantiza un tiempo
+de cierre ni cancela certificaciones completas previas.
 
 ### Manifiesto completo y grupos de aceptación
 
@@ -2721,11 +2723,36 @@ de huellas completas de fuente, aceptados y destino. Una muestra, un conteo o
 una bandera PASS no los reemplaza. Se preservan decimales, IDs, null/vacío,
 fechas, tipos y casos negativos definidos por cada suite.
 
+El recorrido general de navegador, sólo cuando TRACKVANCE_CI_IMAGE_MANIFEST tiene
+un valor y los argumentos están vacíos, enumera todos los specs reales de
+tests-e2e/**/*.spec.ts, incluidos los nuevos y los de subdirectorios. Excluye
+únicamente estos ocho opt-ins si su flag no vale exactamente true; el grupo
+dedicado indicado crea sus fixtures y ejecuta esas pruebas. Los paths siguientes
+son relativos a frontend/tests-e2e.
+
+| Spec opt-in | Flag requerido | Grupo obligatorio |
+| --- | --- | --- |
+| automation.spec.ts | TV_AUTOMATION_E2E | async-volume-100 |
+| volume.spec.ts | TV_VOLUME_E2E | async-volume-100 |
+| corrections-volume.spec.ts | TV_CORRECTIONS_E2E | corrections-browser |
+| connections.spec.ts | TV_CONNECTIONS_E2E | connections |
+| roadmap-source-cycle.spec.ts | TV_CONNECTIONS_E2E | connections |
+| delivery.spec.ts | TV_DELIVERY_E2E | delivery |
+| identity-sso.spec.ts | TV_IDENTITY_SSO_E2E | identity-sso |
+| demo-access-clean.spec.ts | TV_EXPECT_CLEAN_DEMO | compose-critical: compose-clean-demo |
+
+El summary registra selected_spec_files y excluded_opt_in_specs con archivo,
+flag requerido y grupo, sin valores del entorno. El gate compara la selección
+exacta con el manifiesto; una selección vacía, SKIP inesperado o prueba nueva
+omitida falla. Los argumentos explícitos y la invocación habitual sin ese
+manifiesto CI conservan su selección original.
+
 ### Imágenes, cachés, deadlines y evidencia CI
 
 images construye backend y web una vez para el SHA fuente en Linux amd64 con
-locks y etiqueta OCI de revisión. Transporta únicamente imágenes y un manifiesto
-con ID sha256, tamaño y SHA-256 de sus tar. Antes de cargar, cada suite verifica
+locks y etiqueta OCI de revisión. Transporta imágenes, un manifiesto con ID
+sha256, tamaño y SHA-256 de sus tar y frontend-build-proof.zip del mismo SHA.
+Antes de cargar, cada suite verifica
 todos los bytes; después inspecciona la revisión y el ID cargado y los fija en
 su Compose privado. El tag es sólo alias de transporte. Las fuentes legacy
 auténticas se construyen deliberadamente desde sus propios commits conservados.
@@ -2735,12 +2762,34 @@ los volúmenes/redes contra el inventario habitual. El perfil 0.8.0 mantiene su
 preflight estricto y presupuesto conjunto de 9 GiB. Sólo se permite OIDC mock
 explícito de identidad; no se hereda SSO/SMTP ni credenciales reales.
 
+El ZIP procede del target build del mismo Dockerfile web y aprovecha las capas
+BuildKit construidas. Contiene source/ con los archivos frontend versionados,
+verificados byte a byte contra Git, y dist/ con el build real. node_modules
+permanece en la imagen de construcción. El descriptor registra SHA fuente, ID
+de esa imagen, tamaño y SHA-256 del ZIP. Sus cotas son 20.000 archivos, 512 MiB
+sin comprimir y 128 MiB de ZIP. La importación para promoción valida paths e
+inventario, rechaza enlaces/archivos ambiguos y compara los fuentes con Git y
+cada archivo dist con nginx certificado; sólo admite además su página heredada
+50x.html, cuyo hash registra. Permite probar los bytes CI sin reinstalar ni
+reconstruir el frontend durante la promoción; no reemplaza tests ni gate.
+
+El artifact de imágenes usa compression-level 1; la compresión exterior no
+altera los tar ni sus hashes. Se mide su coste de CPU/tiempo y los bytes reales
+de descarga/descompresión; ese nivel no demuestra una mejora por sí solo.
+La carga Docker todavía procesa todos los bytes originales del tar.
+
 Las cachés admiten descargas uv/pnpm, Chromium y capas BuildKit, con claves de
 plataforma/herramientas/locks. Los entornos se reinstalan con locks congelados.
 cold no restaura cachés y puede guardarlas para warm. No se cachean DB, fixtures,
 datasets, backups, estado de negocio, resultados ni receipts PASS. Se miden
 construcción/exportación, bytes y descarga/verificación/carga; la reutilización
 no presume ventaja sobre reconstruir hasta comparar ambos costes reales.
+
+Python 3.12 se conserva para todos los harnesses. Sólo backend y los grupos
+async-volume-100/500/1024 instalan uv y el entorno backend bloqueado en host;
+estos tres generan las poblaciones Parquet con pyarrow. Los otros 14 grupos de
+la matriz utilizan stdlib/helpers propios en host. Las dependencias y pruebas
+de producto, JVM y migraciones dentro de contenedores permanecen completas.
 
 Cada grupo tiene un deadline inferior al timeout de job: Catálogo, 6.300 s frente
 a 120 min y márgenes propios para XLSX. El fallo/timeout registra causa saneada,
@@ -2753,6 +2802,16 @@ RUNNING, los prerrequisitos y los históricos no son terminales certificables.
 Los logs/dumps/queries/credenciales quedan privados. Los artifacts públicos sólo
 contienen reportes explícitos saneados y sus hashes, incluso cuando el job falla.
 
+Cada artifact incluye SHA fuente e intento en su nombre: ci-selection,
+ci-images, ci-image-proof y ci-gate usan el sufijo -<SHA>-<attempt>;
+ci-evidence añade también el grupo. Los downloads requieren el intento actual
+y los receipts validan run_id/run_attempt. Los reintentos conservan los artifacts
+anteriores sin colisiones ni mezcla de evidencia; runs distintos conservan su
+identidad aunque compartan SHA y número de intento. La comparación fría/caliente
+retiene ambos conjuntos completos, modos, hashes y tiempos propios. Nunca
+reutiliza resultados PASS y mide también exportación/transferencia de imágenes
+y del ZIP. Nombres distintos no demuestran cache hits ni reducciones de coste.
+
 final_gate.py exige modo full, selección/manifiesto exactos, needs reales
 exitosos, 64 receipts obligatorios únicos, SHA/run/intento/job, filas/variantes,
 tiempos, imágenes, hashes y contenido de cada evidencia. Rechaza ausencia,
@@ -2762,7 +2821,7 @@ escenarios Linux/JVM. El cierre exige también run y todos los jobs aplicables
 completados SUCCESS del SHA final; después siguen backup fresco, restore
 aislado detenido, promoción protegida y verificación habitual.
 
-### Medición histórica parcial y mediciones pendientes
+### Historial y protocolo de medición
 
 La baseline saneada ci-optimization-baseline.json procede de logs/metadatos
 conservados, sin una nueva ejecución ni certificación. El run 37368090419/495f4eb,
@@ -2788,17 +2847,27 @@ fixture/oráculos completos. El navegador terminado midió 387,001 s; su poblaci
 400k se infiere del orden del driver, no del summary. No acredita el navegador
 restante ni el restore integral. La revisión 630 amplió el presupuesto monolítico
 a 180 min y añadió checkpoints; permanece antecedente del reparto actual.
-El snapshot 630 disponible al auditar tenía 11 SUCCESS y cinco jobs no terminados de 16;
-sus duraciones completas y coste total siguen desconocidos. Las pruebas locales
-de esa revisión son frontend 252 PASS y backend Windows 1.269 PASS/46 SKIP, con alcances
-distintos del backend+scripts Linux que no se suman.
+El run histórico 37388511854/63096e6, intento 1, terminó FAIL con 15 jobs SUCCESS
+y Catálogo/Reportes fallido durante la población de un millón. XLSX fue SUCCESS
+en 3.344 s de job (55,73 min). Desde 23:26:35 UTC del 5 de octubre hasta la
+actualización terminal 00:29:06 UTC del 6 de octubre transcurrieron 3.751 s.
+Los 16 intervalos de jobs suman 14.546 s, o 242,43 min de runner, incluido el
+fallido; no son facturación ni CPU útil. Sustituye para ese run el snapshot previo
+de 11 SUCCESS/cinco pendientes, que se conserva como antecedente. No acredita
+certificación completa ni comparación porcentual con 495. Las pruebas locales
+de esa revisión son frontend 252 PASS y backend Windows 1.269 PASS/46 SKIP, con
+alcances distintos del backend+scripts Linux que no se suman.
 
-Faltan ejecuciones completas fría y caliente del nuevo contrato. Deben medir
-preparación, builds/transferencia, fixtures/adquisiciones, oráculos, SQL, navegador,
-recovery, upload/cleanup, tiempos de cola y suma de ejecución sin solapamientos.
-No se atribuye una reducción porcentual ni coste final a una baseline truncada.
-Los resultados finales de CI, backup/promoción y el hash del PDF publicado se
-registran fuera de sus bytes para evitar referencias circulares.
+La comparación completa fría/caliente del nuevo contrato permanece pendiente
+al corte documental. El protocolo mide preparación, build/exportación,
+transferencia/descompresión, fixtures/adquisiciones, oráculos, SQL, navegador,
+recovery, upload/cleanup, cola y suma de ejecución sin duplicar componentes
+contenidos. No se atribuye una reducción porcentual ni coste final sin ambos
+recorridos reales comparables. El informe externo de cierre, posterior al commit,
+registra runs/intentos, mediciones fría/caliente, SHA documental final, gate,
+backup/restore y promoción, vinculados al hash de este PDF revisado. Conserva
+los bytes aprobados y evita referencias circulares; no anticipa PASS futuros ni
+permite certificar el SHA final con pruebas de una revisión anterior.
 
 ### Corte de certificación actual 0.8.0
 

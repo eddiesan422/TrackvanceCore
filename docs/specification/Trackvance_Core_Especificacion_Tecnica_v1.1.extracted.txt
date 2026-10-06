@@ -459,52 +459,52 @@ Target reconocido y UNKNOWN
 Outbox atómica y consumidores independientes
 104
 22. Calidad, certificación y matriz de requisitos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 105
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 104
+Modos CI y selección conservadora
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 104
+Manifiesto completo y grupos de aceptación
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 106
+Imágenes, cachés, deadlines y evidencia CI
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 107
+Historial y protocolo de medición
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 108
 Corte de certificación actual 0.8.0
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 107
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 110
 Resultados históricos de la publicación inicial 0.7.0
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 109
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 112
 Antecedente: certificación independiente C01-C06
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 113
-Matriz de requisitos, implementación y evidencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 114
-Reglas de aislamiento y evidencia
-114
-23. Decisiones vigentes y control documental
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 114
-ADRs y responsabilidades
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 114
-Fuente, candidato, revisión y publicación
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 115
-Registro de revisión
-116
-24. Antecedente: cambios funcionales y técnicos 0.5.1
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 116
-1. Reparación local de evidencia COMMITTED
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 116
-2. Revisión operacional de UNKNOWN
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 116
-3. Semántica uniforme de métricas
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 116
-4. Desglose UPSERT PostgreSQL por capacidades
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 116
-5. Regresión temporal exhaustiva
+Matriz de requisitos, implementación y evidencia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 117
+Reglas de aislamiento y evidencia
+117
+23. Decisiones vigentes y control documental
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 117
+ADRs y responsabilidades
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 117
+Fuente, candidato, revisión y publicación
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 118
+Registro de revisión
+119
+24. Antecedente: cambios funcionales y técnicos 0.5.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 119
+1. Reparación local de evidencia COMMITTED
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 119
+2. Revisión operacional de UNKNOWN
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 119
+3. Semántica uniforme de métricas
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 119
+4. Desglose UPSERT PostgreSQL por capacidades
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 119
+5. Regresión temporal exhaustiva
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 120
 6. Linaje canónico sin migración histórica
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 117
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 120
 7. Benchmark exclusivo de Delivery
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 117
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 120
 8. División del frontend en módulos de carga diferida
-118
+121
 25. RBAC dinámico y administración real de roles
-120
-26. Usuarios, credenciales y primer acceso
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 120
-Alta e identidad estable
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 120
-Emisión efímera y entrega externa
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 121
-Modal obligatorio y ciclo de vida del plaintext
 
 
 --- PAGE 8 ---
@@ -512,78 +512,80 @@ TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
 8
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 122
-Regeneración y concurrencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 122
-Login, expiración y primer acceso
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 123
-Estado, permisos y auditoría
 123
-27. SSO Microsoft y Google
-124
-28. Notificaciones internas y conservación de historia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 124
-Bandeja vigente por usuario
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 124
-Destinatarios y autorización
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 124
-C06: no leída explícita y persistente
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 124
-Historia y credenciales
-125
-29. Persistencia y recuperación de identidad/automatización
-125
-30. Auditoría técnica de Data Delivery
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 125
-Cambio funcional respecto a 0.5.1
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 125
-Uso del builder
+26. Usuarios, credenciales y primer acceso
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 123
+Alta e identidad estable
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 123
+Emisión efímera y entrega externa
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 124
+Modal obligatorio y ciclo de vida del plaintext
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 125
+Regeneración y concurrencia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 125
+Login, expiración y primer acceso
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 126
+Estado, permisos y auditoría
+126
+27. SSO Microsoft y Google
+127
+28. Notificaciones internas y conservación de historia
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 127
+Bandeja vigente por usuario
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 127
+Destinatarios y autorización
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 127
+C06: no leída explícita y persistente
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 127
+Historia y credenciales
+128
+29. Persistencia y recuperación de identidad/automatización
+128
+30. Auditoría técnica de Data Delivery
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 128
+Cambio funcional respecto a 0.5.1
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 128
+Uso del builder
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 129
 Qué significan las columnas
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 126
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 129
 Esquemas y compatibilidad de tipos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 126
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 129
 Modelo persistente y migración
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 127
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 130
 Fronteras transaccionales y permisos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 128
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 131
 Drift, fallos y estado UNKNOWN
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 128
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 131
 Contratos y evidencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 129
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 132
 Backup/restore, pruebas y límites
-129
-31. Antecedente: cambios funcionales y técnicos 0.6.0
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 130
-A. Roles y catálogo de permisos
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 130
-B. Usuarios, credenciales y SSO
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 131
-C. Notificaciones
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 131
-D. Auditoría de publicación
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 132
-Resultados del antecedente
 132
-32. Configuración y prueba real SSO
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 132
-Preparación común
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 132
-A. Cuenta personal Microsoft: Outlook, Hotmail, Live
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
-B. Microsoft Entra work/school
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
-C. Gmail personal
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
-D. Google Workspace
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
-Verificación y desvinculación
+31. Antecedente: cambios funcionales y técnicos 0.6.0
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
+A. Roles y catálogo de permisos
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 133
+B. Usuarios, credenciales y SSO
  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 134
-Errores frecuentes
-134
-33. Operación de credenciales y retiro de SMTP
+C. Notificaciones
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 134
+D. Auditoría de publicación
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 135
+Resultados del antecedente
 135
-34. Matriz completa de autorización
+32. Configuración y prueba real SSO
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 135
+Preparación común
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 135
+A. Cuenta personal Microsoft: Outlook, Hotmail, Live
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 136
+B. Microsoft Entra work/school
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 136
+C. Gmail personal
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 136
+D. Google Workspace
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 136
+Verificación y desvinculación
 
 
 --- PAGE 9 ---
@@ -591,39 +593,45 @@ TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
 9
-141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 137
+Errores frecuentes
+137
+33. Operación de credenciales y retiro de SMTP
+138
+34. Matriz completa de autorización
+144
 35. Antecedente: cambios funcionales y técnicos 0.6.1
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 144
 1. Situación 0.6.0
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 144
 2. Problema funcional
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 144
 3. Decisión de producto
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 144
 4. Solución funcional
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 141
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 144
 5. Solución técnica
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 6. Cambios API
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 7. Cambios UI
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 8. Persistencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 9. Seguridad y límites de memoria
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 10. Compatibilidad
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 11. E2E y privacidad de evidencia
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 12. Upgrade Docker real
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 142
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 145
 13. CI y trazabilidad documental
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 143
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 146
 14. Limitaciones
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 143
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 146
 15. Pendientes posteriores
- .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 143
+ .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  . 146
 Resultados ejecutados 0.6.1
 
 
@@ -6171,13 +6179,15 @@ La instalación se identifica por etiquetas/configuración, puerto 3100 y proyec
 y PostgreSQL 16. Durante desarrollo ningún fixture/benchmark/fault injection usa sus recursos. Los guards comparan
 imagen/estado/restart/mounts antes y después de tests; el orden de mounts se normaliza, pero sus identidades/valores se
 comparan estrictamente.
-Después de aprobar código/E2E/recovery/documentos y todos los jobs CI del HEAD final, se pausa nuevo despacho, comprueba
-ausencia de trabajos activos, respalda consistentemente con herramientas compatibles, registra inventario y verifica el backup
-mediante restore aislado sin workers/dispatch ni conectividad a destinos reales. La revisión/migración aplicada se consulta del
-runtime: el tag histórico de la imagen no la demuestra. Se recrean todos los servicios afectados desde el commit aprobado y se
-aplica únicamente 0017 sobre el origen compatible verificado. Se conservan .env/puerto/origen/restart:no y la configuración real de
-demo/SSO, usuarios, secretos, zonas horarias y pausas. No se usa down-v, prune, reset, fixture ni escritura de prueba en el
-proyecto del usuario.
+Después de aprobar código/E2E/recovery/documentos y la certificación CI completa del HEAD final, se verifica el gate
+FULL_CERTIFICATION con certifies_final=true, los 19 grupos y 64 escenarios íntegros y el workflow/jobs aplicables terminados
+SUCCESS de esa revisión. El modo rápido de desarrollo no habilita esta etapa. Se pausa nuevo despacho, comprueba ausencia de
+trabajos activos, respalda consistentemente con herramientas compatibles, registra inventario y verifica el backup mediante restore
+aislado sin workers/dispatch ni conectividad a destinos reales. La revisión/migración aplicada se consulta del runtime: el tag
+histórico de la imagen no la demuestra. Se recrean todos los servicios afectados desde el commit aprobado y se aplica únicamente
+0017 sobre el origen compatible verificado. Se conservan .env/puerto/origen/restart:no y la configuración real de demo/SSO,
+usuarios, secretos, zonas horarias y pausas. No se usa down-v, prune, reset, fixture ni escritura de prueba en el proyecto del
+usuario.
 La verificación final no destructiva comprueba health, Alembic, los cuatro workers, scheduler/consumidores, storage, API/UI 0.8.0,
 imágenes/revisión y preservación estricta state 7→8/proyección v7 o la cadena correspondiente al origen real. Comprueba además
 los límites XLSX/Reportes efectivos de API/runtime/UI, sin fixtures ni adquisiciones nuevas sobre datos del usuario. Si falla, se usa
@@ -6430,6 +6440,41 @@ owner antiguo no puede confirmar la acción del owner vigente. No se introduce K
 Cada resultado debe indicar comando, entorno, revisión, status y evidencia. La suite host no habilita los opt-ins JVM; esa omisión
 no es PASS. Las suites Docker dedicadas ejecutan los escenarios JVM obligatorios sin SKIP. Las pruebas E2E principales
 atraviesan navegador, API, PostgreSQL, workers, artefactos, Spark y SQL real; mocks de componente no las sustituyen.
+Modos CI y selección conservadora
+Trackvance CI separa desarrollo rápido de certificación completa. Su checkout utiliza el SHA fuente exacto del push o de la rama
+del PR, sin atribuir resultados del merge sintético a otra revisión. El despacho manual permite elegir rama, modo full/auto/fast y
+caché cold/warm; full es el valor inicial. Un commit con [ci full] exige el recorrido completo. [ci cold] deshabilita la restauración de
+cachés en el primer intento del push. selection.json identifica revisión, paths/reglas, motivo, grupos y SHA-256 del manifiesto
+empleado.
+El selector sólo permite fast para cambios documentales acotados reconocidos. Código/tests, CI, Docker, dependencias/locks,
+migraciones, contratos, harnesses, documentación operativa/de arquitectura y cualquier incertidumbre fuerzan full, incluso si se
+solicitó fast. Los tres grupos rápidos reutilizan todas las comprobaciones backend, frontend y Compose crítico existentes:
+código/contratos, migraciones PostgreSQL y aislamiento Linux; lint/tipos/tests/build de UI; demo vacío y navegador con persistencia
+real después del reinicio. Un gate rápido es DEVELOPMENT_ONLY y certifies_final=false. No acredita volúmenes ni recuperación.
+El push ordinario evita duplicar la validación que recibirá un PR abierto del mismo SHA; despachos manuales y [ci full] conservan la
+ejecución explícita. La cancelación por rama sólo alcanza validaciones de desarrollo obsoletas. La certificación completa usa
+identidad por run y no se cancela por otro push. La matriz ejecuta como máximo 16 grupos en paralelo, cada uno en su runner, con
+un stack pesado por runner, sin elevar los límites de producto. fail-fast está deshabilitado para conservar los resultados de los
+demás grupos. La capacidad efectiva depende de cuota y disponibilidad; no garantiza un tiempo de cierre ni cancela certificaciones
+completas previas.
+Manifiesto completo y grupos de aceptación
+scripts/ci/scenarios.json declara 19 grupos y 64 escenarios obligatorios. Los 16 jobs funcionales históricos continúan cubiertos; el
+job XLSX monolítico se reparte en cuatro grupos con prerrequisitos propios. Los jobs select/images/gate son coordinación, no
+grupos funcionales adicionales. No se transfieren bases, fixtures ni receipts PASS entre grupos para sustituir una ejecución
+necesaria.
+Grupo
+Escenarios
+Cobertura exigida
+backend / frontend / compose-critical
+6 / 4 / 2
+Checks completos existentes, probe Linux,
+migraciones PostgreSQL, demo vacío y
+navegador/persistencia real.
+corrections-acquisition
+9
+Ocho adquisiciones 100k/100001/400k/1M
+inline/shared y rechazo 1M+1 conservando
+la versión anterior.
 
 
 --- PAGE 105 ---
@@ -6437,6 +6482,211 @@ TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
 105
+Grupo
+Escenarios
+Cobertura exigida
+corrections-browser
+2
+Navegador real 400k y 1M shared, cadena
+completa y oráculos de fuente, salida y
+SQL.
+corrections-dispatch
+3
+Cadena de 1M inline, despacho dos
+datasets de 1M con worker ocupado y no
+leída tras reinicio API.
+corrections-recovery
+3
+Cancelación durante lectura, crash/lease
+de 1M shared y backup/restore nativo con
+diagnóstico y no leída.
+identity-sso / connections / delivery
+1 / 1 / 1
+RBAC/OIDC sintético firmado/PKCE,
+motores reales y estrategias/auditoría con
+navegador.
+backup-restore
+4
+Recuperación nativa 0.8.0 y fuentes
+auténticas 0.5.1/0.6.0/0.6.1.
+catalog-reports
+8
+Tres fuentes de 120/400k/1M, navegador,
+snapshot conjunto, HTTP efímero y restore
+nativo/auténtico 0.7.0.
+benchmark-smoke /
+delivery-benchmark-smoke
+1 / 1
+Medición smoke real y ocho casos
+Delivery; no sustituyen benchmark de
+capacidad.
+spark-local / spark-standalone
+2 / 2
+Paridad real y tres módulos de 1M en
+ambos modos.
+async-volume-100
+6
+CSV/JSONL/Parquet de 1M,
+automatización/negativos, navegador
+íntegro y recovery completo.
+async-volume-500 / async-volume-1024
+4 / 4
+CSV/JSONL/Parquet de 1M y
+automatización/negativos en cada tier.
+Los prerrequisitos de dispatch y recovery vuelven a adquirir su propia población de un millón. Sus receipts de preparación no
+cuentan como escenarios obligatorios de adquisición. Las comprobaciones usan fixtures sintéticas con oráculos independientes
+sobre todas las filas/valores, perfiles y numeración física, además de huellas completas de fuente, aceptados y destino. Una
+muestra, un conteo o una bandera PASS no los reemplaza. Se preservan decimales, IDs, null/vacío, fechas, tipos y casos negativos
+definidos por cada suite.
+El recorrido general de navegador, sólo cuando TRACKVANCE_CI_IMAGE_MANIFEST tiene un valor y los argumentos están
+vacíos, enumera todos los specs reales de tests-e2e/**/*.spec.ts, incluidos los nuevos y los de subdirectorios. Excluye únicamente
+estos ocho opt-ins si su flag no vale exactamente true; el grupo dedicado indicado crea sus fixtures y ejecuta esas pruebas. Los
+paths siguientes son relativos a frontend/tests-e2e.
+Spec opt-in
+Flag requerido
+Grupo obligatorio
+automation.spec.ts
+TV_AUTOMATION_E2E
+async-volume-100
+volume.spec.ts
+TV_VOLUME_E2E
+async-volume-100
+corrections-volume.spec.ts
+TV_CORRECTIONS_E2E
+corrections-browser
+connections.spec.ts
+TV_CONNECTIONS_E2E
+connections
+roadmap-source-cycle.spec.ts
+TV_CONNECTIONS_E2E
+connections
+delivery.spec.ts
+TV_DELIVERY_E2E
+delivery
+identity-sso.spec.ts
+TV_IDENTITY_SSO_E2E
+identity-sso
+demo-access-clean.spec.ts
+TV_EXPECT_CLEAN_DEMO
+compose-critical: compose-clean-demo
+
+
+--- PAGE 106 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.8.0
+Trackvance Colombia SAS · 5 octubre 2026
+106
+El summary registra selected_spec_files y excluded_opt_in_specs con archivo, flag requerido y grupo, sin valores del entorno. El
+gate compara la selección exacta con el manifiesto; una selección vacía, SKIP inesperado o prueba nueva omitida falla. Los
+argumentos explícitos y la invocación habitual sin ese manifiesto CI conservan su selección original.
+Imágenes, cachés, deadlines y evidencia CI
+images construye backend y web una vez para el SHA fuente en Linux amd64 con locks y etiqueta OCI de revisión. Transporta
+imágenes, un manifiesto con ID sha256, tamaño y SHA-256 de sus tar y frontend-build-proof.zip del mismo SHA. Antes de cargar,
+cada suite verifica todos los bytes; después inspecciona la revisión y el ID cargado y los fija en su Compose privado. El tag es sólo
+alias de transporte. Las fuentes legacy auténticas se construyen deliberadamente desde sus propios commits conservados.
+TRACKVANCE_CI_IMAGE_MANIFEST activa esta ruta explícita y el preflight histórico, que valida toda la configuración resuelta,
+incluso servicios inactivos, y todos los volúmenes/redes contra el inventario habitual. El perfil 0.8.0 mantiene su preflight estricto y
+presupuesto conjunto de 9 GiB. Sólo se permite OIDC mock explícito de identidad; no se hereda SSO/SMTP ni credenciales reales.
+El ZIP procede del target build del mismo Dockerfile web y aprovecha las capas BuildKit construidas. Contiene source/ con los
+archivos frontend versionados, verificados byte a byte contra Git, y dist/ con el build real. node_modules permanece en la imagen de
+construcción. El descriptor registra SHA fuente, ID de esa imagen, tamaño y SHA-256 del ZIP. Sus cotas son 20.000 archivos, 512
+MiB sin comprimir y 128 MiB de ZIP. La importación para promoción valida paths e inventario, rechaza enlaces/archivos ambiguos y
+compara los fuentes con Git y cada archivo dist con nginx certificado; sólo admite además su página heredada 50x.html, cuyo hash
+registra. Permite probar los bytes CI sin reinstalar ni reconstruir el frontend durante la promoción; no reemplaza tests ni gate.
+El artifact de imágenes usa compression-level 1; la compresión exterior no altera los tar ni sus hashes. Se mide su coste de
+CPU/tiempo y los bytes reales de descarga/descompresión; ese nivel no demuestra una mejora por sí solo. La carga Docker
+todavía procesa todos los bytes originales del tar.
+Las cachés admiten descargas uv/pnpm, Chromium y capas BuildKit, con claves de plataforma/herramientas/locks. Los entornos se
+reinstalan con locks congelados. cold no restaura cachés y puede guardarlas para warm. No se cachean DB, fixtures, datasets,
+backups, estado de negocio, resultados ni receipts PASS. Se miden construcción/exportación, bytes y descarga/verificación/carga;
+la reutilización no presume ventaja sobre reconstruir hasta comparar ambos costes reales.
+Python 3.12 se conserva para todos los harnesses. Sólo backend y los grupos async-volume-100/500/1024 instalan uv y el entorno
+backend bloqueado en host; estos tres generan las poblaciones Parquet con pyarrow. Los otros 14 grupos de la matriz utilizan
+stdlib/helpers propios en host. Las dependencias y pruebas de producto, JVM y migraciones dentro de contenedores permanecen
+completas.
+Cada grupo tiene un deadline inferior al timeout de job: Catálogo, 6.300 s frente a 120 min y márgenes propios para XLSX. El
+fallo/timeout registra causa saneada, conserva evidencia incremental y deja tiempo para subida/cleanup. El navegador acotado
+reclama únicamente sus procesos propios. El cleanup reconoce sólo recursos nuevos con ownership validado; no alcanza datos o
+imágenes habituales. Los receipts terminales por escenario tienen UUID, SHA/run/intento/job, filas/variante, timestamps/duración,
+recursos y adjuntos con hash. El progreso RUNNING, los prerrequisitos y los históricos no son terminales certificables. Los
+logs/dumps/queries/credenciales quedan privados. Los artifacts públicos sólo contienen reportes explícitos saneados y sus hashes,
+incluso cuando el job falla.
+Cada artifact incluye SHA fuente e intento en su nombre: ci-selection, ci-images, ci-image-proof y ci-gate usan el sufijo
+-<SHA>-<attempt>; ci-evidence añade también el grupo. Los downloads requieren el intento actual y los receipts validan
+run_id/run_attempt. Los reintentos conservan los artifacts anteriores sin colisiones ni mezcla de evidencia; runs distintos conservan
+su identidad aunque compartan SHA y número de intento. La comparación fría/caliente retiene ambos conjuntos completos, modos,
+hashes y tiempos propios. Nunca reutiliza resultados PASS y mide también exportación/transferencia de imágenes y del ZIP.
+Nombres distintos no demuestran cache hits ni reducciones de coste.
+final_gate.py exige modo full, selección/manifiesto exactos, needs reales exitosos, 64 receipts obligatorios únicos,
+SHA/run/intento/job, filas/variantes, tiempos, imágenes, hashes y contenido de cada evidencia. Rechaza ausencia, duplicados,
+extras, FAIL/CANCELLED/SKIP/RUNNING, otra revisión o adjuntos alterados. Las omisiones unitarias de plataforma permitidas se
+registran y no acreditan escenarios Linux/JVM. El cierre exige también run y todos los jobs aplicables completados SUCCESS del
+SHA final; después siguen backup fresco, restore aislado detenido, promoción protegida y verificación habitual.
+
+
+--- PAGE 107 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.8.0
+Trackvance Colombia SAS · 5 octubre 2026
+107
+Historial y protocolo de medición
+La baseline saneada ci-optimization-baseline.json procede de logs/metadatos conservados, sin una nueva ejecución ni certificación.
+El run 37368090419/495f4eb, intento 4, terminó CANCELLED con 15 SUCCESS y XLSX cancelado al presupuesto de 90 min. La
+suma de intervalos de sus jobs es 303,35 min de runner, sin cola, incluyendo frontend reutilizado del mismo SHA y el job
+incompleto. No representa facturación ni coste completo de certificación. Sus tres intentos anteriores tuvieron backend sin runner ni
+steps durante 903/902/902 s: espera de asignación externa, separada del tiempo funcional.
+Medición 495
+Tiempo
+Alcance y límite
+Backend / frontend
+405 s / 57 s
+Jobs reales; frontend 33 archivos/252
+tests.
+XLSX
+5.425 s
+Job cancelado; paso funcional 5.376 s, sin
+ciclo/restore integral acreditados.
+Catálogo/Reportes
+4.050 s job / 3.934,695 s ciclo
+Componentes contenidos en el ciclo, no
+sumados como ejecución adicional.
+Catálogo API 120/400k/1M
+38,412/1.045,771/2.343,219 s
+Fixtures y oráculos completos incluidos; no
+sólo motor SQL.
+Catálogo browser/HTTP/recovery
+36,009/95,360/243,209 s
+Resultados reales de esos componentes.
+Backup
+655 s
+Nativo y tres fuentes auténticas.
+Builds explícitos visibles
+Al menos 180 s
+52+54+74 s; builds internos sin desglose
+exacto.
+Los ocho intervalos de adquisición XLSX observados suman 1.393,372 s y excluyen fixture/oráculos completos. El navegador
+terminado midió 387,001 s; su población 400k se infiere del orden del driver, no del summary. No acredita el navegador restante ni
+el restore integral. La revisión 630 amplió el presupuesto monolítico a 180 min y añadió checkpoints; permanece antecedente del
+reparto actual. El run histórico 37388511854/63096e6, intento 1, terminó FAIL con 15 jobs SUCCESS y Catálogo/Reportes fallido
+durante la población de un millón. XLSX fue SUCCESS en 3.344 s de job (55,73 min). Desde 23:26:35 UTC del 5 de octubre hasta
+la actualización terminal 00:29:06 UTC del 6 de octubre transcurrieron 3.751 s. Los 16 intervalos de jobs suman 14.546 s, o 242,43
+min de runner, incluido el fallido; no son facturación ni CPU útil. Sustituye para ese run el snapshot previo de 11 SUCCESS/cinco
+pendientes, que se conserva como antecedente. No acredita certificación completa ni comparación porcentual con 495. Las
+pruebas locales de esa revisión son frontend 252 PASS y backend Windows 1.269 PASS/46 SKIP, con alcances distintos del
+backend+scripts Linux que no se suman.
+La comparación completa fría/caliente del nuevo contrato permanece pendiente al corte documental. El protocolo mide preparación,
+build/exportación, transferencia/descompresión, fixtures/adquisiciones, oráculos, SQL, navegador, recovery, upload/cleanup, cola y
+suma de ejecución sin duplicar componentes contenidos. No se atribuye una reducción porcentual ni coste final sin ambos
+recorridos reales comparables. El informe externo de cierre, posterior al commit, registra runs/intentos, mediciones fría/caliente,
+SHA documental final, gate, backup/restore y promoción, vinculados al hash de este PDF revisado. Conserva los bytes aprobados y
+evita referencias circulares; no anticipa PASS futuros ni permite certificar el SHA final con pruebas de una revisión anterior.
+
+
+--- PAGE 108 ---
+TRACKVANCE CORE
+Especificación v1.1 | Implementación 0.8.0
+Trackvance Colombia SAS · 5 octubre 2026
+108
 Corte de certificación actual 0.8.0
 Verificación
 Resultado ejecutado
@@ -6505,11 +6755,11 @@ ejecutándose. Se conservan los cinco FAIL; corregir guards locales no convierte
 SUCCESS. El siguiente workflow completo debe certificar el HEAD que incluye el PDF.
 
 
---- PAGE 106 ---
+--- PAGE 109 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-106
+109
 Verificación
 Resultado ejecutado
 Persistencia efímera HTTP
@@ -6544,13 +6794,27 @@ conREPORTidle256MiB/0,5CPU/128pids. Credenciales regeneradas y conexionesSQL
 restauradas PASS. Byteproof actual4veces, peakcaps4,125GiB, recursospropios0 y
 habitualUNCHANGED; baseimagen097 conmountsRO actuales, no certificaHEADfinal.
 ConservaFAILCI383 y36guardaslocalesPASS.
+CI histórico 630 - terminal
+Run37388511854/63096e6: COMPLETED FAILURE,15jobsSUCCESS y Catálogo/ReportesFAIL
+en fase1M; causa no observada porque el arnés anterior no conservó el resultado del hijo fallido.
+XLSX completoSUCCESS3344s/55,73min. Suma real16jobs14546s/242,43min de intervalos
+runner, sin atribuir CPU/facturación ni coste de certificación completa. Preservado como fallo
+histórico; no acredita el nuevo SHA.
+Estructura CI - checkpoint c77
+Run37394040219/c77d8f3: backendLinux2172PASS/16SKIP opt-in Spark dedicados,
+frontendPASS252tests y imagesPASS. Al congelar esta publicación los grupos completos siguen
+en curso; sus resultados no se heredan al SHA final. Contrato19grupos/64escenarios y gate
+negativos, Docker inmutable porSHA, transferencia medida y cachés sólo dependencias/capas.
+Regresión local Windows backend+scripts2142PASS/46SKIP en374,85s, alcance distinto no
+sumado aLinux. El cierre frío/caliente completo del SHA documental se registra externamente
+tras el commit junto al hash deestePDF.
 
 
---- PAGE 107 ---
+--- PAGE 110 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-107
+110
 Resultados históricos de la publicación inicial 0.7.0
 Verificación histórica 0.7.0
 Resultado de esa revisión
@@ -6618,11 +6882,11 @@ rechazo de staging corrupto. El FAIL 504 inicial y el reintento PASS quedan regi
 interna NOT_PROVEN.
 
 
---- PAGE 108 ---
+--- PAGE 111 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-108
+111
 Verificación histórica 0.7.0
 Resultado de esa revisión
 CSV integral y etapas
@@ -6687,11 +6951,11 @@ Certificación release
 NO CERRADA mientras existan obligaciones pendientes.
 
 
---- PAGE 109 ---
+--- PAGE 112 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-109
+112
 Verificación histórica 0.7.0
 Resultado de esa revisión
 Perfil concurrente
@@ -6784,11 +7048,11 @@ reproducción es
 sintética.
 
 
---- PAGE 110 ---
+--- PAGE 113 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-110
+113
 Corrección
 Causa comprobada
 Archivos de
@@ -6955,11 +7219,11 @@ DML. Ambas carreras
 de cancelación PASS.
 
 
---- PAGE 111 ---
+--- PAGE 114 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-111
+114
 Corrección
 Causa comprobada
 Archivos de
@@ -7051,11 +7315,11 @@ posteriores conservadas con procedencia propia; no se heredan como ejecución ho
 e75 ni se suman conteos solapados.
 
 
---- PAGE 112 ---
+--- PAGE 115 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-112
+115
 Corrección / prueba
 Evidencia independiente
 Antecedente0.7: Gates externos
@@ -7063,11 +7327,11 @@ Histórico, no recertificación0.8. PDF revisado, todos los jobs SUCCESS del HEA
 upgrade principal verificado todavía pendientes.
 
 
---- PAGE 113 ---
+--- PAGE 116 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-113
+116
 Matriz de requisitos, implementación y evidencia
 Requisito
 Implementación verificable
@@ -7168,11 +7432,11 @@ origen verificado; sólo migraciones nuevas,
 sin fixtures en real.
 
 
---- PAGE 114 ---
+--- PAGE 117 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-114
+117
 Reglas de aislamiento y evidencia
 Los proyectos temporales usan UUID y puertos localhost disponibles distintos de la instalación principal (el perfil de volumen
 reserva 32000..32999), DB/secretos/staging propios, imágenes de prueba y límites CPU/RAM/PIDs. Los guards comprueban
@@ -7231,11 +7495,11 @@ HEAD final. Esta revisión antecede al commit documental final; sus gates GitHub
 después de aprobarse.
 
 
---- PAGE 115 ---
+--- PAGE 118 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-115
+118
 Esta fuente editable, build_specification.py, backend/openapi.json, model_contract_0.8.0.json, permission_contract_0.8.0.json y
 parameters_0.8.0.json son los inputs vigentes. Los inputs 0.7.0 del ciclo C01-C06 se conservan íntegros como antecedentes.
 volume_results_0.7.0.json y validation_results_0.7.0.json conservan, de forma explícita, los resultados históricos de la publicación
@@ -7284,11 +7548,11 @@ derivados/autorización transitiva, 55
 tablas/0017/state 8.
 
 
---- PAGE 116 ---
+--- PAGE 119 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-116
+119
 24. Antecedente: cambios funcionales y técnicos 0.5.1
 1. Reparación local de evidencia COMMITTED
 Antes: el worker preservaba COMMITTED y marcaba PENDING_REPAIR, pero el operador no tenía una acción segura para
@@ -7334,11 +7598,11 @@ Antes: existía la política conservadora, con cobertura parcial de precisiones 
 driver/lector pierda fracción, invente zona o convierta un texto sólo porque parece una fecha.
 
 
---- PAGE 117 ---
+--- PAGE 120 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-117
+120
 Solución: matrices de precisión PostgreSQL y SQL Server, casos null/offset y valores exactos, refresh e historia,
 Intake/Sentinel/Recon y entrega. Archivos: test_dataset_sources.py, test_data_sinks.py, connections_cycle.py y fixtures. No cambia
 modelo, API ni política temporal como parte de la regresión.
@@ -7377,11 +7641,11 @@ antes/después: bundle inicial nuevo de 364,97 kB; la suma de todos los chunks s
 de una feature puede requerir su descarga; una caché o red defectuosa debe mostrar error recuperable, no una pantalla vacía.
 
 
---- PAGE 118 ---
+--- PAGE 121 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-118
+121
 25. RBAC dinámico y administración real de roles
 En 0.5.1 cada usuario contenía una etiqueta de rol y permissions.py resolvía un diccionario estático. Cambiar accesos exigía un
 release; el cliente podía retener permisos hasta cerrar sesión y una ruta desconocida recibía runs:read. En 0.6.0 la relación
@@ -7417,11 +7681,11 @@ reescriben actores, auditorías ni configuraciones históricas. Las semillas son
 que ya ha sido administrado. Los roles desconocidos heredados fallan cerrado.
 
 
---- PAGE 119 ---
+--- PAGE 122 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-119
+122
  Activo
  Crear / editar
  Inactivo
@@ -7453,11 +7717,11 @@ guardan credenciales. La matriz explícita de endpoints se mantiene junto al con
 FastAPI.
 
 
---- PAGE 120 ---
+--- PAGE 123 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-120
+123
 26. Usuarios, credenciales y primer acceso
 Alta e identidad estable
 El formulario conserva nombres, apellidos, username, correo electrónico, rol y estado. Email sigue siendo metadata de identidad y
@@ -7485,11 +7749,11 @@ puede haber quedado creado; se consulta su estado y se regenera con la versión 
 que una entrega por red se completó.
 
 
---- PAGE 121 ---
+--- PAGE 124 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-121
+124
  Administrator
  Sesion normal y users:manage
  Crear usuario
@@ -7520,11 +7784,11 @@ del administrador: el portapapeles y el canal externo elegido quedan fuera del a
 promete borrar portapapeles, historiales del sistema ni mensajes enviados por ese canal.
 
 
---- PAGE 122 ---
+--- PAGE 125 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-122
+125
 Regeneración y concurrencia
 POST /users/{id}/regenerate-credentials recibe la versión esperada. Una operación exitosa genera una temporal nueva, reemplaza
 el hash, renueva 24h, restablece el cambio obligatorio y revoca sesiones en la misma operación persistente antes de devolver la
@@ -7566,11 +7830,11 @@ sesión restringida hasta definir contraseña local. La temporal obtenida por el
 después del cambio. Local sigue habilitado aunque ambos proveedores estén deshabilitados.
 
 
---- PAGE 123 ---
+--- PAGE 126 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-123
+126
 Estado, permisos y auditoría
 Usuarios muestra «Primer acceso pendiente», «Contraseña definida» o «Contraseña temporal vencida»; no muestra estado SMTP.
 Acciones: Acceso, Editar, Regenerar credenciales y Eliminar. Desactivar revoca sesiones; eliminar fija deleted, active=false y
@@ -7614,11 +7878,11 @@ válido crea una sesión restringida y obliga a definir una contraseña local nu
 temporal. Así todas las cuentas mantienen un método local en 0.6.1 sin dejar contraseñas de incorporación activas indefinidamente.
 
 
---- PAGE 124 ---
+--- PAGE 127 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-124
+127
 Usuarios desactivados/eliminados no pueden acceder por ningún proveedor. Roles y permisos continúan resolviéndose en
 Trackvance; claims de grupos, directorios o roles externos nunca elevan privilegios. Un Administrator puede desvincular la identidad
 externa desde Métodos de acceso sin borrar User. Los eventos SSO_LINKED, SSO_UNLINKED, SSO_LOGIN_SUCCESS y
@@ -7662,11 +7926,11 @@ mantiene presentación efímera única y primer cambio obligatorio. Los avisos n
 OIDC, DSN o excepción cruda.
 
 
---- PAGE 125 ---
+--- PAGE 128 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-125
+128
 29. Persistencia y recuperación de identidad/automatización
 C01-C06 conserva dominios, opciones de lectura/numeración, límites capturados y diagnósticos antiguos, además de read_at de
 notificaciones y todas las revisiones de automatización. 0016 agrega campos nullable sin backfill. Backup/restore nativo state 8
@@ -7717,11 +7981,11 @@ incluso si la primera Run no se ejecuta o falla.
 el target y ejecuta DDL/DML juntos cuando corresponde.
 
 
---- PAGE 126 ---
+--- PAGE 129 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-126
+129
 Si la política ya existe, el builder muestra ambas columnas activadas y bloquea su deshabilitación con el texto: «Esta tabla utiliza
 auditoría de ingesta de Trackvance. Todas las entregas posteriores deben registrar fechaIngesta y usuario». La API también
 rechaza drafts manipulados; ocultar un checkbox no es autorización.
@@ -7785,11 +8049,11 @@ Agrega delivery_target_policies y delivery_attempts.system_audit JSON. Los inten
 inventan usernames ni timestamps retrospectivos.
 
 
---- PAGE 127 ---
+--- PAGE 130 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-127
+130
 La política contiene identidad estable, organización, destino inicial, fingerprint único por organización, motor, host, puerto, base,
 schema, tabla, audit_columns_required=true, habilitador user ID/username y fechas de habilitación/materialización/creación.
 La restricción CHECK impide false y no hay endpoint de deshabilitación o borrado. El User se conserva con baja lógica, de forma
@@ -7846,11 +8110,11 @@ privilegios SQL apropiados. PostgreSQL ALTER requiere ownership efectivo/superus
 HAS_PERMS_BY_NAME para ALTER.
 
 
---- PAGE 128 ---
+--- PAGE 131 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-128
+131
 Drift, fallos y estado UNKNOWN
 Estado observado
 Respuesta
@@ -7905,11 +8169,11 @@ faltantes y materialized_at. Intentos, receipt y sección delivery del manifest 
 }
 
 
---- PAGE 129 ---
+--- PAGE 132 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-129
+132
 COMMITTED y materialized se persisten antes de publicar archivos locales. Un fallo de ArtifactStore no provoca replay; reparación
 local conserva los valores persistidos y verifica su consistencia con Run/Attempt. Configuraciones históricas sin el nuevo flag
 mantienen sus hashes canónicos y no se reescriben manifests para agregar campos. El linaje añade AUDITED_TARGET entre Run
@@ -7944,11 +8208,11 @@ Este capítulo une situación anterior, riesgo, decisión y solución con los co
 de pruebas se toma del informe ejecutado, nunca de los requisitos o de una certificación histórica.
 
 
---- PAGE 130 ---
+--- PAGE 133 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-130
+133
 A. Roles y catálogo de permisos
 Aspecto
 Cambio y evidencia de diseño
@@ -8021,11 +8285,11 @@ configuración.
 Gobierno de múltiples organizaciones y mapeo de grupos no se implementan.
 
 
---- PAGE 131 ---
+--- PAGE 134 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-131
+134
 C. Notificaciones
 Aspecto
 Cambio y evidencia de diseño
@@ -8097,11 +8361,11 @@ conservador.
 Scheduling Delivery, SHIST/SCD, targets nuevos y gobierno ampliado fuera de alcance.
 
 
---- PAGE 132 ---
+--- PAGE 135 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-132
+135
 Resultados del antecedente
 Los resultados 0.6.0 permanecen en validation_results_0.6.0.json y evidence/0.6.0. La validación de este antecedente corresponde
 a 0.6.0; capítulo 35 conserva 0.6.1. El capítulo 22 distingue antecedentes 0.7.0 de la certificación vigente 0.8.0.
@@ -8154,11 +8418,11 @@ requiere el tenant consumer de Microsoft y un dominio personal reconocido (Outlo
 ambiguas se rechazan.
 
 
---- PAGE 133 ---
+--- PAGE 136 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-133
+136
 7. Si es primer acceso, define una contraseña local nueva. Confirma el mismo
 
 username/rol interno en /me, luego consulta Métodos de acceso en Usuarios: Microsoft vinculado y último acceso. La fecha de
@@ -8211,11 +8475,11 @@ el vínculo de autenticación, conserva User e historia y revoca las sesiones af
 aplica de nuevo la validación inicial; no se heredan grupos externos.
 
 
---- PAGE 134 ---
+--- PAGE 137 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-134
+137
 Guarda por caso una evidencia saneada: proveedor, tipo de cuenta, hora, commit, resultado, user_id de fixture, permisos
 comprobados y error genérico si falló. No guardes callback completo, código, tokens, cookies, ID token ni capturas de secretos. En
 real-provider-results.json distingue PASS, FAIL y NOT_RUN con motivo.
@@ -8261,11 +8525,11 @@ reales. Las claves no se montan en los executors Spark ni procesos ligeros, y el
 inmutables.
 
 
---- PAGE 135 ---
+--- PAGE 138 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-135
+138
 34. Matriz completa de autorización
 La tabla se genera desde permissions.py del runtime 0.8.0. La autoridad backend incluye clausura transitiva, organización,
 propietario, CSRF, primer acceso, recurso activo y controles de estrategia. Administrator continúa protegido; no tiene acceso
@@ -8338,11 +8602,11 @@ intake:configure
 datasets:read, intake:read; Sí
 
 
---- PAGE 136 ---
+--- PAGE 139 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-136
+139
 Código
 Dependencias / delegable
 intake:execute
@@ -8431,11 +8695,11 @@ GET
 audit:read
 
 
---- PAGE 137 ---
+--- PAGE 140 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-137
+140
 Método
 Ruta
 Permiso
@@ -8552,11 +8816,11 @@ GET
 exceptions:read
 
 
---- PAGE 138 ---
+--- PAGE 141 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-138
+141
 Método
 Ruta
 Permiso
@@ -8673,11 +8937,11 @@ GET
 runs:read
 
 
---- PAGE 139 ---
+--- PAGE 142 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-139
+142
 Método
 Ruta
 Permiso
@@ -8794,11 +9058,11 @@ POST
 delivery:execute
 
 
---- PAGE 140 ---
+--- PAGE 143 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-140
+143
 Método
 Ruta
 Permiso
@@ -8915,11 +9179,11 @@ POST
 reports:write
 
 
---- PAGE 141 ---
+--- PAGE 144 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-141
+144
 Método
 Ruta
 Permiso
@@ -8983,11 +9247,11 @@ no-store/no-cache evita almacenamiento HTTP ordinario. La UI usa una llamada dir
 cache. Cierre, desmontaje y respuesta tardía eliminan referencias controladas por la aplicación.
 
 
---- PAGE 142 ---
+--- PAGE 145 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-142
+145
 6. Cambios API
 POST /users devuelve 201 UserCredentialIssueResponse; POST /users/{id}/regenerate-credentials devuelve 200 con el mismo
 envelope y exige versión. Alias legacy deprecated no envían correo. GET y UserResponse no contienen temporal ni
@@ -9032,11 +9296,11 @@ nuevo conserva sólo exit code y categoría cerrada, nunca SQL ni salida cruda. 
 causalidad retrospectiva; el cierre exige repetir los nueve jobs en el HEAD corregido.
 
 
---- PAGE 143 ---
+--- PAGE 146 ---
 TRACKVANCE CORE
 Especificación v1.1 | Implementación 0.8.0
 Trackvance Colombia SAS · 5 octubre 2026
-143
+146
 14. Limitaciones
 No se prueba SSO real ni se requieren secretos externos. No hay envío de correo, notificaciones operativas, auto-provisioning o
 recuperación de temporales cerradas. Los benchmarks smoke validan los casos medidos, no capacidad empresarial general. La UI

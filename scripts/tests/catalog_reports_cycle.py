@@ -24,6 +24,36 @@ def run(arguments, directory, name):
         raise RuntimeError(f"La etapa {name} falló (exit={result.returncode}); diagnóstico privado disponible.")
 
 
+def report_tier(directory, context, rows, summary):
+    """Copy the last safe checkpoint before the failed fixture is destroyed."""
+    stage = f"reports-{rows}"
+    evidence = f"/tmp/v080-reports-{rows}"
+    target = directory / (stage + ".json")
+    failure = None
+    try:
+        run([*guard.compose_args(directory, context), "exec", "-T", "api", "python",
+             "/app/scripts/tests/catalog_reports_api_cycle.py", "--rows", str(rows), "--evidence", evidence], directory, stage)
+    except RuntimeError as error:
+        failure = error
+    try:
+        run([*guard.compose_args(directory, context), "cp", f"api:{evidence}/result.json", str(target)], directory, f"copy-{rows}")
+        result = json.loads(target.read_text(encoding="utf-8"))
+    except (RuntimeError, OSError, ValueError):
+        summary.update(failed_stage=stage, failed_tier={"rows_per_source": rows, "status": "FAIL", "diagnostics_copied": False},
+                       error={"type": type(failure).__name__ if failure else "EvidenceCopyError", "code": "CATALOG_FIXTURE_EVIDENCE_UNAVAILABLE"})
+        if failure is not None:
+            raise failure
+        raise
+    if failure is not None or result.get("status") != "PASS":
+        detail = {key: result[key] for key in ("active_phase", "phase_started_at", "last_terminal", "error", "duration_seconds") if key in result}
+        summary.update(failed_stage=stage, failed_tier={"rows_per_source": rows, "status": "FAIL", "diagnostics_copied": True, **detail},
+                       error=result.get("error", {"type": "RuntimeError", "code": "CATALOG_FIXTURE_FAILED"}))
+        if failure is not None:
+            raise failure
+        raise RuntimeError("La certificación completa no terminó PASS.")
+    return result
+
+
 def browser_gate(directory, context):
     """Run only the real catalog/report journey and publish its synthetic captures."""
     pnpm = shutil.which("pnpm")
@@ -91,14 +121,7 @@ def main():
             browser_done = True
         for rows in args.rows:
             guard.preflight(directory, context)
-            evidence = f"/tmp/v080-reports-{rows}"
-            run([*guard.compose_args(directory, context), "exec", "-T", "api", "python",
-                 "/app/scripts/tests/catalog_reports_api_cycle.py", "--rows", str(rows), "--evidence", evidence], directory, f"reports-{rows}")
-            target = directory / f"reports-{rows}.json"
-            run([*guard.compose_args(directory, context), "cp", f"api:{evidence}/result.json", str(target)], directory, f"copy-{rows}")
-            result = json.loads(target.read_text(encoding="utf-8"))
-            if result.get("status") != "PASS":
-                raise RuntimeError("La certificación completa no terminó PASS.")
+            result = report_tier(directory, context, rows, summary)
             summary["tiers"].append(result)
             if args.with_browser and rows == 120 and not browser_done:
                 summary["browser"] = browser_gate(directory, context)
