@@ -108,6 +108,12 @@ def removable_image(image: dict) -> bool:
                     for t in image.get("digests", [])))
 
 
+def reference_repository(reference: str) -> str:
+    name = reference.split("@", 1)[0]
+    # A registry port belongs to the repository; only a final tag is stripped.
+    return name[:name.rfind(":")] if name.rfind(":") > name.rfind("/") else name
+
+
 def protected_snapshot(state: dict, retired: set[str]) -> dict:
     containers = [c for c in state["containers"] if project(c) not in retired]
     require(any(project(c) == INSTALLATION for c in containers), "PROTECTED_INSTALLATION_NOT_FOUND")
@@ -207,7 +213,7 @@ def apply(document: dict, checkpoint: Path) -> dict:
     regenerated = plan(document["inventory"], document["retirement_proof"], document["cache_proof"], inventory_hash=document["inventory_sha256"])
     require(regenerated == document, "ALTERED_CLEANUP_PLAN_OR_PROOF")
     retired = retirement_projects(document["retirement_proof"])
-    removed = {k: [] for k in ("containers", "stopped_containers", "images", "image_tags", "networks", "volumes", "cache")}
+    removed = {k: [] for k in ("containers", "stopped_containers", "images", "image_tags", "image_digests", "networks", "volumes", "cache")}
     result = {"status": "RUNNING", "removed": removed, "already_absent_cache": [], "protected_before_sha256": fingerprint(document["protected"])}
     def save():
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -242,13 +248,14 @@ def apply(document: dict, checkpoint: Path) -> dict:
                 docker(command, "rm", current[key]); removed[kind].append(current[key]); save()
         for expected in document["images"]:
             remaining = list(expected["tags"])
+            remaining_digests = list(expected["digests"])
             while True:
                 state = fresh()
                 current = next((i for i in state["images"] if i["id"] == expected["id"]), None)
                 if current is None:
                     require(not remaining, "RETIRING_IMAGE_DISAPPEARED_BEFORE_OPERATION")
                     break
-                require(current == expected | {"tags": remaining} and removable_image(current)
+                require(current == expected | {"tags": remaining, "digests": remaining_digests} and removable_image(current)
                         and not any(c["image_id"] == current["id"] for c in state["containers"]), "RETIRING_IMAGE_IDENTITY_OR_CONSUMER_CHANGED")
                 target = remaining[0] if remaining and not remaining[0].startswith("sha256:") else current["id"]
                 require(not target.startswith("sha256:") or len(remaining) <= 1, "AMBIGUOUS_IMAGE_ALIAS")
@@ -256,9 +263,25 @@ def apply(document: dict, checkpoint: Path) -> dict:
                 if remaining:
                     removed["image_tags"].append(remaining.pop(0))
                 save()
+                if remaining:
+                    after = fresh()
+                    observed = next((i for i in after["images"] if i["id"] == expected["id"]), None)
+                    require(observed is not None, "RETIRING_IMAGE_DISAPPEARED_AFTER_UNTAG")
+                    repository = reference_repository(target)
+                    eligible = {d for d in remaining_digests if reference_repository(d) == repository
+                                and not any(reference_repository(t) == repository for t in remaining)}
+                    digests = observed["digests"]
+                    missing = set(remaining_digests) - set(digests)
+                    require(observed == expected | {"tags": remaining, "digests": digests}
+                            and len(digests) == len(set(digests)) and set(digests) <= set(remaining_digests)
+                            and missing <= eligible, "RETIRING_IMAGE_IDENTITY_OR_DIGEST_CHANGED_AFTER_UNTAG")
+                    removed["image_digests"].extend(sorted(missing))
+                    remaining_digests = list(digests)
+                    save()
                 if not remaining:
                     after = fresh()
                     require(not any(i["id"] == expected["id"] for i in after["images"]), "IMAGE_STILL_PRESENT_AFTER_RETIREMENT")
+                    removed["image_digests"].extend(remaining_digests)
                     break
             removed["images"].append(expected["id"]); save()
         for expected in document["cache"]:

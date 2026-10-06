@@ -51,7 +51,7 @@ def planned(case):
     return cleanup.plan(state, proof, cache)
 
 
-def simulated(case, monkeypatch, *, fail=None):
+def simulated(case, monkeypatch, *, fail=None, drop_repository_digests=False):
     state = copy.deepcopy(case[0])
     calls = []
     monkeypatch.setattr(cleanup, "inventory", lambda **kwargs: copy.deepcopy(state))
@@ -75,7 +75,10 @@ def simulated(case, monkeypatch, *, fail=None):
                 if args[2] == i["id"]:
                     state["images"].remove(i)
                 elif args[2] in i["tags"]:
+                    repository = args[2].split(":")[0]
                     i["tags"].remove(args[2])
+                    if drop_repository_digests and not any(tag.split(":")[0] == repository for tag in i["tags"]):
+                        i["digests"] = [digest for digest in i["digests"] if not digest.startswith(repository + "@")]
                     if not i["tags"]:
                         state["images"].remove(i)
         elif args[:2] == ("buildx", "prune"):
@@ -229,3 +232,69 @@ def test_relative_cache_age_display_can_change_while_actual_identity_and_usage_s
     state, _ = simulated(case, monkeypatch)
     state["cache"][0]["LastUsedAt"] = "one day ago"
     assert cleanup.apply(document, tmp_path / "age-display.json")["status"] == "PASS"
+
+
+def reviewed_two_repository_image(case):
+    resource = case[0]["images"][2]
+    resource["tags"] = ["trackvance-v080-isolated:backend", "trackvance-v080-test-linux-typecheck-02503a0fe906:base"]
+    resource["digests"] = [tag.split(":")[0] + "@" + resource["id"] for tag in resource["tags"]]
+    return resource
+
+
+@pytest.mark.parametrize("drop_repository_digests", [False, True])
+def test_removing_last_reviewed_tag_of_repository_can_remove_only_its_digest(case, monkeypatch, tmp_path, drop_repository_digests):
+    resource = reviewed_two_repository_image(case)
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch, drop_repository_digests=drop_repository_digests)
+    result = cleanup.apply(document, tmp_path / "repository-digest.json")
+    assert result["status"] == "PASS" and not any(i["id"] == resource["id"] for i in state["images"])
+    assert [call[2] for call in calls if call[:2] == ("image", "rm")][-2:] == resource["tags"]
+
+
+def test_digest_stays_when_another_reviewed_tag_of_same_repository_remains(case, monkeypatch, tmp_path):
+    resource = reviewed_two_repository_image(case)
+    resource["tags"][1] = "trackvance-v080-isolated:web"
+    resource["digests"] = resource["digests"][:1]
+    state, _ = simulated(case, monkeypatch, drop_repository_digests=True)
+    assert cleanup.apply(planned(case), tmp_path / "same-repository.json")["status"] == "PASS"
+    assert not any(i["id"] == resource["id"] for i in state["images"])
+
+
+@pytest.mark.parametrize("mutation", [
+    "other_repository_digest_disappears", "digest_added", "foreign_alias", "new_consumer",
+    "image_layer_changed", "image_size_changed", "image_labels_changed", "same_repository_digest_disappears_early",
+])
+def test_unexpected_image_change_after_untag_aborts_before_next_removal(case, monkeypatch, tmp_path, mutation):
+    resource = reviewed_two_repository_image(case)
+    if mutation == "same_repository_digest_disappears_early":
+        resource["tags"][1] = "trackvance-v080-isolated:web"
+        resource["digests"] = resource["digests"][:1]
+    first_tag, second_tag = resource["tags"]
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch, drop_repository_digests=True)
+    safe_simulation = cleanup.docker
+    def changed(*args):
+        output = safe_simulation(*args)
+        if args == ("image", "rm", first_tag):
+            current = next(i for i in state["images"] if i["id"] == resource["id"])
+            if mutation in {"other_repository_digest_disappears", "same_repository_digest_disappears_early"}:
+                current["digests"] = []
+            elif mutation == "digest_added":
+                current["digests"].append("trackvance-v080-unreviewed@sha256:" + "f" * 64)
+            elif mutation == "foreign_alias":
+                current["tags"].append("foreign:alias")
+            elif mutation == "new_consumer":
+                state["containers"].append(container("c", "bikerwash-backend", resource["id"], "foreign-volume"))
+            elif mutation == "image_layer_changed":
+                current["rootfs_layers"].append("sha256:" + "f" * 64)
+            elif mutation == "image_size_changed":
+                current["size_bytes"] += 1
+            elif mutation == "image_labels_changed":
+                current["labels"]["io.trackvance.changed"] = "true"
+        return output
+    monkeypatch.setattr(cleanup, "docker", changed)
+    checkpoint = tmp_path / "changed-after-untag.json"
+    with pytest.raises(EvidenceError):
+        cleanup.apply(document, checkpoint)
+    assert ("image", "rm", first_tag) in calls and ("image", "rm", second_tag) not in calls
+    assert json.loads(checkpoint.read_text())["status"] == "PARTIAL"
