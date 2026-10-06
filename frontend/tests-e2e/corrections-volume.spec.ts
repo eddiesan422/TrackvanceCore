@@ -1,20 +1,27 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { deliveryEvidenceState } from '../src/test/runTerminal'
 import { createClassification } from './helpers/classification'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(5_400_000)
 test.skip(process.env.TV_CORRECTIONS_E2E !== 'true', 'Requires guarded corrections_cycle.py fixtures')
 
-async function terminal(page: Page, path: string) {
+async function terminal(page: Page, path: string, options: { deliveryEvidence?: boolean } = {}) {
   let current: Record<string, any> = {}
   await expect.poll(async () => {
     const response = await page.request.get(`/api/v1${path}`)
     expect(response.status()).toBe(200)
     current = await response.json()
+    if (options.deliveryEvidence) return deliveryEvidenceState(current) !== 'WAITING'
     return ['SUCCESS', 'FAILED', 'FAILED_PRECONDITION', 'CANCELLED', 'UNKNOWN'].includes(current.status)
   }, { timeout: 1_800_000, intervals: [1000] }).toBe(true)
   expect(current.status, JSON.stringify({ error: current.error, error_code: current.error_code })).toBe('SUCCESS')
+  if (options.deliveryEvidence) {
+    expect(current.decision).toBe('COMMITTED')
+    expect(current.metrics?.evidence_status).not.toBe('PENDING_REPAIR')
+    expect(deliveryEvidenceState(current)).toBe('PUBLISHED')
+  }
   return current
 }
 
@@ -241,7 +248,7 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
     return Boolean(occurrence.run_id)
   }, { timeout: 60_000, intervals: [1000] }).toBe(true)
   expect(occurrence.dataset_version_id).toBe(accepted.output_version_id)
-  const committed = await terminal(page, `/runs/${occurrence.run_id}`)
+  const committed = await terminal(page, `/runs/${occurrence.run_id}`, { deliveryEvidence: true })
   expect(committed.decision).toBe('COMMITTED')
   expect(committed.metrics.receipt_artifact_id).toBeTruthy()
   await page.goto(`/runs/${occurrence.run_id}`)
