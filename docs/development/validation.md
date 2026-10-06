@@ -145,9 +145,9 @@ Origen destruido antes del restore fresco, destino STOPPED_VERIFIED, instalació
 habitual UNCHANGED y cleanup propio completo. [Su evidencia](evidence/0.8.0/authentic-061-current-restore.json)
 identifica la imagen y los bytes actuales montados; no certifica el SHA final de CI.
 
-El checkpoint PDF 0.8.0 anterior se publicó tras revisar las **143 páginas**, con 280 marcadores
+El PDF 0.8.0 vigente se publicó tras revisar las **146 páginas**, con 284 marcadores
 y 40 secciones principales. Las dos copias oficiales tienen el SHA-256
-`223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c`;
+`09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61`;
 fuente, generador, insumos y extracción coinciden. La [verificación de publicación](evidence/0.8.0/pdf-verification.json)
 conserva la revisión visual completa y los hashes históricos intactos. Este PASS
 abarca únicamente el documento: el workflow completo del SHA que lo versiona y

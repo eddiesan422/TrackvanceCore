@@ -105,21 +105,21 @@ El [informe A-M 0.5.1](../development/release-report-0.5.1.md) permanece histór
 
 ## Publicación 0.8.0 — PDF revisado; cierre externo pendiente
 
-El PDF vigente contiene **143 páginas, 280 marcadores y 40 secciones principales**,
-con texto seleccionable. Sus 143 páginas se renderizaron a 110 dpi y se revisaron
-en cuatro rangos completos, sin hallazgos pendientes. La publicación copió los bytes
+El PDF vigente contiene **146 páginas, 284 marcadores y 40 secciones principales**,
+con texto seleccionable. Sus 146 páginas se renderizaron a 110 dpi y se revisaron
+en rangos disjuntos completos, sin hallazgos pendientes. La publicación copió los bytes
 del candidato aprobado, sin regenerarlo después de la revisión. Su SHA-256 es
-`223175c92b9a13a031a9eea99e8cdba671e9fbda2461edede2cd3f032f15055c`.
+`09505726ed088a81fbff43e56c5cd8115c1a7d2448f1fb40e51c44e63cce3f61`.
 PDF, fuente, generador, insumos y extracción coinciden byte a byte con las copias
 oficiales en `ProductOne/Documentación`; los once archivos de la edición corregida
 0.7.0 y el original de septiembre permanecen archivados con sus hashes intactos.
 La [verificación PDF](../development/evidence/0.8.0/pdf-verification.json) registra
-los hashes de los insumos y de los 143 renders, los cuatro revisores y el corte
-de implementación `000e1bc1db497ea56ad5ddef19d454428a847fb8`.
+los hashes de los insumos y de los 146 renders, los cuatro revisores y el corte
+de implementación `c77d8f36423d4ba8edf5f461a2575ce47fc36097`.
 
 Los oráculos completos de volumen, recuperación nativa y desde las baselines auténticas
-tienen evidencias locales con sus cortes explícitos. Los dieciséis jobs GitHub Actions
-del SHA documental final y la actualización autorizada de la instalación habitual
+tienen evidencias locales con sus cortes explícitos. Los 22 jobs GitHub Actions,
+19 grupos y 64 escenarios del SHA documental final y la actualización autorizada de la instalación habitual
 siguen siendo gates independientes, registrados externamente después de este commit
 para evitar una referencia circular. Las pruebas locales, los jobs parciales o la
 publicación del PDF no cierran esos gates. `validation_results_0.8.0.json` y el informe
