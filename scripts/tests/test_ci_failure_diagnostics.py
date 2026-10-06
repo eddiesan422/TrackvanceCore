@@ -1,5 +1,6 @@
 """Failure artifacts preserve facts without exporting child payloads or secrets."""
 import ast
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -770,4 +771,165 @@ def test_catalog_nested_failure_publishes_hashed_diagnostics_never_scenario_pass
         attachment = output / 'evidence' / reference['path']
         assert diagnostics.hashlib.sha256(attachment.read_bytes()).hexdigest() == reference['sha256']
         assert all(secret not in attachment.read_text() for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+    assert not list((output / 'evidence').glob('scenario-*.json'))
+
+
+BROWSER_CI = {'run_id': '123', 'run_attempt': '2', 'job_id': 'suite-corrections-browser'}
+BROWSER_SOURCE = 'frontend/tests-e2e/corrections-volume.spec.ts'
+
+
+@pytest.fixture
+def browser_root(tmp_path):
+    # Long receipt filenames are required by the real schema. Windows unit
+    # fixtures use the extended form only for their own pytest temporary root.
+    return Path('\\\\?\\' + str(tmp_path)) if sys.platform == 'win32' else tmp_path
+
+
+def browser_failure_context(root, rows=1000000):
+    context = root / '.codex-local/v070/trackvance-v070-test-corrections-browser-012345abcdef'
+    context.mkdir(parents=True)
+    isolation = context / 'isolation.json'
+    isolation.write_text(json.dumps({'project': context.name, 'env': 'SECRET_TOKEN'}))
+    directory = context / 'xlsx-scenarios-corrections-browser-fedcba987654'; directory.mkdir()
+    scenario = f'browser-{rows}-shared'
+    receipt = directory / ('scenario-' + scenario + '-' + 'a' * 32 + '.json')
+    receipt.write_text(json.dumps({'schema_version': 1, 'kind': 'XLSX_SCENARIO', 'group': 'corrections-browser',
+        'source_sha': SHA, 'ci': BROWSER_CI, 'scenario_id': scenario, 'rows': rows, 'variant': 'shared',
+        'status': 'FAIL', 'result': {'message': 'SECRET_TOKEN'}}))
+    group = context / 'corrections-evidence.json'
+    group.write_text(json.dumps({'schema_version': 1, 'kind': 'XLSX_GROUP', 'group': 'corrections-browser',
+        'source_sha': SHA, 'ci': BROWSER_CI, 'status': 'FAIL',
+        'required_scenarios': ['browser-400000-shared', 'browser-1000000-shared'],
+        'scenario_results': [{'kind': 'XLSX_SCENARIO', 'scenario_id': scenario,
+            'path': receipt.relative_to(context).as_posix(), 'sha256': hashlib.sha256(receipt.read_bytes()).hexdigest()}]}))
+    summary = context / 'browser-summary.json'
+    summary.write_text(json.dumps({'status': 'FAIL', 'expected': 0, 'unexpected': 1, 'skipped': 0, 'flaky': 0,
+        'duration': 1175198.667, 'startTime': 'SECRET_TOKEN', 'url': 'https://SECRET_TOKEN', 'env': {'TOKEN': 'SECRET_TOKEN'},
+        'failures': [{'test': 'PRIVATE_ROW', 'status': 'failed', 'message': 'SECRET_TOKEN',
+            'location': {'file': '/app/' + BROWSER_SOURCE, 'line': 1, 'column': 5, 'stack': 'SECRET_TOKEN'}}]}))
+    return context, isolation, group, receipt, summary
+
+
+def collect_browser(root, before=None, *, sha=SHA, ci=BROWSER_CI):
+    return diagnostics.collect_child_failure('corrections-browser', set() if before is None else before,
+        root=root, sources={BROWSER_SOURCE}, source_sha=sha, ci=ci)
+
+
+@pytest.mark.parametrize('rows', [400000, 1000000])
+def test_corrections_browser_failed_population_keeps_only_verified_location_and_counters(browser_root, rows):
+    browser_failure_context(browser_root, rows)
+    result = collect_browser(browser_root)
+    assert len(result) == 1 and result[0]['scenario_id'] == f'browser-{rows}-shared' and result[0]['rows'] == rows
+    assert result[0]['kind'] == 'CORRECTIONS_BROWSER_PARTIAL_SUMMARY' and result[0]['summary_present'] is True
+    assert result[0]['result'] == {'status': 'FAIL', 'expected': 0, 'unexpected': 1, 'skipped': 0, 'flaky': 0,
+        'duration': 1175198.667, 'failure_location_present': True,
+        'failures': [{'status': 'failed', 'location_present': True, 'location': {'file': BROWSER_SOURCE, 'line': 1, 'column': 5}}]}
+    assert all(value not in json.dumps(result) for value in ('SECRET_TOKEN', 'PRIVATE_ROW', 'https:', '"test":', '"env":'))
+
+
+@pytest.mark.parametrize('change', ['file-unknown', 'file-url', 'file-traversal', 'line-bool', 'line-zero',
+    'line-overflow', 'column-bool', 'column-overflow', 'location-missing', 'failures-missing'])
+def test_corrections_browser_location_missing_is_explicit_without_untrusted_text(browser_root, change):
+    *_, summary = browser_failure_context(browser_root)
+    value = json.loads(summary.read_text())
+    location = value['failures'][0]['location']
+    if change.startswith('file-'):
+        location['file'] = {'file-unknown': '/SECRET_TOKEN/unknown.spec.ts', 'file-url': 'https://SECRET_TOKEN/' + BROWSER_SOURCE,
+            'file-traversal': '../' + BROWSER_SOURCE}[change]
+    elif change.startswith('line-'):
+        location['line'] = {'line-bool': True, 'line-zero': 0, 'line-overflow': 1000000}[change]
+    elif change.startswith('column-'):
+        location['column'] = True if change == 'column-bool' else 1000000
+    elif change == 'location-missing':
+        value['failures'][0].pop('location')
+    else:
+        value.pop('failures')
+    summary.write_text(json.dumps(value))
+    result = collect_browser(browser_root)[0]['result']
+    if change.startswith('column-'):
+        assert result['failure_location_present'] is True and 'column' not in result['failures'][0]['location']
+    else:
+        assert result['failure_location_present'] is False
+    assert 'SECRET_TOKEN' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('damage', ['isolation-project', 'group-sha', 'group-ci', 'group-pass', 'group-schema',
+    'group-scenarios', 'receipt-sha', 'receipt-ci', 'receipt-pass', 'receipt-kind', 'receipt-schema',
+    'receipt-rows', 'receipt-variant', 'receipt-id', 'reference-path', 'reference-hash', 'duplicate-failed'])
+def test_corrections_browser_rejects_foreign_or_mismatched_group_scenario_identity(browser_root, damage):
+    _, isolation, group, receipt, _ = browser_failure_context(browser_root)
+    target = isolation if damage.startswith('isolation') else group if damage.startswith(('group-', 'reference-', 'duplicate')) else receipt
+    value = json.loads(target.read_text())
+    changes = {'isolation-project': ('project', 'trackvance-certification'), 'group-sha': ('source_sha', '2' * 40),
+        'group-ci': ('ci', {**BROWSER_CI, 'run_attempt': '3'}), 'group-pass': ('status', 'PASS'), 'group-schema': ('schema_version', True),
+        'group-scenarios': ('required_scenarios', []), 'receipt-sha': ('source_sha', '2' * 40),
+        'receipt-ci': ('ci', {**BROWSER_CI, 'run_id': '456'}), 'receipt-pass': ('status', 'PASS'), 'receipt-kind': ('kind', 'XLSX_PROGRESS'),
+        'receipt-schema': ('schema_version', True), 'receipt-rows': ('rows', 400000), 'receipt-variant': ('variant', 'inline'),
+        'receipt-id': ('scenario_id', 'browser-400000-shared')}
+    if damage in changes:
+        key, replacement = changes[damage]; value[key] = replacement
+    elif damage == 'reference-path':
+        value['scenario_results'][0]['path'] = '../SECRET_TOKEN/scenario-browser-1000000-shared-' + 'a' * 32 + '.json'
+    elif damage == 'reference-hash':
+        value['scenario_results'][0]['sha256'] = 'b' * 64
+    else:
+        value['scenario_results'].append(value['scenario_results'][0])
+    target.write_text(json.dumps(value))
+    if target == receipt:
+        envelope = json.loads(group.read_text())
+        envelope['scenario_results'][0]['sha256'] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        group.write_text(json.dumps(envelope))
+    assert collect_browser(browser_root) == []
+
+
+@pytest.mark.parametrize('unsafe', ['base-link', 'context-link', 'isolation-link', 'group-link', 'scenario-dir-link',
+    'receipt-link', 'summary-link', 'scenario-dir-junction', 'summary-junction', 'isolation-old', 'group-old',
+    'receipt-old', 'summary-old', 'summary-oversized', 'summary-malformed', 'summary-pass'])
+def test_corrections_browser_rejects_linked_stale_or_unbounded_sources(browser_root, monkeypatch, unsafe):
+    context, isolation, group, receipt, summary = browser_failure_context(browser_root)
+    before = set()
+    targets = {'base-link': context.parent, 'context-link': context, 'isolation-link': isolation, 'group-link': group,
+        'scenario-dir-link': receipt.parent, 'receipt-link': receipt, 'summary-link': summary,
+        'scenario-dir-junction': receipt.parent, 'summary-junction': summary}
+    if unsafe in targets:
+        method = 'is_junction' if unsafe.endswith('junction') else 'is_symlink'
+        original = getattr(Path, method, lambda _self: False)
+        monkeypatch.setattr(Path, method, lambda self: self == targets[unsafe] or original(self), raising=False)
+    elif unsafe.endswith('-old'):
+        before.add({'isolation-old': isolation, 'group-old': group, 'receipt-old': receipt, 'summary-old': summary}[unsafe].resolve())
+    elif unsafe == 'summary-oversized':
+        summary.write_text('x' * (diagnostics.MAX_BYTES + 1))
+    elif unsafe == 'summary-malformed':
+        summary.write_text('{bad-json')
+    else:
+        value = json.loads(summary.read_text()); value['status'] = 'PASS'; summary.write_text(json.dumps(value))
+    assert collect_browser(browser_root, before) == []
+
+
+def test_corrections_browser_absent_summary_and_unknown_counters_never_invent_a_location(browser_root):
+    *_, summary = browser_failure_context(browser_root)
+    summary.unlink()
+    result = collect_browser(browser_root)
+    assert result[0]['summary_present'] is False
+    assert result[0]['result'] == {'status': 'FAIL', 'failure_location_present': False}
+    assert collect_browser(browser_root, sha='2' * 40) == []
+    assert collect_browser(browser_root, ci={**BROWSER_CI, 'job_id': 'suite-other'}) == []
+    value = diagnostics.sanitize_browser_failure({'expected': True, 'unexpected': -1, 'skipped': 'SECRET_TOKEN',
+        'flaky': 1000001, 'duration': float('nan'), 'failures': [{'status': 'SECRET_TOKEN', 'test': 'PRIVATE_ROW'}]}, {BROWSER_SOURCE})
+    assert value == {'status': 'FAIL', 'failures': [{'location_present': False}], 'failure_location_present': False}
+
+
+def test_corrections_browser_failure_attachment_is_hashed_failed_and_not_a_scenario_pass(browser_root, monkeypatch):
+    browser_failure_context(browser_root)
+    monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: {BROWSER_SOURCE})
+    output = browser_root / 'ci'
+    path = diagnostics.publish_failure('corrections-browser', output, source_sha=SHA, ci=BROWSER_CI,
+        phases=[{'name': 'corrections', 'status': 'FAIL', 'exit_code': 1, 'timed_out': False}],
+        error=RuntimeError('SECRET_TOKEN'), phase='corrections', before=set(), root=browser_root)
+    result = json.loads(path.read_text())
+    assert result['status'] == 'FAIL' and result['certifies_final'] is False
+    assert len(result['evidence']) == 1 and result['evidence'][0]['kind'] == 'CORRECTIONS_BROWSER_PARTIAL_SUMMARY'
+    reference = result['evidence'][0]; attachment = output / 'evidence' / reference['path']
+    assert hashlib.sha256(attachment.read_bytes()).hexdigest() == reference['sha256']
+    assert all(value not in attachment.read_text() for value in ('SECRET_TOKEN', 'PRIVATE_ROW', '"test":'))
     assert not list((output / 'evidence').glob('scenario-*.json'))

@@ -227,7 +227,9 @@ def extract_log_facts(path: Path, sources: set[str]):
             'error_types': sorted(types), 'error_codes': sorted(codes), 'progress': progress[-10:]}
 
 
-def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, sources=None):
+def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, sources=None, source_sha=None, ci=None):
+    if group == 'corrections-browser':
+        return collect_corrections_browser_failure(before, root=root, sources=sources, source_sha=source_sha, ci=ci)
     if group == 'backup-restore':
         return collect_recovery_failure(before, root=root)
     if group == 'corrections-recovery':
@@ -291,6 +293,109 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
 def fresh_catalog_file(path, before, *, bounded=True):
     return (path.is_file() and not path.is_symlink() and not getattr(path, 'is_junction', lambda: False)()
             and path.resolve() not in before and (not bounded or path.stat().st_size <= MAX_BYTES))
+
+
+def sanitize_browser_failure(value, sources):
+    """Only counters and verified source locations survive; no test title or message."""
+    result = {'status': 'FAIL'}
+    for key in ('expected', 'unexpected', 'skipped', 'flaky'):
+        if type(value.get(key)) is int and 0 <= value[key] <= 1000000:
+            result[key] = value[key]
+    if number(value.get('duration')) and value['duration'] <= 3600000:
+        result['duration'] = value['duration']
+    if allowed(value.get('error_type'), ERROR_TYPES):
+        result['error_type'] = value['error_type']
+    failures = []
+    for failure in value.get('failures', [])[:30] if isinstance(value.get('failures'), list) else []:
+        if not isinstance(failure, dict):
+            continue
+        item = {'location_present': False}
+        if allowed(failure.get('status'), {'failed', 'timedOut', 'interrupted'}):
+            item['status'] = failure['status']
+        location = failure.get('location')
+        if isinstance(location, dict) and isinstance(location.get('file'), str):
+            raw = location['file'].replace('\\', '/')
+            selected = [source for source in sources if source.startswith('frontend/tests-e2e/')
+                and source.endswith('.spec.ts') and (raw == source or raw.endswith('/' + source)
+                or raw == Path(source).name or raw == source.removeprefix('frontend/'))]
+            if len(selected) == 1 and not any(mark in raw for mark in ('://', '\n', '\r', '\0', '?', '#')) and '..' not in raw.split('/'):
+                source = ROOT / selected[0]
+                if source.is_file() and not any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                                               for part in (source, *source.parents)):
+                    lines = source.read_text(encoding='utf-8').splitlines()
+                    line, column = location.get('line'), location.get('column')
+                    if type(line) is int and 1 <= line <= len(lines):
+                        safe = {'file': selected[0], 'line': line}
+                        if type(column) is int and 1 <= column <= min(4096, len(lines[line - 1]) + 1):
+                            safe['column'] = column
+                        item.update(location_present=True, location=safe)
+        failures.append(item)
+    result.update(failures=failures, failure_location_present=any(item['location_present'] for item in failures))
+    return result
+
+
+def collect_corrections_browser_failure(before, *, root=ROOT, sources=None, source_sha=None, ci=None):
+    """Bind the root summary to the fresh group's one final failed population receipt."""
+    if (not isinstance(source_sha, str) or not SHA.fullmatch(source_sha) or not isinstance(ci, dict)
+            or set(ci) != {'run_id', 'run_attempt', 'job_id'} or ci.get('job_id') != 'suite-corrections-browser'):
+        return []
+    sources = trusted_sources() if sources is None else sources
+    base = root / '.codex-local/v070'
+    if not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                               for part in (base, base.parent, base.parent.parent)):
+        return []
+    observations = []
+    for context in sorted(base.iterdir()):
+        if (not re.fullmatch(r'trackvance-v070-test-corrections-browser-[a-f0-9]{12}', context.name)
+                or not context.is_dir() or context.is_symlink() or getattr(context, 'is_junction', lambda: False)()):
+            continue
+        paths = [context / 'isolation.json', context / 'corrections-evidence.json']
+        if not all(fresh_catalog_file(path, before) for path in paths):
+            continue
+        try:
+            identity, group = (json.loads(path.read_text(encoding='utf-8')) for path in paths)
+            if (not isinstance(identity, dict) or identity.get('project') != context.name
+                    or not isinstance(group, dict) or type(group.get('schema_version')) is not int or group['schema_version'] != 1 or group.get('kind') != 'XLSX_GROUP'
+                    or group.get('group') != 'corrections-browser' or group.get('status') != 'FAIL'
+                    or group.get('source_sha') != source_sha or group.get('ci') != ci
+                    or group.get('required_scenarios') != ['browser-400000-shared', 'browser-1000000-shared']
+                    or not isinstance(group.get('scenario_results'), list) or len(group['scenario_results']) > 2):
+                continue
+            failed = []
+            for reference in group['scenario_results']:
+                if not isinstance(reference, dict) or reference.get('kind') != 'XLSX_SCENARIO' or not isinstance(reference.get('path'), str):
+                    continue
+                match = re.fullmatch(r'xlsx-scenarios-corrections-browser-[a-f0-9]{12}/'
+                    r'scenario-browser-(400000|1000000)-shared-[a-f0-9]{32}\.json', reference['path'])
+                if not match:
+                    continue
+                path = context / reference['path']
+                if (path.parent.is_symlink() or getattr(path.parent, 'is_junction', lambda: False)()
+                        or not fresh_catalog_file(path, before) or hashlib.sha256(path.read_bytes()).hexdigest() != reference.get('sha256')):
+                    continue
+                receipt = json.loads(path.read_text(encoding='utf-8'))
+                scenario, rows = 'browser-' + match[1] + '-shared', int(match[1])
+                if (isinstance(receipt, dict) and type(receipt.get('schema_version')) is int and receipt['schema_version'] == 1 and receipt.get('kind') == 'XLSX_SCENARIO'
+                        and receipt.get('status') == 'FAIL' and receipt.get('group') == 'corrections-browser'
+                        and receipt.get('source_sha') == source_sha and receipt.get('ci') == ci
+                        and receipt.get('scenario_id') == reference.get('scenario_id') == scenario
+                        and type(receipt.get('rows')) is int and receipt['rows'] == rows and receipt.get('variant') == 'shared'):
+                    failed.append((scenario, rows))
+            if len(failed) != 1:
+                continue
+            path = context / 'browser-summary.json'
+            if (path.exists() or path.is_symlink()) and not fresh_catalog_file(path, before):
+                continue
+            value = json.loads(path.read_text(encoding='utf-8')) if fresh_catalog_file(path, before) else None
+            if value is not None and (not isinstance(value, dict) or value.get('status') != 'FAIL'):
+                continue
+            scenario, rows = failed[0]
+            observations.append({'kind': 'CORRECTIONS_BROWSER_PARTIAL_SUMMARY', 'scenario_id': scenario, 'rows': rows,
+                'summary_present': value is not None, 'result': sanitize_browser_failure(value, sources) if value is not None
+                else {'status': 'FAIL', 'failure_location_present': False}})
+        except (OSError, ValueError, RecursionError):
+            continue
+    return observations[:4]
 
 
 def collect_catalog_recovery_failure(context, before, sources):
@@ -588,7 +693,7 @@ def publish_failure(group: str, output: Path, *, source_sha: str, ci: dict, phas
                                      or key == 'timed_out' and type(record[key]) is bool
                                      or key == 'duration_seconds' and number(record[key]))})
     sources = trusted_sources()
-    children = collect_child_failure(group, before, root=root, sources=sources)
+    children = collect_child_failure(group, before, root=root, sources=sources, source_sha=source_sha, ci=ci)
     # Filenames are trusted phase identifiers from run_suite, not child output.
     log_facts = extract_log_facts(output / 'diagnostics' / group / (phase + '.private.log'), sources)
     code = 'GROUP_DEADLINE_EXPIRED' if isinstance(error, TimeoutError) else 'CHILD_EXIT_NONZERO'
