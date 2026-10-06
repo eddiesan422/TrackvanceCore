@@ -255,7 +255,8 @@ def cancel_and_recover(api, directory, context, fixture, report):
 
 def certify_row_limit_failure(api, directory, context, baseline, report):
     maximum = report["effective_limits"]["xlsx_max_rows"]
-    fixture = generate(directory / "xlsx-fixtures", maximum + 1, strings="inline")
+    fixture = generate(directory / "xlsx-fixtures", maximum + 1, strings="inline",
+        late_type_after=baseline["fixture"].get("late_type_after", 100000))
     dataset = api.get("/api/v1/datasets/" + baseline["acquisition"]["dataset_id"])
     original_ids = [version["id"] for version in dataset["versions"]]
     with volume.phase(report, "xlsx_row_limit_failure_preserves_previous_version", directory, context):
@@ -398,10 +399,10 @@ def certify(directory, context, args):
         (directory / "corrections-evidence.json").write_text(encoded, encoding="utf-8")
 
 
-def acquire_group_fixture(api, directory, context, rows, variant):
+def acquire_group_fixture(api, directory, context, rows, variant, *, late_type_after=100000):
     report, timeline = {}, []
     began = time.monotonic()
-    fixture = generate(directory / "xlsx-fixtures", rows, strings=variant)
+    fixture = generate(directory / "xlsx-fixtures", rows, strings=variant, late_type_after=late_type_after)
     report.update(fixture=fixture, fixture_prepare_seconds=round(time.monotonic() - began, 6))
     with volume.phase(report, "xlsx_acquisition_whole", directory, context) as metrics:
         dataset, acquisition, transfer = register(api, fixture, f"XLSX {rows} {variant}")
@@ -416,8 +417,8 @@ def acquire_group_fixture(api, directory, context, rows, variant):
         profile = api.get('/api/v1/dataset-versions/' + completed["output_version_id"] + '/profile')
         report["profile"] = volume.validate_profile(profile, fixture)
         report["column_types"] = {column["name"]: column["logical_type"] for column in profile["profile"]["columns"]}
-        if rows > 100000 and report["column_types"]["late_type"] != "STRING":
-            raise AssertionError("La inferencia no consideró los cambios posteriores a100k.")
+        if rows > late_type_after and report["column_types"]["late_type"] != "STRING":
+            raise AssertionError("La inferencia no consideró el cambio tardío de tipo.")
     report["observed_worker_stages"] = stage_resources(timeline, metrics.samples)
     report.update(status="PASS", rows=rows, strings=variant)
     return report
@@ -614,9 +615,11 @@ def certify_functional(directory, context, images, evidence):
     if limits["xlsx_max_rows"] != 120 or limits["batch_rows"] != 20:
         raise ValueError("Functional fixture bounds were not applied to the private test context")
     acquired = {}
+    # Preserve the deep fixture's numeric-to-text transition across real batches.
+    # Pure numeric short inputs otherwise change INT64 to DECIMAL after Intake.
     for variant in ("inline", "shared"):
         acquired[variant] = evidence.scenario(f"acquisition-120-{variant}", 120, variant,
-            lambda variant=variant: acquire_group_fixture(api, directory, context, 120, variant), seconds=180)
+            lambda variant=variant: acquire_group_fixture(api, directory, context, 120, variant, late_type_after=60), seconds=180)
     baseline = acquired["inline"]
     def limit_case():
         result = {"effective_limits": limits}

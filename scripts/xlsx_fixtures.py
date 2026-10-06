@@ -30,13 +30,13 @@ def canonical(row):
     return (json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
 
 
-def expected_row(number):
+def expected_row(number, *, late_type_after=100000):
     payload = base64.urlsafe_b64encode(hashlib.shake_256(SEED + number.to_bytes(8, "big")).digest(72)).decode()
     observed = None if number % 100 == 0 else "" if number % 100 == 1 else (
         f"  é-ñ-{number:012d}-😀\ncontinuación  " if number % 10000 == 2 else f"  é-ñ-{number:012d}-😀  ")
     return dict(zip(COLUMNS, (f"{number:012d}", f"{number % 997 + 1}.00000001", f"R{number % 20:02d}",
         observed, payload, (date(2023, 1, 1) + timedelta(days=number % 365)).isoformat(),
-        f"=A{number + HEADER_ROW}+1", str(number % 997) if number <= 100000 else f"late-text-{number}"), strict=True))
+        f"=A{number + HEADER_ROW}+1", str(number % 997) if number <= late_type_after else f"late-text-{number}"), strict=True))
 
 
 def _text(value):
@@ -52,12 +52,14 @@ def _database(path):
     return db
 
 
-def generate(directory, rows, *, strings="inline", wrong_dimension=True):
-    if not 1 <= rows <= 1048576 - HEADER_ROW or strings not in {"inline", "shared"}:
+def generate(directory, rows, *, strings="inline", wrong_dimension=True, late_type_after=100000):
+    if not 1 <= rows <= 1048576 - HEADER_ROW or strings not in {"inline", "shared"} or not 1 <= late_type_after <= 1048576:
         raise ValueError("La población debe caber en Excel incluyendo las filas de encabezado.")
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     name = f"xlsx-{rows}-{strings}-diverse"
+    if late_type_after != 100000:
+        name += f"-late-{late_type_after}"
     path, metadata_path = directory / f"{name}.xlsx", directory / f"{name}.json"
     if path.exists() or metadata_path.exists():
         if not (path.exists() and metadata_path.exists()):
@@ -113,13 +115,13 @@ def generate(directory, rows, *, strings="inline", wrong_dimension=True):
                     output.write(f'<worksheet xmlns="{NS}"><dimension ref="{dimension}"/><sheetData><row r="2"><c r="A2" s="1"/></row>'.encode())
                     output.write((f'<row r="{HEADER_ROW}">' + ''.join(cell(f'{chr(65+i)}{HEADER_ROW}', column) for i, column in enumerate(COLUMNS)) + '</row>').encode())
                     for number in range(1, rows + 1):
-                        row = expected_row(number)
+                        row = expected_row(number, late_type_after=late_type_after)
                         digest.update(canonical(row))
                         observed_bytes += sum(len(value.encode()) for value in row.values() if value is not None)
                         physical = number + HEADER_ROW
                         cells = []
                         for i, (column, value) in enumerate(row.items()):
-                            kind = "date" if column == "date" else "formula" if column == "formula" else "number" if column == "amount" or (column == "late_type" and number <= 100000) else "text"
+                            kind = "date" if column == "date" else "formula" if column == "formula" else "number" if column == "amount" or (column == "late_type" and number <= late_type_after) else "text"
                             cells.append(cell(f'{chr(65+i)}{physical}', value, kind))
                         output.write((f'<row r="{physical}">' + ''.join(cells) + '</row>').encode())
                         if number % 10000 == 0:
@@ -147,6 +149,8 @@ def generate(directory, rows, *, strings="inline", wrong_dimension=True):
         "compressed_expanded_ratio": path.stat().st_size / expanded_bytes,
         "generation_seconds": round(time.monotonic() - started, 3), "max_buffer_rows": 1,
         "formats": {"XLSX": {"path": str(path), "actual_bytes": path.stat().st_size, "sha256": file_hash}}}
+    if late_type_after != 100000:
+        result["late_type_after"] = late_type_after
     result["oracle"] = verify(path, result)
     metadata_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
@@ -203,7 +207,7 @@ def verify(path, expected):
                         row[column] = observed
                     if any(value is not None for value in row.values()):
                         count += 1
-                        if physical != count + HEADER_ROW or row != expected_row(count):
+                        if physical != count + HEADER_ROW or row != expected_row(count, late_type_after=expected.get("late_type_after", 100000)):
                             raise AssertionError(f"Oracle mismatch at physical row {physical}; values withheld.")
                         digest.update(canonical(row))
                         empty += row["observed"] == ""
