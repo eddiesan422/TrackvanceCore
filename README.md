@@ -15,12 +15,12 @@ y generación durable tienen perfiles separados; sólo la última publica un dat
 nuevo, pendiente de su propia validación de calidad. El proceso SQL ejecuta en
 Linux con Landlock/seccomp, sin credenciales de negocio ni acceso general a archivos.
 
-Véanse las guías de [Catálogo](docs/development/catalog-governance-0.8.0.md),
-[Reportes](docs/development/reports-0.8.0.md), [parámetros](docs/development/parameters-0.8.0.md)
-y [guía de usuario](docs/development/catalog-reports-user-guide.md),
-además de la [auditoría de partida](docs/development/catalog-reports-audit-0.8.0.md).
+Véanse las guías de [Catálogo](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/catalog-governance.md),
+[Reportes](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/reports.md), [parámetros](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/parameters.md)
+y [guía de usuario](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/catalog-reports-user-guide.md),
+además de la [auditoría de partida](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/catalog-reports-audit.md).
 El cierre requiere las pruebas integradas y todos los jobs de GitHub Actions del
-commit final; su estado real se registra en [validación](docs/development/validation.md).
+commit final; su estado real se registra en [validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md).
 
 ## Capacidades de volumen y automatización conservadas
 
@@ -28,9 +28,9 @@ El ciclo C01–C06 corrige la adquisición XLSX, diagnóstico de límites, selec
 área, edición de zona horaria, despacho de automatizaciones y marca no leída.
 XLSX normal usa lectura incremental con default de 1 millón de filas de datos,
 1 GiB comprimido y 4 GiB expandido, sujeto al espacio físico de la hoja y demás
-[límites efectivos](docs/development/parameters-0.7.0.md). La UI consulta esos
+[límites efectivos](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/parameters.md). La UI consulta esos
 límites antes de registrar; JSON no lineal y carga rápida conservan sus cotas.
-Véase [ADR 0025](docs/adr/0025-corrections-c01-c06.md) para causas, semántica y
+Véase [ADR 0025](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0025-corrections-c01-c06.md) para causas, semántica y
 verificaciones. La certificación independiente del ciclo requiere todos los
 gates sobre su SHA final; el verde de la publicación inicial no los sustituye.
 
@@ -39,7 +39,7 @@ inmutables. La revisión añade adquisición asíncrona, datasets multipartes,
 PySpark real para Intake/ReconOps/Sentinel, preflight persistido y preparación
 Delivery por lotes en disco, automatización versionada y bandeja personal.
 Los resultados de cada suite y tamaño se registran en
-[validación](docs/development/validation.md); capacidad implementada y certificada
+[validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md); capacidad implementada y certificada
 se distinguen, y la release permanece abierta mientras falten gates obligatorios.
 
 La UI normal recibe el archivo a staging, permite confirmar opciones, registra
@@ -54,7 +54,7 @@ versión, recursos y motivo de selección/rechazo. PySpark 4.0.3/Java 17 ejecuta
 reglas portables y operaciones globales; no retorna toda la población al driver.
 El modo estándar es local[2]; un overlay opcional prueba Standalone con driver
 DEFAULT y dos executors en el mismo host. No amplía recursos físicos ni certifica
-escalamiento multinodo. Véase [Spark y evidencia](docs/development/spark-volume-0.7.0.md).
+escalamiento multinodo. Véase [Spark y evidencia](https://github.com/eddiesan422/TrackvanceCore-docs/blob/source/code-fc49ed9a1da5/docs/development/spark-volume-0.7.0.md).
 
 Data Delivery conserva sus cuatro estrategias y una transacción por intento.
 Preflight grande se sigue como trabajo; su reutilización exige borrador exacto.
@@ -79,14 +79,14 @@ delivery-worker, scheduler, events-chaining y events-notifications. Todos mantie
 `restart: "no"`. Cada worker tiene su lane; adquisición monta sólo secretos de
 fuentes y Delivery sólo secretos de destinos. Calidad/Spark y procesos ligeros no
 tienen credenciales SQL de negocio. Los parámetros efectivos y unidades
-están en [parámetros](docs/development/parameters-0.7.0.md); la UI de Sistema muestra
+están en [parámetros](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/parameters.md); la UI de Sistema muestra
 cotas y salud separadas. La instalación principal conserva proyecto/volúmenes,
 puerto/origen y SSO desactivado; nunca sirve como entorno de pruebas.
 
-- [Arquitectura](docs/architecture.md) y [especificación v1.1, implementación 0.7.0](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf).
-- [Contrato HTTP](backend/API_CONTRACT.md) y [permisos](docs/development/permission-matrix.md).
-- [Operación y recuperación](docs/development/operations.md).
-- [ADRs 0020–0025](docs/adr/0020-async-acquisition-multipart.md).
+- [Arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md) y [especificación v1.1, producto 0.8.0](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf).
+- [Contrato HTTP](backend/API_CONTRACT.md) y [permisos](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/permission-matrix.md).
+- [Operación y recuperación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/operations.md).
+- [ADRs 0020–0025](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0020-async-acquisition-multipart.md).
 
 Los apartados históricos siguientes conservan contexto de 0.5.x/0.6.x y sus
 propias cifras; no sustituyen la certificación 0.7.0. Credenciales temporales de
@@ -121,7 +121,7 @@ tipado, preview, preflight, configuraciones inmutables y transacciones remotas.
 la versión de dataset y destino sin exponer secretos ni filas completas.
 
 Los contratos históricos se conservan. La
-[línea oficial de evolución](docs/roadmap.md) completa el punto 10 local antes de
+[línea oficial de evolución](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/roadmap.md) completa el punto 10 local antes de
 productizar en el punto 11. El ciclo 0.5.1 endurece Data Delivery sin añadir
 conectores ni módulos grandes. El código 8927ea0 obtuvo ocho jobs SUCCESS en
 [GitHub Actions](https://github.com/eddiesan422/TrackvanceCore/actions/runs/36194431770).
@@ -156,40 +156,42 @@ No se habilita infraestructura cloud ni se extrapolan garantías productivas.
   separado de Intake/Recon/Sentinel. Sólo las cargas realmente ejecutadas se
   publican como mediciones; los no ejecutados conservan su motivo. Smoke y
   carga representativa de 8.917.809 bytes / 20.000 filas aprobaron 8/8 casos cada
-  uno; ver [resultados y límites](docs/development/delivery-benchmark-results-0.5.1.md).
+  uno; ver [resultados y límites](https://github.com/eddiesan422/TrackvanceCore-docs/blob/source/code-fc49ed9a1da5/docs/development/delivery-benchmark-results-0.5.1.md).
 - **Carga por rutas:** React.lazy/Suspense reduce el JavaScript inicial medido
   de 611,41 a 364,97 kB y de 179,47 a 116,77 kB gzip. La navegación permanece
   disponible mientras carga una sección y un fallo de chunk ofrece recuperación.
-  Ver [medición y límites](docs/development/code-splitting-results-0.5.1.md).
+  Ver [medición y límites](https://github.com/eddiesan422/TrackvanceCore-docs/blob/source/code-fc49ed9a1da5/docs/development/code-splitting-results-0.5.1.md).
 
 La única migración nueva añade revisiones consultables y auditables de UNKNOWN.
 No cambia los estados históricos de DeliveryAttempt ni las migraciones 0001–0008.
 El estado de pruebas, Docker/SQL y GitHub Actions se mantiene en
-[validación](docs/development/validation.md); la evidencia de interfaz distingue
+[validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md); la evidencia de interfaz distingue
 tests con API simulada de los ciclos con bases reales.
+
+La fuente documental oficial es el repositorio privado [TrackvanceCore-docs](https://github.com/eddiesan422/TrackvanceCore-docs); `ProductOne/Documentación` es su checkout vigente. Los perfiles `functional` (Actions) y `deep` (certificación local) tienen cierres independientes. Véanse [instrucciones de trabajo](AGENTS.md) y [guía de CI](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/ci.md).
 
 Documentación del ciclo:
 
-- [Arquitectura local y evolución del producto](docs/architecture.md).
-- [Puertos de almacenamiento, fuentes, ejecución y cola](docs/adr/0006-architecture-ports.md).
-- [Semántica y catálogo de reglas](docs/rules-catalog.md).
-- [Reglas avanzadas y referencias inmutables](docs/adr/0008-advanced-intake-rules.md).
-- [Conciliación configurable](docs/adr/0009-configurable-reconciliation.md).
-- [Programación Sentinel local](docs/adr/0010-local-sentinel-scheduler.md).
-- [Excepciones operativas y resolución automática](docs/adr/0011-advanced-exception-workflow.md).
-- [Administración local de usuarios](docs/adr/0012-local-identity-administration.md).
-- [Manifiestos, identidad y compatibilidad](docs/adr/0002-evidence-and-artifacts.md).
-- [Lectores y normalización de datasets](docs/adr/0004-dataset-readers.md).
-- [Conexiones, credenciales y snapshots externos](docs/adr/0007-external-connections.md).
-- [Data Delivery, transacciones y estado UNKNOWN](docs/adr/0015-data-delivery.md).
-- [Validación técnica de excepciones](docs/adr/0005-technical-validation-of-exceptions.md).
-- [Contenido y seguridad de los Excel](docs/exports-xlsx.md).
-- [Validación y pendientes explícitos](docs/development/validation.md).
-- [Operación, Docker y respaldo](docs/development/operations.md).
-- [Backup, restore y reset verificados](docs/adr/0013-local-backup-restore.md).
-- [Benchmarks medidos y límites](docs/development/volume-benchmark.md).
+- [Arquitectura local y evolución del producto](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md).
+- [Puertos de almacenamiento, fuentes, ejecución y cola](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0006-architecture-ports.md).
+- [Semántica y catálogo de reglas](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/rules-catalog.md).
+- [Reglas avanzadas y referencias inmutables](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0008-advanced-intake-rules.md).
+- [Conciliación configurable](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0009-configurable-reconciliation.md).
+- [Programación Sentinel local](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0010-local-sentinel-scheduler.md).
+- [Excepciones operativas y resolución automática](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0011-advanced-exception-workflow.md).
+- [Administración local de usuarios](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0012-local-identity-administration.md).
+- [Manifiestos, identidad y compatibilidad](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0002-evidence-and-artifacts.md).
+- [Lectores y normalización de datasets](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0004-dataset-readers.md).
+- [Conexiones, credenciales y snapshots externos](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0007-external-connections.md).
+- [Data Delivery, transacciones y estado UNKNOWN](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0015-data-delivery.md).
+- [Validación técnica de excepciones](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0005-technical-validation-of-exceptions.md).
+- [Contenido y seguridad de los Excel](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/exports-xlsx.md).
+- [Validación y pendientes explícitos](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md).
+- [Operación, Docker y respaldo](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/operations.md).
+- [Backup, restore y reset verificados](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0013-local-backup-restore.md).
+- [Benchmarks medidos y límites](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/volume-benchmark.md).
 - [Snapshot OpenAPI](backend/openapi.json) y [contrato HTTP vigente](backend/API_CONTRACT.md).
-- [Especificación técnica v1.1 y su revisión de implementación](docs/specification/README.md).
+- [Especificación técnica v1.1 y su revisión de implementación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/README.md).
 
 La instalación local `trackvance-certification` utiliza `http://localhost:3100`.
 El puerto por defecto de una instalación nueva es 3000; `WEB_PORT` y
@@ -202,11 +204,11 @@ Excepciones y Auditoría en una misma aplicación.
 
 Basado en **Trackvance Core — Especificación Técnica v1.1**. Esta evolución
 funcional no representa la implementación de la
-arquitectura objetivo del documento. Consulta [el estado de arquitectura](docs/architecture.md)
-y [el alcance vigente](docs/development/prototype-scope.md).
-Los resultados de las pruebas están en [verificación local](docs/development/validation.md).
-La especificación oficial v1.1 tiene una [revisión de implementación versionada](docs/specification/README.md)
-y conserva su [fuente editable](docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md) en el repositorio.
+arquitectura objetivo del documento. Consulta [el estado de arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md)
+y [el alcance vigente](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/prototype-scope.md).
+Los resultados de las pruebas están en [verificación local](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md).
+La especificación oficial v1.1 tiene una [revisión de implementación versionada](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/README.md)
+y conserva su [fuente editable](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.md) en el repositorio documental privado.
 
 ## Inicio recomendado: Docker Compose y PostgreSQL
 
@@ -237,7 +239,7 @@ contenedores existentes. Para instalar una revisión nueva se requiere un backup
 verificado y reconstruir las imágenes conservando el mismo proyecto y volúmenes.
 Inicia primero PostgreSQL y API, compara la preservación con los procesos
 automáticos detenidos y después reactívalos según el procedimiento de
-[actualización](docs/development/operations.md#actualización-y-recuperación-070).
+[actualización](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/operations.md#actualización-y-recuperación-070).
 La API aplica la migración al iniciar. Comprueba `/api/v1/health`; no uses `down -v`.
 
 PostgreSQL guarda metadata; los archivos y artefactos permanecen fuera de la
@@ -408,7 +410,7 @@ python scripts/tests/connections_cycle.py
 El ciclo incluye PostgreSQL, SQL Server, smoke API y Playwright. Requiere recursos
 para ambos motores; crea un proyecto temporal y elimina solamente sus propios
 volúmenes. Los detalles de límites, secretos y nuevos conectores están en
-[ADR 0007](docs/adr/0007-external-connections.md).
+[ADR 0007](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0007-external-connections.md).
 
 ## Data Delivery hacia PostgreSQL y SQL Server
 
@@ -469,9 +471,9 @@ instalación principal:
 python scripts/tests/delivery_cycle.py
 ```
 
-Consulta garantías y límites en [ADR 0015](docs/adr/0015-data-delivery.md) y los
+Consulta garantías y límites en [ADR 0015](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0015-data-delivery.md) y los
 resultados ejecutados en
-[validación](docs/development/validation.md).
+[validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md).
 
 ## Mantenimiento y pruebas de volumen
 
@@ -519,7 +521,7 @@ Como antecedente 0.4.0, el perfil variado de 50.000 filas y cuatro columnas comp
 overrides locales y no eleva los defaults del producto. 500 MiB, 1/2/5 GiB no se
 ejecutaron por presupuesto; no son capacidades certificadas ni fallos medidos.
 Tiempos, memoria, temporal, fuentes SQL y limitaciones están en
-[el informe de volumen](docs/development/volume-benchmark.md). No se atribuye esa
+[el informe de volumen](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/volume-benchmark.md). No se atribuye esa
 medición histórica a 0.5.1; sus ejecuciones nuevas están en validación y en el
 informe específico de Data Delivery.
 
@@ -566,7 +568,7 @@ El ciclo completo Docker con datos aislados y limpieza automática se ejecuta
 desde la raíz con `python scripts/tests/docker_e2e_cycle.py`. La certificación de
 Conexiones añade `python scripts/tests/connections_cycle.py --full-playwright`
 con PostgreSQL y SQL Server reales. Consulta los conteos y resultados vigentes en
-[validación](docs/development/validation.md); los informes anteriores conservan
+[validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md); los informes anteriores conservan
 sus resultados históricos.
 
 Data Delivery usa su proyecto aislado y fixtures de destino:
@@ -597,7 +599,7 @@ Las dependencias resueltas se registran en `backend/uv.lock` y
 
 Las capas se organizan por responsabilidades dentro del monolito; la API y los tres
 workers comparten modelos y servicios. Los puertos permiten sustituir la
-infraestructura sin cambiar las reglas. El [mapa de arquitectura](docs/architecture.md)
+infraestructura sin cambiar las reglas. El [mapa de arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md)
 identifica los archivos y los límites pendientes de esa separación.
 
 ```text
@@ -605,7 +607,7 @@ backend/       API, persistencia, procesamiento, workers y pruebas
 frontend/      SPA React + TypeScript + Vite
 demo/          Datos ficticios de demostración
 deploy/        Imagen de interfaz y proxy Nginx
-docs/          Decisiones y alcance
+docs/          Contratos generados y enlaces al repositorio documental oficial
 scripts/       Inicio, parada, bootstrap y prueba de integración
 compose.yml    Entorno PostgreSQL local
 ```
@@ -645,7 +647,7 @@ compose.yml    Entorno PostgreSQL local
   bloqueo dentro de la transacción. Otros cambios externos siguen siendo
   responsabilidad operativa del destino.
 - Los resultados de volumen, backup/restore y máximos realmente certificados se publican en
-  [validación](docs/development/validation.md). No se extrapolan garantías de
+  [validación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md). No se extrapolan garantías de
   producción ni volúmenes no ejecutados.
 
 ## Si algo no inicia

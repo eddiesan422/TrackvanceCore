@@ -84,8 +84,8 @@ exports y uso de entradas vuelven a comprobar autorización transitiva vigente.
 Responsables/creadores no reciben permisos automáticamente. Administrator
 mantiene catálogo completo y roles personalizados existentes conservan grants.
 La guía completa está en
-[Catálogo y gobierno](../docs/development/catalog-governance-0.8.0.md) y
-[ADR0026](../docs/adr/0026-controlled-governance-strict-approval.md).
+[Catálogo y gobierno](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/catalog-governance.md) y
+[ADR0026](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0026-controlled-governance-strict-approval.md).
 
 ## Reportes 0.8.0
 
@@ -93,7 +93,7 @@ Definiciones/revisiones, resolución multifuente congelada, preview/descarga
 efímeros y generación deliberada tienen entidades/endpoints propios. No crean
 un Run ni un dataset ficticio para representar la consulta. El contrato detallado
 de fuentes, joins, SQL, contextos, perfiles y ejecución está en
-[Reportes 0.8.0](../docs/development/reports-0.8.0.md).
+[Reportes 0.8.0](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/reports.md).
 
 ## Adquisición asíncrona 0.7.0
 
@@ -518,7 +518,7 @@ indica que Trackvance no puede confirmar el commit remoto; no equivale a fallo n
 decidir una ejecución explícita. Receipt y manifest no contienen secretos ni filas
 completas y enlazan Run, DatasetVersion, DestinationVersion y DeliveryAttempt.
 
-RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence. Receipt añade artifacts:download. La matriz exhaustiva y los controles adicionales por módulo/recurso están en [permission-matrix.md](../docs/development/permission-matrix.md).
+RBAC 0.6.0 separa destinations:read/use/manage de delivery:read/configure/execute/overwrite/alter_target/review_unknown/repair_evidence. Receipt añade artifacts:download. La matriz exhaustiva y los controles adicionales por módulo/recurso están en [permission-matrix.md](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/permission-matrix.md).
 
 ## Configuraciones y ejecuciones
 
@@ -606,7 +606,7 @@ intentos, más `jobs.lane`. Las configuraciones históricas no se modifican. Dat
 Delivery fija una DatasetVersion y DestinationVersion, ejecuta preflight dos veces,
 usa una transacción remota por intento y publica receipt/manifest/linaje sólo
 después de confirmación. `UNKNOWN` conserva la ambigüedad de commit y bloquea el
-reintento automático. Ver [ADR 0015](../docs/adr/0015-data-delivery.md).
+reintento automático. Ver [ADR 0015](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0015-data-delivery.md).
 
 Backup/restore y verificación incorporan `delivery_credentials` y `delivery_keys`.
 Los almacenes cifrados y sus claves son material sensible aunque las respuestas y
@@ -624,7 +624,7 @@ JSON string. El sample se lee después de verificar integridad del canonical.
 Las configuraciones admiten `schema_version:2`, reglas declarativas Intake y
 Sentinel y transforms ordenados. Recon admite `key_normalization`,
 `comparison_rules` múltiples y `aggregation`. Ver parámetros y ejemplos en
-[catálogo](../docs/rules-catalog.md). Las respuestas añaden metadata derivada
+[catálogo](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/rules-catalog.md). Las respuestas añaden metadata derivada
 de semántica; al republicar se elimina esta metadata antes de validar inputs.
 
 - `POST /intake/contracts/{id}/versions`, `/recon/controls/{id}/versions`,
@@ -659,7 +659,7 @@ Audit añade actor_type/actor_id/actor_legacy/request_id/run_id; `actor` sigue
 siendo el nombre visible. Los eventos de excepciones también tienen identidad
 estable. Las colecciones se limitan a la organización y las acciones se
 validan por permiso del rol. Más detalles en
-[ADR de evidencia](../docs/adr/0002-evidence-and-artifacts.md).
+[ADR de evidencia](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0002-evidence-and-artifacts.md).
 
 
 ## Endurecimiento Data Delivery 0.5.1
@@ -742,7 +742,7 @@ Esta revisión no añade endpoints ni modifica DTOs persistidos. La interfaz con
 
 ### Reglas avanzadas
 
-Intake añade `compound_unique`, `length`, `column_compare` y `reference`; las reglas por registro admiten `when` como condición declarativa acotada. Nuevas publicaciones asignan `rule_id` estable; los lectores históricos no inventan IDs ni alteran fingerprints anteriores. `rule_id`, `evaluated_count`, `failed_count`, `skipped_count` y severidad acompañan el resultado. Una regla que no evaluó filas no demuestra una corrección técnica. El catálogo completo y los límites de la DSL están en `docs/rules-catalog.md` y ADR 0008.
+Intake añade `compound_unique`, `length`, `column_compare` y `reference`; las reglas por registro admiten `when` como condición declarativa acotada. Nuevas publicaciones asignan `rule_id` estable; los lectores históricos no inventan IDs ni alteran fingerprints anteriores. `rule_id`, `evaluated_count`, `failed_count`, `skipped_count` y severidad acompañan el resultado. Una regla que no evaluó filas no demuestra una corrección técnica. El catálogo completo y los límites de la DSL están en [catálogo de reglas](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/rules-catalog.md) y ADR 0008.
 
 Las referencias fijan una DatasetVersion accesible por organización, columnas y políticas. Se validan al publicar y ejecutar; su tamaño participa en preflight, el manifiesto conserva hashes y `RUN_REFERENCE` incorpora linaje. El motor recibe snapshots normalizados y no consulta fuentes externas.
 
@@ -851,8 +851,8 @@ logout: el backend relee Role y la UI refresca /me.
 SSO no auto-provisiona ni confía en roles externos. El primer vínculo exige email
 con autoridad verificada y usuario activo preprovisionado; accesos posteriores
 usan provider/issuer/subject. No se guardan access/id/refresh tokens. Ver
-[identidad](../docs/development/identity-060.md), [SSO](../docs/development/sso-setup.md)
-y el [antecedente SMTP deshabilitado](../docs/development/smtp-setup.md).
+[identidad](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/identity.md), [SSO](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/sso-setup.md)
+y el [antecedente SMTP deshabilitado](https://github.com/eddiesan422/TrackvanceCore-docs/blob/source/code-fc49ed9a1da5/docs/development/smtp-setup.md).
 
 ### Columnas de auditoría y target policy 0.6.0
 
@@ -885,5 +885,5 @@ TIMESTAMPTZ(6)/VARCHAR(128) en PostgreSQL y DATETIMEOFFSET(6)/NVARCHAR(128) en S
 Faltantes tras materialización provocan AUDIT_COLUMNS_DRIFT; tipos/nombres no
 adoptables, AUDIT_COLUMNS_INCOMPATIBLE; desactivación exigida por policy,
 AUDIT_COLUMNS_REQUIRED. UNKNOWN no se reintenta automáticamente; la policy sigue
-requerida aunque no haya confirmación local. Ver [Delivery audit](../docs/development/delivery-audit.md)
+requerida aunque no haya confirmación local. Ver [Delivery audit](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/delivery-audit.md)
 para fingerprint, permisos, evidencia, recuperación y límites.

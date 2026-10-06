@@ -1,7 +1,7 @@
 """Verified SQLite, ArtifactStore and SecretStore backups for direct execution.
 
 This utility is for scripts/start-local.ps1. Docker/PostgreSQL backups use pg_dump
-and the named persistent volumes, described in docs/development/operations.md.
+and the named persistent volumes, described in https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/operations.md.
 """
 
 import argparse
