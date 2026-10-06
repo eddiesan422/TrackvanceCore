@@ -48,7 +48,7 @@ RECOVERY_PHASES = {'freshness_guards', 'external_postgresql', 'source_trackvance
     'source_backup', 'enable_disposable_access', 'current_credentials', 'current_backup_privacy',
     'authentic_archive', 'authentic_source_start', 'historical_fixtures', 'authentic_backup',
     'destroy_authentic_source', 'restore_080_stopped', 'multipart_fixture', 'native_backup',
-    'fresh_restore', 'restored_multipart'}
+    'fresh_restore', 'restored_multipart', 'native', 'legacy'}
 RECOVERY_CODES = {'RECOVERY_API_UNEXPECTED_HTTP', 'RECOVERY_RUN_NOT_SUCCESS',
     'RECOVERY_ACQUISITION_NOT_PUBLISHED', 'CANONICAL_ARTIFACT_HASH_MISMATCH',
     'CANONICAL_BUNDLE_INVENTORY_MISMATCH', 'CANONICAL_DESCRIPTOR_INVALID',
@@ -241,28 +241,103 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
     sources = trusted_sources() if sources is None else sources
     observations = []
     base = root / '.codex-local/v080'
+    if not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                               for part in (base, base.parent, base.parent.parent)):
+        return []
     for context in sorted(base.glob('trackvance-v080-test-catalog-reports-*')):
         isolation = context / 'isolation.json'
-        if not isolation.is_file() or isolation.resolve() in before or context.is_symlink() or isolation.is_symlink():
+        if (not re.fullmatch(r'trackvance-v080-test-catalog-reports-[a-f0-9]{12}', context.name)
+                or not context.is_dir() or context.is_symlink() or getattr(context, 'is_junction', lambda: False)()
+                or not fresh_catalog_file(isolation, before)):
+            continue
+        try:
+            identity = json.loads(isolation.read_text(encoding='utf-8'))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if not isinstance(identity, dict) or identity.get('project') != context.name:
             continue
         path = context / 'result.json'
         try:
-            summary = sanitize_summary(json.loads(path.read_text(encoding='utf-8'))) if path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_BYTES else {'status': 'FAIL', 'summary_present': False}
+            summary = sanitize_summary(json.loads(path.read_text(encoding='utf-8'))) if fresh_catalog_file(path, before) else {'status': 'FAIL', 'summary_present': False}
         except (OSError, ValueError, RecursionError):
             summary = {'error': {'code': 'UNCLASSIFIED_CHILD_FAILURE'}}
         observations.append({'kind': 'CATALOG_PARTIAL_SUMMARY', 'result': summary})
         for rows in (120, 400000, 1000000):
             tier = path.parent / f'reports-{rows}.json'
-            if tier.is_file() and not tier.is_symlink() and tier.stat().st_size <= MAX_BYTES:
+            if fresh_catalog_file(tier, before):
                 try:
                     observations.append({'kind': 'CATALOG_TIER_PARTIAL', 'rows': rows,
                                          'result': sanitize_summary(json.loads(tier.read_text(encoding='utf-8')))})
                 except (OSError, ValueError, RecursionError):
                     pass
-            facts = extract_log_facts(path.parent / f'reports-{rows}.private.log', sources)
+            log = path.parent / f'reports-{rows}.private.log'
+            facts = extract_log_facts(log, sources) if fresh_catalog_file(log, before, bounded=False) else {}
             if any(facts.values()):
                 observations.append({'kind': 'CATALOG_TIER_LOG_FACTS', 'rows': rows, 'facts': facts})
-    return observations[:12]
+        observations.extend(collect_catalog_recovery_failure(context, before, sources))
+        http = context / 'reports-ephemeral-http.json'
+        if fresh_catalog_file(http, before):
+            try:
+                value = json.loads(http.read_text(encoding='utf-8'))
+                if (isinstance(value, dict) and isinstance(value.get('project'), str)
+                        and re.fullmatch(r'trackvance-v080-test-reports-http-[a-f0-9]{12}', value['project'])
+                        and allowed(value.get('status'), {'PASS', 'FAIL'})):
+                    observations.append({'kind': 'CATALOG_HTTP_PARTIAL_SUMMARY', 'result': sanitize_catalog_http(value)})
+            except (OSError, ValueError, RecursionError):
+                pass
+    return observations[:24]
+
+
+def fresh_catalog_file(path, before, *, bounded=True):
+    return (path.is_file() and not path.is_symlink() and not getattr(path, 'is_junction', lambda: False)()
+            and path.resolve() not in before and (not bounded or path.stat().st_size <= MAX_BYTES))
+
+
+def collect_catalog_recovery_failure(context, before, sources):
+    """Read only the failed catalog child's fresh UUID directory, never its raw log."""
+    observations = []
+    for directory in sorted(context.glob('catalog-recovery-*')):
+        if (not re.fullmatch(r'catalog-recovery-[a-f0-9]{12}', directory.name) or not directory.is_dir()
+                or directory.is_symlink() or getattr(directory, 'is_junction', lambda: False)()):
+            continue
+        path = directory / 'result.json'
+        if not fresh_catalog_file(path, before):
+            continue
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if (not isinstance(value, dict) or value.get('source_project') != context.name
+                or not allowed(value.get('mode'), {'native', 'legacy', 'both'})
+                or not allowed(value.get('status'), {'PASS', 'FAIL'})):
+            continue
+        result = {**sanitize_recovery_summary(value), 'mode': value['mode']}
+        for profile, version in (('native', '0.8.0'), ('legacy', '0.7.0')):
+            child = value.get(profile)
+            if (isinstance(child, dict) and value['mode'] in {profile, 'both'}
+                    and child.get('source_version') == version and child.get('target_version') == '0.8.0'):
+                result[profile] = sanitize_recovery_summary(child)
+        observations.append({'kind': 'CATALOG_RECOVERY_PARTIAL_SUMMARY', 'result': result})
+        log = directory / 'diagnostic.private.log'
+        facts = extract_log_facts(log, sources) if fresh_catalog_file(log, before, bounded=False) else {}
+        if any(facts.values()):
+            observations.append({'kind': 'CATALOG_RECOVERY_LOG_FACTS', 'facts': facts})
+    return observations[:8]
+
+
+def sanitize_catalog_http(value):
+    result = sanitize_summary(value)
+    for key, choices in (('stage', {'SYNTHETIC_AUTHORIZATION', 'SYNTHETIC_GOVERNANCE',
+            'REAL_ACQUISITION_AND_STRICT_INTAKE', 'FREEZE_JOINT_CONTEXT', 'VERIFY_FIXTURE_JOBS_TERMINAL',
+            'STOP_COMPLETED_FIXTURE_WORKERS', 'STORAGE_AND_METADATA_BASELINE',
+            'VERIFY_STORAGE_METADATA_AND_SYSCALLS', 'EXECUTE_HTTP_CASE', 'COMPLETE'}),
+            ('current_case', {'PREVIEW_SUCCESS', 'PREVIEW_LARGE_CONTEXT_REQUEST', 'PREVIEW_RESOURCE_FAILURE',
+            'PREVIEW_CONSUMER_DISCONNECT', *(f'{fmt}_{suffix}' for fmt in ('CSV', 'XLSX')
+                for suffix in ('SUCCESS', 'RESOURCE_FAILURE', 'CONSUMER_DISCONNECT'))}),
+            ('api_error_code', ERROR_CODES)):
+        if allowed(value.get(key), choices):
+            result[key] = value[key]
+    return result
 
 
 def sanitize_recovery_summary(value):
@@ -273,7 +348,7 @@ def sanitize_recovery_summary(value):
     for key, choices in (('failed_stage', RECOVERY_PHASES), ('error_type', ERROR_TYPES),
                          ('error_code', RECOVERY_CODES),
                          ('error_category', {'CONNECTION', 'SQL', 'UNHEALTHY', 'BUILD', 'UNKNOWN'}),
-                         ('source_version', {'0.5.1', '0.6.0', '0.6.1'}),
+                         ('source_version', {'0.5.1', '0.6.0', '0.6.1', '0.7.0', '0.8.0'}),
                          ('target_version', {'0.8.0'}), ('cleanup', {'PASS', 'FAIL'}),
                          ('main_inventory', {'UNCHANGED', 'CHANGED_OR_UNVERIFIABLE', 'UNVERIFIABLE'}),
                          ('cleanup_error_type', ERROR_TYPES), ('inventory_error_type', ERROR_TYPES)):

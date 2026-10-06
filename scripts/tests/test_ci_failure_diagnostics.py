@@ -129,7 +129,7 @@ def test_download_oracle_roles_and_role_limits_are_closed():
 def test_download_oracle_failure_attachment_is_hashed_without_row_values(tmp_path, monkeypatch):
     context = tmp_path / '.codex-local/v080/trackvance-v080-test-catalog-reports-012345abcdef'
     context.mkdir(parents=True)
-    (context / 'isolation.json').write_text('{}')
+    (context / 'isolation.json').write_text(json.dumps({'project': context.name}))
     oracle = download_oracle(actual={'rows': 1, 'sha256': 'b' * 64}, status='FAIL')
     (context / 'result.json').write_text(json.dumps({'status': 'FAIL', 'download_oracles': {'CSV': oracle},
         'query': 'SECRET_TOKEN', 'rows': ['PRIVATE_ROW']}))
@@ -191,7 +191,7 @@ def test_phase_log_preflight_facts_survive_for_every_group_without_child_summary
 def test_partial_child_without_final_summary_preserves_facts_after_external_timeout(tmp_path):
     context = tmp_path / '.codex-local/v080/trackvance-v080-test-catalog-reports-012345abcdef'
     context.mkdir(parents=True)
-    (context / 'isolation.json').write_text('{}')
+    (context / 'isolation.json').write_text(json.dumps({'project': context.name}))
     (context / 'reports-1000000.private.log').write_text('AssertionError: REPORT_TIMEOUT password=secret\n')
     result = diagnostics.collect_child_failure('catalog-reports', set(), root=tmp_path, sources=set())
     assert result[0]['result'] == {'status': 'FAIL', 'summary_present': False}
@@ -203,7 +203,7 @@ def test_partial_child_without_final_summary_preserves_facts_after_external_time
 def test_published_child_attachments_are_normalized_hashed_and_cannot_count_as_pass(tmp_path, monkeypatch):
     context = tmp_path / '.codex-local/v080/trackvance-v080-test-catalog-reports-012345abcdef'
     context.mkdir(parents=True)
-    (context / 'isolation.json').write_text('{}')
+    (context / 'isolation.json').write_text(json.dumps({'project': context.name}))
     (context / 'result.json').write_text(json.dumps({'status': 'FAIL', 'failed_stage': 'reports-1000000',
                                                     'failed_tier': 1000000, 'token': 'secret'}))
     monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: set())
@@ -645,3 +645,129 @@ def test_async_failure_publishes_hashed_closed_attachments_and_never_certifies(t
         attachment = output / 'evidence' / reference['path']
         assert diagnostics.hashlib.sha256(attachment.read_bytes()).hexdigest() == reference['sha256']
         assert all(secret not in attachment.read_text() for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+
+
+def catalog_nested_failure(root):
+    context = root / '.codex-local/v080/trackvance-v080-test-catalog-reports-012345abcdef'
+    context.mkdir(parents=True)
+    (context / 'isolation.json').write_text(json.dumps({'project': context.name, 'env': 'SECRET_TOKEN'}))
+    (context / 'result.json').write_text(json.dumps({'status': 'FAIL', 'failed_stage': 'recovery'}))
+    child = context / 'catalog-recovery-fedcba987654'
+    child.mkdir()
+    (child / 'result.json').write_text(json.dumps({'status': 'FAIL', 'mode': 'both',
+        'source_project': context.name, 'failed_stage': 'legacy', 'error_type': 'ComposePreflightError',
+        'error_code': 'LIVE_CREDENTIAL_INHERITANCE', 'duration_seconds': 125, 'main_inventory': 'UNCHANGED',
+        'native': {'status': 'PASS', 'source_version': '0.8.0', 'target_version': '0.8.0',
+                   'source_state_sha256': 'SECRET_TOKEN', 'fixture': {'rows': ['PRIVATE_ROW']}},
+        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.0'},
+        'sql': 'PRIVATE_ROW', 'message': 'SECRET_TOKEN'}))
+    (child / 'diagnostic.private.log').write_text(
+        '  File "/app/scripts/tests/catalog_reports_recovery.py", line 91, in compose_adapter\n'
+        'ci.compose_preflight.ComposePreflightError: LIVE_CREDENTIAL_INHERITANCE token=SECRET_TOKEN row=PRIVATE_ROW\n')
+    http = context / 'reports-ephemeral-http.json'
+    http.write_text(json.dumps({'status': 'FAIL', 'project': 'trackvance-v080-test-reports-http-abcdef012345',
+        'stage': 'EXECUTE_HTTP_CASE', 'current_case': 'XLSX_RESOURCE_FAILURE', 'api_error_code': 'REPORT_RESULT_LIMIT',
+        'error_type': 'AssertionError', 'main_unchanged': True, 'duration_seconds': 15,
+        'cases': [{'name': 'SECRET_TOKEN', 'rows': ['PRIVATE_ROW']}], 'raw_trace': 'SECRET_TOKEN'}))
+    return context, child, http
+
+
+def test_catalog_nested_recovery_and_http_preserve_closed_facts_not_payloads(tmp_path):
+    catalog_nested_failure(tmp_path)
+    result = diagnostics.collect_child_failure('catalog-reports', set(), root=tmp_path,
+        sources={'scripts/tests/catalog_reports_recovery.py'})
+    nested = next(item for item in result if item['kind'] == 'CATALOG_RECOVERY_PARTIAL_SUMMARY')['result']
+    assert nested == {'status': 'FAIL', 'mode': 'both', 'failed_stage': 'legacy',
+        'error_type': 'ComposePreflightError', 'error_code': 'LIVE_CREDENTIAL_INHERITANCE',
+        'duration_seconds': 125, 'main_inventory': 'UNCHANGED',
+        'native': {'status': 'PASS', 'source_version': '0.8.0', 'target_version': '0.8.0'},
+        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.0'}}
+    facts = next(item for item in result if item['kind'] == 'CATALOG_RECOVERY_LOG_FACTS')['facts']
+    assert facts['frames'] == [{'file': 'scripts/tests/catalog_reports_recovery.py', 'line': 91, 'function': 'compose_adapter'}]
+    assert facts['error_codes'] == ['LIVE_CREDENTIAL_INHERITANCE']
+    http = next(item for item in result if item['kind'] == 'CATALOG_HTTP_PARTIAL_SUMMARY')['result']
+    assert http['stage'] == 'EXECUTE_HTTP_CASE' and http['current_case'] == 'XLSX_RESOURCE_FAILURE'
+    assert http['api_error_code'] == 'REPORT_RESULT_LIMIT'
+    assert all(secret not in json.dumps(result) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW', 'source_project', 'raw_trace'))
+
+
+@pytest.mark.parametrize('unsafe', ['base-link', 'context-link', 'isolation-link', 'isolation-junction',
+    'recovery-dir-link', 'recovery-dir-junction', 'recovery-result-link', 'recovery-result-junction',
+    'recovery-log-link', 'http-link', 'http-junction', 'isolation-old', 'recovery-old', 'http-old',
+    'isolation-project', 'recovery-source', 'recovery-mode', 'http-project',
+    'recovery-oversized', 'recovery-malformed', 'recovery-archived', 'recovery-name'])
+def test_catalog_nested_rejects_foreign_stale_linked_or_unbounded_sources(tmp_path, monkeypatch, unsafe):
+    context, child, http = catalog_nested_failure(tmp_path)
+    nested = child / 'result.json'
+    isolation = context / 'isolation.json'
+    before = set()
+    if unsafe.endswith(('-link', '-junction')):
+        targets = {'base-link': context.parent, 'context-link': context, 'isolation-link': isolation,
+            'isolation-junction': isolation, 'recovery-dir-link': child, 'recovery-dir-junction': child,
+            'recovery-result-link': nested, 'recovery-result-junction': nested,
+            'recovery-log-link': child / 'diagnostic.private.log', 'http-link': http, 'http-junction': http}
+        method = 'is_junction' if unsafe.endswith('-junction') else 'is_symlink'
+        original = getattr(Path, method, lambda _self: False)
+        monkeypatch.setattr(Path, method, lambda self: self == targets[unsafe] or original(self), raising=False)
+    elif unsafe.endswith('-old'):
+        before.add({'isolation-old': isolation, 'recovery-old': nested, 'http-old': http}[unsafe].resolve())
+    elif unsafe in {'isolation-project', 'recovery-source', 'recovery-mode', 'http-project'}:
+        path, key, value = {'isolation-project': (isolation, 'project', 'trackvance-certification'),
+            'recovery-source': (nested, 'source_project', 'trackvance-certification'),
+            'recovery-mode': (nested, 'mode', 'SECRET_TOKEN'),
+            'http-project': (http, 'project', 'trackvance-certification')}[unsafe]
+        document = json.loads(path.read_text()); document[key] = value
+        path.write_text(json.dumps(document))
+    elif unsafe == 'recovery-oversized':
+        nested.write_text('x' * (diagnostics.MAX_BYTES + 1))
+    elif unsafe == 'recovery-malformed':
+        nested.write_text('{bad-json')
+    elif unsafe == 'recovery-archived':
+        archived = child / 'baseline'; archived.mkdir()
+        nested.replace(archived / nested.name)
+    else:
+        child.rename(context / 'catalog-recovery-short')
+    result = diagnostics.collect_child_failure('catalog-reports', before, root=tmp_path,
+        sources={'scripts/tests/catalog_reports_recovery.py'})
+    if unsafe in {'base-link', 'context-link', 'isolation-link', 'isolation-junction', 'isolation-old', 'isolation-project'}:
+        assert result == []
+    elif unsafe.startswith('http-'):
+        assert not any(item['kind'] == 'CATALOG_HTTP_PARTIAL_SUMMARY' for item in result)
+    elif unsafe == 'recovery-log-link':
+        assert not any(item['kind'] == 'CATALOG_RECOVERY_LOG_FACTS' for item in result)
+        assert any(item['kind'] == 'CATALOG_RECOVERY_PARTIAL_SUMMARY' for item in result)
+    else:
+        assert not any(item['kind'].startswith('CATALOG_RECOVERY') for item in result)
+
+
+def test_catalog_nested_unknown_codes_stages_cases_and_versions_are_not_published(tmp_path):
+    _, child, http = catalog_nested_failure(tmp_path)
+    path = child / 'result.json'; value = json.loads(path.read_text())
+    value.update(failed_stage='SECRET_TOKEN', error_type='PrivateSecretError', error_code='PRIVATE_ROW')
+    value['native']['source_version'] = '0.7.0'
+    path.write_text(json.dumps(value))
+    value = json.loads(http.read_text())
+    value.update(stage='SECRET_TOKEN', current_case='PRIVATE_ROW', api_error_code='SECRET_TOKEN')
+    http.write_text(json.dumps(value))
+    result = diagnostics.collect_child_failure('catalog-reports', set(), root=tmp_path, sources=set())
+    nested = next(item for item in result if item['kind'] == 'CATALOG_RECOVERY_PARTIAL_SUMMARY')['result']
+    assert 'failed_stage' not in nested and 'error_type' not in nested and 'error_code' not in nested and 'native' not in nested
+    assert all(secret not in json.dumps(result) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW', 'PrivateSecretError'))
+
+
+def test_catalog_nested_failure_publishes_hashed_diagnostics_never_scenario_pass(tmp_path, monkeypatch):
+    catalog_nested_failure(tmp_path)
+    monkeypatch.setattr(diagnostics, 'trusted_sources', lambda: {'scripts/tests/catalog_reports_recovery.py'})
+    output = tmp_path / 'ci'
+    path = diagnostics.publish_failure('catalog-reports', output, source_sha=SHA, ci=CI,
+        phases=[{'name': 'catalog', 'status': 'FAIL', 'exit_code': 1, 'timed_out': False}],
+        error=RuntimeError('SECRET_TOKEN'), phase='catalog', before=set(), root=tmp_path)
+    value = json.loads(path.read_text())
+    assert value['status'] == 'FAIL' and value['certifies_final'] is False
+    assert {item['kind'] for item in value['evidence']} == {'CATALOG_PARTIAL_SUMMARY',
+        'CATALOG_RECOVERY_PARTIAL_SUMMARY', 'CATALOG_RECOVERY_LOG_FACTS', 'CATALOG_HTTP_PARTIAL_SUMMARY'}
+    for reference in value['evidence']:
+        attachment = output / 'evidence' / reference['path']
+        assert diagnostics.hashlib.sha256(attachment.read_bytes()).hexdigest() == reference['sha256']
+        assert all(secret not in attachment.read_text() for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+    assert not list((output / 'evidence').glob('scenario-*.json'))

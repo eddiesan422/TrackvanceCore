@@ -91,7 +91,11 @@ def compose_adapter(directory, context, environment):
         if project != context["project"]:
             raise ValueError("El adaptador recibió un proyecto ajeno.")
         child = {**private_environment(directory), **(environment or {})}
-        preflight(directory, context, child)
+        config = preflight(directory, context, child)
+        if arguments == ("config", "--format", "json"):
+            # The validated resolved configuration contains synthetic secrets.
+            # Keep it in memory instead of scanning it as shareable output.
+            return json.dumps(config)
         return run([*args_for(directory, context), *arguments], child)
     return compose
 
@@ -109,8 +113,12 @@ def cleanup(directory, context, evidence):
 
 
 def image_id(tag, role):
-    if tag != "trackvance-v080-isolated:" + role:
+    if role not in {"backend", "web"} or tag != "trackvance-v080-isolated:" + role:
         raise ValueError("La recuperación sólo admite imágenes privadas 0.8.0.")
+    from ci_images import verified_images
+    images = verified_images()
+    if images:
+        return images[role]
     return json.loads(guard.command(["docker", "image", "inspect", tag]))[0]["Id"]
 
 
@@ -423,7 +431,8 @@ def main():
     assert_main(context)
     evidence = directory / ("catalog-recovery-" + uuid4().hex[:12])
     evidence.mkdir()
-    result, began = {"status": "FAIL", "mode": options.mode, "main_inventory": "UNCHANGED"}, time.monotonic()
+    result, began = {"status": "FAIL", "mode": options.mode, "source_project": context["project"],
+                    "main_inventory": "UNCHANGED"}, time.monotonic()
     stage = "native" if options.mode != "legacy" else "legacy"
     try:
         if options.mode in {"native", "both"}:

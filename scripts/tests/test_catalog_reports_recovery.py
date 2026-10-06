@@ -58,6 +58,24 @@ def test_habitual_image_rejected_before_docker_inspection(monkeypatch):
         recovery.image_id("trackvance-api:latest", "backend")
 
 
+@pytest.mark.parametrize("role", ["backend", "web"])
+def test_ci_recovery_pins_verified_image_instead_of_mutable_alias(monkeypatch, role):
+    import ci_images
+
+    images = {"backend": "sha256:" + "b" * 64, "web": "sha256:" + "c" * 64}
+    monkeypatch.setattr(ci_images, "verified_images", lambda: images)
+    monkeypatch.setattr(recovery.guard, "command", lambda *_args, **_kwargs: pytest.fail("CI must use the verified immutable role."))
+    assert recovery.image_id("trackvance-v080-isolated:" + role, role) == images[role]
+
+
+def test_unknown_image_role_rejected_before_ci_verification(monkeypatch):
+    import ci_images
+
+    monkeypatch.setattr(ci_images, "verified_images", lambda: pytest.fail("Unknown role must never inspect images."))
+    with pytest.raises(ValueError, match="imágenes privadas"):
+        recovery.image_id("trackvance-v080-isolated:postgres", "postgres")
+
+
 def test_resolved_config_credentials_are_private(monkeypatch, tmp_path):
     secret = "synthetic-config-secret"
     config = {"services": {"api": {"environment": {"POSTGRES_PASSWORD": secret}}}}
@@ -68,6 +86,54 @@ def test_resolved_config_credentials_are_private(monkeypatch, tmp_path):
     monkeypatch.setattr(recovery.guard, "validate_resolved", lambda value, *_args: observed.append(value))
     result = recovery.preflight(tmp_path, {"project": "trackvance-v080-test-own-012345abcdef"}, {"POSTGRES_PASSWORD": secret})
     assert result == config and observed == [config]
+
+
+def test_adapter_returns_validated_private_config_without_public_output(monkeypatch, tmp_path, capsys):
+    project = "trackvance-v080-test-own-012345abcdef"
+    secret = "synthetic-config-secret"
+    (tmp_path / "test.env").write_text(
+        "POSTGRES_USER=tv_v080_test\nPOSTGRES_DB=tv_v080_test\nPOSTGRES_PASSWORD=" + secret + "\n")
+    config = {"services": {"api": {"environment": {"POSTGRES_PASSWORD": secret}}}}
+    monkeypatch.setattr(recovery, "assert_main", lambda _context: None)
+    commands, validated = [], []
+
+    def private_read(arguments, **options):
+        assert arguments[-3:] == ["config", "--format", "json"]
+        assert options["capture_output"] and options["timeout"] == 60
+        commands.append(arguments)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(config))
+
+    monkeypatch.setattr(recovery.subprocess, "run", private_read)
+    monkeypatch.setattr(recovery.guard, "validate_resolved", lambda value, *_args: validated.append(value))
+    monkeypatch.setattr(recovery, "run", lambda *_args, **_kwargs: pytest.fail("Private config must not enter the public scanner."))
+    adapter = recovery.compose_adapter(tmp_path, {"project": project}, {})
+    assert json.loads(adapter(project, "config", "--format", "json")) == config
+    assert validated == [config] and len(commands) == 1
+    assert secret not in capsys.readouterr().out
+
+
+def test_adapter_private_config_still_rejects_failed_preflight(monkeypatch, tmp_path):
+    project = "trackvance-v080-test-own-012345abcdef"
+    monkeypatch.setattr(recovery, "private_environment", lambda _directory: {})
+
+    def failed(*_args):
+        raise ValueError("invalid scope")
+
+    monkeypatch.setattr(recovery, "preflight", failed)
+    monkeypatch.setattr(recovery, "run", lambda *_args, **_kwargs: pytest.fail("Invalid scope must never reach Compose."))
+    with pytest.raises(ValueError, match="invalid scope"):
+        recovery.compose_adapter(tmp_path, {"project": project}, {})(project, "config", "--format", "json")
+
+
+def test_adapter_non_config_commands_keep_public_secret_scan(monkeypatch, tmp_path):
+    project = "trackvance-v080-test-own-012345abcdef"
+    secret = "synthetic-config-secret"
+    monkeypatch.setattr(recovery, "private_environment", lambda _directory: {"POSTGRES_PASSWORD": secret})
+    monkeypatch.setattr(recovery, "preflight", lambda *_args: {"services": {}})
+    monkeypatch.setattr(recovery.subprocess, "run", lambda *_args, **_kwargs:
+                        SimpleNamespace(returncode=0, stdout=secret, stderr=""))
+    with pytest.raises(RuntimeError, match="credencial"):
+        recovery.compose_adapter(tmp_path, {"project": project}, {})(project, "logs", "api")
 
 
 def test_native_backup_pins_source_adapter_and_restores_it_on_failure(monkeypatch, tmp_path):
