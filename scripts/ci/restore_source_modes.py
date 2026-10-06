@@ -14,6 +14,9 @@ def restore_source_modes(root: Path) -> dict:
     entries = subprocess.check_output(["git", "-C", str(root), "ls-files", "--stage", "-z"])
     pending = []
     links = 0
+    excluded_outputs = []
+    ignore_file = root / ".dockerignore"
+    excludes_outputs = ignore_file.is_file() and "outputs" in ignore_file.read_text(encoding="utf-8").splitlines()
     for entry in entries.split(b"\0"):
         if not entry:
             continue
@@ -25,9 +28,17 @@ def restore_source_modes(root: Path) -> dict:
         if relative.is_absolute() or any(part in {".", ".."} for part in relative.parts):
             raise ValueError("Committed path escapes the source checkout")
         path = root / relative
-        if not path.parent.resolve(strict=True).is_relative_to(root):
+        if not path.parent.resolve().is_relative_to(root):
             raise ValueError("Committed path parent escapes the source checkout")
-        current = path.lstat()
+        try:
+            current = path.lstat()
+        except FileNotFoundError:
+            # The committed Docker context deliberately omits example outputs.
+            # Missing source, tests or any other tracked path remains an error.
+            if excludes_outputs and relative.parts[0] == "outputs":
+                excluded_outputs.append(relative.as_posix())
+                continue
+            raise
         if mode == b"120000":
             if not stat.S_ISLNK(current.st_mode):
                 raise ValueError("Committed symlink was materialized as another file type")
@@ -47,6 +58,8 @@ def restore_source_modes(root: Path) -> dict:
     return {"status": "PASS", "regular_files": len(pending),
         "executable_files": sum(mode == 0o755 for _, _, mode in pending),
         "symlinks_untouched": links, "committed_modes_sha256": digest.hexdigest(),
+        "copy_excluded_tracked_outputs": len(excluded_outputs),
+        "copy_excluded_paths_sha256": hashlib.sha256("\n".join(sorted(excluded_outputs)).encode("utf-8")).hexdigest(),
         "scope": "Git-index regular files only; no symlink targets or untracked files"}
 
 

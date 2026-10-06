@@ -107,3 +107,24 @@ def test_parent_traversal_cannot_grant_permissions_outside_checkout(tmp_path, mo
     monkeypatch.setattr(source_modes.os, "chmod", lambda *_args, **_kwargs: pytest.fail("Outside checkout must not be modified"))
     with pytest.raises(ValueError, match="escapes"):
         source_modes.restore_source_modes(tmp_path)
+
+
+def test_only_the_explicit_committed_docker_outputs_exclusion_can_omit_tracked_files(tmp_path, monkeypatch):
+    (tmp_path / ".dockerignore").write_text(".git\noutputs\n")
+    (tmp_path / "source.py").write_text("pass\n")
+    monkeypatch.setattr(source_modes.subprocess, "check_output", lambda _args:
+        index_entry("100644", "source.py") + index_entry("100644", "outputs/example.json"))
+    changed = mock_posix_chmod(monkeypatch)
+    report = source_modes.restore_source_modes(tmp_path)
+    assert changed == {tmp_path / "source.py": 0o644}
+    assert report["copy_excluded_tracked_outputs"] == 1
+    assert report["regular_files"] == 1
+
+
+@pytest.mark.parametrize("path,rule", [("backend/missing.py", "outputs"), ("outputs/example.json", "")])
+def test_missing_code_or_outputs_without_a_copy_exclusion_still_fails(tmp_path, monkeypatch, path, rule):
+    (tmp_path / ".dockerignore").write_text(rule + "\n")
+    monkeypatch.setattr(source_modes.subprocess, "check_output", lambda _args: index_entry("100644", path))
+    monkeypatch.setattr(source_modes.os, "chmod", lambda *_args, **_kwargs: pytest.fail("Missing source must not mutate files"))
+    with pytest.raises(FileNotFoundError):
+        source_modes.restore_source_modes(tmp_path)
