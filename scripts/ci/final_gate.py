@@ -4,7 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
+import subprocess
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,7 @@ try:
     from .common import (
         DIGEST,
         MANIFEST,
+        ROOT,
         SHA,
         EvidenceError,
         load_json,
@@ -22,11 +26,13 @@ try:
         require,
         sha256,
     )
+    from .executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
     from .validators import junit_document, validate_content
 except ImportError:
     from common import (
         DIGEST,
         MANIFEST,
+        ROOT,
         SHA,
         EvidenceError,
         load_json,
@@ -36,6 +42,7 @@ except ImportError:
         require,
         sha256,
     )
+    from executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
     from validators import junit_document, validate_content
 
 
@@ -135,7 +142,8 @@ def validate_attachments(record: dict[str, Any], receipt: Path) -> dict[str, str
 def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
              jobs_path: Path, image_manifest_path: Path, source_sha: str,
              run_id: str, run_attempt: str, development_only: bool = False,
-             documentation_path: Path | None = None) -> dict[str, Any]:
+             documentation_path: Path | None = None, repository: str = "", branch: str = "",
+             approval_api: GitHubAPI | None = None, repository_root: Path | None = None) -> dict[str, Any]:
     require(bool(SHA.fullmatch(source_sha)) and run_id.isdigit() and int(run_id) > 0
             and run_attempt.isdigit() and int(run_attempt) > 0, "INVALID_EXPECTED_CI_IDENTITY")
     manifest = load_manifest(manifest_path)
@@ -143,22 +151,30 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
     selection = load_json(selection_path)
     require(selection.get("schema_version") == 1 and selection.get("source_sha") == source_sha
             and selection.get("manifest_sha256") == manifest_hash, "SELECTION_COMMIT_OR_MANIFEST_MISMATCH")
+    fingerprint = executable_fingerprint(source_sha, root=repository_root or ROOT)
+    require(selection.get("executable_fingerprint") == fingerprint, "SELECTION_EXECUTABLE_FINGERPRINT_MISMATCH")
     mode = selection.get("mode")
     require(not development_only, "LEGACY_DEVELOPMENT_GATE_REMOVED")
     if mode == "docs":
         require(selection.get("groups") == [] and selection.get("scope") == "DOCUMENTATION_ONLY",
                 "INVALID_DOCUMENTATION_ONLY_SELECTION")
+        inheritance = revalidate_inheritance(selection.get("functional_inheritance"),
+            repository=repository, branch=branch, current_sha=source_sha, fingerprint=fingerprint,
+            manifest_path=manifest_path, api=approval_api, root=repository_root or ROOT)
         validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt, documentation_only=True)
         require(documentation_path is not None, "MISSING_DOCUMENTATION_EVIDENCE")
         documents = validate_documentation_evidence(documentation_path, selection, selection_path,
                                                    source_sha, run_id, run_attempt)
         return {"schema_version": 1, "status": "PASS", "scope": "DOCUMENTATION_APPROVED", "profile": "functional",
                 "certifies_final": False, "functional_approved": False, "deep_approved": False,
+                "current_functional_executed": False, "inherited_executable_approved": True,
+                "functional_inheritance": inheritance, "executable_fingerprint": fingerprint,
                 "source_sha": source_sha, "run_id": run_id, "run_attempt": run_attempt,
                 "manifest_sha256": manifest_hash, "groups": [], "scenario_count": 0, "documents": documents}
     # Deep certification is local and must use its own execution identity. A
     # GitHub status cannot approve intensive work that was not executed there.
     require(mode == "functional" and selection.get("profile") == "functional", "NON_FUNCTIONAL_GITHUB_SELECTION")
+    require(selection.get("functional_inheritance") is None, "FUNCTIONAL_CANNOT_REUSE_ANCESTOR_RECEIPTS")
     groups = profile_groups(manifest, "functional")
     require(selection.get("groups") == groups, "INCOMPLETE_OR_DUPLICATE_SELECTION_GROUPS")
     validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt)
@@ -209,6 +225,8 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
     return {"schema_version": 1, "status": "PASS", "scope": "CI_FUNCTIONAL_APPROVED", "profile": "functional",
             "certifies_final": False, "functional_approved": True, "deep_approved": False, "source_sha": source_sha,
             "run_id": run_id, "run_attempt": run_attempt, "manifest_sha256": manifest_hash,
+            "executable_fingerprint": fingerprint, "current_functional_executed": True,
+            "inherited_executable_approved": False,
             "image_manifest_sha256": image_hash, "runtime_images": roles, "groups": groups,
             "scenario_count": len(found), "module_coverage": manifest["profiles"]["functional"]["module_coverage"], "receipts": receipts}
 
@@ -224,6 +242,8 @@ def main() -> int:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
+    parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--branch", default=os.environ.get("CI_BRANCH", ""))
     parser.add_argument("--development-only", action="store_true")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -231,9 +251,9 @@ def main() -> int:
         result = evaluate(manifest_path=args.manifest, selection_path=args.selection, evidence_dir=args.evidence_dir,
                           jobs_path=args.jobs, image_manifest_path=args.image_manifest, source_sha=args.sha,
                           run_id=args.run_id, run_attempt=args.run_attempt, development_only=args.development_only,
-                          documentation_path=args.documentation_evidence)
+                          documentation_path=args.documentation_evidence, repository=args.repository, branch=args.branch)
         exit_code = 0
-    except (EvidenceError, OSError, ValueError, KeyError, TypeError) as error:
+    except (EvidenceError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         result = {"schema_version": 1, "status": "FAIL", "certifies_final": False, "source_sha": args.sha,
                   "run_id": args.run_id, "run_attempt": args.run_attempt,
                   "error_code": str(error) if isinstance(error, EvidenceError) else type(error).__name__}

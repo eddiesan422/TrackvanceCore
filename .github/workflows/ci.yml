@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 concurrency:
   # A duplicate push must never cancel the authoritative PR regression.
   # Ordinary older runs of each branch/event are cancelled as a whole.
@@ -25,6 +26,7 @@ concurrency:
 env:
   CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   CI_PROFILE: functional
+  CI_BRANCH: ${{ github.head_ref || github.ref_name }}
   CI_CACHE_MODE: ${{ inputs.cache_mode || (github.run_attempt == 1 && contains(github.event.head_commit.message, '[ci cold]') && 'cold' || 'warm') }}
 jobs:
   select:
@@ -60,6 +62,7 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
           CI_BRANCH: ${{ github.head_ref || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/ci/select_suites.py --profile "$REQUESTED_PROFILE" --base "$BASE_SHA" \
             --head "$CI_SOURCE_SHA" --event "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --branch "$CI_BRANCH" \
@@ -346,6 +349,7 @@ jobs:
         if: needs.select.outputs.run == 'true'
         with:
           ref: ${{ env.CI_SOURCE_SHA }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         if: needs.select.outputs.run == 'true' && needs.select.outputs.mode == 'functional'
         with:
@@ -371,6 +375,7 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           SELECTED_MODE: ${{ needs.select.outputs.mode }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
           import json, os

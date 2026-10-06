@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -19,6 +20,13 @@ try:
         require,
         sha256,
     )
+    from .executable_proof import (
+        api_from_environment,
+        executable_fingerprint,
+        find_approval,
+        human_document,
+        validate_fingerprint,
+    )
 except ImportError:
     from common import (
         MANIFEST,
@@ -31,6 +39,13 @@ except ImportError:
         require,
         sha256,
     )
+    from executable_proof import (
+        api_from_environment,
+        executable_fingerprint,
+        find_approval,
+        human_document,
+        validate_fingerprint,
+    )
 
 
 def impact(path: str) -> str:
@@ -40,16 +55,12 @@ def impact(path: str) -> str:
     require(not parsed.is_absolute() and ".." not in parsed.parts and ":" not in path, "UNCERTAIN_CHANGED_PATH")
     if path == "docs/development/permission-matrix.md":
         return "generated-permission-contract"
-    if path.lower().endswith((".md", ".rst")):
+    if human_document(path):
         return "documentation"
     if path.startswith((".github/", "scripts/", "deploy/", "backend/src/", "backend/alembic/", "frontend/src/")):
         return "transverse-runtime-or-harness"
     if path.startswith("docs/"):
-        if path.lower().endswith((".md", ".txt", ".rst", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".svg", ".webp")):
-            return "documentation"
         return "uncertain-document"
-    if len(parsed.parts) == 1 and (path.lower().endswith(".md") or path == "LICENSE"):
-        return "documentation"
     if any(token in path.lower() for token in ("docker", "migration", "lock", "package.json", "pyproject", "requirements", "openapi", "contract")):
         return "dependency-container-or-contract"
     if path.startswith(("backend/tests/", "frontend/tests/", "frontend/tests-e2e/")):
@@ -59,7 +70,9 @@ def impact(path: str) -> str:
 
 def select(mode: str, changed_files: list[str] | None, *, source_sha: str,
            manifest_path: Path = MANIFEST, diff_uncertain: bool = False,
-           commit_message: str = "", cache_mode: str = "warm") -> dict[str, Any]:
+           commit_message: str = "", cache_mode: str = "warm",
+           verified_inheritance: dict[str, Any] | None = None,
+           inheritance_reason: str = "unverified-executable-inheritance") -> dict[str, Any]:
     require(mode in {"auto", "functional", "deep", "fast", "full"}, "INVALID_SELECTION_MODE")
     require(bool(SHA.fullmatch(source_sha)), "INVALID_SOURCE_SHA")
     require(cache_mode in {"cold", "warm"}, "INVALID_CACHE_MODE")
@@ -83,6 +96,15 @@ def select(mode: str, changed_files: list[str] | None, *, source_sha: str,
         paths.append({"path": path, "rule": rule})
         if rule != "documentation":
             reasons.append(rule)
+    if not reasons and changed_files:
+        if verified_inheritance is None:
+            reasons.append(inheritance_reason)
+        else:
+            require(verified_inheritance.get("schema_version") == 1
+                    and verified_inheritance.get("kind") == "GITHUB_FUNCTIONAL_INHERITANCE"
+                    and verified_inheritance.get("source_sha") == source_sha
+                    and isinstance(verified_inheritance.get("origin"), dict), "INVALID_VERIFIED_INHERITANCE")
+            validate_fingerprint(verified_inheritance.get("executable_fingerprint"))
     selected_mode = "deep" if requested == "deep" else "functional" if reasons or not changed_files else "docs"
     profile = "deep" if selected_mode == "deep" else "functional"
     groups = profile_groups(manifest, profile) if selected_mode != "docs" else []
@@ -103,7 +125,8 @@ def select(mode: str, changed_files: list[str] | None, *, source_sha: str,
             "final_eligible": selected_mode == "deep", "cache_mode": cache_mode,
             "reason": sorted(set(reasons)) or ["documentation-only"],
             "changed_files": paths, "groups": groups, "matrix": matrix,
-            "manifest_sha256": sha256(manifest_path)}
+            "manifest_sha256": sha256(manifest_path),
+            "functional_inheritance": verified_inheritance if selected_mode == "docs" else None}
 
 
 def changed_from_git(base: str, head: str) -> list[str] | None:
@@ -157,10 +180,27 @@ def main() -> int:
         if paths is None:
             base = base_from_event(load_json(args.event_path)) if args.event_path else args.base
             paths = changed_from_git(base, args.head)
+        fingerprint = executable_fingerprint(args.head)
+        proof, inheritance_reason = None, "unverified-executable-inheritance"
+        try:
+            docs_candidate = (args.mode == "auto" and paths and not args.diff_uncertain
+                              and "[ci functional]" not in args.commit_message.lower()
+                              and all(impact(path) == "documentation" for path in paths))
+        except EvidenceError:
+            docs_candidate = False
+        if docs_candidate:
+            try:
+                repository = os.environ.get("GITHUB_REPOSITORY", "")
+                api = api_from_environment(repository)
+                proof, inheritance_reason = find_approval(api, repository=repository, branch=args.branch,
+                    current_sha=args.head, fingerprint=fingerprint, manifest_path=args.manifest,
+                    current_run_id=os.environ.get("GITHUB_RUN_ID", ""))
+            except (EvidenceError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+                inheritance_reason = "executable-inheritance-unavailable"
         result = select(args.mode, paths, source_sha=args.head, manifest_path=args.manifest,
                         diff_uncertain=args.diff_uncertain, commit_message=args.commit_message,
-                        cache_mode=args.cache_mode)
-        result.update(event=args.event, branch=args.branch)
+                        cache_mode=args.cache_mode, verified_inheritance=proof, inheritance_reason=inheritance_reason)
+        result.update(event=args.event, branch=args.branch, executable_fingerprint=fingerprint)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         if args.github_output:
@@ -174,7 +214,7 @@ def main() -> int:
                     stream.write(f"{key}={value}\n")
         print(json.dumps({"mode": result["mode"], "reason": result["reason"], "certifies_final": False}))
         return 0
-    except (EvidenceError, OSError, ValueError) as error:
+    except (EvidenceError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(json.dumps({"status": "FAIL", "error_code": str(error) if isinstance(error, EvidenceError) else type(error).__name__}))
         return 1
 

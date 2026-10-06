@@ -15,9 +15,9 @@ def test_changed_document_links_target_existing_local_files_and_remote_official_
         "[Guide](guide.md#usage) [Official docs](https://github.com/eddiesan422/TrackvanceCore-docs)\n"
         "[Reference][guide]\n\n[guide]: guide.md\n"
         "```sh\n[Example](not-a-file.md)\n```\n", encoding="utf-8")
-    results = validate_documentation(tmp_path, ["README.md", "docs/removed.md"])
-    assert results[0]["status"] == "VALID" and results[0]["sha256"]
-    assert results[1] == {"path": "docs/removed.md", "status": "DELETED"}
+    results = validate_documentation(tmp_path, ["README.md", "CHANGELOG.md"])
+    assert results[0] == {"path": "CHANGELOG.md", "status": "DELETED"}
+    assert results[1]["status"] == "VALID" and results[1]["sha256"]
 
 
 @pytest.mark.parametrize("content,code", [
@@ -38,7 +38,11 @@ def test_documentation_selection_cannot_hide_product_or_generated_contract_chang
         validate_documentation(tmp_path, ["docs/development/permission-matrix.md"])
 
 
-def test_truncated_pdf_never_counts_as_valid_documentation(tmp_path):
+def test_truncated_pdf_never_counts_as_valid_documentation(tmp_path, monkeypatch):
+    from scripts.ci import check_documentation
+    # Format validation remains available; unlisted PDFs now conservatively
+    # trigger functional in the selector rather than inherit a document skip.
+    monkeypatch.setattr(check_documentation, "impact", lambda _: "documentation")
     docs = tmp_path / "docs"; docs.mkdir()
     target = docs / "specification.pdf"; target.write_bytes(b"%PDF-1.7\ntruncated")
     with pytest.raises(EvidenceError, match="INCOMPLETE_DOCUMENT_PDF"):

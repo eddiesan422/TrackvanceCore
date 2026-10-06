@@ -20,7 +20,18 @@ y hashes comprobados. No inventar fechas, SHA, resultados ni origen de archivos.
   los reportes útiles y limpiar únicamente recursos de esa identidad, incluso si
   falla. No ejecutar limpieza global ni `down -v` de la instalación habitual.
 - Reutilizar imágenes sólo después de verificar SHA de código, etiqueta OCI e ID
-  inmutable; conservar cachés recientes y dependencias bloqueadas.
+  inmutable. El runner usa un builder propio y elimina su estado, stacks, volúmenes
+  e imágenes de pruebas después de conservar la evidencia, también ante fallos.
+  La retención excepcional debe indicar propósito, tamaño y vencimiento acotado;
+  por defecto las imágenes locales de pruebas no se retienen.
+- La protección de identidad y datos incluye los servicios detenidos. Reservar
+  CPU/RAM por los servicios activos y una reserva mínima; comprobar cambios de
+  estado e identidad durante la ejecución y abortar sólo los recursos propios.
+- Después de todas las pruebas que creen recursos, inventariar Docker de nuevo y
+  retirar los residuos comprobados. Proteger imágenes por IDs y referencias reales,
+  no por un prefijo que también pueda nombrar versiones obsoletas. Revisar todos los
+  consumidores antes de cada eliminación; conservar excepciones de dueño incierto
+  con nombre y motivo. La caché se elimina por IDs comprobados, sin prune global.
 
 ## Perfiles de verificación y cierre
 
@@ -32,8 +43,12 @@ y hashes comprobados. No inventar fechas, SHA, resultados ni origen de archivos.
   100/500/1024 MiB, variantes XLSX, Spark masivo, límites reales, concurrencia y
   recuperación prolongada. Conservar todas las pruebas intensivas históricas.
 - Durante desarrollo ejecutar pruebas según impacto. No repetir toda la matriz
-  masiva por cada ajuste ni por cambios exclusivamente documentales; éstos validan
-  documentos y enlaces y dejan resuelto el check final estable.
+  masiva por cada ajuste. Un delta documental sólo omite functional si verifica un
+  gate funcional aprobado del mismo repositorio, workflow y rama, ancestro del SHA
+  actual, cuyo contenido ejecutable y dependencias de pruebas/build siguen idénticos.
+  Validar procedencia, intento, jobs, artefacto y digest; un intento más reciente
+  fallido, cancelado o pendiente del mismo contenido impide heredar una aprobación
+  anterior. Ante incertidumbre ejecutar functional. Acotar la consulta a 30 segundos.
 - Distinguir explícitamente **CI funcional aprobado** de **volumetría/certificación
   profunda aprobada**. Un perfil no acredita el otro. La política reemplaza exigir
   toda la volumetría en Actions y repetir recorridos completos por documentación.
@@ -42,6 +57,9 @@ y hashes comprobados. No inventar fechas, SHA, resultados ni origen de archivos.
   duración, recursos, resultados y pruebas no ejecutadas. Un runner local usa su
   identidad propia y nunca simula IDs de Actions. Si falta capacidad, registrar
   `PENDING_CAPACITY` (pendiente por capacidad) y continuar las pruebas que sí caben.
+- Desde Windows ejecutar el backend obligatorio en Linux aislado, con las mismas
+  assertions y herramientas requeridas. No convertir sus pruebas de Reportes en
+  SKIP ni atribuir al host Windows una ejecución Linux que no ocurrió.
 - Los informes conservan FAIL/CANCELLED/SKIP/pendientes históricos. Medir tiempo real
   y separar cambio de alcance de mejora de ejecución; no anticipar CI del SHA final
   ni resultados futuros. Un cambio sólo documental no invalida evidencia de producto

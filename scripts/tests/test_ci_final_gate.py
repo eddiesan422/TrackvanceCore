@@ -14,6 +14,7 @@ from scripts.ci.final_gate import evaluate
 from scripts.ci.validators import SPARK_REAL_CASES, junit_document
 
 SHA = "a" * 40
+FINGERPRINT = {"algorithm": "GIT_TRACKED_EXECUTABLE_TREE_V1", "sha256": "b" * 64, "tracked_entries": 10}
 
 
 def save(path, value):
@@ -22,7 +23,9 @@ def save(path, value):
 
 
 @pytest.fixture
-def gate_case(tmp_path):
+def gate_case(tmp_path, monkeypatch):
+    from scripts.ci import final_gate
+    monkeypatch.setattr(final_gate, "executable_fingerprint", lambda *args, **kwargs: FINGERPRINT)
     manifest = save(tmp_path / "manifest.json", {"schema_version": 1, "profiles": {
         "functional": {"groups": ["backend"], "module_coverage": {
             name: {"scenario_ids": ["backend-lint"]} for name in FUNCTIONAL_MODULES}},
@@ -30,7 +33,7 @@ def gate_case(tmp_path):
         "groups": [{"id": "backend", "job_key": "backend", "required_sources": [],
                     "scenarios": [{"id": "backend-lint", "validator": "backend-check", "check": "lint"}]}]})
     selection = save(tmp_path / "selection.json", {"schema_version": 1, "source_sha": SHA, "manifest_sha256": sha256(manifest),
-        "mode": "functional", "profile": "functional", "groups": ["backend"]})
+        "mode": "functional", "profile": "functional", "groups": ["backend"], "executable_fingerprint": FINGERPRINT})
     jobs = save(tmp_path / "jobs.json", {"source_sha": SHA, "run_id": "123", "run_attempt": "1", "needs": {
         name: {"result": "success"} for name in ("select", "backend", "frontend", "images", "suites")}})
     images = save(tmp_path / "images.json", {"schema_version": 1, "source_sha": SHA, "status": "PASS",
@@ -257,14 +260,19 @@ def test_every_required_product_job_must_be_present(gate_case, job):
 
 @pytest.fixture
 def documentation_case(gate_case, monkeypatch):
-    from scripts.ci import common
+    from scripts.ci import common, final_gate
     from scripts.ci.check_documentation import validate_documentation
     args, _ = gate_case
     root = args["selection_path"].parent
     (root / "README.md").write_text("# Documentation\n", encoding="utf-8")
     monkeypatch.setattr(common, "ROOT", root)
     selection = json.loads(args["selection_path"].read_text())
-    selection.update(mode="docs", scope="DOCUMENTATION_ONLY", groups=[], changed_files=[{"path": "README.md", "rule": "documentation"}])
+    proof = {"kind": "GITHUB_FUNCTIONAL_INHERITANCE", "origin": {"run_id": 1}}
+    # These tests isolate document-content checks; genuine API/ancestry proofs
+    # and rejected cached origins are exercised in test_ci_executable_proof.
+    monkeypatch.setattr(final_gate, "revalidate_inheritance", lambda *args, **kwargs: proof)
+    selection.update(mode="docs", scope="DOCUMENTATION_ONLY", groups=[], functional_inheritance=proof,
+                     changed_files=[{"path": "README.md", "rule": "documentation"}])
     save(args["selection_path"], selection)
     jobs = json.loads(args["jobs_path"].read_text())
     for job in ("backend", "frontend", "images", "suites"):
@@ -284,6 +292,7 @@ def test_docs_only_gate_passes_without_product_artifacts(documentation_case):
     result = evaluate(**documentation_case)
     assert result["status"] == "PASS" and result["scope"] == "DOCUMENTATION_APPROVED"
     assert result["scenario_count"] == 0 and not result["functional_approved"] and not result["deep_approved"]
+    assert result["inherited_executable_approved"] and not result["current_functional_executed"]
 
 
 @pytest.mark.parametrize("status", ["failure", "cancelled", "skipped", None])

@@ -15,13 +15,18 @@ from scripts.ci.common import (
 from scripts.ci.select_suites import base_from_event, select
 
 SHA = 'a' * 40
+FINGERPRINT = {'algorithm': 'GIT_TRACKED_EXECUTABLE_TREE_V1', 'sha256': 'b' * 64, 'tracked_entries': 10}
+INHERITANCE = {'schema_version': 1, 'kind': 'GITHUB_FUNCTIONAL_INHERITANCE', 'source_sha': SHA,
+               'executable_fingerprint': FINGERPRINT, 'origin': {'run_id': 1}}
 
 
 @pytest.mark.parametrize('path', ['backend/src/trackvance/api.py', 'backend/uv.lock', 'frontend/package.json',
     'frontend/src/routes.tsx', 'scripts/tests/corrections_cycle.py', 'scripts/ci/scenarios.json', 'deploy/docker/compose.yml',
     '.github/workflows/ci.yml', 'unknown/new.file', '../README.md', '/README.md', 'C:/README.md',
     'backend/tests/test_permissions.py', 'docs/development/permission-matrix.md',
-    'docs/specification/permission_contract_0.8.0.json', '.gitignore'])
+    'docs/specification/permission_contract_0.8.0.json', '.gitignore', 'AGENTS.md',
+    'backend/migrations/README.md', 'backend/tests/assets/input.md', 'docs/operations/docker.md',
+    '.github/actions/dependencies/README.md'])
 def test_uncertain_runtime_contract_and_harness_changes_select_complete_functional(path):
     result = select('auto', [path], source_sha=SHA)
     assert result['mode'] == result['profile'] == 'functional'
@@ -34,13 +39,21 @@ def test_missing_or_empty_uncertain_diff_never_skips_product_tests(files, extra)
     assert select('auto', files, source_sha=SHA, **extra)['mode'] == 'functional'
 
 
-@pytest.mark.parametrize('path', ['README.md', 'AGENTS.md', 'backend/API_CONTRACT.md', 'docs/operations/docker.md',
-    'docs/development/architecture.md', 'docs/specification/specification.pdf', 'docs/archive/old.docx'])
+@pytest.mark.parametrize('path', ['README.md', 'CHANGELOG.md', 'backend/API_CONTRACT.md', 'docs/README.md',
+    'docs/specification/README.md', 'LICENSE-or-proprietary-notice.txt'])
 def test_documentation_only_changes_have_no_product_groups_or_matrix(path):
-    result = select('auto', [path], source_sha=SHA)
+    result = select('auto', [path], source_sha=SHA, verified_inheritance=INHERITANCE)
     assert result['mode'] == 'docs' and result['scope'] == 'DOCUMENTATION_ONLY'
     assert result['groups'] == [] and result['matrix'] == {'include': []}
     assert not result['certifies_final'] and not result['functional_eligible']
+    assert result['functional_inheritance'] == INHERITANCE
+
+
+@pytest.mark.parametrize('path', ['README.md', 'CHANGELOG.md', 'backend/API_CONTRACT.md'])
+def test_documentation_delta_alone_never_excuses_unapproved_inherited_executable(path):
+    result = select('auto', [path], source_sha=SHA)
+    assert result['mode'] == 'functional' and result['functional_inheritance'] is None
+    assert 'unverified-executable-inheritance' in result['reason']
 
 
 def test_mixed_changes_and_explicit_functional_dispatch_cannot_become_docs_only():
@@ -132,5 +145,6 @@ def test_selector_cli_uses_event_delta_for_documentation_followup(tmp_path, monk
         assert base == previous and head == SHA
         return ['README.md']
     monkeypatch.setattr(select_suites, 'changed_from_git', changed)
+    monkeypatch.setattr(select_suites, 'executable_fingerprint', lambda _: FINGERPRINT)
     assert select_suites.main() == 0
-    assert json.loads(output.read_text())['scope'] == 'DOCUMENTATION_ONLY'
+    assert json.loads(output.read_text())['scope'] == 'FUNCTIONAL'
