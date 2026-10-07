@@ -338,14 +338,23 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
     monkeypatch.setattr(run_local, "ResourceMonitor", lambda *_args: SimpleNamespace(
         thread=SimpleNamespace(start=lambda: None), finish=dict))
     executed, validated, image_cleanup = [], [], []
+    historical_result = {"status": "PASS", "source_destroyed_before_restore": True,
+        "main_inventory": "UNCHANGED", "source_version": "0.6.1", "target_version": "0.8.0",
+        "restore": "STOPPED_VERIFIED", "automatic_processes_started": False,
+        "exact_historical_state": "PASS", "source_state_sha256": "c" * 64,
+        "restored_legacy_sha256": "c" * 64, "native_tables": 55, "new_catalog_tables_empty": True}
     def execute(arguments, *_args, **_kwargs):
         executed.append(arguments)
         output = Path(arguments[arguments.index("--evidence-dir") + 1])
         assert output.resolve().is_relative_to((tmp_path / ".codex-local/v070").resolve())
         output.mkdir(parents=True)
-        (output / "result.json").write_text('{"status":"PASS"}')
+        (output / "result.json").write_text(json.dumps(historical_result))
     monkeypatch.setattr(run_local, "execute", execute)
-    monkeypatch.setattr(validators, "validate_content", lambda spec, value: validated.append((spec["version"], value)))
+    actual_validator = validators.validate_content
+    def validate(spec, value):
+        actual_validator(spec, value)
+        validated.append((spec["version"], value))
+    monkeypatch.setattr(validators, "validate_content", validate)
     monkeypatch.setattr(local_failure_probe, "run", lambda *_args: {"status": "PASS", "observed_exit_code": 23})
     monkeypatch.setattr(run_local, "cleanup_builder_images", lambda *_args: {"status": "PASS"})
     monkeypatch.setattr(run_local, "cleanup_fixture_images", lambda *_args, **_kwargs:
@@ -358,7 +367,7 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
     group = next(row for row in summary["groups"] if row["group"] == "backup-restore")
     assert group["status"] == "PARTIAL_PASS" and sum(row["status"] == "NOT_SELECTED" for row in group["scenarios"]) == 3
     assert sum(row["status"] == "NOT_SELECTED" for row in summary["groups"]) == 18
-    assert validated == [("0.6.1", {"status": "PASS"})] and image_cleanup
+    assert validated == [("0.6.1", {"documents": {"legacy061": historical_result}})] and image_cleanup
     assert len(executed) == 1 and executed[0][1].endswith("identity_legacy_restore_cycle.py")
     if builder_failure:
         assert summary["builder_cleanup_error"] == "CalledProcessError"

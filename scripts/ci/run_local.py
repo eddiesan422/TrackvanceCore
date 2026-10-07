@@ -431,7 +431,8 @@ def main(arguments=None):
                     spec = next(scenario for spec_group in manifest["groups"] if spec_group["id"] == group
                         for scenario in spec_group["scenarios"] if scenario.get("version") == version)
                     result_path = output / "result.json"
-                    validate_content(spec, json.loads(result_path.read_text(encoding="utf-8")))
+                    validate_content(spec, {"documents": {spec["source"]:
+                        json.loads(result_path.read_text(encoding="utf-8"))}})
                     group_output = directory / group
                     group_output.mkdir(parents=True, exist_ok=False)
                     for safe_name in ("result.json", "local-historical-source-proof.json", "local-legacy-image-ownership.json"):
