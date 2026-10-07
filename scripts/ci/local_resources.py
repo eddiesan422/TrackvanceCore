@@ -8,10 +8,9 @@ import os
 import re
 import subprocess
 import time
+import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath
-
-import tomllib
 
 IMAGE_LABELS = ("io.trackvance.local-proof", "io.trackvance.local-execution",
     "io.trackvance.local-project", "io.trackvance.local-role",
