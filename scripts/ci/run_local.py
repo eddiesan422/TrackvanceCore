@@ -67,13 +67,18 @@ def capacity(group):
     return {"memory_bytes": 3 * GIB, "cpus": 1, "disk_bytes": 20 * GIB}
 
 
-def plan(manifest, groups):
+def plan(manifest, groups, historical_version=None):
     result = []
     for group in manifest["groups"]:
         if group["id"] in groups:
             result.append({"group": group["id"], "scenarios": [{key: scenario[key] for key in
                 ("id", "rows", "variant", "tier_mib", "mode") if key in scenario} for scenario in group["scenarios"]],
                 "minimum_capacity": capacity(group["id"])})
+            if historical_version:
+                result[-1].update(execution_scope="REPRESENTATIVE_HISTORICAL_RESTORE", full_group_approved=False,
+                    scenarios=[{"id": scenario["id"], "version": scenario["version"],
+                        "selection": "SELECTED" if scenario["version"] == historical_version else "NOT_SELECTED"}
+                        for scenario in group["scenarios"]])
     return result
 
 
@@ -178,6 +183,16 @@ class ResourceMonitor:
 
 
 def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend_tests=False, environment=None):
+    from ci.local_resources import (
+        begin_image_build,
+        initialize_image_registry,
+        observe_image_builds,
+    )
+    execution = (environment or os.environ).get("TRACKVANCE_LOCAL_EXECUTION_ID", directory.name)
+    image_registry = Path((environment or os.environ).get("TRACKVANCE_LOCAL_IMAGE_REGISTRY", directory / "owned-images.json"))
+    image_command = lambda *arguments: command("docker", *arguments)
+    initialize_image_registry(image_registry, execution, image_command)
+    owner_project = "trackvance-v070-test-images-" + execution[-12:]
     images = {}
     write(directory / "builder-images.before.json", command("docker", "image", "ls", "-aq", "--no-trunc").split())
     builder = "tv-local-build-" + directory.name.removeprefix("local-")[:12]
@@ -215,20 +230,27 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                     from ci.local_backend import test_context
                     context = test_context(ROOT, directory, sha, execute, environment)
                 reference = f"trackvance-local-proof:{sha[:12]}-{directory.name[-12:]}-{role}"
+                labels = begin_image_build(image_registry, execution, owner_project, sha,
+                    "0.8.0", role, reference, image_command)
                 execute(["docker", "buildx", "build", "--builder", builder, "--load", "--platform", "linux/amd64",
-                    "--label", "org.opencontainers.image.revision=" + sha, "--label", "io.trackvance.local-proof=true",
-                    "--label", "org.opencontainers.image.version=0.8.0",
-                    "--label", "io.trackvance.local-role=" + role, "-t", reference, "-f", dockerfile, "."],
+                    *[argument for key, value in labels.items() for argument in ("--label", key + "=" + value)],
+                    "-t", reference, "-f", dockerfile, "."],
                     directory, "build-" + role, 1800, cwd=context, environment=environment)
+                observe_image_builds(image_registry, execution, image_command)
                 row = inspect_image(reference, sha)
             images[role] = row["Id"]
     finally:
-        if builder_created:
-            # The builder name is unique to this local execution; no current/default builder is changed.
-            execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
-                    environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
-        shutil.rmtree(directory / "backend-test-context", ignore_errors=True)
-        write(directory / "builder-image-cleanup.json", cleanup_builder_images(directory))
+        try:
+            observe_image_builds(image_registry, execution, image_command)
+        finally:
+            try:
+                if builder_created:
+                    # The builder name is unique to this execution.
+                    execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
+                            environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
+            finally:
+                shutil.rmtree(directory / "backend-test-context", ignore_errors=True)
+                write(directory / "builder-image-cleanup.json", cleanup_builder_images(directory))
     proof = directory / "local-images.json"
     write(proof, {"schema_version": 1, "kind": "LOCAL_IMAGE_PROOF", "status": "PASS", "source_sha": sha,
         "verified_at": stamp(), "images": {role: image for role, image in images.items() if role != "backend-tests"},
@@ -266,41 +288,16 @@ def cleanup_builder_images(directory):
     return {"status": "PASS", "removed": removed, "skipped": skipped, "purpose": "Newly pulled infrastructure for this owned builder only"}
 
 
-def cleanup_fixture_images(source_sha, retain_for_seconds=0):
+def cleanup_fixture_images(source_sha, retain_for_seconds=0, *, registry=None, execution_id=None):
     if not re.fullmatch(r"[a-f0-9]{40}", source_sha) or not 0 <= retain_for_seconds <= 86400:
         raise ValueError("Image retention requires an exact SHA and an explicit bounded duration")
-    identifiers = list(dict.fromkeys(command("docker", "image", "ls", "-q", "--no-trunc", "--filter",
-        "label=io.trackvance.local-proof=true").split()))
-    rows = json.loads(command("docker", "image", "inspect", *identifiers)) if identifiers else []
-    removed, skipped = [], []
-    for row in rows:
-        labels = row.get("Config", {}).get("Labels") or {}
-        sha = labels.get("org.opencontainers.image.revision", "")
-        tags = row.get("RepoTags") or []
-        if (labels.get("io.trackvance.local-proof") == "true" and re.fullmatch(r"[a-f0-9]{40}", sha)
-                and labels.get("org.opencontainers.image.version") == "0.8.0"
-                and tags and all(re.fullmatch(r"trackvance-local-proof:[a-f0-9]{12}-[a-f0-9]{12}-(?:backend|web|backend-tests)", tag) for tag in tags)):
-            owned = True
-        else:
-            owned = False
-        if not owned:
-            skipped.append({"image_id": row["Id"], "reason": "OWNERSHIP_OR_REFERENCES_UNCERTAIN"})
-            continue
-        if sha == source_sha and retain_for_seconds:
-            skipped.append({"image_id": row["Id"], "reason": "EXPLICIT_TEMPORARY_REUSE", "expires_at_unix": int(time.time()) + retain_for_seconds,
-                            "purpose": "Reuse this exact source SHA in local development; removal on the next zero-retention cleanup"})
-            continue
-        if command("docker", "ps", "-aq", "--filter", "ancestor=" + row["Id"]).strip():
-            skipped.append({"image_id": row["Id"], "reason": "CONTAINER_CONSUMER"})
-            continue
-        check = json.loads(command("docker", "image", "inspect", row["Id"]))[0]
-        if check.get("RepoTags") == row.get("RepoTags") and check.get("Id") == row["Id"]:
-            command("docker", "image", "rm", *row["RepoTags"])
-            removed.append({"image_id": row["Id"], "tags": row["RepoTags"], "source_sha": sha})
-        else:
-            skipped.append({"image_id": row["Id"], "reason": "REFERENCES_CHANGED_DURING_CLEANUP"})
-    return {"status": "PASS", "removed": removed, "skipped": skipped, "retain_for_seconds": retain_for_seconds,
-            "policy": "No force, no global pruning, exclude every container-consumed or uncertain image"}
+    from ci.local_resources import cleanup_registered_images
+    if registry is None:
+        raise ValueError("Scoped image cleanup requires a durable execution registry")
+    path = Path(registry)
+    execution = execution_id or json.loads(path.read_text(encoding="utf-8"))["execution_id"]
+    return cleanup_registered_images(path, execution, retain_for_seconds=retain_for_seconds,
+        command=lambda *arguments: command("docker", *arguments))
 
 
 def retain_reports(base, current, count):
@@ -334,6 +331,8 @@ def main(arguments=None):
     parser.add_argument("--concurrency", type=int, choices=[1], default=1, help="One stack at a time protects active certification")
     parser.add_argument("--build-images", action="store_true")
     parser.add_argument("--exercise-failure-cleanup", action="store_true", help="Also run an explicit owned exit-23 fault and verify Docker cleanup")
+    parser.add_argument("--historical-source-version", choices=["0.5.1", "0.6.0", "0.6.1"],
+        help="Run only one authentic historical restore; requires --groups backup-restore and remains partial")
     parser.add_argument("--retain-runs", type=int, default=7)
     args = parser.parse_args(arguments)
     manifest = load_manifest()
@@ -343,7 +342,9 @@ def main(arguments=None):
     if not 1 <= args.max_cpus <= 8 or not 1 <= args.max_memory_gib <= 16 or args.reserve_memory_gib < 2 or not 1 <= args.retain_runs <= 30:
         parser.error("Resource budgets and retention must remain bounded; use at least one CPU and reserve at least 2 GiB")
     groups = available if args.all else list(dict.fromkeys(args.groups))
-    selected = plan(manifest, groups)
+    if args.historical_source_version and (args.all or groups != ["backup-restore"]):
+        parser.error("A representative historical restore requires only --groups backup-restore, without --all")
+    selected = plan(manifest, groups, args.historical_source_version)
     if args.plan:
         print(json.dumps({"profile": "deep", "origin": "local", "groups": selected,
             "concurrency": 1, "max_cpus": args.max_cpus, "max_memory_gib": args.max_memory_gib}, indent=2))
@@ -357,6 +358,7 @@ def main(arguments=None):
     directory.mkdir(parents=True, exist_ok=False)
     registry = directory / "owned-projects.json"
     builder_registry = directory / "owned-builders.json"
+    image_registry = directory / "owned-images.json"
     write(registry, [])
     write(builder_registry, [])
     summary = {"schema_version": 1, "kind": "LOCAL_DEEP_EXECUTION", "profile": "deep", "origin": "local",
@@ -365,6 +367,9 @@ def main(arguments=None):
         "limits": {"max_cpus": args.max_cpus, "max_memory_bytes": int(args.max_memory_gib * GIB),
             "concurrency": 1, "reserve_memory_bytes": int(args.reserve_memory_gib * GIB)},
         "plan": selected, "groups": [{"group": group, "status": "NOT_SELECTED"} for group in available if group not in groups]}
+    if args.historical_source_version:
+        summary.update(execution_scope="REPRESENTATIVE_HISTORICAL_RESTORE", full_group_approved=False,
+            historical_source_version=args.historical_source_version)
     target = directory / "local-summary.json"
     write(target, summary)
     began = time.monotonic()
@@ -391,6 +396,7 @@ def main(arguments=None):
         environment.update(TRACKVANCE_LOCAL_EXECUTION_ID=execution, TRACKVANCE_SOURCE_SHA=sha,
             TRACKVANCE_LOCAL_PROJECT_REGISTRY=str(registry), TRACKVANCE_LOCAL_MAX_CPUS=str(args.max_cpus),
             TRACKVANCE_LOCAL_BUILDER_REGISTRY=str(builder_registry),
+            TRACKVANCE_LOCAL_IMAGE_REGISTRY=str(image_registry),
             TRACKVANCE_LOCAL_MAX_MEMORY_BYTES=str(permitted), PYTHONPATH=str(ROOT / "scripts"),
             TRACKVANCE_LOCAL_PROTECTED_INVENTORY=str(directory / "protected-inventory.before.json"))
         environment.update(NODE_OPTIONS="--max-old-space-size=384", UV_THREADPOOL_SIZE="1", OMP_NUM_THREADS="1",
@@ -411,10 +417,28 @@ def main(arguments=None):
             monitor.thread.start()
             group_start = time.monotonic()
             try:
-                execute([sys.executable, str(ROOT / "scripts/ci/run_suite.py"), "--profile", "deep", "--group", group,
-                    "--output-dir", str(directory / group)], directory, group, 7200,
-                    environment=environment | {"TRACKVANCE_LOCAL_GROUP": group})
-                row["status"] = "PASS"
+                if args.historical_source_version:
+                    version = args.historical_source_version
+                    output = directory / group
+                    execute([sys.executable, str(ROOT / "scripts/tests/identity_legacy_restore_cycle.py"),
+                        "--source-version", version, "--evidence-dir", str(output)], directory, group, 3600,
+                        environment=environment | {"TRACKVANCE_LOCAL_GROUP": group})
+                    from ci.validators import validate_content
+                    spec = next(scenario for spec_group in manifest["groups"] if spec_group["id"] == group
+                        for scenario in spec_group["scenarios"] if scenario.get("version") == version)
+                    result_path = output / "result.json"
+                    validate_content(spec, json.loads(result_path.read_text(encoding="utf-8")))
+                    row.update(status="PARTIAL_PASS", full_group_approved=False,
+                        execution_scope="REPRESENTATIVE_HISTORICAL_RESTORE",
+                        scenarios=[{"id": scenario["id"], "status": "PASS" if scenario["selection"] == "SELECTED" else "NOT_SELECTED"}
+                            for scenario in selected[0]["scenarios"]],
+                        validated_result={"path": str(result_path.relative_to(directory)),
+                            "sha256": hashlib.sha256(result_path.read_bytes()).hexdigest()})
+                else:
+                    execute([sys.executable, str(ROOT / "scripts/ci/run_suite.py"), "--profile", "deep", "--group", group,
+                        "--output-dir", str(directory / group)], directory, group, 7200,
+                        environment=environment | {"TRACKVANCE_LOCAL_GROUP": group})
+                    row["status"] = "PASS"
             except (Exception, KeyboardInterrupt) as error:
                 row.update(status="FAIL", error_type=type(error).__name__)
                 if isinstance(error, KeyboardInterrupt):
@@ -427,7 +451,7 @@ def main(arguments=None):
         if args.exercise_failure_cleanup:
             from ci.local_failure_probe import run as failure_probe
             summary["controlled_failure_cleanup"] = failure_probe(directory / "controlled-failure", environment)
-        summary["status"] = "PASS" if all(r["status"] == "PASS" for r in summary["groups"] if r["status"] != "NOT_SELECTED") else "INCOMPLETE"
+        summary["status"] = "PASS" if all(r["status"] in {"PASS", "PARTIAL_PASS"} for r in summary["groups"] if r["status"] != "NOT_SELECTED") else "INCOMPLETE"
         summary["closure"] = "DEEP_CERTIFICATION_APPROVED" if summary["status"] == "PASS" and args.all else "PARTIAL_DEEP_EXECUTION"
     except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- persist setup failures and explicit unexecuted groups.
         summary.update(status="FAIL", error_type=type(error).__name__)
@@ -444,11 +468,14 @@ def main(arguments=None):
                 summary["owned_cleanup"] = cleanup(owned_before, projects=set(json.loads(registry.read_text(encoding="utf-8"))))
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary.update(status="FAIL", cleanup_error=type(error).__name__)
-        for builder in json.loads(builder_registry.read_text(encoding="utf-8")):
-            if re.fullmatch(r"tv-local-(?:legacy-[a-f0-9]{24}|build-[a-f0-9]{12})", builder) and builder in command("docker", "buildx", "ls", "--format", "{{.Name}}").split():
-                with (directory / "legacy-builder-cleanup.private.log").open("a", encoding="utf-8") as output:
-                    subprocess.run(["docker", "buildx", "rm", builder], stdout=output, stderr=subprocess.STDOUT,
-                        check=False, timeout=180)
+        try:
+            for builder in json.loads(builder_registry.read_text(encoding="utf-8")):
+                if re.fullmatch(r"tv-local-(?:legacy-[a-f0-9]{24}|build-[a-f0-9]{12})", builder) and builder in command("docker", "buildx", "ls", "--format", "{{.Name}}").split():
+                    with (directory / "legacy-builder-cleanup.private.log").open("a", encoding="utf-8") as output:
+                        subprocess.run(["docker", "buildx", "rm", builder], stdout=output, stderr=subprocess.STDOUT,
+                            check=False, timeout=180)
+        except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as error:
+            summary.update(status="FAIL", builder_cleanup_error=type(error).__name__)
         try:
             summary["builder_image_cleanup"] = cleanup_builder_images(directory)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -474,7 +501,8 @@ def main(arguments=None):
         write(target, summary)
         if summary.get("environment", {}).get("docker_memory_bytes"):
             try:
-                summary["fixture_image_cleanup"] = cleanup_fixture_images(sha)
+                summary["fixture_image_cleanup"] = cleanup_fixture_images(sha, registry=image_registry, execution_id=execution) if image_registry.exists() else {
+                    "status": "PASS", "removed": [], "skipped": [], "reason": "NO_IMAGE_BUILD_ATTEMPT"}
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary["retention_image_error"] = type(error).__name__
                 summary.update(status="FAIL", closure="PARTIAL_DEEP_EXECUTION")

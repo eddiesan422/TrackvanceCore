@@ -252,31 +252,115 @@ def test_linux_backend_requires_verified_test_role_and_shares_total_budget(tmp_p
         local_backend.launch(tmp_path, environment, lambda *_a, **_k: pytest.fail("Wrong image must not start"))
 
 
-def test_ephemeral_image_cleanup_removes_current_sha_but_preserves_consumed_and_uncertain_images(monkeypatch):
-    from ci import run_local
-    sha = "a" * 40
-    labels = {"io.trackvance.local-proof": "true", "org.opencontainers.image.revision": sha,
-              "org.opencontainers.image.version": "0.8.0"}
-    rows = [{"Id": name, "Config": {"Labels": labels}, "RepoTags": tags} for name, tags in (
-        ("unused", ["trackvance-local-proof:" + "a" * 12 + "-" + "b" * 12 + "-backend-tests"]),
-        ("consumed", ["trackvance-local-proof:" + "a" * 12 + "-" + "b" * 12 + "-backend"]),
-        ("unknown", ["shared-other-project:latest"]))]
-    removed = []
-    def command(*args):
-        if args[:3] == ("docker", "image", "ls"):
-            return "unused consumed unknown"
-        if args[:3] == ("docker", "image", "inspect"):
-            return json.dumps(rows if len(args) > 4 else [next(row for row in rows if row["Id"] == args[-1])])
-        if args[:2] == ("docker", "ps"):
-            return "protected-container" if args[-1] == "ancestor=consumed" else ""
-        assert args[:3] == ("docker", "image", "rm") and "--force" not in args
-        removed.extend(args[3:])
-        return ""
+def test_fixture_cleanup_requires_durable_execution_registry_and_never_sweeps_by_label(tmp_path, monkeypatch):
+    from ci import local_resources, run_local
+    monkeypatch.setattr(run_local, "command", lambda *_args: pytest.fail("No global image query is allowed"))
+    with pytest.raises(ValueError, match="durable execution"):
+        run_local.cleanup_fixture_images("a" * 40)
+    registry = tmp_path / "images.json"
+    registry.write_text(json.dumps({"execution_id": "local-" + "b" * 32}))
+    calls = []
+    monkeypatch.setattr(local_resources, "cleanup_registered_images", lambda *args, **kwargs:
+        calls.append((args, kwargs)) or {"status": "PASS", "removed": [], "skipped": []})
+    assert run_local.cleanup_fixture_images("a" * 40, registry=registry)["status"] == "PASS"
+    assert calls[0][0] == (registry, "local-" + "b" * 32) and calls[0][1]["retain_for_seconds"] == 0
+
+
+@pytest.mark.parametrize("version", ["0.5.1", "0.6.0", "0.6.1"])
+def test_representative_historical_plan_selects_one_authentic_scenario_without_docker(version, monkeypatch, capsys):
+    monkeypatch.setattr("ci.run_local.command", lambda *_args: pytest.fail("Plan must be read-only without Docker"))
+    assert main(["--groups", "backup-restore", "--historical-source-version", version, "--plan"]) == 0
+    group = json.loads(capsys.readouterr().out)["groups"][0]
+    assert group["execution_scope"] == "REPRESENTATIVE_HISTORICAL_RESTORE" and group["full_group_approved"] is False
+    assert sum(row["selection"] == "SELECTED" for row in group["scenarios"]) == 1
+    assert next(row["version"] for row in group["scenarios"] if row["selection"] == "SELECTED") == version
+    assert sum(row["selection"] == "NOT_SELECTED" for row in group["scenarios"]) == 3
+
+
+@pytest.mark.parametrize("arguments", [["--all"], ["--groups", "backend"], ["--groups", "backup-restore", "backend"]])
+def test_historical_partial_selection_cannot_approve_other_or_full_groups(arguments, monkeypatch):
+    monkeypatch.setattr("ci.run_local.command", lambda *_args: pytest.fail("Invalid selection must not inspect Docker"))
+    with pytest.raises(SystemExit) as error:
+        main([*arguments, "--historical-source-version", "0.6.1", "--plan"])
+    assert error.value.code == 2
+
+
+def test_image_observation_failure_still_retires_owned_builder_and_context(tmp_path, monkeypatch):
+    from ci import local_resources, run_local
+    directory = tmp_path / ("local-" + "a" * 32)
+    directory.mkdir()
+    (directory / "backend-test-context").mkdir()
+    monkeypatch.setattr(run_local, "command", lambda *_args: "")
+    observed = []
+    monkeypatch.setattr(run_local, "execute", lambda command, *_args, **_kwargs: observed.append(command))
+    monkeypatch.setattr(run_local, "inspect_image", lambda *_args: {"Id": "sha256:" + "b" * 64})
+    monkeypatch.setattr(local_resources, "observe_image_builds", lambda *_args: (_ for _ in ()).throw(ValueError("Unreadable registry")))
+    infrastructure = []
+    monkeypatch.setattr(run_local, "cleanup_builder_images", lambda *_args: infrastructure.append(True) or {"status": "PASS"})
+    with pytest.raises(ValueError, match="Unreadable"):
+        run_local.prepare_images(directory, "c" * 40, True, max_memory_bytes=4 * 1024**3, max_cpus=2)
+    assert observed[-1][:3] == ["docker", "buildx", "rm"] and infrastructure
+    assert not (directory / "backend-test-context").exists()
+
+
+@pytest.mark.parametrize("builder_failure", [False, True])
+def test_representative_restore_closes_partial_scope_and_still_attempts_images_after_builder_failure(tmp_path, monkeypatch, builder_failure):
+    import subprocess
+    from types import SimpleNamespace
+
+    from ci import local_failure_probe, owned_cleanup, run_local, validators
+    monkeypatch.setattr(run_local, "ROOT", tmp_path)
+    monkeypatch.setattr(run_local, "protected_inventory", dict)
+    monkeypatch.setattr(run_local, "limit_cpu_affinity", lambda *_args: {"original_logical_processors": [0]})
+    monkeypatch.setattr(run_local, "set_cpu_affinity", lambda *_args: None)
+    monkeypatch.setattr(owned_cleanup, "snapshot", dict)
+    monkeypatch.setattr(owned_cleanup, "cleanup", lambda *_args, **_kwargs: {"status": "PASS"})
+    def command(*arguments):
+        if arguments[:2] == ("git", "rev-parse"):
+            return "a" * 40
+        if arguments[:2] == ("git", "status"):
+            return ""
+        if arguments[:2] == ("docker", "info"):
+            return json.dumps({"ServerVersion": "test", "MemTotal": 16 * run_local.GIB})
+        if arguments[:3] == ("docker", "context", "show"):
+            return "test"
+        if arguments[:3] == ("docker", "buildx", "ls"):
+            raise subprocess.CalledProcessError(1, "docker buildx ls")
+        pytest.fail("Unexpected operation")
     monkeypatch.setattr(run_local, "command", command)
-    audit = run_local.cleanup_fixture_images(sha)
-    assert [row["image_id"] for row in audit["removed"]] == ["unused"]
-    assert {row["reason"] for row in audit["skipped"]} == {"CONTAINER_CONSUMER", "OWNERSHIP_OR_REFERENCES_UNCERTAIN"}
-    assert removed == rows[0]["RepoTags"] and audit["retain_for_seconds"] == 0
+    def prepare(directory, *_args, **kwargs):
+        environment = kwargs["environment"]
+        Path(environment["TRACKVANCE_LOCAL_IMAGE_REGISTRY"]).write_text("{}")
+        if builder_failure:
+            Path(environment["TRACKVANCE_LOCAL_BUILDER_REGISTRY"]).write_text(json.dumps(["tv-local-build-" + "b" * 12]))
+        return directory / "local-images.json"
+    monkeypatch.setattr(run_local, "prepare_images", prepare)
+    monkeypatch.setattr(run_local, "ResourceMonitor", lambda *_args: SimpleNamespace(
+        thread=SimpleNamespace(start=lambda: None), finish=dict))
+    executed, validated, image_cleanup = [], [], []
+    def execute(arguments, *_args, **_kwargs):
+        executed.append(arguments)
+        output = Path(arguments[arguments.index("--evidence-dir") + 1])
+        output.mkdir()
+        (output / "result.json").write_text('{"status":"PASS"}')
+    monkeypatch.setattr(run_local, "execute", execute)
+    monkeypatch.setattr(validators, "validate_content", lambda spec, value: validated.append((spec["version"], value)))
+    monkeypatch.setattr(local_failure_probe, "run", lambda *_args: {"status": "PASS", "observed_exit_code": 23})
+    monkeypatch.setattr(run_local, "cleanup_builder_images", lambda *_args: {"status": "PASS"})
+    monkeypatch.setattr(run_local, "cleanup_fixture_images", lambda *_args, **_kwargs:
+        image_cleanup.append(True) or {"status": "PASS", "removed": [], "skipped": []})
+    result = main(["--groups", "backup-restore", "--historical-source-version", "0.6.1",
+        "--max-cpus", "4", "--max-memory-gib", "8", "--exercise-failure-cleanup"])
+    summary = json.loads(next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json")).read_text())
+    assert result == int(builder_failure) and summary["status"] == ("FAIL" if builder_failure else "PASS")
+    assert summary["closure"] == "PARTIAL_DEEP_EXECUTION" and summary["full_group_approved"] is False
+    group = next(row for row in summary["groups"] if row["group"] == "backup-restore")
+    assert group["status"] == "PARTIAL_PASS" and sum(row["status"] == "NOT_SELECTED" for row in group["scenarios"]) == 3
+    assert sum(row["status"] == "NOT_SELECTED" for row in summary["groups"]) == 18
+    assert validated == [("0.6.1", {"status": "PASS"})] and image_cleanup
+    assert len(executed) == 1 and executed[0][1].endswith("identity_legacy_restore_cycle.py")
+    if builder_failure:
+        assert summary["builder_cleanup_error"] == "CalledProcessError"
 
 
 @pytest.mark.parametrize("leftover", [False, True])

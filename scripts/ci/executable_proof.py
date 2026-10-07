@@ -297,6 +297,10 @@ def find_approval(api: GitHubAPI, *, repository: str, branch: str, current_sha: 
             break
         try:
             fresh = api.get(f"actions/runs/{candidate['id']}")
+            # A rerun can change state after the list response. Its latest state
+            # blocks older approvals just as an unapproved list entry does.
+            if fresh.get("status") != "completed" or fresh.get("conclusion") != "success":
+                return None, "inherited-executable-run-unapproved"
             return verify_origin(api, fresh, repository=repository, branch=branch, current_sha=current_sha,
                                  fingerprint=fingerprint, manifest_path=manifest_path,
                                  expected_workflow_id=identity, root=root), "verified-functional-inheritance"

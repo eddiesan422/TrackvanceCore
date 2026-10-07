@@ -48,6 +48,8 @@ class FakeAPI:
             return copy.deepcopy(self.case["workflow"])
         if path.startswith("actions/workflows/123/runs?"):
             return {"workflow_runs": copy.deepcopy(self.case["runs"])}
+        if path in self.case.get("fresh_runs", {}):
+            return copy.deepcopy(self.case["fresh_runs"][path])
         if path == "actions/runs/111":
             return copy.deepcopy(self.case["run"])
         if path == "actions/runs/111/attempts/1/jobs?per_page=100":
@@ -166,6 +168,47 @@ def test_failed_cancelled_or_pending_code_then_readme_cannot_hide_behind_older_g
                                  verified_inheritance=proof, inheritance_reason=reason)
     assert result["mode"] == "functional" and result["functional_inheritance"] is None
     assert result["groups"] == load_manifest()["profiles"]["functional"]["groups"]
+
+
+def newer_listed_success(case, state):
+    """Two same-content ancestors: the latest list entry is stale, the older is green."""
+    latest_sha = case["current_sha"]
+    (case["root"] / "README.md").write_text("# README after the latest execution\n", encoding="utf-8")
+    case["current_sha"] = commit(case["root"], "README follows the latest execution")
+    latest = copy.deepcopy(case["run"])
+    latest.update(id=444, head_sha=latest_sha)
+    case["runs"] = [latest, copy.deepcopy(case["run"])]
+    fresh = copy.deepcopy(latest)
+    fresh.update(status="completed" if state in {"failure", "cancelled"} else state,
+                 conclusion=state if state in {"failure", "cancelled"} else None)
+    case["fresh_runs"] = {"actions/runs/444": fresh}
+
+
+@pytest.mark.parametrize("state", ["failure", "cancelled", "queued", "in_progress"])
+def test_fresh_unapproved_run_stops_discovery_before_older_green_and_selects_functional(proof_case, state):
+    newer_listed_success(proof_case, state)
+    proof, reason = discover(proof_case)
+    assert proof is None and reason == "inherited-executable-run-unapproved"
+    selected = select_suites.select("auto", ["README.md"], source_sha=proof_case["current_sha"],
+        verified_inheritance=proof, inheritance_reason=reason)
+    assert selected["mode"] == "functional" and selected["functional_inheritance"] is None
+    assert selected["reason"] == [reason]
+    assert selected["groups"] == load_manifest()["profiles"]["functional"]["groups"]
+    assert proof_case["api"].calls == ["actions/workflows/ci.yml",
+        "actions/workflows/123/runs?branch=feat%2Flocal-prototype&per_page=100", "actions/runs/444"]
+
+
+@pytest.mark.parametrize("state", ["failure", "cancelled", "queued", "in_progress"])
+def test_gate_revalidation_stops_at_fresh_unapproved_candidate_despite_cached_older_green(
+        proof_case, monkeypatch, state):
+    newer_listed_success(proof_case, state)
+    proof = verify(proof_case)
+    args = gate_arguments(proof_case, proof, monkeypatch)
+    proof_case["api"].calls.clear()
+    with pytest.raises(EvidenceError, match="INHERITED_EXECUTABLE_NO_LONGER_APPROVED"):
+        final_gate.evaluate(**args)
+    assert proof_case["api"].calls == ["actions/workflows/ci.yml",
+        "actions/workflows/123/runs?branch=feat%2Flocal-prototype&per_page=100", "actions/runs/444"]
 
 
 @pytest.mark.parametrize("path", ["requirements.lock", "backend/uv.lock", "frontend/pnpm-lock.yaml",

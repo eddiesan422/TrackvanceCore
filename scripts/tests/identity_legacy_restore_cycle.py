@@ -126,8 +126,28 @@ def main() -> int:
     options = parser.parse_args()
     if options.source_version == "0.6.1":
         from v070_recovery import authentic_061_cycle
-
-        return authentic_061_cycle(SOURCES["0.6.1"][0], options.evidence_dir)
+        if not os.environ.get("TRACKVANCE_LOCAL_EXECUTION_ID"):
+            return authentic_061_cycle(SOURCES["0.6.1"][0], options.evidence_dir)
+        keys = ("TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA", "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION")
+        previous = {key: os.environ.get(key) for key in keys}
+        os.environ.update(dict(zip(keys, (SOURCES["0.6.1"][0], "0.6.1"), strict=True)))
+        try:
+            return authentic_061_cycle(SOURCES["0.6.1"][0], options.evidence_dir)
+        finally:
+            from ci.local_resources import cleanup_registered_images
+            try:
+                registry = Path(os.environ["TRACKVANCE_LOCAL_IMAGE_REGISTRY"])
+                if registry.exists():
+                    rows = json.loads(registry.read_text(encoding="utf-8"))["builds"]
+                    projects = {row["project"] for row in rows if row["source_sha"] == SOURCES["0.6.1"][0] and row["version"] == "0.6.1"}
+                    audit = cleanup_registered_images(registry, os.environ["TRACKVANCE_LOCAL_EXECUTION_ID"], projects=projects)
+                    (registry.parent / "historical-061-image-cleanup.json").write_text(json.dumps(audit, indent=2), encoding="utf-8")
+            finally:
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
     from v070_recovery import compose_adapter, guarded_project, target_override
 
     baseline_commit, expected_migration, expected_state = SOURCES[options.source_version]
@@ -148,6 +168,8 @@ def main() -> int:
         "DEMO_SEED_ENABLED": "true", "WEB_PORT": str(port), "TRACKVANCE_SMTP_ENABLED": "false",
         "TRACKVANCE_SSO_MICROSOFT_ENABLED": "false", "TRACKVANCE_SSO_GOOGLE_ENABLED": "false",
         "TRACKVANCE_WEB_ORIGIN": f"http://127.0.0.1:{port}", "COMPOSE_FILE": "compose.yml",
+        "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA": baseline_commit,
+        "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION": options.source_version,
     }
     original_environment = dict(os.environ)
     os.environ.update(environment)
@@ -297,6 +319,15 @@ def main() -> int:
                     run([*command, "down", "-v", "--remove-orphans"], cwd=directory)
                 except (OSError, RuntimeError, subprocess.SubprocessError):
                     cleanup_failed = True
+        if os.environ.get("TRACKVANCE_LOCAL_EXECUTION_ID"):
+            try:
+                from ci.local_resources import cleanup_registered_images
+                registry = Path(environment["TRACKVANCE_LOCAL_IMAGE_REGISTRY"])
+                if registry.exists():
+                    result["image_cleanup"] = cleanup_registered_images(registry,
+                        environment["TRACKVANCE_LOCAL_EXECUTION_ID"], projects={source})
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                cleanup_failed = True
         if cleanup_failed:
             result.update(status="FAIL", cleanup="FAIL")
         else:

@@ -20,6 +20,116 @@ except ImportError:
 
 INSTALLATION = "trackvance-certification"
 BUILDER = "desktop-linux"
+CACHE_ID = re.compile(r"[a-z0-9]{20,64}")
+
+
+def cache_index(records: list[dict]) -> dict[str, dict]:
+    require(isinstance(records, list), "INVALID_CACHE_RECORD_LIST")
+    indexed = {}
+    for record in records:
+        require(isinstance(record, dict) and isinstance(record.get("ID"), str)
+                and CACHE_ID.fullmatch(record["ID"]) and record["ID"] not in indexed,
+                "INVALID_OR_DUPLICATE_CACHE_ID")
+        parents = [] if record.get("Parents") is None else record["Parents"]
+        require(isinstance(parents, list) and all(isinstance(p, str) and CACHE_ID.fullmatch(p) for p in parents)
+                and len(parents) == len(set(parents)), "INVALID_CACHE_PARENTS")
+        indexed[record["ID"]] = record
+    return indexed
+
+
+def cache_ancestors(seed: str, indexed: dict[str, dict]) -> set[str]:
+    """Visit the actual parent graph without inferring ownership from reachability."""
+    completed: set[str] = set()
+    active: set[str] = set()
+    stack = [(seed, False)]
+    while stack:
+        identity, leaving = stack.pop()
+        if identity not in indexed:
+            continue  # A missing parent is never invented or selected for removal.
+        if leaving:
+            active.remove(identity)
+            completed.add(identity)
+            continue
+        require(identity not in active, "CYCLIC_CACHE_GRAPH")
+        if identity in completed:
+            continue
+        active.add(identity)
+        stack.append((identity, True))
+        stack.extend((p, False) for p in reversed(indexed[identity].get("Parents") or []))
+    return completed
+
+
+def private_reclaimable_cache(record: dict) -> bool:
+    return (record.get("Reclaimable") is True and record.get("Shared") is False
+            and record.get("Mutable") is False and record.get("Type") == "regular")
+
+
+def cache_partition(records: list[dict], authorized: set[str], protected_ids: set[str]) -> tuple[set[str], set[str]]:
+    indexed = cache_index(records)
+    require(protected_ids <= set(indexed), "PROTECTED_CACHE_ID_MISSING")
+    eligible = {i for i in authorized & set(indexed) if private_reclaimable_cache(indexed[i])} - protected_ids
+    retained = set(indexed) - eligible
+    for identity in indexed:
+        ancestors = cache_ancestors(identity, indexed)  # Validate even unrelated graphs.
+        if identity in retained:
+            retained |= ancestors
+    # Newly retained ancestors need no further expansion: each closure above is transitive.
+    return set(indexed) - retained, retained
+
+
+def ordered_cache_targets(indexed: dict[str, dict], selected: set[str]) -> list[dict]:
+    pending, ordered = set(selected), []
+    while pending:
+        leaves = sorted(i for i in pending if not any(i in (indexed[c].get("Parents") or []) for c in pending))
+        require(bool(leaves), "CYCLIC_SELECTED_CACHE_GRAPH")
+        ordered.extend(indexed[i] for i in leaves)
+        pending.difference_update(leaves)
+    return ordered
+
+
+def cache_identity(record: dict) -> dict:
+    # LastUsedAt is a relative CLI display, not an identity field. Keep every
+    # other engine field, including future references; safe_description/markers
+    # are audit annotations already represented by description_sha256.
+    value = {k: v for k, v in record.items() if k not in {"LastUsedAt", "safe_description", "description_markers"}}
+    value["Parents"] = sorted(record.get("Parents") or [])
+    return value
+
+
+def verify_cache_boundary(current: list[dict], expected: list[dict]) -> None:
+    before, after = cache_index(expected), cache_index(current)
+    require(set(before) == set(after), "CONCURRENT_CACHE_ID_SET_CHANGED")
+    require(all(cache_identity(after[i]) == cache_identity(before[i]) for i in before), "CACHE_IDENTITY_OR_USE_CHANGED")
+    for identity in after:
+        cache_ancestors(identity, after)
+
+
+def cache_prune_transition(before: list[dict], after: list[dict], target: str) -> list[dict]:
+    """Accept only a bounded parent release observed around a successful exact prune.
+
+    BuildKit releases a pruned child's direct parents and may increment their
+    usage once (cache/refs.go and cache/metadata.go in BuildKit v0.26.2). This is
+    an observed compatible transition, not proof that concurrent activity is
+    impossible. Every other change stops the procedure.
+    """
+    previous, current = cache_index(before), cache_index(after)
+    require(target in previous and target not in current, "CACHE_RECORD_STILL_PRESENT")
+    require(set(current) == set(previous) - {target}, "CONCURRENT_CACHE_ID_SET_CHANGED_AFTER_PRUNE")
+    parents = set(previous[target].get("Parents") or [])
+    transitions = []
+    for identity, record in current.items():
+        expected = copy.deepcopy(previous[identity])
+        old, new = expected.get("UsageCount"), record.get("UsageCount")
+        if old != new:
+            require(identity in parents and type(old) is int and type(new) is int and new == old + 1,
+                    "UNEXPECTED_USAGE_COUNT_TRANSITION")
+            expected["UsageCount"] = new
+            transitions.append({"ID": identity, "old_usage_count": old, "new_usage_count": new,
+                                "operation_target": target, "classification": "OBSERVED_SCOPED_CHILD_RELEASE_PLUS_ONE"})
+        require(cache_identity(record) == cache_identity(expected), "CACHE_IDENTITY_OR_GRAPH_CHANGED_AFTER_PRUNE")
+    for identity in current:
+        cache_ancestors(identity, current)
+    return transitions
 
 
 def fingerprint(value: Any) -> str:
@@ -147,14 +257,7 @@ def retirement_projects(proof: dict) -> set[str]:
 def cache_candidates(state: dict, proof: dict, inventory_hash: str) -> list[dict]:
     require(proof.get("schema_version") == 1 and proof.get("builder") == BUILDER
             and proof.get("inventory_sha256") == inventory_hash and isinstance(proof.get("records"), list), "CACHE_PROOF_INVENTORY_MISMATCH")
-    indexed = {c["ID"]: c for c in state["cache"]}
-    def ancestors(identity: str, visited: set[str]) -> set[str]:
-        require(identity in indexed and identity not in visited, "CACHE_PROOF_MISSING_OR_CYCLIC_PARENT")
-        visited = visited | {identity}
-        # GC can have removed an unselected parent already; absent records are
-        # never deletion targets or invented proof of ownership.
-        return {identity}.union(*(ancestors(p, visited) for p in indexed[identity].get("Parents", []) if p in indexed))
-    selected = []
+    indexed = cache_index(state["cache"])
     seen = set()
     for entry in proof["records"]:
         identity, seed = entry.get("id"), entry.get("owned_root_id")
@@ -162,20 +265,21 @@ def cache_candidates(state: dict, proof: dict, inventory_hash: str) -> list[dict
                 "INVALID_OR_DUPLICATE_CACHE_ID")
         seen.add(identity)
         require(identity in indexed and seed in indexed and "trackvance" in indexed[seed].get("description_markers", [])
-                and identity in ancestors(seed, set()), "CACHE_NOT_REACHABLE_FROM_TRACKVANCE_SEED")
+                and identity in cache_ancestors(seed, indexed), "CACHE_NOT_REACHABLE_FROM_TRACKVANCE_SEED")
         record = indexed[identity]
         require(entry.get("description_sha256") == record.get("description_sha256")
                 and sorted(entry.get("parents", [])) == sorted(record.get("Parents", [])), "CACHE_IDENTITY_CHANGED")
-        if record.get("Reclaimable") is True:
-            selected.append(record)
-    # Descendants must be attempted before their reviewed parents.
-    selected.sort(key=lambda c: len(ancestors(c["ID"], set())), reverse=True)
-    return selected
+    protected = proof.get("protected_cache_ids", [])
+    require(isinstance(protected, list) and all(isinstance(i, str) and CACHE_ID.fullmatch(i) for i in protected)
+            and len(protected) == len(set(protected)), "INVALID_PROTECTED_CACHE_IDS")
+    selected, _ = cache_partition(state["cache"], seen, set(protected))
+    return ordered_cache_targets(indexed, selected)
 
 
 def plan(state: dict, retirement_proof: dict, cache_proof: dict, *, inventory_hash: str | None = None) -> dict:
     require(state.get("kind") == "SANITIZED_CLI_DOCKER_INVENTORY", "INVALID_SANITIZED_INVENTORY")
     inventory_hash = inventory_hash or fingerprint(state)
+    cache_index(state.get("cache"))
     state = normalized(state)
     retired = retirement_projects(retirement_proof)
     protected = protected_snapshot(state, retired)
@@ -193,13 +297,16 @@ def plan(state: dict, retirement_proof: dict, cache_proof: dict, *, inventory_ha
     selected = {"containers": {c["id"] for c in containers}, "images": {i["id"] for i in images},
                 "networks": {n["id"] for n in networks}, "volumes": {v["name"] for v in volumes}, "cache": {c["ID"] for c in caches}}
     exceptions = []
+    authorized = {r["id"] for r in cache_proof["records"]}
     for kind, key in (("containers", "id"), ("images", "id"), ("networks", "id"), ("volumes", "name"), ("cache", "ID")):
         for resource in state[kind]:
             if resource[key] not in selected[kind]:
                 reason = ("PROTECTED_INSTALLATION_OR_FOREIGN_REFERENCE" if kind != "cache" else
-                          "CACHE_ACTIVE_OR_WITHOUT_REVIEWED_TRACKVANCE_ATTRIBUTION")
+                          "CACHE_REQUIRED_BY_RETAINED_OR_PROTECTED_ENTRY" if resource[key] in authorized
+                          and private_reclaimable_cache(resource) else "CACHE_ACTIVE_SHARED_OR_WITHOUT_REVIEWED_ATTRIBUTION")
                 exceptions.append({"kind": kind, "id": resource[key], "name": resource.get("name", resource.get("tags", [])),
-                                   "reason": reason, "size_bytes": resource.get("size_bytes", resource.get("Size"))})
+                                   "reason": reason, "size_bytes": resource.get("size_bytes", resource.get("Size")),
+                                   "expiry": None, "expiry_exception": "PROTECTED_OR_UNCERTAIN_OWNER"})
     return {"schema_version": 1, "kind": "REVIEWED_TRACKVANCE_DOCKER_CLEANUP", "inventory": state,
         "inventory_sha256": inventory_hash, "retirement_proof": retirement_proof, "cache_proof": cache_proof,
         "retirement_proof_sha256": fingerprint(retirement_proof), "cache_proof_sha256": fingerprint(cache_proof),
@@ -208,24 +315,49 @@ def plan(state: dict, retirement_proof: dict, cache_proof: dict, *, inventory_ha
         "builders": [], "builder_policy": "Built-in builders and unreviewed builders are retained; owned test runners remove their temporary builders."}
 
 
-def apply(document: dict, checkpoint: Path) -> dict:
+def apply(document: dict, checkpoint: Path, *, reviewed_plan_sha256: str | None = None) -> dict:
     require(document.get("kind") == "REVIEWED_TRACKVANCE_DOCKER_CLEANUP" and document.get("schema_version") == 1, "INVALID_CLEANUP_PLAN")
     regenerated = plan(document["inventory"], document["retirement_proof"], document["cache_proof"], inventory_hash=document["inventory_sha256"])
     require(regenerated == document, "ALTERED_CLEANUP_PLAN_OR_PROOF")
+    require(reviewed_plan_sha256 is None or isinstance(reviewed_plan_sha256, str)
+            and DIGEST.fullmatch(reviewed_plan_sha256), "INVALID_REVIEWED_PLAN_SHA256")
     retired = retirement_projects(document["retirement_proof"])
     removed = {k: [] for k in ("containers", "stopped_containers", "images", "image_tags", "image_digests", "networks", "volumes", "cache")}
-    result = {"status": "RUNNING", "removed": removed, "already_absent_cache": [], "protected_before_sha256": fingerprint(document["protected"])}
+    result = {"status": "RUNNING", "removed": removed, "already_absent_cache": [],
+              "protected_before_sha256": fingerprint(document["protected"]),
+              "cache_operations": [], "plan_fingerprint": fingerprint(document),
+              "reviewed_plan_sha256": reviewed_plan_sha256, "builder": BUILDER}
+    expected_cache = copy.deepcopy(document["inventory"]["cache"])
     def save():
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         checkpoint.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    def fresh():
+    def fresh(*, removed_image: str | None = None):
         state = normalized(inventory(with_cache=False))
         require(protected_snapshot(state, retired) == document["protected"], "PROTECTED_IDENTITY_CONFIG_STATE_OR_REFERENCE_CHANGED")
         require({c["id"] for c in state["containers"]} == {c["id"] for c in document["inventory"]["containers"]} - set(removed["containers"]),
                 "CONCURRENT_CONTAINER_OR_CONSUMER_CHANGE")
+        for kind, key in (("images", "id"), ("networks", "id"), ("volumes", "name")):
+            expected_ids = {r[key] for r in document["inventory"][kind]} - set(removed[kind])
+            if kind == "images" and removed_image is not None:
+                expected_ids.discard(removed_image)
+            require({r[key] for r in state[kind]} == expected_ids, "CONCURRENT_RESOURCE_OR_REFERENCE_CHANGE")
+            targets = {r[key] for r in document[kind]}
+            current = {r[key]: r for r in state[kind]}
+            for original in document["inventory"][kind]:
+                if original[key] not in targets:
+                    retained = copy.deepcopy(original)
+                    if kind == "networks":
+                        retained["endpoints"] = sorted(set(retained["endpoints"]) - set(removed["containers"]))
+                    require(current[original[key]] == retained, "RETAINED_RESOURCE_IDENTITY_OR_REFERENCES_CHANGED")
         return state
+    def cache_guard():
+        fresh()
+        observed = cache_inventory()
+        verify_cache_boundary(observed, expected_cache)
+        return observed
     save()
     try:
+        cache_guard()
         for expected in document["containers"]:
             current = next(c for c in fresh()["containers"] if c["id"] == expected["id"])
             require(current == expected, "RETIRING_CONTAINER_CHANGED")
@@ -279,29 +411,48 @@ def apply(document: dict, checkpoint: Path) -> dict:
                     remaining_digests = list(digests)
                     save()
                 if not remaining:
-                    after = fresh()
+                    after = fresh(removed_image=expected["id"])
                     require(not any(i["id"] == expected["id"] for i in after["images"]), "IMAGE_STILL_PRESENT_AFTER_RETIREMENT")
                     removed["image_digests"].extend(remaining_digests)
                     break
             removed["images"].append(expected["id"]); save()
         for expected in document["cache"]:
-            fresh()
-            current = next((c for c in cache_inventory() if c["ID"] == expected["ID"]), None)
-            if current is None:
-                result["already_absent_cache"].append(expected["ID"]); save()
-                continue
-            require(current.get("Reclaimable") is True and all(current.get(k) == expected.get(k)
-                    for k in ("ID", "Parents", "description_sha256", "Type", "Mutable", "UsageCount")), "CACHE_IDENTITY_OR_USE_CHANGED")
+            before_cache = cache_guard()
+            current = cache_index(before_cache)[expected["ID"]]
+            authorized = {r["id"] for r in document["cache_proof"]["records"]}
+            selected, _ = cache_partition(before_cache, authorized, set(document["cache_proof"].get("protected_cache_ids", [])))
+            require(current["ID"] in selected and private_reclaimable_cache(current), "CACHE_ACQUIRED_PROTECTED_DEPENDENCY_OR_USE")
+            operation = {"schema_version": 1, "target": current["ID"], "builder": BUILDER,
+                         "index": len(result["cache_operations"]), "status": "RUNNING",
+                         "started_at": datetime.now(UTC).isoformat(),
+                         "before_cache_sha256": fingerprint(before_cache), "usage_transitions": []}
+            result["cache_operations"].append(operation); save()
             docker("buildx", "prune", "--builder", BUILDER, "--filter", "id=" + current["ID"], "--force")
-            require(not any(c["ID"] == current["ID"] for c in cache_inventory()), "CACHE_RECORD_STILL_PRESENT")
+            operation["command_succeeded"] = True; save()
+            after_cache = cache_inventory()
+            operation.update(completed_at=datetime.now(UTC).isoformat(),
+                             after_cache_sha256=fingerprint(after_cache),
+                             target_absent_after_command=not any(c["ID"] == current["ID"] for c in after_cache))
+            save()
+            fresh()
+            transitions = cache_prune_transition(before_cache, after_cache, current["ID"])
+            operation.update(status="PASS", usage_transitions=transitions)
+            expected_cache = copy.deepcopy(after_cache)
             removed["cache"].append(current["ID"]); save()
         after = fresh()
-        require(not ({c["ID"] for c in document["cache"]} & {c["ID"] for c in cache_inventory()}), "REVIEWED_CACHE_REMAINS_AFTER_CLEANUP")
+        final_cache = cache_guard()
+        require(not ({c["ID"] for c in document["cache"]} & {c["ID"] for c in final_cache}), "REVIEWED_CACHE_REMAINS_AFTER_CLEANUP")
         result.update(status="PASS", after=after, protected_after_sha256=fingerprint(protected_snapshot(after, retired)),
+            final_cache_sha256=fingerprint(final_cache), retained_cache_ids=sorted(c["ID"] for c in final_cache),
             docker_space=docker("system", "df"), note="Docker image/cache accounting shares layers; physical Windows disk reclamation is measured separately.")
     except (EvidenceError, ValueError, OSError, StopIteration, KeyError, TypeError, subprocess.SubprocessError) as error:
-        result.update(status="PARTIAL" if any(removed.values()) else "FAIL",
-                      error_code=str(error) if isinstance(error, EvidenceError) else type(error).__name__)
+        error_code = str(error) if isinstance(error, EvidenceError) else type(error).__name__
+        for operation in result["cache_operations"]:
+            if operation["status"] == "RUNNING":
+                operation.update(status="FAIL", error_code=error_code)
+        partial = any(removed.values()) or any(o.get("command_succeeded") and o.get("target_absent_after_command") is not False
+                                               for o in result["cache_operations"])
+        result.update(status="PARTIAL" if partial else "FAIL", error_code=error_code)
         save()
         raise
     save()
@@ -321,7 +472,7 @@ def main() -> int:
     try:
         if args.apply_plan:
             require(sha256(args.apply_plan) == args.plan_sha256, "REVIEWED_PLAN_SHA256_MISMATCH")
-            result = apply(load_json(args.apply_plan), args.output)
+            result = apply(load_json(args.apply_plan), args.output, reviewed_plan_sha256=args.plan_sha256)
         else:
             require(all((args.inventory, args.retirement_proof, args.cache_proof)), "MISSING_REVIEWED_CLEANUP_INPUT")
             result = plan(load_json(args.inventory), load_json(args.retirement_proof), load_json(args.cache_proof), inventory_hash=sha256(args.inventory))

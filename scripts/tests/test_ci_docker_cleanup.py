@@ -29,7 +29,7 @@ def case():
                for project, name in (("trackvance-certification", "trackvance-certification_data"), (PROJECT, PROJECT + "_data"))]
     cache = [{"ID": char * 26, "Parents": parents, "description_sha256": char * 64,
               "description_markers": markers, "Reclaimable": True, "Size": "100", "Mutable": False,
-              "Type": "regular", "UsageCount": 1, "LastUsedAt": "2026-01-01"}
+              "Type": "regular", "Shared": False, "UsageCount": 1, "LastUsedAt": "2026-01-01"}
              for char, parents, markers in (("a", ["b" * 26], ["trackvance"]), ("b", [], []))]
     images = [image(1, ["trackvance-ci:backend"]), image(2, [PROJECT + ":backend"]), image(3, ["trackvance-certification-api:latest"])]
     containers = [container("a", "trackvance-certification", images[0]["id"], volumes[0]["name"]),
@@ -157,13 +157,14 @@ def test_failure_after_partial_removal_never_leaves_running_or_pass_checkpoint(c
     assert json.loads(checkpoint.read_text())["status"] == "PARTIAL"
 
 
-def test_gc_absent_cache_is_verified_separately_and_still_present_returncode_is_failure(case, monkeypatch, tmp_path):
+def test_absent_cache_aborts_and_successful_noop_prune_cannot_approve(case, monkeypatch, tmp_path):
     document = planned(case)
     state, _ = simulated(case, monkeypatch)
     state["cache"] = state["cache"][:1]
-    result = cleanup.apply(document, tmp_path / "absent.json")
-    assert result["already_absent_cache"] == ["b" * 26]
-    assert result["removed"]["cache"] == ["a" * 26]
+    with pytest.raises(EvidenceError, match="CONCURRENT_CACHE_ID_SET_CHANGED"):
+        cleanup.apply(document, tmp_path / "absent.json")
+    absent = json.loads((tmp_path / "absent.json").read_text())
+    assert absent["status"] == "FAIL" and absent["removed"]["cache"] == absent["already_absent_cache"] == []
     for key in ("containers", "images", "networks", "volumes"):
         case[0][key] = case[0][key][:1]
     case[1]["projects"] = {}
@@ -199,7 +200,7 @@ def test_cache_new_usage_and_image_identity_changes_cannot_be_removed(case, monk
     state["cache"][0]["UsageCount"] += 1
     with pytest.raises(EvidenceError, match="CACHE_IDENTITY_OR_USE_CHANGED"):
         cleanup.apply(document, tmp_path / "cache-used.json")
-    assert json.loads((tmp_path / "cache-used.json").read_text())["status"] == "PARTIAL"
+    assert json.loads((tmp_path / "cache-used.json").read_text())["status"] == "FAIL"
 
 
 def test_reviewed_hash_mismatch_overwrites_a_stale_green_checkpoint_without_docker(case, monkeypatch, tmp_path):
@@ -298,3 +299,244 @@ def test_unexpected_image_change_after_untag_aborts_before_next_removal(case, mo
         cleanup.apply(document, checkpoint)
     assert ("image", "rm", first_tag) in calls and ("image", "rm", second_tag) not in calls
     assert json.loads(checkpoint.read_text())["status"] == "PARTIAL"
+
+
+def add_cache(case, char, parents, *, authorize=False):
+    record = copy.deepcopy(case[0]["cache"][0])
+    record.update(ID=char * 26, Parents=parents, description_sha256=char * 64,
+                  description_markers=["trackvance"] if authorize else [])
+    case[0]["cache"].append(record)
+    if authorize:
+        case[2]["records"].append({"id": record["ID"], "description_sha256": record["description_sha256"],
+                                  "parents": parents, "owned_root_id": record["ID"]})
+    return record
+
+
+def test_parent_reachable_from_trackvance_is_retained_when_unknown_child_needs_it(case, monkeypatch, tmp_path):
+    unknown = add_cache(case, "c", ["b" * 26])
+    document = planned(case)
+    assert [r["ID"] for r in document["cache"]] == ["a" * 26]
+    parent = next(r for r in document["retained"] if r["id"] == "b" * 26)
+    assert parent["reason"] == "CACHE_REQUIRED_BY_RETAINED_OR_PROTECTED_ENTRY"
+    state, calls = simulated(case, monkeypatch)
+    assert cleanup.apply(document, tmp_path / "shared-parent.json")["status"] == "PASS"
+    assert {r["ID"] for r in state["cache"]} == {"b" * 26, unknown["ID"]}
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+
+
+def test_unknown_descendant_protects_entire_authorized_ancestor_chain(case):
+    add_cache(case, "c", ["a" * 26])
+    assert planned(case)["cache"] == []
+
+
+@pytest.mark.parametrize("change", [{"Shared": True}, {"Mutable": True}, {"Reclaimable": False},
+                                     {"Type": "exec.cachemount"}, {"Shared": None}])
+def test_shared_mutable_active_or_unproven_root_protects_all_ancestors(case, change):
+    case[0]["cache"][0].update(change)
+    assert planned(case)["cache"] == []
+
+
+def test_explicit_protected_cache_root_protects_its_parents(case):
+    case[2]["protected_cache_ids"] = ["a" * 26]
+    assert planned(case)["cache"] == []
+
+
+@pytest.mark.parametrize("change", ["duplicate_id", "duplicate_parent", "parents_scalar", "parents_mapping",
+                                    "invalid_parent", "cycle", "unrelated_cycle"])
+def test_invalid_cache_graph_rejected_before_any_docker_mutation(case, monkeypatch, change):
+    monkeypatch.setattr(cleanup, "docker", lambda *args: pytest.fail("Planning must not call Docker"))
+    if change == "duplicate_id":
+        case[0]["cache"].append(copy.deepcopy(case[0]["cache"][0]))
+    elif change == "duplicate_parent":
+        case[0]["cache"][0]["Parents"] *= 2
+    elif change == "parents_scalar":
+        case[0]["cache"][0]["Parents"] = 0
+    elif change == "parents_mapping":
+        case[0]["cache"][0]["Parents"] = {"b" * 26: True}
+    elif change == "invalid_parent":
+        case[0]["cache"][0]["Parents"] = ["untrusted"]
+    elif change == "cycle":
+        case[0]["cache"][1]["Parents"] = ["a" * 26]
+    else:
+        add_cache(case, "c", ["d" * 26])
+        add_cache(case, "d", ["c" * 26])
+    with pytest.raises(EvidenceError):
+        planned(case)
+
+
+def test_each_deleted_child_can_increment_only_its_direct_parent_once(case, monkeypatch, tmp_path):
+    add_cache(case, "c", ["b" * 26], authorize=True)
+    document = planned(case)
+    assert [r["ID"] for r in document["cache"]] == ["a" * 26, "c" * 26, "b" * 26]
+    state, calls = simulated(case, monkeypatch)
+    ordinary = cleanup.docker
+    def release_parent(*args):
+        if args[:2] != ("buildx", "prune"):
+            return ordinary(*args)
+        target = args[args.index("--filter") + 1].removeprefix("id=")
+        parents = next(r["Parents"] for r in state["cache"] if r["ID"] == target)
+        output = ordinary(*args)
+        for record in state["cache"]:
+            if record["ID"] in parents:
+                record["UsageCount"] += 1
+                record["LastUsedAt"] = "less than a second ago"
+        return output
+    monkeypatch.setattr(cleanup, "docker", release_parent)
+    result = cleanup.apply(document, tmp_path / "parent-release.json")
+    assert result["status"] == "PASS" and state["cache"] == []
+    transitions = [t for op in result["cache_operations"] for t in op["usage_transitions"]]
+    assert [(t["ID"], t["old_usage_count"], t["new_usage_count"]) for t in transitions] == [
+        ("b" * 26, 1, 2), ("b" * 26, 2, 3)]
+    assert all(op["status"] == "PASS" and op["before_cache_sha256"] and op["after_cache_sha256"]
+               and op["command_succeeded"] and op["target_absent_after_command"] for op in result["cache_operations"])
+    assert result["plan_fingerprint"] == cleanup.fingerprint(document) and result["builder"] == "desktop-linux"
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 3
+
+
+@pytest.mark.parametrize("change", ["parent_plus_two", "unrelated_counter", "new_id", "other_absence", "parents",
+                                    "description", "created", "size", "shared", "mutable", "reclaimable", "reference"])
+def test_external_change_after_prune_stops_before_the_next_target(case, monkeypatch, tmp_path, change):
+    add_cache(case, "c", [])
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch)
+    ordinary = cleanup.docker
+    def changed(*args):
+        output = ordinary(*args)
+        if args[:2] == ("buildx", "prune"):
+            parent = next(r for r in state["cache"] if r["ID"] == "b" * 26)
+            if change == "parent_plus_two":
+                parent["UsageCount"] += 2
+            elif change == "unrelated_counter":
+                next(r for r in state["cache"] if r["ID"] == "c" * 26)["UsageCount"] += 1
+            elif change == "new_id":
+                extra = copy.deepcopy(parent)
+                extra["ID"] = "d" * 26
+                state["cache"].append(extra)
+            elif change == "other_absence":
+                state["cache"] = [r for r in state["cache"] if r["ID"] != "c" * 26]
+            elif change == "parents":
+                parent["Parents"] = ["c" * 26]
+            elif change == "description":
+                parent["description_sha256"] = "f" * 64
+            elif change == "created":
+                parent["CreatedAt"] = "different creation"
+            elif change == "size":
+                parent["Size"] = "101"
+            elif change == "shared":
+                parent["Shared"] = True
+            elif change == "mutable":
+                parent["Mutable"] = True
+            elif change == "reclaimable":
+                parent["Reclaimable"] = False
+            else:
+                parent["ImageReferences"] = ["new-reference"]
+        return output
+    monkeypatch.setattr(cleanup, "docker", changed)
+    checkpoint = tmp_path / (change + ".json")
+    with pytest.raises(EvidenceError):
+        cleanup.apply(document, checkpoint)
+    result = json.loads(checkpoint.read_text())
+    assert result["status"] == "PARTIAL" and result["cache_operations"][0]["status"] == "FAIL"
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+    assert any(r["ID"] == "b" * 26 for r in state["cache"])
+
+
+def test_direct_parent_change_outside_command_window_is_not_attributed_to_own_prune(case, monkeypatch, tmp_path):
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch)
+    reads = 0
+    def cache_inventory():
+        nonlocal reads
+        reads += 1
+        if reads == 4:  # After post-prune validation, before the next command.
+            state["cache"][0]["UsageCount"] += 1
+        return copy.deepcopy(state["cache"])
+    monkeypatch.setattr(cleanup, "cache_inventory", cache_inventory)
+    with pytest.raises(EvidenceError, match="CACHE_IDENTITY_OR_USE_CHANGED"):
+        cleanup.apply(document, tmp_path / "outside-window.json")
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+
+
+def test_retained_parent_counter_can_change_only_by_the_bounded_child_release(case, monkeypatch, tmp_path):
+    add_cache(case, "c", ["b" * 26])
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch)
+    ordinary = cleanup.docker
+    def release(*args):
+        output = ordinary(*args)
+        if args[:2] == ("buildx", "prune"):
+            next(r for r in state["cache"] if r["ID"] == "b" * 26)["UsageCount"] += 1
+        return output
+    monkeypatch.setattr(cleanup, "docker", release)
+    result = cleanup.apply(document, tmp_path / "retained-parent-release.json")
+    assert result["status"] == "PASS" and len(result["cache_operations"]) == 1
+    assert result["retained_cache_ids"] == ["b" * 26, "c" * 26]
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+
+
+def test_non_target_retired_labelled_network_identity_cannot_change_unobserved(case, monkeypatch, tmp_path):
+    case[0]["networks"].append({"id": "f" * 64, "name": "uncertain-shared-network", "labels": {
+        "com.docker.compose.project": PROJECT}, "driver": "bridge", "endpoints": []})
+    document = planned(case)
+    assert not any(n["id"] == "f" * 64 for n in document["networks"] + document["protected"]["networks"])
+    state, calls = simulated(case, monkeypatch)
+    ordinary = cleanup.docker
+    def changed(*args):
+        output = ordinary(*args)
+        if args[:2] == ("buildx", "prune"):
+            next(n for n in state["networks"] if n["id"] == "f" * 64)["driver"] = "external-driver"
+        return output
+    monkeypatch.setattr(cleanup, "docker", changed)
+    with pytest.raises(EvidenceError, match="RETAINED_RESOURCE_IDENTITY_OR_REFERENCES_CHANGED"):
+        cleanup.apply(document, tmp_path / "retained-network.json")
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+
+
+def test_cache_mutation_followed_by_protection_failure_keeps_partial_ack_and_observation(case, monkeypatch, tmp_path):
+    for kind in ("containers", "images", "networks", "volumes"):
+        case[0][kind] = case[0][kind][:1]
+    case[1]["projects"] = {}
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch)
+    ordinary = cleanup.docker
+    def changed(*args):
+        output = ordinary(*args)
+        if args[:2] == ("buildx", "prune"):
+            state["containers"][0]["config_sha256"] = "f" * 64
+        return output
+    monkeypatch.setattr(cleanup, "docker", changed)
+    checkpoint = tmp_path / "cache-then-protection-failure.json"
+    with pytest.raises(EvidenceError, match="PROTECTED_IDENTITY_CONFIG_STATE_OR_REFERENCE_CHANGED"):
+        cleanup.apply(document, checkpoint, reviewed_plan_sha256="a" * 64)
+    result = json.loads(checkpoint.read_text())
+    assert result["status"] == "PARTIAL" and result["removed"]["cache"] == []
+    assert result["reviewed_plan_sha256"] == "a" * 64
+    operation = result["cache_operations"][0]
+    assert operation["status"] == "FAIL" and operation["command_succeeded"]
+    assert operation["target_absent_after_command"] and operation["after_cache_sha256"]
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1
+
+
+def test_failed_post_prune_read_preserves_partial_without_inventing_after_snapshot(case, monkeypatch, tmp_path):
+    for kind in ("containers", "images", "networks", "volumes"):
+        case[0][kind] = case[0][kind][:1]
+    case[1]["projects"] = {}
+    document = planned(case)
+    state, calls = simulated(case, monkeypatch)
+    reads = 0
+    def unreadable_after_prune():
+        nonlocal reads
+        reads += 1
+        if reads == 3:
+            raise OSError("Controlled cache read failure after successful scoped prune")
+        return copy.deepcopy(state["cache"])
+    monkeypatch.setattr(cleanup, "cache_inventory", unreadable_after_prune)
+    checkpoint = tmp_path / "post-prune-read-fault.json"
+    with pytest.raises(OSError, match="Controlled"):
+        cleanup.apply(document, checkpoint)
+    result = json.loads(checkpoint.read_text())
+    operation = result["cache_operations"][0]
+    assert result["status"] == "PARTIAL" and result["removed"]["cache"] == []
+    assert operation["status"] == "FAIL" and operation["command_succeeded"]
+    assert "after_cache_sha256" not in operation and "target_absent_after_command" not in operation
+    assert len([c for c in calls if c[:2] == ("buildx", "prune")]) == 1

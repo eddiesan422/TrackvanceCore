@@ -11,6 +11,8 @@ import pytest
 
 
 def test_historical_sources_are_fixed_authentic_commits_not_current_checkout():
+    from ci.local_resources import HISTORICAL_SOURCES
+    assert HISTORICAL_SOURCES == {version: spec[0] for version, spec in runner.SOURCES.items()}
     assert runner.SOURCES["0.6.1"] == (
         "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5)
     assert runner.TARGET_VERSION == "0.8.0"
@@ -18,6 +20,56 @@ def test_historical_sources_are_fixed_authentic_commits_not_current_checkout():
         "587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5)
     assert runner.SOURCES["0.5.1"] == (
         "4519ed354202ea8f220682758da234e07b6df3ed", "0009_delivery_reviews", 4)
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("Failed build"), subprocess.TimeoutExpired("build", 1), KeyboardInterrupt()])
+def test_authentic_061_cleans_registered_source_images_after_success_failure_timeout_or_cancel(tmp_path, monkeypatch, failure):
+    import v070_recovery
+    from ci import local_resources
+    execution = "local-" + "a" * 32
+    project = "trackvance-v070-test-auth061-src-" + "b" * 12
+    registry = tmp_path / "images.json"
+    monkeypatch.setattr(runner.os, "environ", {"TRACKVANCE_LOCAL_EXECUTION_ID": execution,
+        "TRACKVANCE_LOCAL_IMAGE_REGISTRY": str(registry), "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA": "previous"})
+    monkeypatch.setattr(runner.sys, "argv", ["restore", "--source-version", "0.6.1"])
+    def cycle(source, evidence):
+        assert source == runner.SOURCES["0.6.1"][0]
+        assert os.environ["TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA"] == source
+        assert os.environ["TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION"] == "0.6.1"
+        registry.write_text(json.dumps({"builds": [{"project": project, "source_sha": source, "version": "0.6.1"}]}))
+        if failure:
+            raise failure
+        return 0
+    monkeypatch.setattr(v070_recovery, "authentic_061_cycle", cycle)
+    calls = []
+    monkeypatch.setattr(local_resources, "cleanup_registered_images", lambda *args, **kwargs:
+        calls.append((args, kwargs)) or {"status": "PASS", "removed": [], "skipped": []})
+    if failure:
+        with pytest.raises(type(failure)):
+            runner.main()
+    else:
+        assert runner.main() == 0
+    assert calls[0][0] == (registry, execution) and calls[0][1]["projects"] == {project}
+    assert os.environ["TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA"] == "previous"
+    assert "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION" not in os.environ
+    assert json.loads((tmp_path / "historical-061-image-cleanup.json").read_text())["status"] == "PASS"
+
+
+def test_historical_environment_restored_even_when_image_cleanup_fails(tmp_path, monkeypatch):
+    import v070_recovery
+    from ci import local_resources
+    registry = tmp_path / "images.json"
+    registry.write_text('{"builds": []}')
+    monkeypatch.setattr(runner.os, "environ", {"TRACKVANCE_LOCAL_EXECUTION_ID": "local-" + "a" * 32,
+        "TRACKVANCE_LOCAL_IMAGE_REGISTRY": str(registry)})
+    monkeypatch.setattr(runner.sys, "argv", ["restore", "--source-version", "0.6.1"])
+    monkeypatch.setattr(v070_recovery, "authentic_061_cycle", lambda *_args: 0)
+    monkeypatch.setattr(local_resources, "cleanup_registered_images", lambda *_args, **_kwargs:
+        (_ for _ in ()).throw(ValueError("Cleanup unavailable")))
+    with pytest.raises(ValueError, match="Cleanup unavailable"):
+        runner.main()
+    assert "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA" not in os.environ
+    assert "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION" not in os.environ
 
 
 def test_relative_evidence_is_resolved_before_running_from_archived_checkout(monkeypatch, tmp_path):
