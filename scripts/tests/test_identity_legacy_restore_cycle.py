@@ -72,6 +72,34 @@ def test_historical_environment_restored_even_when_image_cleanup_fails(tmp_path,
     assert "TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION" not in os.environ
 
 
+@pytest.mark.parametrize("allowed", [False, True])
+def test_actual_061_private_evidence_guard_accepts_runner_root_without_weakening(allowed, tmp_path, monkeypatch):
+    import docker_backup_cycle
+    import isolation_profile
+    import v070_recovery
+    monkeypatch.setattr(v070_recovery, "ROOT", tmp_path)
+    monkeypatch.setattr(v070_recovery.docker_state, "ensure_fresh_project", lambda *_args: None)
+    monkeypatch.setattr(v070_recovery.certification_v070, "inventory", lambda *_args: {})
+    monkeypatch.setattr(v070_recovery, "target_override", lambda *_args: tmp_path / "target.json")
+    monkeypatch.setattr(docker_backup_cycle, "available_port", iter([32001, 32002]).__next__)
+    monkeypatch.setattr(v070_recovery.os, "environ", {"PYTHONIOENCODING": "utf-8"})
+    monkeypatch.setattr(isolation_profile, "runtime_diagnostics", lambda *_args: {})
+    calls = []
+    def stop_before_docker(arguments, *_args, **_kwargs):
+        assert arguments[:2] == ["git", "archive"]
+        calls.append(arguments)
+        raise RuntimeError("Stop before Docker mutation")
+    monkeypatch.setattr(docker_backup_cycle, "execute", stop_before_docker)
+    evidence = tmp_path / (".codex-local/v070" if allowed else ".codex-local/local-deep") / ("local-" + "a" * 32 + "-historical")
+    if allowed:
+        assert v070_recovery.authentic_061_cycle(runner.SOURCES["0.6.1"][0], evidence) == 1
+        assert calls and json.loads((evidence / "result.json").read_text())["failed_stage"] == "authentic_archive"
+    else:
+        with pytest.raises(ValueError, match="directorio privado"):
+            v070_recovery.authentic_061_cycle(runner.SOURCES["0.6.1"][0], evidence)
+        assert not calls and not evidence.exists()
+
+
 def test_relative_evidence_is_resolved_before_running_from_archived_checkout(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(runner.sys, "argv", ["restore", "--source-version", "0.6.0", "--evidence-dir", "private"])

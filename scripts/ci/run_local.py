@@ -419,7 +419,11 @@ def main(arguments=None):
             try:
                 if args.historical_source_version:
                     version = args.historical_source_version
-                    output = directory / group
+                    # The authentic 0.6.1 runner intentionally requires this
+                    # private root. Preserve that guard and copy safe receipts.
+                    output = ROOT / ".codex-local/v070" / (execution + "-historical")
+                    row["historical_evidence_directory"] = str(output.relative_to(ROOT))
+                    write(target, summary)
                     execute([sys.executable, str(ROOT / "scripts/tests/identity_legacy_restore_cycle.py"),
                         "--source-version", version, "--evidence-dir", str(output)], directory, group, 3600,
                         environment=environment | {"TRACKVANCE_LOCAL_GROUP": group})
@@ -428,8 +432,15 @@ def main(arguments=None):
                         for scenario in spec_group["scenarios"] if scenario.get("version") == version)
                     result_path = output / "result.json"
                     validate_content(spec, json.loads(result_path.read_text(encoding="utf-8")))
+                    group_output = directory / group
+                    group_output.mkdir(parents=True, exist_ok=False)
+                    for safe_name in ("result.json", "local-historical-source-proof.json", "local-legacy-image-ownership.json"):
+                        if (output / safe_name).is_file():
+                            shutil.copyfile(output / safe_name, group_output / safe_name)
+                    result_path = group_output / "result.json"
                     row.update(status="PARTIAL_PASS", full_group_approved=False,
                         execution_scope="REPRESENTATIVE_HISTORICAL_RESTORE",
+                        historical_evidence_directory=str(output.relative_to(ROOT)),
                         scenarios=[{"id": scenario["id"], "status": "PASS" if scenario["selection"] == "SELECTED" else "NOT_SELECTED"}
                             for scenario in selected[0]["scenarios"]],
                         validated_result={"path": str(result_path.relative_to(directory)),

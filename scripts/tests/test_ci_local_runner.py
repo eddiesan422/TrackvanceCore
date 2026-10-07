@@ -341,7 +341,8 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
     def execute(arguments, *_args, **_kwargs):
         executed.append(arguments)
         output = Path(arguments[arguments.index("--evidence-dir") + 1])
-        output.mkdir()
+        assert output.resolve().is_relative_to((tmp_path / ".codex-local/v070").resolve())
+        output.mkdir(parents=True)
         (output / "result.json").write_text('{"status":"PASS"}')
     monkeypatch.setattr(run_local, "execute", execute)
     monkeypatch.setattr(validators, "validate_content", lambda spec, value: validated.append((spec["version"], value)))

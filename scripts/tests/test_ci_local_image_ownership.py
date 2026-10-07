@@ -156,6 +156,45 @@ def test_reassigned_reference_preserves_both_old_exact_id_and_new_image(tmp_path
     assert audit["skipped"][0]["reason"] == "REFERENCE_REASSIGNED" and len(docker.images) == 2
 
 
+@pytest.mark.parametrize("older_receipt", [False, True])
+def test_first_load_synthetic_digest_owns_only_exact_repository_and_image_id(tmp_path, older_receipt):
+    docker, path = DockerInventory(), tmp_path / "images.json"
+    intent(path, docker)
+    synthetic = REFERENCE.rsplit(":", 1)[0] + "@" + IDENTIFIER
+    docker.images[IDENTIFIER]["RepoDigests"] = [synthetic]
+    observed = resources.observe_image_builds(path, EXECUTION, docker)
+    assert observed["builds"][0]["registered_digests"] == [synthetic]
+    if older_receipt:
+        del observed["builds"][0]["registered_digests"]
+        resources.save_image_registry(path, observed)
+    audit = resources.cleanup_registered_images(path, EXECUTION, command=docker)
+    assert docker.removed == [IDENTIFIER] and audit["removed"][0]["image_id"] == IDENTIFIER
+
+
+@pytest.mark.parametrize("digest", [REFERENCE.rsplit(":", 1)[0] + "@sha256:" + "e" * 64,
+    "foreign/shared@" + IDENTIFIER])
+def test_first_load_digest_with_different_id_or_foreign_repository_is_never_accredited(tmp_path, digest):
+    docker, path = DockerInventory(), tmp_path / "images.json"
+    intent(path, docker)
+    docker.images[IDENTIFIER]["RepoDigests"] = [digest]
+    observed = resources.observe_image_builds(path, EXECUTION, docker)
+    assert observed["builds"][0]["registered_digests"] == []
+    assert resources.cleanup_registered_images(path, EXECUTION, command=docker)["skipped"]
+    assert not docker.removed
+
+
+def test_synthetic_digest_added_after_first_load_is_a_durable_exception(tmp_path):
+    docker, path = DockerInventory(), tmp_path / "images.json"
+    intent(path, docker)
+    resources.observe_image_builds(path, EXECUTION, docker)
+    docker.images[IDENTIFIER]["RepoDigests"] = [REFERENCE.rsplit(":", 1)[0] + "@" + IDENTIFIER]
+    assert resources.cleanup_registered_images(path, EXECUTION, command=docker)["skipped"]
+    record = json.loads(path.read_text())["builds"][0]
+    assert record["registered_digests"] == [] and record["observed_change"]
+    docker.images[IDENTIFIER]["RepoDigests"] = []
+    assert resources.cleanup_registered_images(path, EXECUTION, command=docker)["skipped"] and not docker.removed
+
+
 def git_fixture(tmp_path, monkeypatch):
     repository, context = tmp_path / "repository", tmp_path / "context"
     repository.mkdir()

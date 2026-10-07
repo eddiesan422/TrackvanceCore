@@ -123,6 +123,24 @@ def test_late_foreign_reference_exception_is_durable_after_that_reference_disapp
     assert set(docker.images) == {BASELINE, OWNED}
 
 
+def test_own_digest_added_at_final_inspection_is_never_adopted_even_if_it_disappears(tmp_path):
+    docker, path = registered(tmp_path)
+    digest = PROJECT + "@" + OWNED
+    def add_digest():
+        docker.images[OWNED]["RepoDigests"].append(digest)
+    docker.before_consumer_read = add_digest
+    report = resources.cleanup_registered_images(path, EXECUTION, command=docker)
+    assert report["removed"] == [] and report["skipped"][0]["reason"] == "IMAGE_IDENTITY_OR_REFERENCES_CHANGED"
+    record = json.loads(path.read_text())["builds"][0]
+    assert record["registered_digests"] == [] and record["image"]["digests"] == []
+    assert record["observed_change"]["digests"] == [digest]
+    docker.images[OWNED]["RepoDigests"] = []
+    resumed = resources.cleanup_registered_images(path, EXECUTION, command=docker)
+    assert resumed["removed"] == [] and resumed["skipped"][0]["reason"] == "IMAGE_IDENTITY_OR_REFERENCES_CHANGED"
+    assert set(docker.images) == {BASELINE, OWNED}
+    assert not any(call[:2] == ("image", "rm") for call in docker.calls)
+
+
 def test_registry_resume_and_project_filter_never_claim_other_execution_or_project(tmp_path):
     docker, path = registered(tmp_path)
     snapshot = path.read_bytes()

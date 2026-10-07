@@ -205,6 +205,13 @@ def observe_image_builds(path: Path, execution: str, command=docker_output) -> d
                 continue
         else:
             record["image"] = image  # First load is the immutable ownership boundary.
+        if "registered_digests" not in record:
+            # Derive only from the frozen FIRST load, including older durable
+            # receipts. Never accredit references from a later observation.
+            initial = record["image"]
+            expected_digest = record["reference"].rsplit(":", 1)[0] + "@" + initial["image_id"]
+            record["registered_digests"] = [digest for digest in initial["digests"]
+                if digest == expected_digest and initial["labels"] == record["expected_labels"]]
         record["status"] = ("PREEXISTING_IMAGE" if image["image_id"] in baseline_ids else
             "OWNED" if image["labels"] == record["expected_labels"] else "OWNERSHIP_UNVERIFIED")
     save_image_registry(path, value)
@@ -228,7 +235,9 @@ def cleanup_registered_images(path: Path, execution: str, *, projects=None,
             continue
         if record["status"] != "OWNED" or image["image_id"] in baseline_ids:
             reason = record["status"]
-        elif set(image["tags"]) - {record["reference"]} or image["digests"] or set(image["tags"] + image["digests"]) & baseline_references:
+        elif (set(image["tags"]) - {record["reference"]}
+                or set(image["digests"]) - set(record.get("registered_digests", []))
+                or set(image["tags"] + image["digests"]) & baseline_references):
             reason = "SHARED_OR_PREEXISTING_REFERENCES"
         elif retain_for_seconds:
             reason = "EXPLICIT_TEMPORARY_REUSE"
