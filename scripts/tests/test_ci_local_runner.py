@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,6 +89,236 @@ def test_retention_never_deletes_unknown_or_current_evidence(tmp_path):
     unknown.mkdir()
     retain_reports(tmp_path, owned[-1], 1)
     assert owned[-1].exists() and unknown.exists()
+
+
+def owned_report(base, character):
+    directory = base / ("local-" + character * 32)
+    directory.mkdir(parents=True)
+    (directory / "local-summary.json").write_text('{"status":"FAIL"}', encoding="utf-8")
+    return directory
+
+
+def directory_link(target, link):
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def test_owned_scratch_removes_actual_readonly_git_file_without_touching_sibling(tmp_path):
+    from ci.run_local import remove_owned_scratch
+    run = owned_report(tmp_path, "a")
+    context = run / "backend-test-context"
+    objects = context / ".git/objects/pack"
+    objects.mkdir(parents=True)
+    readonly = objects / "source.pack"
+    readonly.write_bytes(b"regenerable git clone")
+    readonly.chmod(stat.S_IRUSR)
+    protected = run / "evidence/original.json"
+    protected.parent.mkdir()
+    protected.write_bytes(b"preserved evidence")
+    remove_owned_scratch(run, context)
+    assert not context.exists() and protected.read_bytes() == b"preserved evidence"
+
+
+@pytest.mark.parametrize("target", ["outside", "relative", "root"])
+def test_owned_scratch_rejects_outside_relative_and_run_root_before_removal(tmp_path, target):
+    from ci.run_local import remove_owned_scratch
+    run = owned_report(tmp_path, "a")
+    outside = tmp_path / "protected"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"original")
+    path = {"outside": outside, "relative": Path("backend-test-context"), "root": run}[target]
+    with pytest.raises(ValueError, match="absolute|outside"):
+        remove_owned_scratch(run, path)
+    assert run.exists() and (outside / "keep").read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("location", ["target", "descendant", "ancestor"])
+def test_owned_scratch_rejects_real_directory_links_before_any_file_is_removed(tmp_path, location):
+    from ci.run_local import remove_owned_scratch
+    run = owned_report(tmp_path, "a")
+    outside = tmp_path / "protected"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"protected")
+    target = run / "backend-test-context"
+    if location == "target":
+        directory_link(outside, target)
+    elif location == "descendant":
+        target.mkdir()
+        (target / "first").write_bytes(b"untouched")
+        directory_link(outside, target / "nested-link")
+    else:
+        alias = tmp_path / "alias"
+        directory_link(run, alias)
+        target = alias / "backend-test-context"
+        (run / "backend-test-context").mkdir()
+    with pytest.raises(ValueError, match="symlinks|junctions"):
+        remove_owned_scratch(run, target)
+    assert (outside / "keep").read_bytes() == b"protected"
+    if location == "descendant":
+        assert (target / "first").read_bytes() == b"untouched"
+
+
+def test_readonly_retry_never_chmods_a_writable_acl_failure(tmp_path, monkeypatch):
+    from ci import run_local
+    run = owned_report(tmp_path, "a")
+    file = run / "writable"
+    file.write_bytes(b"unchanged")
+    error = PermissionError("ACL denies deletion")
+    error.winerror = 5
+    calls = []
+    monkeypatch.setattr(run_local.os, "chmod", lambda *_a, **_k: calls.append(True))
+    with pytest.raises(PermissionError) as caught:
+        run_local.retry_readonly_scratch(run, os.unlink, file, error)
+    assert caught.value is error and not calls and file.read_bytes() == b"unchanged"
+
+
+def test_readonly_retry_is_single_and_propagates_remaining_acl_failure(tmp_path, monkeypatch):
+    from ci import run_local
+    run = owned_report(tmp_path, "a")
+    file = run / "readonly"
+    file.write_bytes(b"unchanged")
+    original_lstat = Path.lstat
+    def lstat(path, *args, **kwargs):
+        metadata = original_lstat(path, *args, **kwargs)
+        return SimpleNamespace(st_mode=metadata.st_mode, st_file_attributes=stat.FILE_ATTRIBUTE_READONLY) if path == file else metadata
+    monkeypatch.setattr(Path, "lstat", lstat)
+    writes, retries = [], []
+    monkeypatch.setattr(run_local.os, "chmod", lambda path, *_a, **_k: writes.append(path))
+    def unlink(path):
+        retries.append(path)
+        raise PermissionError("ACL still denies deletion")
+    monkeypatch.setattr(run_local.os, "unlink", unlink)
+    error = PermissionError("Readonly file")
+    error.winerror = 5
+    with pytest.raises(PermissionError, match="still denies"):
+        run_local.retry_readonly_scratch(run, unlink, file, error)
+    assert writes == [file] and retries == [file] and file.read_bytes() == b"unchanged"
+
+
+@pytest.mark.parametrize("failure", ["write", "verify", "publish", "remove"])
+def test_report_retention_failures_preserve_previous_zip_and_never_delete_unarchived_source(tmp_path, monkeypatch, failure):
+    from ci import run_local
+    base = tmp_path / "local-deep"
+    old, current = owned_report(base, "a"), owned_report(base, "b")
+    os.utime(old, (1, 1))
+    archives = tmp_path / "local-deep-archives"
+    archives.mkdir()
+    previous = archives / (old.name + ".zip")
+    previous.write_bytes(b"previous immutable archive")
+    if failure == "write":
+        monkeypatch.setattr(zipfile.ZipFile, "write", lambda *_a, **_k: (_ for _ in ()).throw(OSError("archive write failed")))
+    elif failure == "verify":
+        monkeypatch.setattr(zipfile.ZipFile, "testzip", lambda *_a: "corrupt entry")
+    elif failure == "publish":
+        monkeypatch.setattr(run_local.os, "link", lambda *_a: (_ for _ in ()).throw(PermissionError("archive publish denied")))
+    else:
+        monkeypatch.setattr(run_local, "remove_owned_scratch", lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("removal denied")))
+    with pytest.raises((OSError, ValueError)):
+        retain_reports(base, current, 1)
+    assert previous.read_bytes() == b"previous immutable archive"
+    assert (old / "local-summary.json").is_file() and current.exists()
+    assert not list(archives.glob("*.partial-*"))
+    if failure == "remove":
+        new_archive = next(path for path in archives.glob("*.zip") if path != previous)
+        with zipfile.ZipFile(new_archive) as zipped:
+            assert zipped.testzip() is None and zipped.read("local-summary.json") == b'{"status":"FAIL"}'
+
+
+def test_retention_verifies_closed_zip_before_removing_readonly_git_scratch(tmp_path, monkeypatch):
+    from ci import run_local
+    base = tmp_path / "local-deep"
+    old, current = owned_report(base, "a"), owned_report(base, "b")
+    os.utime(old, (1, 1))
+    evidence = old / "backend/evidence"
+    evidence.mkdir(parents=True)
+    (evidence / "pytest-junit.xml").write_bytes(b"<testsuite/>")
+    scratch = old / "backend-test-context/.git/objects"
+    scratch.mkdir(parents=True)
+    readonly = scratch / "historical-object"
+    readonly.write_bytes(b"regenerable")
+    readonly.chmod(stat.S_IRUSR)
+    os.utime(old, (1, 1))
+    actual_remove = run_local.remove_owned_scratch
+    observed = []
+    def remove(run, path, **kwargs):
+        archive = tmp_path / "local-deep-archives" / (old.name + ".zip")
+        with zipfile.ZipFile(archive) as zipped:
+            assert zipped.testzip() is None
+            assert zipped.read("backend/evidence/pytest-junit.xml") == b"<testsuite/>"
+            assert not any(name.startswith("backend-test-context/") for name in zipped.namelist())
+        assert not list(archive.parent.glob("*.partial-*"))
+        observed.append(True)
+        actual_remove(run, path, **kwargs)
+    monkeypatch.setattr(run_local, "remove_owned_scratch", remove)
+    assert retain_reports(base, current, 1) == [old.name]
+    assert observed and not old.exists() and current.exists()
+
+
+def isolated_main(monkeypatch, root, *, setup_failure=False):
+    """Stub all external operations; tests exercise actual main/finally persistence."""
+    from ci import owned_cleanup, run_local, run_suite
+    monkeypatch.setattr(run_local, "ROOT", root)
+    monkeypatch.setattr(run_local, "protected_inventory", dict)
+    monkeypatch.setattr(run_local, "limit_cpu_affinity", lambda *_a: {"original_logical_processors": [0]})
+    monkeypatch.setattr(run_local, "set_cpu_affinity", lambda *_a: None)
+    monkeypatch.setattr(owned_cleanup, "snapshot", dict)
+    monkeypatch.setattr(owned_cleanup, "cleanup", lambda *_a, **_k: {"status": "PASS"})
+    monkeypatch.setattr(run_local.shutil, "disk_usage", lambda *_a: SimpleNamespace(free=40 * run_local.GIB))
+    def command(*args):
+        if args[:2] == ("git", "rev-parse"):
+            return "a" * 40
+        if args[:2] == ("git", "status"):
+            return ""
+        if args[:2] == ("docker", "info"):
+            return json.dumps({"ServerVersion": "test", "MemTotal": 16 * run_local.GIB})
+        if args[:3] == ("docker", "context", "show"):
+            return "isolated-test"
+        pytest.fail("Unexpected external operation")
+    monkeypatch.setattr(run_local, "command", command)
+    def prepare(directory, *_a, **kwargs):
+        Path(kwargs["environment"]["TRACKVANCE_LOCAL_IMAGE_REGISTRY"]).write_text("{}")
+        if setup_failure:
+            raise run_suite.PhaseFailed({"status": "FAIL", "exit_code": 17, "protected_state_changed": False})
+    monkeypatch.setattr(run_local, "prepare_images", prepare)
+    monkeypatch.setattr(run_local, "cleanup_builder_images", lambda *_a: {"status": "PASS"})
+    monkeypatch.setattr(run_local, "cleanup_fixture_images", lambda *_a, **_k: {"status": "PASS"})
+    monkeypatch.setattr(run_local, "ResourceMonitor", lambda *_a: SimpleNamespace(thread=SimpleNamespace(start=lambda: None), finish=dict))
+    monkeypatch.setattr(run_local, "execute", lambda *_a, **_k: None)
+    return run_local
+
+
+@pytest.mark.parametrize("setup_failure", [False, True])
+def test_retention_failure_persists_final_fail_keeps_prior_error_and_prints_receipt(tmp_path, monkeypatch, capsys, setup_failure):
+    runner = isolated_main(monkeypatch, tmp_path, setup_failure=setup_failure)
+    monkeypatch.setattr(runner, "retain_reports", lambda *_a: (_ for _ in ()).throw(PermissionError("retention ACL denied")))
+    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10"]) == 1
+    summary_path = next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json"))
+    summary = json.loads(summary_path.read_text())
+    assert summary["status"] == "FAIL" and summary["closure"] == "PARTIAL_DEEP_EXECUTION"
+    assert summary["retention_reports_error"] == "PermissionError" and summary["fixture_image_cleanup"]["status"] == "PASS"
+    assert summary["owned_cleanup"]["status"] == "PASS" and summary["protected_inventory_unchanged"] is True
+    assert summary.get("error_type") == ("PhaseFailed" if setup_failure else None)
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "FAIL" and printed["report"] == str(summary_path)
+
+
+def test_final_write_failure_still_prints_fail_and_preserves_attempted_original_error(tmp_path, monkeypatch, capsys):
+    runner = isolated_main(monkeypatch, tmp_path, setup_failure=True)
+    monkeypatch.setattr(runner, "retain_reports", lambda *_a: (_ for _ in ()).throw(ValueError("invalid retention path")))
+    actual_write, attempted = runner.write, []
+    def write(path, value):
+        if isinstance(value, dict) and value.get("retention_reports_error"):
+            attempted.append(dict(value))
+            raise PermissionError("summary ACL denies write")
+        actual_write(path, value)
+    monkeypatch.setattr(runner, "write", write)
+    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10"]) == 1
+    assert attempted[0]["error_type"] == "PhaseFailed" and attempted[0]["retention_reports_error"] == "ValueError"
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["status"] == "FAIL" and printed["summary_write_error"] == "PermissionError"
 
 
 def test_local_build_is_bounded_unique_and_labels_the_version_before_verification(tmp_path, monkeypatch):

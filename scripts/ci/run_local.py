@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -253,8 +254,16 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                     execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
                             environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
             finally:
-                shutil.rmtree(directory / "backend-test-context", ignore_errors=True)
-                write(directory / "builder-image-cleanup.json", cleanup_builder_images(directory))
+                pending_error = sys.exception()
+                try:
+                    remove_owned_scratch(directory, directory / "backend-test-context")
+                    write(directory / "scratch-cleanup.json", {"status": "PASS"})
+                except (OSError, ValueError) as error:
+                    write(directory / "scratch-cleanup.json", {"status": "FAIL", "error_type": type(error).__name__})
+                    if pending_error is None:
+                        raise
+                finally:
+                    write(directory / "builder-image-cleanup.json", cleanup_builder_images(directory))
     proof = directory / "local-images.json"
     write(proof, {"schema_version": 1, "kind": "LOCAL_IMAGE_PROOF", "status": "PASS", "source_sha": sha,
         "verified_at": stamp(), "images": {role: image for role, image in images.items() if role != "backend-tests"},
@@ -304,22 +313,138 @@ def cleanup_fixture_images(source_sha, retain_for_seconds=0, *, registry=None, e
         command=lambda *arguments: command("docker", *arguments))
 
 
+def checked_scratch_path(path):
+    """Require an absolute canonical path without symlinks or Windows reparse points."""
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError("Scratch cleanup requires an absolute canonical path")
+    for node in (*reversed(path.parents), path):
+        try:
+            metadata = node.lstat()
+        except FileNotFoundError:
+            continue
+        if (stat.S_ISLNK(metadata.st_mode) or node.is_junction()
+                or getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise ValueError("Scratch cleanup rejects symlinks, junctions and reparse points")
+    if path.resolve() != path:
+        raise ValueError("Scratch cleanup requires an absolute canonical path")
+    return path
+
+
+def owned_scratch_path(run, path, *, allow_run_root=False):
+    run, path = checked_scratch_path(run), checked_scratch_path(path)
+    if not re.fullmatch(r"local-[a-f0-9]{32}", run.name) or not run.is_dir():
+        raise ValueError("Scratch cleanup requires an existing owned run directory")
+    if not path.is_relative_to(run) or (path == run and not allow_run_root):
+        raise ValueError("Scratch cleanup target is outside its owned run")
+    return path
+
+
+def owned_scratch_files(run, path, *, allow_run_root=False):
+    """Preflight the complete tree before any archive, chmod or recursive removal."""
+    path = owned_scratch_path(run, path, allow_run_root=allow_run_root)
+    if not path.exists():
+        return []
+    if not path.is_dir():
+        raise ValueError("Scratch cleanup target must be a directory")
+    directories, files = [path], []
+    while directories:
+        directory = directories.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                child = checked_scratch_path(Path(entry.path))
+                if not child.is_relative_to(path):
+                    raise ValueError("Scratch cleanup entry is outside its owned tree")
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(child)
+                elif entry.is_file(follow_symlinks=False):
+                    files.append(child)
+                else:
+                    raise ValueError("Scratch cleanup rejects nonregular entries")
+    return files
+
+
+def retry_readonly_scratch(run, function, path, error, *, allow_run_root=False):
+    """Repair only Windows READONLY regular files, never directory or ACL failures."""
+    if not isinstance(error, PermissionError) or getattr(error, "winerror", None) != 5:
+        raise error
+    path = owned_scratch_path(run, Path(path), allow_run_root=allow_run_root)
+    metadata = path.lstat()
+    if (function not in {os.unlink, os.remove} or not stat.S_ISREG(metadata.st_mode)
+            or not getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_READONLY):
+        raise error
+    os.chmod(path, metadata.st_mode | stat.S_IWRITE, follow_symlinks=False)
+    function(path)  # One retry; an ACL failure remains an error.
+
+
+def remove_owned_scratch(run, path, *, allow_run_root=False):
+    path = owned_scratch_path(run, path, allow_run_root=allow_run_root)
+    owned_scratch_files(run, path, allow_run_root=allow_run_root)
+    if path.exists():
+        shutil.rmtree(path, onexc=lambda function, failed, error: retry_readonly_scratch(
+            run, function, failed, error, allow_run_root=allow_run_root))
+
+
+def stream_digest(stream):
+    digest = hashlib.sha256()
+    while block := stream.read(1024 * 1024):
+        digest.update(block)
+    return digest.hexdigest()
+
+
+def archive_reports(run, archives):
+    reports = [report for report in owned_scratch_files(run, run, allow_run_root=True)
+        if (report == run / "local-summary.json"
+            or report.name in {"protected-inventory.before.json", "protected-inventory.after.json"}
+            or "evidence" in report.relative_to(run).parts or report.name.endswith("-timing.json"))]
+    if run / "local-summary.json" not in reports:
+        raise ValueError("Retained report archive requires its original summary")
+    archives = checked_scratch_path(archives)
+    archives.mkdir(parents=True, exist_ok=True)
+    archive = checked_scratch_path(archives / (run.name + ".zip"))
+    if archive.exists():
+        archive = archives / (run.name + "-" + uuid4().hex + ".zip")
+    temporary = archives / ("." + archive.name + ".partial-" + uuid4().hex)
+    expected = {}
+    try:
+        with zipfile.ZipFile(temporary, "x", compression=zipfile.ZIP_DEFLATED) as zipped:
+            for report in reports:
+                with report.open("rb") as stream:
+                    expected[report.relative_to(run).as_posix()] = stream_digest(stream)
+                zipped.write(report, report.relative_to(run))
+        with zipfile.ZipFile(temporary) as zipped:
+            if set(zipped.namelist()) != expected.keys() or zipped.testzip() is not None:
+                raise ValueError("Retained report archive failed verification")
+            for name, digest in expected.items():
+                with zipped.open(name) as stream:
+                    if stream_digest(stream) != digest:
+                        raise ValueError("Retained report archive content changed")
+        # Publish a closed, verified archive exclusively; never overwrite an older ZIP.
+        checked_scratch_path(archive)
+        os.link(temporary, archive)
+    finally:
+        if temporary.exists():
+            checked_scratch_path(temporary).unlink()
+    return archive
+
+
 def retain_reports(base, current, count):
-    candidates = [p for p in base.iterdir() if p.is_dir() and not p.is_symlink()
-        and re.fullmatch(r"local-[a-f0-9]{32}", p.name) and (p / "local-summary.json").is_file()]
+    base, current = checked_scratch_path(base), checked_scratch_path(current)
+    if current.parent != base:
+        raise ValueError("Current report must be inside its retention directory")
+    owned_scratch_path(current, current, allow_run_root=True)
+    candidates = []
+    for path in base.iterdir():
+        if re.fullmatch(r"local-[a-f0-9]{32}", path.name):
+            checked_scratch_path(path)
+            if path.is_dir() and (path / "local-summary.json").is_file():
+                candidates.append(path)
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     removed = []
     for path in candidates[count:]:
-        if path != current and path.resolve().parent == base.resolve():
-            archive = base.parent / "local-deep-archives" / (path.name + ".zip")
-            archive.parent.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
-                for report in path.rglob("*"):
-                    if report.is_file() and not report.is_symlink() and (report == path / "local-summary.json"
-                            or report.name in {"protected-inventory.before.json", "protected-inventory.after.json"}
-                            or "evidence" in report.relative_to(path).parts or report.name.endswith("-timing.json")):
-                        zipped.write(report, report.relative_to(path))
-            shutil.rmtree(path)
+        if path != current:
+            archive_reports(path, base.parent / "local-deep-archives")
+            remove_owned_scratch(path, path, allow_run_root=True)
             removed.append(path.name)
     return removed
 
@@ -522,10 +647,25 @@ def main(arguments=None):
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 summary["retention_image_error"] = type(error).__name__
                 summary.update(status="FAIL", closure="PARTIAL_DEEP_EXECUTION")
-        summary["retention_removed_reports"] = retain_reports(base, directory, args.retain_runs)
-        summary.update(completed_at=stamp(), duration_seconds=round(time.monotonic() - began, 3))
-        write(target, summary)
-        print(json.dumps({"status": summary["status"], "profile": "deep", "execution_id": execution, "report": str(target)}))
+        try:
+            scratch = directory / "scratch-cleanup.json"
+            if scratch.exists():
+                summary["scratch_cleanup"] = json.loads(scratch.read_text(encoding="utf-8"))
+                if summary["scratch_cleanup"]["status"] != "PASS":
+                    summary["status"] = "FAIL"
+            summary["retention_removed_reports"] = retain_reports(base, directory, args.retain_runs)
+        except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 -- preserve earlier failures and always persist retention failures.
+            summary.update(status="FAIL", retention_reports_error=type(error).__name__)
+        finally:
+            summary.update(completed_at=stamp(), duration_seconds=round(time.monotonic() - began, 3))
+            summary["closure"] = "DEEP_CERTIFICATION_APPROVED" if summary["status"] == "PASS" and args.all else "PARTIAL_DEEP_EXECUTION"
+            try:
+                write(target, summary)
+            except (OSError, ValueError) as error:
+                summary.update(status="FAIL", closure="PARTIAL_DEEP_EXECUTION", summary_write_error=type(error).__name__)
+            finally:
+                print(json.dumps({"status": summary["status"], "profile": "deep", "execution_id": execution, "report": str(target),
+                    **({"summary_write_error": summary["summary_write_error"]} if "summary_write_error" in summary else {})}))
     return 0 if summary["status"] == "PASS" else 1
 
 
