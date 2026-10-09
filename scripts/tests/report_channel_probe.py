@@ -222,6 +222,9 @@ def host(args):
     schema = [{"name": name, "logical_type": "DECIMAL" if name == "amount" else "STRING", "nullable": False}
               for name in ("key", "zone", "value", "amount")]
     draft = {"mode": "SQL", "sources": [{"alias": alias, "input_dataset_id": str(uuid.uuid4())} for alias in ("a", "b")],
+             "joins": [{"left_alias": "a", "right_alias": "b", "type": "INNER",
+                        "keys": [{"left_column": name, "right_column": name} for name in ("key", "zone")],
+                        "expected_cardinality": "1:1", "allow_many_to_many": False}],
              "sql": "SELECT a.key AS a_key,a.value AS a_value,b.key AS b_key,b.value AS b_value FROM a INNER JOIN b ON a.key=b.key AND a.zone=b.zone ORDER BY a.key,b.key LIMIT 100000"}
     context = {"rows_per_source": 1000000, "schema": schema, "plan": compile_draft(draft, {"a": schema, "b": schema}),
                "limits": ReportLimits.configured("DOWNLOAD").dto()}
