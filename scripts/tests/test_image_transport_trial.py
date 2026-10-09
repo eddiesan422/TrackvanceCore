@@ -93,6 +93,17 @@ def test_process_environment_never_uses_global_context_or_credentials(tmp_path, 
     assert all(key not in env for key in ("DOCKER_CONTEXT", "DOCKER_AUTH_CONFIG", "DOCKER_TLS_VERIFY"))
 
 
+def test_existing_anonymous_private_config_can_keep_buildx_plugin_locations():
+    assert trial.anonymous_config({"auths": {"https://index.docker.io/v1/": {}},
+                                   "cliPluginsExtraDirs": ["C:/private/cli-plugins"]})
+
+
+@pytest.mark.parametrize("additional", [{"credsStore": "desktop"}, {"credHelpers": {}},
+                                        {"currentContext": "usual"}, {"cliPluginsExtraDirs": "invalid"}])
+def test_private_config_rejects_helpers_context_or_invalid_plugin_metadata(additional):
+    assert not trial.anonymous_config({"auths": {"https://index.docker.io/v1/": {}}, **additional})
+
+
 @pytest.mark.parametrize("damage", ["memory", "cpu", "unbounded-memory", "unbounded-cpu"])
 def test_capacity_includes_external_envelope_and_rejects_unbounded_consumers(damage):
     info = {"MemTotal": 24 * trial.GIB, "NCPU": 16}

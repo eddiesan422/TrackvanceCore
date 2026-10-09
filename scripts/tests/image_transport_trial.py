@@ -60,6 +60,13 @@ def environment(config, host):
     return result
 
 
+def anonymous_config(value):
+    return (isinstance(value, dict) and value.get("auths") == {"https://index.docker.io/v1/": {}}
+            and set(value) <= {"auths", "cliPluginsExtraDirs"}
+            and isinstance(value.get("cliPluginsExtraDirs", []), list)
+            and all(isinstance(path, str) for path in value.get("cliPluginsExtraDirs", [])))
+
+
 def capacity(info, rows, external_memory, external_cpus):
     memory, cpus = 0, 0.0
     for row in rows:
@@ -127,7 +134,7 @@ class Trial:
         if config.is_symlink() or not (config / "config.json").is_file():
             raise ValueError("Explicit existing private Docker configuration required")
         config_data = json.loads((config / "config.json").read_text(encoding="utf-8"))
-        if config_data != {"auths": {"https://index.docker.io/v1/": {}}}:
+        if not anonymous_config(config_data):
             raise ValueError("Trial requires the anonymous private configuration without helpers")
         directory.mkdir(parents=True)
         self.directory, self.config, self.sha = directory, config, sha
