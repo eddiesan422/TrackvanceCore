@@ -1,7 +1,9 @@
 """Coordinator-to-confined-process channel, bounded pipes and cancellation."""
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import queue
 import subprocess
 import sys
@@ -13,6 +15,28 @@ from .operations_common import OperationError
 from .report_config import ReportLimits
 
 _slots = threading.BoundedSemaphore(ReportLimits.configured().concurrency)
+logger = logging.getLogger(__name__)
+
+
+def _channel_diagnostic(error: ValueError | OSError, line: bytes | None,
+                        profile: str, returncode: int | None, *, stop_requested: bool) -> dict:
+    """Private, bounded metadata only; never log rejected bytes or exceptions."""
+    return {"event": "reader_failure", "profile": profile,
+            "exception_class": type(error).__name__[:80],
+            "json_position": error.pos if isinstance(error, json.JSONDecodeError) else None,
+            "errno": error.errno if isinstance(error, OSError) else None,
+            "line_length": len(line) if line is not None else None,
+            "line_newline": line.endswith(b"\n") if line is not None else None,
+            "line_cr_count": line.count(b"\r") if line is not None else None,
+            "line_sha256": hashlib.sha256(line).hexdigest() if line is not None else None,
+            "child_returncode": returncode, "coordinator_killed": False,
+            "stop_requested": stop_requested}
+
+
+def _log_channel_diagnostic(metadata: dict) -> None:
+    # No exc_info/stack_info: decoder errors and OSError messages can contain
+    # cells, SQL, paths or credentials. Capture only this closed JSON record.
+    logger.error("REPORT_CHANNEL_DIAGNOSTIC %s", json.dumps(metadata, separators=(",", ":")))
 
 
 def execute_messages(sources: list[dict], plan: dict, profile: str, *,
@@ -24,6 +48,7 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         raise OperationError(429, "REPORT_CONCURRENCY_LIMIT", "El ejecutor está ocupado; intenta nuevamente.")
     process = None
     stop = threading.Event()
+    failure_metadata: dict | None = None
     try:
         check()
         script = Path(__file__).with_name("report_sandbox.py")
@@ -52,10 +77,16 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         process.stdin.write(content)
         process.stdin.close()
         messages: queue.Queue = queue.Queue(maxsize=1)
+        child_process = process
 
         def read():
+            nonlocal failure_metadata
+            line: bytes | None = None
             try:
                 while not stop.is_set():
+                    # Clear the previous successful row before a read that may
+                    # raise; an OSError must not hash an unrelated prior batch.
+                    line = None
                     line = output_stream.readline(limits.batch_bytes + 1024)
                     if not line:
                         value = None
@@ -71,7 +102,14 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
                             continue
                     if value is None:
                         return
-            except (ValueError, OSError):
+            except (ValueError, OSError) as error:
+                try:
+                    returncode = child_process.poll()
+                except OSError:
+                    returncode = None
+                failure_metadata = _channel_diagnostic(error, line, profile, returncode,
+                                                       stop_requested=stop.is_set())
+                _log_channel_diagnostic(failure_metadata)
                 try:
                     messages.put({"kind": "error", "code": "REPORT_CHANNEL_FAILED", "message": "El canal del ejecutor falló."}, timeout=1)
                 except queue.Full:
@@ -101,9 +139,14 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
     finally:
         stop.set()
         if process:
-            if process.poll() is None:
+            coordinator_killed = process.poll() is None
+            if coordinator_killed:
                 process.kill()
-            process.wait(timeout=5)
+            returncode = process.wait(timeout=5)
+            if failure_metadata is not None:
+                _log_channel_diagnostic({**failure_metadata, "event": "child_reaped",
+                                         "child_returncode": returncode,
+                                         "coordinator_killed": coordinator_killed})
             if process.stdout:
                 process.stdout.close()
         _slots.release()

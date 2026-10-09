@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -28,6 +29,7 @@ from ci import owned_cleanup, run_local, validators
 from ci.host_resources import limit_cpu_affinity, set_cpu_affinity
 from ci.local_resources import cleanup_registered_images, initialize_image_registry
 from ci.run_suite import execute, now
+from report_channel_diagnostics import capture_api_diagnostics
 
 GIB = 1024**3
 ROWS = [120, 400000, 1000000]
@@ -334,6 +336,14 @@ def main(arguments=None):
         if monitor:
             summary["resources"] = monitor.finish()
         if before is not None:
+            if summary["status"] != "PASS" and summary.get("mass_context"):
+                try:
+                    mass_directory, context = guard.load_context(Path(summary["mass_context"]))
+                    summary["channel_diagnostics"] = capture_api_diagnostics(
+                        guard.compose_args(mass_directory, context), context["project"],
+                        directory / "api-channel-diagnostics.private.json")
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    summary["channel_diagnostics"] = {"status": "UNAVAILABLE", "error_type": type(error).__name__}
             summary["cleanup"] = cleanup(directory, execution, before, baseline_builders)
             if summary["cleanup"]["status"] != "PASS":
                 summary["status"] = "FAIL"

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts/tests"))
 import certification_v080 as guard
 from browser_evidence import run_browser
+from report_channel_diagnostics import capture_api_diagnostics
 from report_resources_085 import configure as configure_report_resources
 from report_resources_085 import effective_cgroups
 
@@ -38,16 +39,29 @@ def report_tier(directory, context, rows, summary):
              "/app/scripts/tests/catalog_reports_api_cycle.py", "--rows", str(rows), "--evidence", evidence], directory, stage)
     except RuntimeError as error:
         failure = error
+    def channel_diagnostics():
+        try:
+            summary["channel_diagnostics"] = capture_api_diagnostics(
+                guard.compose_args(directory, context), context["project"],
+                directory / (stage + "-channel-diagnostics.private.json"))
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            summary["channel_diagnostics"] = {"status": "UNAVAILABLE", "error_type": type(error).__name__}
+    if failure is not None:
+        channel_diagnostics()
     try:
         run([*guard.compose_args(directory, context), "cp", f"api:{evidence}/result.json", str(target)], directory, f"copy-{rows}")
         result = json.loads(target.read_text(encoding="utf-8"))
     except (RuntimeError, OSError, ValueError):
+        if failure is None:
+            channel_diagnostics()
         summary.update(failed_stage=stage, failed_tier={"rows_per_source": rows, "status": "FAIL", "diagnostics_copied": False},
                        error={"type": type(failure).__name__ if failure else "EvidenceCopyError", "code": "CATALOG_FIXTURE_EVIDENCE_UNAVAILABLE"})
         if failure is not None:
             raise failure
         raise
     if failure is not None or result.get("status") != "PASS":
+        if failure is None:
+            channel_diagnostics()
         detail = {key: result[key] for key in ("active_phase", "phase_started_at", "last_terminal", "error", "duration_seconds") if key in result}
         summary.update(failed_stage=stage, failed_tier={"rows_per_source": rows, "status": "FAIL", "diagnostics_copied": True, **detail},
                        error=result.get("error", {"type": "RuntimeError", "code": "CATALOG_FIXTURE_FAILED"}))
