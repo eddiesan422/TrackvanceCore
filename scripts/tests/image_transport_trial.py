@@ -112,7 +112,7 @@ def source_profile(row, project, helper, *, cleanup=False):
             or mounts[0].get("Name") != project + "-data" or mounts[0].get("Destination") != "/var/lib/docker"
             or set(row.get("NetworkSettings", {}).get("Networks", {})) != {project + "-net"}
             or len(bindings) != 1 or bindings[0].get("HostIp") != "127.0.0.1"
-            or (not cleanup or row.get("State", {}).get("Running"))
+            or (not cleanup or ports)
             and (len(ports) != 1 or ports[0].get("HostIp") != "127.0.0.1")):
         raise ValueError("Actual source isolation or resource profile differs from registered intent")
     return endpoint("tcp://127.0.0.1:" + ports[0]["HostPort"]) if ports else None
@@ -275,8 +275,6 @@ class Trial:
                 self.intent("create-" + kind, name)
                 args = [kind, "create", "--label", LABEL + "=" + self.project,
                         "--label", OWNER + "=" + self.project]
-                if kind == "network":
-                    args.append("--internal")
                 identifier = self.docker(*args, name).strip()
                 self.registry[kind] = identifier
                 write(self.directory / "registry.json", self.registry)
