@@ -124,6 +124,77 @@ def test_valid_archives_load_exact_digests_without_rebuilds(bundle, monkeypatch)
         role: descriptor["image_id"] for role, descriptor in manifest["images"].items()}
 
 
+@pytest.mark.parametrize("references", [None, []])
+@pytest.mark.parametrize("reported_id", ["configuration", "host-target"])
+def test_immutable_id_export_without_tags_resolves_loaded_id_to_exact_host(
+        bundle, monkeypatch, references, reported_id):
+    path, manifest = bundle
+    for role in ("backend", "web"):
+        archive = path.parent / (role + ".tar")
+        content = image_archive(archive, COMMIT, role)
+        members = content["members"]
+        docker_manifest = json.loads(members["manifest.json"])
+        docker_manifest[0]["RepoTags"] = references
+        members["manifest.json"] = json.dumps(docker_manifest).encode()
+        write_members(archive, members)
+        manifest["images"][role].update(archive_bytes=archive.stat().st_size,
+                                       archive_sha256=image_bundle.file_digest(archive))
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    calls, hosts = fake_transport(bundle, monkeypatch, host_kind="index")
+    original_docker = image_bundle.docker
+
+    def docker(*arguments):
+        if arguments[0] == "load" and reported_id == "configuration":
+            calls.append(arguments)
+            role = Path(arguments[-1]).stem
+            return "Loaded image ID: " + hosts[role]["configuration_digest"] + "\n"
+        if arguments[:2] == ("image", "inspect"):
+            role = next((role for role, row in hosts.items()
+                         if arguments[-1] == row["configuration_digest"]), None)
+            if role:
+                calls.append(arguments)
+                return original_docker(*arguments[:-1], hosts[role]["engine_id"])
+        return original_docker(*arguments)
+
+    monkeypatch.setattr(image_bundle, "docker", docker)
+    proof = image_bundle.load_images(path, COMMIT, path.parent / "loaded.json")
+    mapping = json.loads((path.parent / "host-images.json").read_text())
+    assert proof["status"] == "PASS"
+    for role, row in mapping["images"].items():
+        assert row["source_identity"]["references"] == []
+        assert row["source_image_id"] != row["host_image_id"] == hosts[role]["engine_id"]
+    assert all(call[0] in {"load", "save", "image"} for call in calls)
+
+
+def test_transfer_interval_includes_final_archive_verification_and_mapping(bundle, monkeypatch):
+    path, _ = bundle
+    folder = path.parent / "bundle"
+    folder.mkdir()
+    for original_file in (path, path.parent / "backend.tar", path.parent / "web.tar"):
+        shutil.move(original_file, folder / original_file.name)
+    path = folder / "images.json"
+    bundle = path, bundle[1]
+    fake_transport(bundle, monkeypatch)
+    (path.parent.parent / "image-transfer-start.txt").write_text("1000", encoding="utf-8")
+    original = image_bundle.validate_manifest
+    phase = {"verifications": 0}
+
+    def validate(*args, **kwargs):
+        result = original(*args, **kwargs)
+        phase["verifications"] += 1
+        return result
+
+    def now():
+        assert phase["verifications"] == 2
+        assert (path.parent / "host-images.json").is_file()
+        return 1042
+
+    monkeypatch.setattr(image_bundle, "validate_manifest", validate)
+    monkeypatch.setattr(image_bundle.time, "time", now)
+    proof = image_bundle.load_images(path, COMMIT, path.parent / "loaded.json")
+    assert proof["download_verify_and_load_seconds"] == 42
+
+
 @pytest.mark.parametrize('damage', ['source-sha', 'bytes', 'path'])
 def test_frontend_build_proof_is_verified_before_loading_runtime_images(bundle, monkeypatch, damage):
     path, manifest = bundle
