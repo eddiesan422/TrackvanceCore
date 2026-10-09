@@ -52,7 +52,7 @@ async function classify(page: Page, datasetId: string, macro: string, domain: st
   await expect(dialog).not.toBeVisible()
   const after = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
   expect(after.versions.map((version: { id: string }) => version.id)).toEqual(before.versions.map((version: { id: string }) => version.id))
-  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(after[role]).toBe(personId)
+  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(after.governance[role]).toBe(personId)
   await page.reload()
   await expect(page.getByText('Fuente sintética de certificación de gobierno y Reportes.').first()).toBeVisible()
   return personId
@@ -233,7 +233,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   await expect.poll(async () => (await (await page.request.get(`/api/v1/reports/executions/${generation.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   const published = await (await page.request.get(`/api/v1/reports/executions/${generation.id}`)).json()
   const derivedDataset = await (await page.request.get(`/api/v1/datasets/${published.output_dataset_id}`)).json()
-  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(derivedDataset[role]).toBe(personId)
+  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(derivedDataset.governance[role]).toBe(personId)
   const outputProfile = await (await page.request.get(`/api/v1/dataset-versions/${published.output_version_id}/profile`)).json()
   expect(outputProfile.profile.columns.find((column: { name: string }) => column.name === 'fuente1_customer_id')).toEqual(expect.objectContaining({ logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }))
   await expect(page.getByText(/Pendiente de validación de calidad/)).toBeVisible()

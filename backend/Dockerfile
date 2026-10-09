@@ -22,11 +22,14 @@ WORKDIR /app/backend
 
 # The committed lock controls dependency versions for the API and worker.
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# Dependencies are copied into .venv; build/download cache is not a runtime input.
+RUN uv sync --frozen --no-dev --no-install-project \
+    && uv cache clean
 
 COPY backend/ ./
 COPY demo/ /app/demo/
 RUN uv sync --frozen --no-dev --no-editable \
+    && uv cache clean \
     && groupadd --system trackvance \
     && useradd --system --gid trackvance --home-dir /app trackvance \
     && mkdir -p /var/lib/trackvance /var/lib/trackvance-credentials /var/lib/trackvance-keys \

@@ -46,6 +46,66 @@ PRIVATE_RESOURCES = {
     "destination-sqlserver": (3072, 0.41), "scheduler": (256, 0.03),
     "events-notifications": (256, 0.03), "events-chaining": (256, 0.03),
 }
+# Python startup shares the service's very small cgroup quota. The measured
+# 0.05-CPU OIDC fixture timed out every inherited three-second probe.
+PRIVATE_HEALTHCHECKS = {
+    "postgres": (15, 30), "api": (15, 60), "worker": (30, 60),
+    "acquisition-worker": (30, 60), "delivery-worker": (30, 60),
+    "report-worker": (30, 60), "web": (15, 15), "mock-oidc": (15, 30),
+    "destination-postgres": (15, 30), "destination-postgres18": (15, 30),
+    "destination-sqlserver": (15, 30), "scheduler": (15, 60),
+    "events-notifications": (15, 60), "events-chaining": (15, 60),
+}
+
+
+def healthcheck_seconds(value) -> float | None:
+    # Compose serializes 60s as Go's canonical 1m0s in its resolved JSON.
+    if not isinstance(value, str):
+        return None
+    parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        return None
+    factors = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": .001, "s": 1, "m": 60, "h": 3600}
+    return sum(float(number) * factors[unit] for number, unit in parts)
+
+
+def validate_private_healthchecks(services: dict, *, require_probes: bool = False) -> dict:
+    timings = {}
+    for name, (timeout, start_period) in PRIVATE_HEALTHCHECKS.items():
+        health = services[name].get("healthcheck", {})
+        probe = health.get("test")
+        if (health.get("disable") or probe == ["NONE"]
+                or healthcheck_seconds(health.get("timeout")) != timeout
+                or healthcheck_seconds(health.get("start_period")) != start_period
+                or (require_probes and (not isinstance(probe, list) or len(probe) < 2
+                                       or probe[0] not in {"CMD", "CMD-SHELL"}))):
+            raise ValueError("DELIVERY_PRIVATE_HEALTHCHECK_MISMATCH: " + name)
+        timings[name] = {"timeout_seconds": timeout, "start_period_seconds": start_period}
+    return timings
+
+
+def private_healthcheck_evidence(diagnostics: list[dict], services: dict) -> dict:
+    """Require actual Docker probes and finite cgroups, without probe output."""
+    from ci.local_resources import memory_bytes
+
+    timings = validate_private_healthchecks(services, require_probes=True)
+    by_service = {item["service"]: item for item in diagnostics}
+    if len(by_service) != len(diagnostics) or set(by_service) != set(PRIVATE_RESOURCES):
+        raise RuntimeError("DELIVERY_REAL_HEALTHCHECK_TOPOLOGY")
+    for name, row in by_service.items():
+        last = (row.get("probes") or [{}])[-1]
+        if (row.get("state") != "running" or row.get("health") != "healthy"
+                or row.get("oom_killed") or row.get("exit_code") != 0
+                or not row.get("pid") or last.get("exit_code") != 0
+                or last.get("timed_out") is not False
+                or not isinstance(last.get("duration_seconds"), (int, float))
+                or not math.isfinite(last["duration_seconds"]) or last["duration_seconds"] < 0
+                or row.get("memory_limit_bytes") != memory_bytes(services[name]["mem_limit"])
+                or row.get("nano_cpus") != round(float(services[name]["cpus"]) * 10**9)
+                or row.get("pids_limit") != int(services[name]["pids_limit"])):
+            raise RuntimeError("DELIVERY_REAL_HEALTHCHECK_FAILED: " + name)
+    return {"status": "PASS", "scope": "OWNED_REAL_DOCKER_HEALTHCHECKS",
+            "timings": timings, "services": diagnostics}
 
 
 def validate_private_resources(profile: dict) -> dict:
@@ -68,6 +128,7 @@ def validate_private_resources(profile: dict) -> dict:
         cpus += cpu
     if memory > 8 * 1024**3 or cpus > 2.000001:
         raise ValueError("DELIVERY_PRIVATE_AGGREGATE_BUDGET")
+    healthcheck_timings = validate_private_healthchecks(services)
     sql = services["destination-sqlserver"]
     pool = int(sql.get("environment", {}).get("MSSQL_MEMORY_LIMIT_MB", "0"))
     if pool != 2048 or pool * 1024**2 >= memory_bytes(sql["mem_limit"]):
@@ -84,6 +145,7 @@ def validate_private_resources(profile: dict) -> dict:
             "sqlserver_engine_memory_mib": pool, "sqlserver_cgroup_memory_mib": 3072,
             "report_engine_memory_mib": 512, "report_process_virtual_memory_mib": 2048,
             "active_services": sorted(PRIVATE_RESOURCES),
+            "healthcheck_timings": healthcheck_timings,
             "capacity_claim": "FINITE_CONFIG_ONLY_REAL_PEAK_MEASUREMENT_REQUIRED"}
 
 
@@ -101,6 +163,8 @@ def configure_private_resources(profile: dict, project: str) -> dict:
         row = services.setdefault(name, {"pids_limit": 128 if name == "report-worker" else 256})
         row.update(mem_limit=mib * 1024**2, cpus=cpus)
         row.pop("profiles", None)
+        timeout, start_period = PRIVATE_HEALTHCHECKS[name]
+        row.setdefault("healthcheck", {}).update(timeout=f"{timeout}s", start_period=f"{start_period}s")
     services["destination-sqlserver"].setdefault("environment", {}).setdefault("MSSQL_MEMORY_LIMIT_MB", "2048")
     validate_private_resources(profile)
     apply_limits(profile, project)
@@ -1244,6 +1308,7 @@ def main() -> int:
             raise RuntimeError(f"El proyecto {project} ya tiene recursos; utiliza otro nombre.")
         resolved_profile = json.loads(command([*compose, "config", "--format", "json"], capture=True))
         resource_profile = validate_private_resources(resolved_profile)
+        validate_private_healthchecks(resolved_profile["services"], require_probes=True)
         started = True
         run(
             ["up", "-d", "--wait", "--wait-timeout", "300",
@@ -1262,6 +1327,12 @@ def main() -> int:
         if not args.skip_build:
             up.append("--build")
         run(up)
+        healthchecks = private_healthcheck_evidence(
+            runtime_diagnostics(project, inventory_reader, include_delivery_destinations=True),
+            resolved_profile["services"],
+        )
+        (evidence / "healthchecks.json").write_text(json.dumps(healthchecks, indent=2), encoding="utf-8")
+        checks.verify(healthchecks["status"] == "PASS", "Catorce sondas reales saludables bajo cuotas exactas")
         run(["exec", "-T", "api", "alembic", "check"])
         command(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url,
@@ -1397,6 +1468,7 @@ def main() -> int:
                 "automatic_replay": False,
             },
             "postgres_metrics_matrix": metrics_matrix,
+            "healthchecks": healthchecks,
         }
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(f"OK: {len(checks.completed)} comprobaciones Data Delivery reales.", flush=True)
@@ -1427,7 +1499,7 @@ def main() -> int:
     finally:
         if started:
             try:
-                diagnostics = runtime_diagnostics(project, inventory_reader)
+                diagnostics = runtime_diagnostics(project, inventory_reader, include_delivery_destinations=True)
                 (evidence / "runtime-diagnostics.json").write_text(
                     json.dumps(diagnostics, indent=2), encoding="utf-8"
                 )

@@ -130,7 +130,7 @@ def assert_main_unchanged(before: list[dict], run) -> None:
         raise RuntimeError('El inventario de la instalación habitual cambió durante la certificación.')
 
 
-def runtime_diagnostics(project: str, run) -> list[dict]:
+def runtime_diagnostics(project: str, run, *, include_delivery_destinations=False) -> list[dict]:
     """Allowlist disposable runtime facts; never retain env, logs or probe output."""
     validate_project(project)
     identifiers = run(['docker', 'ps', '-aq', '--filter',
@@ -139,9 +139,12 @@ def runtime_diagnostics(project: str, run) -> list[dict]:
         return []
     inspected = json.loads(run(['docker', 'inspect', *identifiers]))
     diagnostics = []
+    included_services = {*SERVICES, 'mock-oidc', 'report-worker'}
+    if include_delivery_destinations:
+        included_services.update({'destination-postgres', 'destination-postgres18', 'destination-sqlserver'})
     for row in inspected:
         service = row.get('Config', {}).get('Labels', {}).get('com.docker.compose.service')
-        if service not in {*SERVICES, 'mock-oidc', 'report-worker'}:
+        if service not in included_services:
             continue
         state, limits = row.get('State', {}), row.get('HostConfig', {})
         health = state.get('Health', {})

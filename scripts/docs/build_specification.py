@@ -14,28 +14,37 @@ import re
 import shutil
 from pathlib import Path
 
-import reportlab
-from pypdf import PdfReader
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
-    BaseDocTemplate,
-    CondPageBreak,
-    Flowable,
-    Frame,
-    Image,
-    PageBreak,
-    PageTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-)
-from reportlab.platypus.tableofcontents import TableOfContents
+AUTHORING_IMPORT_ERROR: ModuleNotFoundError | None = None
+try:
+    import reportlab
+    from pypdf import PdfReader
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import (
+        BaseDocTemplate,
+        CondPageBreak,
+        Flowable,
+        Frame,
+        Image,
+        PageBreak,
+        PageTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+    from reportlab.platypus.tableofcontents import TableOfContents
+except ModuleNotFoundError as error:
+    if error.name not in {"reportlab", "pypdf"}:
+        raise
+    # Provenance validation is usable by product CI without PDF dependencies.
+    # Rendering still requires the separate document-authoring runtime.
+    AUTHORING_IMPORT_ERROR = error
+    BaseDocTemplate = Flowable = object
 
 HERE = Path(__file__).resolve().parent
 def find_repo() -> Path:
@@ -50,49 +59,57 @@ REPO: Path
 DOCS_ROOT: Path
 SOURCE: Path
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.8.0"
-EDITION_DATE = "6 octubre 2026"
+VERSION = "0.8.5"
+EDITION_DATE = "9 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
-NAVY = colors.HexColor("#15324B")
-TEAL = colors.HexColor("#008B83")
-INK = colors.HexColor("#263E50")
-MUTED = colors.HexColor("#617787")
-PALE = colors.HexColor("#EFF7F7")
-LINE = colors.HexColor("#D9E4EB")
-WIDTH, HEIGHT = letter
+WIDTH, HEIGHT = letter if AUTHORING_IMPORT_ERROR is None else (612, 792)
 MARGIN = 43
 CONTENT = WIDTH - 2 * MARGIN
 
-font_candidates = [
-    (Path("C:/Windows/Fonts"), ("arial.ttf", "arialbd.ttf", "ariali.ttf")),
-    (Path("/usr/share/fonts/truetype/dejavu"), ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf")),
-    (Path(reportlab.__file__).resolve().parent / "fonts", ("Vera.ttf", "VeraBd.ttf", "VeraIt.ttf")),
-]
-font_root, font_files = next((root, files) for root, files in font_candidates if all((root / f).exists() for f in files))
-for name, filename in zip(("Arial", "ArialBold", "ArialItalic"), font_files, strict=True):
-    pdfmetrics.registerFont(TTFont(name, str(font_root / filename)))
-pdfmetrics.registerFontFamily("Arial", normal="Arial", bold="ArialBold", italic="ArialItalic")
+if AUTHORING_IMPORT_ERROR is None:
+    NAVY = colors.HexColor("#15324B")
+    TEAL = colors.HexColor("#008B83")
+    INK = colors.HexColor("#263E50")
+    MUTED = colors.HexColor("#617787")
+    PALE = colors.HexColor("#EFF7F7")
+    LINE = colors.HexColor("#D9E4EB")
+    font_candidates = [
+        (Path("C:/Windows/Fonts"), ("arial.ttf", "arialbd.ttf", "ariali.ttf")),
+        (Path("/usr/share/fonts/truetype/dejavu"), ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf")),
+        (Path(reportlab.__file__).resolve().parent / "fonts", ("Vera.ttf", "VeraBd.ttf", "VeraIt.ttf")),
+    ]
+    font_root, font_files = next((root, files) for root, files in font_candidates if all((root / f).exists() for f in files))
+    for name, filename in zip(("Arial", "ArialBold", "ArialItalic"), font_files, strict=True):
+        pdfmetrics.registerFont(TTFont(name, str(font_root / filename)))
+    pdfmetrics.registerFontFamily("Arial", normal="Arial", bold="ArialBold", italic="ArialItalic")
 
-STYLES = {
-    "body": ParagraphStyle("body", fontName="Arial", fontSize=9, leading=11.8,
-                           textColor=INK, spaceAfter=6, allowWidows=0, allowOrphans=0),
-    "h1": ParagraphStyle("h1", fontName="ArialBold", fontSize=18, leading=22,
-                         textColor=NAVY, spaceAfter=12, keepWithNext=True),
-    "h2": ParagraphStyle("h2", fontName="ArialBold", fontSize=11, leading=15,
-                         textColor=TEAL, spaceBefore=7, spaceAfter=6, keepWithNext=True),
-    "h3": ParagraphStyle("h3", fontName="ArialBold", fontSize=9.5, leading=13,
-                         textColor=NAVY, spaceBefore=7, spaceAfter=5, keepWithNext=True),
-    "cell": ParagraphStyle("cell", fontName="Arial", fontSize=8.3, leading=10.8,
-                           textColor=INK),
-    "head": ParagraphStyle("head", fontName="ArialBold", fontSize=8.3, leading=10.8,
-                           textColor=colors.white),
-    "code": ParagraphStyle("code", fontName="Courier", fontSize=7.8, leading=11,
-                           textColor=NAVY, leftIndent=8, rightIndent=8, spaceAfter=1),
-    "small": ParagraphStyle("small", fontName="Arial", fontSize=8, leading=11,
-                            textColor=MUTED, spaceAfter=7),
-    "bullet": ParagraphStyle("bullet", fontName="Arial", fontSize=9, leading=11.8,
-                             textColor=INK, leftIndent=12, firstLineIndent=-9, spaceAfter=5),
-}
+    STYLES = {
+        "body": ParagraphStyle("body", fontName="Arial", fontSize=9, leading=11.8,
+                               textColor=INK, spaceAfter=6, allowWidows=0, allowOrphans=0),
+        "h1": ParagraphStyle("h1", fontName="ArialBold", fontSize=18, leading=22,
+                             textColor=NAVY, spaceAfter=12, keepWithNext=True),
+        "h2": ParagraphStyle("h2", fontName="ArialBold", fontSize=11, leading=15,
+                             textColor=TEAL, spaceBefore=7, spaceAfter=6, keepWithNext=True),
+        "h3": ParagraphStyle("h3", fontName="ArialBold", fontSize=9.5, leading=13,
+                             textColor=NAVY, spaceBefore=7, spaceAfter=5, keepWithNext=True),
+        "cell": ParagraphStyle("cell", fontName="Arial", fontSize=8.3, leading=10.8,
+                               textColor=INK),
+        "head": ParagraphStyle("head", fontName="ArialBold", fontSize=8.3, leading=10.8,
+                               textColor=colors.white),
+        "code": ParagraphStyle("code", fontName="Courier", fontSize=7.8, leading=11,
+                               textColor=NAVY, leftIndent=8, rightIndent=8, spaceAfter=1),
+        "small": ParagraphStyle("small", fontName="Arial", fontSize=8, leading=11,
+                                textColor=MUTED, spaceAfter=7),
+        "bullet": ParagraphStyle("bullet", fontName="Arial", fontSize=9, leading=11.8,
+                                 textColor=INK, leftIndent=12, firstLineIndent=-9, spaceAfter=5),
+    }
+
+
+def require_authoring_runtime() -> None:
+    if AUTHORING_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "La generación PDF requiere el runtime documental con reportlab y pypdf."
+        ) from AUTHORING_IMPORT_ERROR
 
 
 def escaped(text: str) -> str:
@@ -251,7 +268,7 @@ class Diagram(Flowable):
                 ],
                 "delivery-preparation": [
                     ("Preflight persistido", "DELIVERY_PREFLIGHT; sin intento"),
-                    ("Validación completa", "Tipos, claves, destino, permisos"),
+                    ("Validación completa", "Tipos, claves y permisos; PK nativa en TEMP con rollback"),
                     ("PreparedRows sellado", "SQLite: hashes + binding exacto"),
                     ("Revalidar / STARTED", "Integridad actual, autorización y target guard"),
                     ("Una transacción SQL", "Lotes; cuatro estrategias"),
@@ -277,7 +294,8 @@ class Diagram(Flowable):
             self.box(0, 7, w, 48, "Cierre administrativo / Reapertura", "Descartada, aceptada y no aplica requieren motivo; reabrir exige comentario")
         elif self.kind == "delivery-flow":
             titles = [("DatasetVersion", "Parquet + hash"), ("Configuración", "Destino + mapping"),
-                      ("Preflight", "Solo lectura"), ("Run DELIVERY", "Cola aislada")]
+                      ("Preflight", "Sin cambios persistentes; PK en TEMP revertido"),
+                      ("Run DELIVERY", "Cola aislada")]
             for i, (title, detail) in enumerate(titles):
                 x = i * (w + 12) / 4
                 self.box(x, 126, (w - 36) / 4, 52, title, detail)
@@ -455,6 +473,51 @@ def openapi_table():
     return table(rows, [49, 299, CONTENT - 348])
 
 
+CURRENT_INPUTS = {"model_contract", "permission_contract", "parameters"}
+HISTORICAL_INPUT_VERSIONS = {"corrections_results": "0.8.0", "volume_results": "0.8.0"}
+
+
+def validate_input_document(name, value):
+    """Validate each input's authority without changing historical evidence."""
+    if not isinstance(value, dict):
+        raise TypeError(f"El insumo {name} debe ser un objeto JSON.")
+    if name in CURRENT_INPUTS:
+        expected_version, version_field = VERSION, "version"
+    elif name in HISTORICAL_INPUT_VERSIONS:
+        expected_version = HISTORICAL_INPUT_VERSIONS[name]
+        version_field = "Versión" if name == "volume_results" else "version"
+    else:
+        raise ValueError(f"Insumo desconocido: {name}.")
+    if value.get(version_field) != expected_version:
+        raise ValueError(f"El insumo {name} no corresponde a {expected_version}.")
+    if name == "corrections_results":
+        summary = value.get("summary")
+        if not isinstance(summary, list) or not summary or not all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("label"), str)
+            and isinstance(entry.get("result"), str)
+            for entry in summary
+        ):
+            raise ValueError("El antecedente de correcciones requiere etiquetas y resultados de texto.")
+    elif name == "volume_results" and not all(isinstance(item, str) for item in value.values()):
+        raise ValueError("El antecedente de volumen requiere etiquetas y resultados de texto.")
+    return value
+
+
+def historical_input_notice(name):
+    version = HISTORICAL_INPUT_VERSIONS[name]
+    scope = "correcciones" if name == "corrections_results" else "volumen"
+    return (
+        f"Antecedente de {scope}: insumo documental {version}; "
+        f"se conserva la procedencia de cada resultado. No certifica la implementación {VERSION}."
+    )
+
+
+def model_evolution_label(evolution):
+    return {"NEW": f"Nueva en {VERSION}", "MODIFIED": f"Evolucionada en {VERSION}",
+            "PRESERVED": "Estructura histórica preservada"}.get(evolution)
+
+
 def input_document(name):
     if name in {"model_contract", "permission_contract"}:
         path = REPO / "docs/specification" / f"{name}_{VERSION}.json"
@@ -464,9 +527,7 @@ def input_document(name):
             "corrections_results": "corrections-results.json",
         }[name]
     value = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(value, dict) and value.get("version", VERSION) != VERSION:
-        raise ValueError(f"El insumo {name} no corresponde a {VERSION}.")
-    return value
+    return validate_input_document(name, value)
 
 
 def model_tables():
@@ -476,8 +537,7 @@ def model_tables():
         # together; a heading alone at the foot of a page is not useful.
         story.append(CondPageBreak(120))
         story.append(paragraph(entity["table"], "h2"))
-        evolution = {"NEW": "Nueva en 0.8.0", "MODIFIED": "Evolucionada en 0.8.0",
-                     "PRESERVED": "Estructura histórica preservada"}.get(entity.get("evolution"))
+        evolution = model_evolution_label(entity.get("evolution"))
         if evolution:
             story.append(paragraph(evolution, "small"))
         rows = [["Campo", "Tipo, nulabilidad y relación"]]
@@ -520,6 +580,7 @@ def parameter_tables():
 
 
 def build(candidate: Path, results: dict, draft: bool):
+    require_authoring_runtime()
     story = []
     logo = REPO / "frontend/public/trackvance-logo.jpg"
     story.append(Spacer(1, 40))
@@ -576,6 +637,7 @@ def build(candidate: Path, results: dict, draft: bool):
             story.append(table([["Verificación histórica 0.7.0", "Resultado de esa revisión"], *[[k, v] for k, v in historical.items()]]))
         elif line == "@corrections":
             data = input_document("corrections_results")
+            story.append(paragraph(historical_input_notice("corrections_results"), "small"))
             story.append(table([["Corrección / prueba", "Evidencia independiente"], *[
                 [str(entry["label"]), str(entry["result"])] for entry in data["summary"]]]))
         elif line in {"@models", "@newmodels"}:
@@ -585,7 +647,9 @@ def build(candidate: Path, results: dict, draft: bool):
         elif line == "@parameters":
             story.extend(parameter_tables())
         elif line == "@volume":
-            story.append(table([["Ejecución", "Medición / alcance"], *[[k, v] for k, v in input_document("volume_results").items()]]))
+            data = input_document("volume_results")
+            story.append(paragraph(historical_input_notice("volume_results"), "small"))
+            story.append(table([["Ejecución histórica", "Medición / alcance"], *[[k, v] for k, v in data.items()]]))
         elif line.startswith("|"):
             rows = []
             while i < len(lines) and lines[i].strip().startswith("|"):
@@ -652,6 +716,7 @@ def main():
     results = json.loads(args.results.read_text(encoding="utf-8"))
     if not isinstance(results, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in results.items()):
         parser.error("El informe de resultados debe ser un objeto de etiquetas y valores de texto.")
+    require_authoring_runtime()
     tmp = args.output_dir / "tmp/pdfs"
     tmp.mkdir(parents=True, exist_ok=True)
     original = args.output_dir / PDF_NAME

@@ -12,6 +12,7 @@ RUN mv /app/source/.ci-source-git /app/source/.git \
     && cd /app/source/backend \
     && uv run --frozen --no-sync ruff check src tests ../scripts \
     && uv run --frozen --no-sync mypy src/trackvance --check-untyped-defs --ignore-missing-imports \
+    && uv cache clean \
     && chown -R trackvance:trackvance /app/source
 ENV PATH="/app/source/backend/.venv/bin:$PATH" \
     UV_CACHE_DIR=/tmp/uv-cache \
