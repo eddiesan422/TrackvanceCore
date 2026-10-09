@@ -179,6 +179,9 @@ def host(args):
     project = "trackvance-v070-test-channel-probe-" + uuid.uuid4().hex[:12]
     directory = args.output.parent / project
     directory.mkdir(parents=True)
+    # The entire read-only parent mount must already contain its entry point;
+    # runc cannot create a nested mountpoint below a read-only bind directory.
+    (directory / "channel_probe.py").write_bytes(Path(__file__).read_bytes())
     package = directory / "trackvance"
     package.mkdir()
     files = {}
@@ -255,7 +258,6 @@ def host(args):
             "--cpus", "2", "--memory", "4g", "--memory-swap", "4g", "--pids-limit", "128",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
             "--mount", f"type=bind,src={directory.resolve()},dst=/probe,readonly",
-            "--mount", f"type=bind,src={Path(__file__).resolve()},dst=/probe/channel_probe.py,readonly",
             *mount, *[argument for name in (*files, "report_channel_private.py")
                       for argument in ("--mount", f"type=bind,src={package / name},dst={SITE}/trackvance/{name},readonly")],
             "--entrypoint", "python", args.image_id, "/probe/channel_probe.py", "--native").strip()
