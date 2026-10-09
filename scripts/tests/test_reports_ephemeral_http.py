@@ -63,6 +63,37 @@ def test_late_serialization_fixture_uses_final_case_parameter_without_mutating_s
     assert "invalid\ufffe" not in plan["sql"]
 
 
+def test_private_cell_fixture_is_admitted_by_acquisition_and_canonical_scan_at_exact_utf8_boundary(tmp_path):
+    import csv
+
+    import polars as pl
+
+    from trackvance.batch_readers import FileBatchReader
+    from trackvance.dataset_scans import profile_paths
+    from trackvance.report_query import compile_draft
+
+    path = tmp_path / "boundary.csv"
+    with path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(["key", "value"])
+        for index in range(120):
+            writer.writerow([observer.cycle.source_key(index), observer.cell_source_value("c", index)])
+    batches = list(FileBatchReader(path, path.name))
+    assert sum(batch.frame.height for batch in batches) == 120
+    parquet = tmp_path / "boundary.parquet"
+    population = pl.concat([batch.frame for batch in batches])
+    population.write_parquet(parquet)
+    value = population["value"][-1]
+    assert value == "é" * 32768 and len(value.encode("utf-8")) == observer.CELL_FIXTURE_BYTES == 65536
+    assert len(value.encode("utf-8")) == observer.HTTP_MAX_CELL_BYTES + 1
+    schema, profile, _ = profile_paths([parquet], temporary_parent=tmp_path)
+    assert profile["row_count"] == 120
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "c"}], "columns": [], "joins": [], "order_by": [],
+                          "sql": "SELECT c.key AS c_key,c.value AS c_value FROM c ORDER BY c.key ASC", "parameters": []}, {"c": schema})
+    assert plan["projection_schema"] == {"c_key": {"logical_type": "STRING", "semantic_tag": None},
+                                         "c_value": {"logical_type": "STRING", "semantic_tag": None}}
+
+
 def observation_receipt():
     trace = {"status": "PASS", "violations": {}, "observed_syscalls": 1, "syscall_counts": {"write": 1},
              "sha256": "a" * 64, "raw_trace_published": False}
@@ -90,10 +121,16 @@ def observation_receipt():
                         fixture_source_metadata_restored=True,
                         fault_injection="PERSISTED_DEADLINE_EXPIRED" if name == "CSV_DEADLINE_EXPIRED" else
                             "OWNED_SYNTHETIC_METADATA" if name in {"CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"} else "REAL_OUTPUT_BUDGET")
+            if name == "CSV_CELL_BYTES":
+                case.update(max_cell_bytes=65535, input_cell_bytes=65536, cell_limit_scope="PRIVATE_REDUCED_OUTPUT_BUDGET")
         cases.append(case)
     return {"status": "PASS", "version": "0.8.5", "requirement": "R085-01", "cases": cases,
             "main_unchanged": True, "trace_scope": "REAL_NGINX_API_AND_CONFINED_CHILDREN", "privileges_added": False,
             "raw_traces_published": False,
+            "private_max_cell_bytes": 65535, "input_cell_bytes": 65536, "default_max_cell_bytes": 65536,
+            "cell_limit_scope": "PRIVATE_REDUCED_OUTPUT_BUDGET",
+            "effective_api_limits": {profile: {"max_cell_bytes": 65536 if profile == "DATASET" else 65535}
+                                     for profile in ("PREVIEW", "DOWNLOAD", "DATASET", "XLSX")},
             "metadata_storage_baseline": {"protected_source_metadata_sha256": "c" * 64}}
 
 
@@ -174,4 +211,21 @@ def test_source_fault_gate_requires_owned_injection_and_restore(name, damage):
     case = next(item for item in receipt["cases"] if item["name"] == name)
     case["fault_injection" if damage == "missing-injection" else "fixture_source_metadata_restored"] = "NOT_RUN" if damage == "missing-injection" else False
     with pytest.raises(EvidenceError, match="EPHEMERAL_SOURCE_FAULT_PROOF_MISSING"):
+        ephemeral_http_observation(receipt)
+
+
+@pytest.mark.parametrize("damage", ["desired-only", "effective-default", "dataset-changed", "case-default-claim", "input-over-acquisition"])
+def test_private_cell_receipt_requires_actual_api_budget_without_claiming_default_limit_failure(damage):
+    receipt = observation_receipt()
+    if damage == "desired-only":
+        del receipt["effective_api_limits"]
+    elif damage == "effective-default":
+        receipt["effective_api_limits"]["DOWNLOAD"]["max_cell_bytes"] = 65536
+    elif damage == "dataset-changed":
+        receipt["effective_api_limits"]["DATASET"]["max_cell_bytes"] = 65535
+    elif damage == "case-default-claim":
+        next(item for item in receipt["cases"] if item["name"] == "CSV_CELL_BYTES")["max_cell_bytes"] = 65536
+    else:
+        receipt["input_cell_bytes"] = 65538
+    with pytest.raises(EvidenceError, match="EPHEMERAL_(?:EFFECTIVE|PRIVATE)_CELL_BUDGET_MISSING"):
         ephemeral_http_observation(receipt)

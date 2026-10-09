@@ -42,6 +42,8 @@ HTTP_CASES = {"PREVIEW_SUCCESS", "PREVIEW_LARGE_CONTEXT_REQUEST", "PREVIEW_RESOU
 STREAM_FAILURE_CODES = {"XLSX_CELL_LIMIT": "REPORT_XLSX_CELL_LIMIT", "CSV_CELL_BYTES": "REPORT_CELL_LIMIT",
                         "CSV_SERIALIZED_BYTES": "REPORT_DOWNLOAD_BYTES", "CSV_DEADLINE_EXPIRED": "REPORT_TIMEOUT",
                         "CSV_APPROVAL_REVOKED": "REPORT_SOURCE_REVOKED", "CSV_FROZEN_VERSION_DRIFT": "REPORT_SOURCE_CHANGED"}
+HTTP_MAX_CELL_BYTES = 65535
+CELL_FIXTURE_BYTES = 65536
 
 
 def analyze_trace(content: str) -> dict:
@@ -116,6 +118,7 @@ def prepare(port: int, main_project: str | None) -> tuple[Path, dict]:
         else:
             entry["environment"].update(PYTHONDONTWRITEBYTECODE="1", REPORT_BATCH_ROWS="16", REPORT_PREVIEW_MAX_BYTES="65536",
                 REPORT_DOWNLOAD_MAX_ROWS="300", REPORT_XLSX_MAX_ROWS="300", REPORT_MAX_JOIN_ROWS="3000",
+                REPORT_MAX_CELL_BYTES=str(HTTP_MAX_CELL_BYTES),
                 REPORT_DOWNLOAD_SERIALIZED_MAX_BYTES=str(8 * 1024**2))
             # The production ready probe intentionally writes a .ready file.
             # Verify it explicitly before the observation baseline below; use
@@ -195,6 +198,12 @@ def source_value(alias: str, index: int) -> str:
     # cell remains below XLSX 32767 characters and the API's 64 KiB cell budget.
     value = "".join(hashlib.sha256(f"{alias}:{index}:{part}".encode()).hexdigest() for part in range(440))
     return f"{alias}:á,\"{index}\":東京:" + value
+
+
+def cell_source_value(alias: str, index: int) -> str:
+    # Acquisition admits the default 64 KiB boundary. The private HTTP report
+    # profile lowers that output budget by one byte; source bytes stay intact.
+    return "\u00e9" * (CELL_FIXTURE_BYTES // 2) if index == 119 else source_value(alias, index)
 
 
 def trace_positions(directory: Path) -> dict[str, int]:
@@ -352,10 +361,17 @@ def failed_stream(client: ProxyClient, frozen: str, format_name: str, *, after_h
 
 
 def certify(directory: Path, context: dict, progress: dict) -> dict:
-    progress.update(version="0.8.5", requirement="R085-01", project=context["project"], sources=2, rows_per_source=120, cases=[])
+    progress.update(version="0.8.5", requirement="R085-01", project=context["project"], sources=3, join_sources=2, cell_sources=1, rows_per_source=120, cases=[],
+                    private_max_cell_bytes=HTTP_MAX_CELL_BYTES, input_cell_bytes=CELL_FIXTURE_BYTES,
+                    default_max_cell_bytes=65536, cell_limit_scope="PRIVATE_REDUCED_OUTPUT_BUDGET")
     client = ProxyClient(context["port"])
     phase(progress, "SYNTHETIC_AUTHORIZATION")
     client.call("/auth/demo", {})
+    phase(progress, "VERIFY_EFFECTIVE_PRIVATE_CELL_LIMIT")
+    progress["effective_api_limits"] = client.call("/reports/limits")["profiles"]
+    assert all(progress["effective_api_limits"][profile]["max_cell_bytes"] == HTTP_MAX_CELL_BYTES
+               for profile in ("PREVIEW", "DOWNLOAD", "XLSX"))
+    assert progress["effective_api_limits"]["DATASET"]["max_cell_bytes"] == 65536
     phase(progress, "SYNTHETIC_GOVERNANCE")
     macro = client.call("/catalog/macrodomains", {"name": "HTTP ephemeral " + context["project"][-12:]}, expected=201)
     domain = client.call("/catalog/domains", {"name": "Syscall observation", "macro_domain_id": macro["id"]}, expected=201)
@@ -364,8 +380,8 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
     for alias in ("a", "b"):
         phase(progress, "REAL_ACQUISITION_AND_STRICT_INTAKE", alias)
         sources.append(cycle.acquire(client, directory, alias, 120, macro["id"], domain["id"])[0])
-    phase(progress, "REAL_OVERSIZE_CELL_SOURCE")
-    cycle.source_value = lambda alias, index: "\u00e9" * 32769 if index == 119 else source_value(alias, index)
+    phase(progress, "REAL_ACQUISITION_BOUNDARY_CELL_SOURCE")
+    cycle.source_value = cell_source_value
     try:
         cell_source = cycle.acquire(client, directory, "c", 120, macro["id"], domain["id"])[0]
     finally:
@@ -538,6 +554,8 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
                 fixture_fault(directory, context, injected_identity, "RESTORE", originals)
         record(name, baseline, failed, http_status=200, bytes_delivered=received,
                failure_stage="DURING_STREAM", original_error_preserved=True,
+               **({"max_cell_bytes": HTTP_MAX_CELL_BYTES, "input_cell_bytes": CELL_FIXTURE_BYTES,
+                   "cell_limit_scope": "PRIVATE_REDUCED_OUTPUT_BUDGET"} if name == "CSV_CELL_BYTES" else {}),
                fixture_source_metadata_restored=bool(injected_identity and originals),
                fault_injection="PERSISTED_DEADLINE_EXPIRED" if name == "CSV_DEADLINE_EXPIRED" else
                                "OWNED_SYNTHETIC_METADATA" if injected_identity else "REAL_OUTPUT_BUDGET")

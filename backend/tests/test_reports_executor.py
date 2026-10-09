@@ -239,6 +239,31 @@ def test_native_stream_enforces_utf8_cell_bytes_without_truncation(tmp_path, pro
     assert not any(message["kind"] in {"batch", "complete"} for message in observed)
 
 
+@pytest.mark.parametrize("profile", ["PREVIEW", "DOWNLOAD", "XLSX", "DATASET"])
+@pytest.mark.parametrize("configured", [65535, 65536, 65537])
+def test_native_utf8_boundary_uses_effective_budget_and_preserves_prior_batches(tmp_path, monkeypatch, profile, configured):
+    # 32,768 characters are exactly 65,536 UTF-8 bytes. DATASET ignores the
+    # reducible HTTP budget; the other profiles reject only under 65,535 bytes.
+    value = "é" * 32768
+    values = [value] if profile == "PREVIEW" else ["safe", value]
+    sources, schemas = final_result_fixture(tmp_path, {"key": [str(index) for index in range(len(values))], "value": values})
+    monkeypatch.setenv("REPORT_MAX_CELL_BYTES", str(configured))
+    monkeypatch.setenv("REPORT_BATCH_ROWS", "1")
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}],
+                          "sql": "SELECT a.value AS value FROM a ORDER BY a.key", "parameters": []}, schemas)
+    observed = []
+    if configured == 65535 and profile != "DATASET":
+        with pytest.raises(OperationError) as caught:
+            observed.extend(execute_messages(sources, plan, profile))
+        assert caught.value.code == "REPORT_CELL_LIMIT" and "65535" in caught.value.message
+        assert [message["rows"] for message in observed if message["kind"] == "batch"] == ([] if profile == "PREVIEW" else [[["safe"]]])
+        assert not any(message["kind"] == "complete" for message in observed)
+    else:
+        observed = list(execute_messages(sources, plan, profile))
+        assert [message["rows"] for message in observed if message["kind"] == "batch"] == [[[item]] for item in values]
+        assert next(message for message in observed if message["kind"] == "complete")["rows"] == len(values)
+
+
 @pytest.mark.parametrize("profile", ["DOWNLOAD", "XLSX"])
 def test_native_logical_byte_budget_interrupts_stream_without_complete_result(tmp_path, monkeypatch, profile):
     sources, schemas = final_result_fixture(tmp_path, {"value": ["001", "002", "003"]})

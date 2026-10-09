@@ -27,6 +27,7 @@ class ReportLimits:
     concurrency: int
     serialized_max_bytes: int
     expanded_max_bytes: int
+    max_cell_bytes: int = 65536
 
     @classmethod
     def configured(cls, profile: str = "PREVIEW"):
@@ -49,7 +50,8 @@ class ReportLimits:
                     positive("REPORT_CONCURRENCY", 2),
                     positive(f"REPORT_{profile}_SERIALIZED_MAX_BYTES", (512 if profile == "XLSX" else mb) * 1024**2),
                     min(positive("REPORT_XLSX_EXPANDED_MAX_BYTES", 2 * 1024**3 - 1), 2 * 1024**3 - 1)
-                    if profile == "XLSX" else positive(f"REPORT_{profile}_EXPANDED_MAX_BYTES", mb * 1024**2))
+                    if profile == "XLSX" else positive(f"REPORT_{profile}_EXPANDED_MAX_BYTES", mb * 1024**2),
+                    min(positive("REPORT_MAX_CELL_BYTES", 65536), 65536) if profile != "DATASET" else 65536)
         if limits.memory_bytes >= limits.process_memory_bytes or limits.batch_rows > 10000:
             raise RuntimeError("Presupuesto Reportes incompatible: memoria proceso > motor y lote <=10.000.")
         return limits
@@ -57,7 +59,6 @@ class ReportLimits:
     def dto(self):
         return {**asdict(self), "max_sources": 8, "max_columns": 100,
                 "xlsx_precision_policy": "DECIMAL_AS_TEXT",
-                "max_cell_bytes": 65536,
                 "byte_contract": "LOGICAL_JSON_SERIALIZED_TRANSPORT_EXPANDED_XML_V2",
                 "xlsx_zip_policy": "ZIP32_STREAM_BOUNDED_BELOW_ZIP64" if self.profile == "XLSX" else None,
                 "xlsx_physical_rows": min(1048576, self.max_rows + 1) if self.profile == "XLSX" else None,

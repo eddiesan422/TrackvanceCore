@@ -119,6 +119,15 @@ def ephemeral_http_observation(value: dict[str, Any]) -> None:
             and value.get("version") == "0.8.5" and value.get("requirement") == "R085-01", "EPHEMERAL_CASES_MISSING")
     require(value.get("trace_scope") == "REAL_NGINX_API_AND_CONFINED_CHILDREN" and value.get("privileges_added") is False
             and value.get("raw_traces_published") is False, "EPHEMERAL_OBSERVATION_SCOPE")
+    require(value.get("private_max_cell_bytes") == 65535 and value.get("input_cell_bytes") == 65536
+            and value.get("default_max_cell_bytes") == 65536
+            and value.get("cell_limit_scope") == "PRIVATE_REDUCED_OUTPUT_BUDGET",
+            "EPHEMERAL_PRIVATE_CELL_BUDGET_MISSING")
+    effective = value.get("effective_api_limits", {})
+    require(all(effective.get(profile, {}).get("max_cell_bytes") == 65535
+                for profile in ("PREVIEW", "DOWNLOAD", "XLSX"))
+            and effective.get("DATASET", {}).get("max_cell_bytes") == 65536,
+            "EPHEMERAL_EFFECTIVE_CELL_BUDGET_MISSING")
     source_metadata = value.get("metadata_storage_baseline", {}).get("protected_source_metadata_sha256")
     digest(source_metadata)
     for case in cases:
@@ -159,7 +168,11 @@ def ephemeral_http_observation(value: dict[str, Any]) -> None:
                     and case.get("bytes_delivered", 0) > 0 and case.get("error_code") == stream_errors[case["name"]]
                     and case.get("original_error_preserved") is True and case.get("failure_stage") == "DURING_STREAM",
                     "EPHEMERAL_STREAM_FAILURE_MISSING")
-            if case["name"] == "CSV_DEADLINE_EXPIRED":
+            if case["name"] == "CSV_CELL_BYTES":
+                require(case.get("max_cell_bytes") == 65535 and case.get("input_cell_bytes") == 65536
+                        and case.get("cell_limit_scope") == "PRIVATE_REDUCED_OUTPUT_BUDGET",
+                        "EPHEMERAL_PRIVATE_CELL_BUDGET_MISSING")
+            elif case["name"] == "CSV_DEADLINE_EXPIRED":
                 require(case.get("fault_injection") == "PERSISTED_DEADLINE_EXPIRED", "EPHEMERAL_DEADLINE_PROOF_MISSING")
             elif case["name"] in {"CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"}:
                 require(case.get("fault_injection") == "OWNED_SYNTHETIC_METADATA"

@@ -27,6 +27,30 @@ def test_download_product_caps_cannot_be_raised_by_environment(monkeypatch):
     assert ReportLimits.configured("DOWNLOAD").dto()["max_cell_bytes"] == 65536
 
 
+@pytest.mark.parametrize("configured,expected", [(None, 65536), ("65535", 65535), ("65536", 65536), ("65537", 65536)])
+def test_cell_byte_limit_public_api_matches_effective_budget_without_changing_dataset(authenticated, monkeypatch, configured, expected):
+    if configured is None:
+        monkeypatch.delenv("REPORT_MAX_CELL_BYTES", raising=False)
+    else:
+        monkeypatch.setenv("REPORT_MAX_CELL_BYTES", configured)
+    response = authenticated.get("/api/v1/reports/limits")
+    assert response.status_code == 200
+    profiles = response.json()["profiles"]
+    for name in ("PREVIEW", "DOWNLOAD", "XLSX"):
+        effective = ReportLimits.configured(name)
+        assert profiles[name]["max_cell_bytes"] == effective.max_cell_bytes == expected
+    assert profiles["DATASET"]["max_cell_bytes"] == ReportLimits.configured("DATASET").max_cell_bytes == 65536
+
+
+@pytest.mark.parametrize("configured", ["0", "-1"])
+def test_cell_byte_limit_rejects_nonpositive_budgets_and_leaves_dataset_unchanged(monkeypatch, configured):
+    monkeypatch.setenv("REPORT_MAX_CELL_BYTES", configured)
+    for profile in ("PREVIEW", "DOWNLOAD", "XLSX"):
+        with pytest.raises(RuntimeError, match="REPORT_MAX_CELL_BYTES"):
+            ReportLimits.configured(profile)
+    assert ReportLimits.configured("DATASET").max_cell_bytes == 65536
+
+
 def test_xlsx_data_row_cap_excludes_header_and_uses_excel_compatible_streamed_zip32(monkeypatch):
     monkeypatch.setenv("REPORT_XLSX_MAX_ROWS", "3")
     content = b"".join(xlsx_stream([{"name": "id"}], iter([[["001"], ["002"], ["003"]]])))

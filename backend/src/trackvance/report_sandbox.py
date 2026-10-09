@@ -86,7 +86,7 @@ def filter_literal(sql, params):
     return sqlglot.parse_one(sql, read="duckdb").transform(replace).sql(dialect="duckdb")
 
 
-def tagged(value):
+def tagged(value, max_cell_bytes=65536):
     if isinstance(value, Decimal):
         return {"type": "DECIMAL", "value": str(value)}
     if isinstance(value, datetime):
@@ -96,8 +96,8 @@ def tagged(value):
     if isinstance(value, float):
         # Floating arithmetic is unsupported for exact logical source types.
         raise SandboxError("REPORT_FLOAT_RESULT", "El resultado contiene float; selecciona una expresión exacta.")
-    if isinstance(value, str) and len(value.encode()) > 65536:
-        raise SandboxError("REPORT_CELL_LIMIT", "Una celda supera 64 KiB.")
+    if isinstance(value, str) and len(value.encode()) > min(max_cell_bytes, 65536):
+        raise SandboxError("REPORT_CELL_LIMIT", f"Una celda supera el límite efectivo de {min(max_cell_bytes, 65536)} bytes UTF-8.")
     if not isinstance(value, (str, int, bool, type(None))):
         raise SandboxError("REPORT_RESULT_TYPE", "Tipo de resultado no compatible con el contrato canónico.")
     return value
@@ -446,7 +446,7 @@ def run(payload):
             batch = cursor.fetchmany(min(limits["batch_rows"], 10 if payload["profile"] == "PREVIEW" else limits["batch_rows"]))
             if not batch:
                 break
-            encoded = [[tagged(cell) for cell in row] for row in batch]
+            encoded = [[tagged(cell, limits["max_cell_bytes"]) for cell in row] for row in batch]
             size = len(json.dumps(encoded, ensure_ascii=False, separators=(",", ":")).encode())
             if size > limits["batch_bytes"]:
                 raise SandboxError("REPORT_BATCH_LIMIT", "Un lote excede el presupuesto de memoria del canal.")
