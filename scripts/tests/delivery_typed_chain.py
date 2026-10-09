@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import uuid
 from datetime import UTC, datetime
@@ -153,7 +154,38 @@ def report_draft(dataset_id, contract_id, names):
             + " FROM a ORDER BY a.record_id"}
 
 
-def certify_sources(runner, api, checks, worker_cgroup):
+def save_report_terminal(runner, report, engine, evidence_directory, credentials):
+    """Retain closed terminal fields before the publication assertion can fail."""
+    states = {"SUCCESS", "FAILED", "CANCELLED", "COMPLETE", "PENDING", "INTERRUPTED"}
+    terminal = {"schema_version": 1, "kind": "DELIVERY_TYPED_REPORT_TERMINAL", "engine": engine}
+    for source, target in (("id", "execution_id"), ("output_version_id", "output_version_id"),
+                           ("output_dataset_id", "output_dataset_id")):
+        value = report.get(source)
+        terminal[target] = value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else None
+    for key in ("status", "generation_status", "transmission_status"):
+        value = report.get(key)
+        terminal[key] = value if isinstance(value, str) and value in states else None
+    code = report.get("error_code")
+    terminal["error_code"] = code if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,119}", code) else None
+    message = report.get("error_message")
+    terminal["error_message"] = " ".join(runner.redact(message, credentials).split())[:512] if isinstance(message, str) else None
+    metrics = report.get("metrics") or {}
+    allowed = {"rows", "total_rows", "bytes", "logical_bytes", "parts", "canonical_size_bytes",
+               "rows_generated", "bytes_prepared", "parts_prepared", "temporary_bytes_observed",
+               "elapsed_seconds", "query_seconds", "profiling_seconds", "max_rss_bytes",
+               "cpu_user_seconds", "cpu_system_seconds", "cgroup_memory_current_bytes",
+               "cgroup_memory_lifetime_peak_bytes", "disk_free_bytes_at_start",
+               "disk_free_bytes_min_observed", "temporary_bytes_sampled_max"}
+    terminal["metrics"] = {key: value for key, value in metrics.items() if key in allowed
+                           and type(value) in {int, float} and 0 <= value <= 2**63 - 1 and math.isfinite(value)}
+    rendered = json.dumps(terminal, ensure_ascii=False, indent=2, allow_nan=False)
+    runner.assert_no_credentials(rendered, credentials, "Una credencial apareció en el terminal de Reportes.")
+    temporary = evidence_directory / f"typed-report-terminal-{engine.lower()}.partial.json"
+    temporary.write_text(rendered + "\n", encoding="utf-8")
+    temporary.replace(evidence_directory / f"typed-report-terminal-{engine.lower()}.json")
+
+
+def certify_sources(runner, api, checks, worker_cgroup, *, evidence_directory, credentials):
     rows = fixture_rows(runner)
     macro = api.post("/api/v1/catalog/macrodomains", {"name": "Tipos 085 " + uuid.uuid4().hex[:8]})
     domain = api.post("/api/v1/catalog/domains", {"name": "Delivery tipos", "macro_domain_id": macro["id"]})
@@ -189,6 +221,7 @@ def certify_sources(runner, api, checks, worker_cgroup):
         report = runner.smoke.wait_until("el dataset Reportes tipado", lambda generated=generated: api.get(
             f"/api/v1/reports/executions/{generated['id']}"),
             lambda current: current["status"] in {"SUCCESS", "FAILED", "CANCELLED"}, timeout=180, interval=.5)
+        save_report_terminal(runner, report, engine, evidence_directory, credentials)
         checks.verify(report["status"] == "SUCCESS" and report["output_version_id"] not in {
             upload["id"], approved["output_version_id"]}, "R085-03: Reportes publica una nueva versión completa")
         phases.append(verify_profile(runner, api, checks, report["output_version_id"], "REPORT_DATASET", rows, renamed=True))

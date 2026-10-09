@@ -1399,7 +1399,8 @@ def main() -> int:
 
         worker_cgroup = next(item for item in healthchecks["services"] if item["service"] == "worker")
         typed_chain = certify_sources(sys.modules[__name__], api, checks,
-            {key: worker_cgroup[key] for key in ("service", "memory_limit_bytes", "nano_cpus", "pids_limit")})
+            {key: worker_cgroup[key] for key in ("service", "memory_limit_bytes", "nano_cpus", "pids_limit")},
+            evidence_directory=evidence, credentials=credentials)
         final_version_id = typed_chain["cases"][-1]["final_version_id"]
         results = [
             certify_engine(
@@ -1532,7 +1533,7 @@ def main() -> int:
         if started:
             try:
                 logs = run(
-                    ["logs", "--no-color", "--tail", "180", "api", "worker", "delivery-worker",
+                    ["logs", "--no-color", "--tail", "180", "api", "worker", "delivery-worker", "report-worker",
                      "acquisition-worker", "scheduler", "events-chaining", "events-notifications"],
                     capture=True,
                 )
