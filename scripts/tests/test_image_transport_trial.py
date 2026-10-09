@@ -175,6 +175,20 @@ def test_source_endpoint_context_is_restored_on_failure(tmp_path):
     assert trial.image_bundle.docker is docker and trial.image_bundle.save_image is save
 
 
+def test_protected_mount_hash_ignores_inspect_array_order_but_detects_actual_changes(tmp_path, monkeypatch):
+    tool = instance(tmp_path)
+    row = source()
+    row["State"]["Status"] = "exited"
+    row["Config"]["Labels"] = {trial.LABEL: "trackvance-certification"}
+    row["Mounts"].append({"Type": "volume", "Name": "protected", "Destination": "/app/data"})
+    monkeypatch.setattr(tool, "rows", lambda: [row])
+    before = tool.protected()
+    row["Mounts"].reverse()
+    assert tool.protected() == before
+    row["Mounts"][0]["Destination"] = "/changed"
+    assert tool.protected() != before
+
+
 @pytest.mark.parametrize("cleanup_status", ["PASS", "FAIL"])
 def test_original_failure_is_persisted_even_when_cleanup_fails(tmp_path, monkeypatch, cleanup_status):
     tool = instance(tmp_path)
