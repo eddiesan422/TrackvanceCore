@@ -99,11 +99,11 @@ def verify_profile(runner, api, checks, version_id, phase, expected_rows, *, ren
                   f"R085-03 {phase}: esquema declarado y etiquetas exactas en población completa")
     actual = normalize_canonical_rows([[row[name] for name in names] for row in profile["sample"]])
     checks.verify(actual == normalize_rows(expected_rows), f"R085-03 {phase}: nueve columnas y tres filas exactas")
-    canonical = next(artifact for artifact in profile["artifacts"] if artifact["id"] == profile["canonical_artifact_id"])
+    canonical = next(artifact for artifact in profile["artifacts"] if artifact["artifact_id"] == profile["canonical_artifact_id"])
     return {"status": "PASS", "phase": phase, "version_id": profile["id"],
             "dataset_id": profile["dataset_id"], "rows": 3, "columns": 9,
             "sha256": profile["sha256"], "schema_hash": profile["schema_hash"],
-            "canonical_artifact_id": canonical["id"], "canonical_sha256": canonical["sha256"],
+            "canonical_artifact_id": canonical["artifact_id"], "canonical_sha256": canonical["sha256"],
             "schema": schema, "logical_values_sha256": content_hash(actual),
             "all_null_int_rows": 3,
             "source_run_id": profile["source_run_id"], "parent_version_id": profile["parent_version_id"]}
@@ -209,7 +209,7 @@ def certify_sources(runner, api, checks, worker_cgroup):
         for phase in phases:
             again = api.get(f"/api/v1/dataset-versions/{phase['version_id']}/profile")
             canonical = next((artifact for artifact in again["artifacts"]
-                              if artifact["id"] == again["canonical_artifact_id"]), {})
+                              if artifact["artifact_id"] == again["canonical_artifact_id"]), {})
             checks.verify(again["sha256"] == phase["sha256"] and again["schema_hash"] == phase["schema_hash"]
                           and again["canonical_artifact_id"] == phase["canonical_artifact_id"]
                           and canonical.get("sha256") == phase["canonical_sha256"],
