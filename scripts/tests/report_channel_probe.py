@@ -181,7 +181,9 @@ def host(args):
     directory.mkdir(parents=True)
     # The entire read-only parent mount must already contain its entry point;
     # runc cannot create a nested mountpoint below a read-only bind directory.
-    (directory / "channel_probe.py").write_bytes(Path(__file__).read_bytes())
+    entrypoint = directory / "scripts/tests/report_channel_probe.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_bytes(Path(__file__).read_bytes())
     package = directory / "trackvance"
     package.mkdir()
     files = {}
@@ -260,7 +262,7 @@ def host(args):
             "--mount", f"type=bind,src={directory.resolve()},dst=/probe,readonly",
             *mount, *[argument for name in (*files, "report_channel_private.py")
                       for argument in ("--mount", f"type=bind,src={package / name},dst={SITE}/trackvance/{name},readonly")],
-            "--entrypoint", "python", args.image_id, "/probe/channel_probe.py", "--native").strip()
+            "--entrypoint", "python", args.image_id, "/probe/scripts/tests/report_channel_probe.py", "--native").strip()
         receipt["container_id"] = identifier
         save()
         status, stdout, stderr = bounded_process(["docker", "start", "--attach", identifier], timeout=300)
