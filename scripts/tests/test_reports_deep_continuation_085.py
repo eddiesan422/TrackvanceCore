@@ -162,6 +162,29 @@ def test_existing_http_prepare_builder_is_supported_without_adopting_preexisting
     assert not runner.BUILDER.fullmatch("default") and not runner.BUILDER.fullmatch("trackvance-certification")
 
 
+def test_capacity_pending_receipt_is_explicit_and_no_ownership_mutation_is_started(tmp_path, monkeypatch, capsys):
+    directory = parent_receipts(tmp_path / "parent")
+    code_root = tmp_path / "code"
+    manifest = tmp_path / "image-proof.json"
+    save(manifest, {"status": "PASS"})
+    monkeypatch.setattr(runner, "ROOT", code_root)
+    monkeypatch.setattr(runner.downloads, "verify_code", lambda sha: {"backend": "sha256:" + "a" * 64})
+    monkeypatch.setattr(runner, "source_provenance", lambda *args: {"approval_inheritance": "NOT_GRANTED"})
+    monkeypatch.setattr(runner, "capacity", lambda: (_ for _ in ()).throw(ValueError("PENDING_CAPACITY_CONTINUATION_4_CPU_10_GIB")))
+    monkeypatch.setattr(runner.owned_cleanup, "snapshot", lambda: pytest.fail("no owned resource boundary is started"))
+    monkeypatch.setattr(runner.run_local, "protected_inventory", lambda: pytest.fail("no workload creation follows pending capacity"))
+    # main writes child environment only in this process; isolate it from later tests.
+    monkeypatch.setattr(runner.os, "environ", dict(runner.os.environ))
+    assert runner.main(["--original-context", str(directory), "--original-source-sha", SHA,
+        "--source-sha", "b" * 40, "--image-manifest", str(manifest), "--main-project", "trackvance-certification"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    receipt = runner.read(Path(output["evidence"]))
+    assert receipt["status"] == "PENDING_CAPACITY" and receipt["error_code"] == "PENDING_CAPACITY"
+    assert [item["status"] for item in receipt["stages"]] == ["PENDING"] * 4
+    assert receipt["full_catalog_approved"] is False and receipt["original_evidence_unchanged"] is True
+    assert not (Path(output["evidence"]).parent / "owned-images.json").exists()
+
+
 def test_mass_failure_preserves_failed_receipt_and_pending_later_scopes(tmp_path, monkeypatch):
     mass = tmp_path / "mass"
     save(mass / "reports-download-085.json", {"status": "FAIL", "active_phase": "RESOLVE_120"})
