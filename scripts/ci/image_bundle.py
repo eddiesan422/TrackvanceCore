@@ -287,13 +287,6 @@ def load_images(path: Path, sha: str, output: Path, host_mapping: Path | None = 
             "archive_bytes": image["archive_bytes"], "load_seconds": round(time.monotonic() - began, 3)})
     proof = {"schema_version": 1, "kind": "IMAGE_TRANSFER_PROOF", "status": "PASS", "source_sha": sha, "manifest_sha256": original_manifest_hash,
              "measurements": measurements, "rebuilds": 0}
-    start_file = path.parent.parent / "image-transfer-start.txt"
-    if start_file.is_file():
-        stamp = float(start_file.read_text(encoding="utf-8").strip())
-        elapsed = time.time() - stamp
-        if not math.isfinite(elapsed) or not 0 <= elapsed <= 3600:
-            raise ValueError("Invalid measured image transfer interval.")
-        proof["download_verify_and_load_seconds"] = round(elapsed, 3)
     if file_digest(path) != mapping["source_manifest_sha256"]:
         raise ValueError("Original CI manifest changed during image transfer.")
     validate_manifest(path, sha)  # Also detect archive drift before a PASS receipt.
@@ -305,6 +298,13 @@ def load_images(path: Path, sha: str, output: Path, host_mapping: Path | None = 
         stream.write(mapping_bytes)
     proof["host_mapping"] = str(host_mapping.resolve())
     proof["host_mapping_sha256"] = hashlib.sha256(mapping_bytes).hexdigest()
+    start_file = path.parent.parent / "image-transfer-start.txt"
+    if start_file.is_file():
+        stamp = float(start_file.read_text(encoding="utf-8").strip())
+        elapsed = time.time() - stamp
+        if not math.isfinite(elapsed) or not 0 <= elapsed <= 3600:
+            raise ValueError("Invalid measured image transfer interval.")
+        proof["download_verify_and_load_seconds"] = round(elapsed, 3)
     with output.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(proof, indent=2) + "\n")
     return proof
