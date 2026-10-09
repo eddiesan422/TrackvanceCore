@@ -9,7 +9,6 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-
 from trackvance.operations_common import OperationError
 from trackvance.report_executor import execute_messages
 from trackvance.report_query import compile_draft
@@ -84,6 +83,41 @@ def plan_for(schemas, kind="INNER", allow=False):
 def _rows(messages):
     return [tuple(value["value"] if isinstance(value, dict) else value for value in row)
             for message in messages if message["kind"] == "batch" for row in message["rows"]]
+
+
+@pytest.mark.parametrize("profile", ["DOWNLOAD", "DATASET"])
+def test_real_timestamptz_projection_preserves_offsets_microseconds_and_null(tmp_path, profile):
+    """Exercise DuckDB's Python TIMESTAMPTZ conversion inside the real sandbox."""
+    from datetime import UTC, datetime
+
+    path = tmp_path / "timestamps.parquet"
+    pl.DataFrame({"key": ["001", "002", "003"],
+                  "instant": ["2026-09-21T11:30:00.123456-05:00", "2026-09-22T00:15:00.000001+05:30", None],
+                  "all_null_int": [None, None, None]},
+                 schema={"key": pl.String, "instant": pl.String, "all_null_int": pl.String}).write_parquet(path)
+    schema = [{"name": "key", "logical_type": "STRING", "semantic_tag": "IDENTIFIER"},
+              {"name": "instant", "logical_type": "TIMESTAMP", "nullable": True},
+              {"name": "all_null_int", "logical_type": "INT64", "nullable": True}]
+    sources = [{"alias": "a", "paths": [str(path)], "schema": schema}]
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}], "parameters": [],
+                         "sql": "SELECT a.key AS key,a.instant AS renamed_instant,a.all_null_int AS all_null_int FROM a ORDER BY a.key"},
+                        {"a": schema})
+    staging = tmp_path / "staging" if profile == "DATASET" else None
+    if staging:
+        staging.mkdir()
+    messages = list(execute_messages(sources, plan, profile, staging=staging))
+    columns = next(message["columns"] for message in messages if message["kind"] == "schema")
+    assert [(column["name"], column["type"]) for column in columns] == [
+        ("key", "VARCHAR"), ("renamed_instant", "TIMESTAMP WITH TIME ZONE"), ("all_null_int", "BIGINT")]
+    rows = [row for message in messages if message["kind"] == "batch" for row in message["rows"]]
+    assert [row[0] for row in rows] == ["001", "002", "003"]
+    assert all(row[2] is None for row in rows) and rows[2][1] is None
+    assert [row[1]["type"] for row in rows[:2]] == ["TIMESTAMP", "TIMESTAMP"]
+    assert [datetime.fromisoformat(row[1]["value"]).astimezone(UTC) for row in rows[:2]] == [
+        datetime(2026, 9, 21, 16, 30, 0, 123456, tzinfo=UTC),
+        datetime(2026, 9, 21, 18, 45, 0, 1, tzinfo=UTC)]
+    complete = next(message for message in messages if message["kind"] == "complete")
+    assert complete["rows"] == 3 and complete["sample"] is False
 
 
 @pytest.mark.parametrize("kind", ["INNER", "LEFT", "RIGHT", "FULL"])

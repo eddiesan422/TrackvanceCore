@@ -7,6 +7,7 @@ Its output is synthetic and bounded; this is diagnosis, not Delivery certificati
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import hashlib
 import io
@@ -17,7 +18,9 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import uuid
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -164,6 +167,11 @@ def native() -> dict:
         try:
             result["production_messages"] = list(execute_messages(sources, plan, "DATASET", staging=staging))
             result["production_status"] = "COMPLETE"
+            tagged_rows = [row for message in result["production_messages"] if message["kind"] == "batch"
+                           for row in message["rows"]]
+            decoded = [[value["value"] if isinstance(value, dict) else value for value in row] for row in tagged_rows]
+            assert chain.normalize_rows(decoded) == chain.normalize_rows(rows)
+            result["production_full_27_values"] = "PASS"
         except OperationError as exc:
             result["production_status"] = "FAILED"
             result["production_error"] = {"code": exc.code, "message": exc.message}
@@ -188,6 +196,23 @@ def native() -> dict:
         result["private_exit_code"] = status
         result["private_messages"] = [json.loads(line) for line in stdout.splitlines()]
         result["private_exception"] = [json.loads(line) for line in stderr.splitlines()]
+        if result["production_status"] == "COMPLETE":
+            # Run the exact newly tracked regression body, not a surrogate or
+            # pytest skip. The immutable production image has no dev pytest.
+            test_path = Path("/probe/test_reports_executor.py")
+            test_source = test_path.read_text(encoding="utf-8")
+            test_name = "test_real_timestamptz_projection_preserves_offsets_microseconds_and_null"
+            function = next(node for node in ast.parse(test_source).body
+                            if isinstance(node, ast.FunctionDef) and node.name == test_name)
+            function.decorator_list = []
+            namespace = {"pl": pl, "execute_messages": execute_messages, "compile_draft": compile_draft}
+            exec(compile(ast.Module(body=[function], type_ignores=[]), str(test_path), "exec"), namespace)  # noqa: S102 - own committed, hashed regression body only.
+            result["regression"] = {"name": test_name, "source_sha256": digest(test_path), "profiles": {}}
+            for profile in ("DOWNLOAD", "DATASET"):
+                directory = scratch / ("regression-" + profile.lower())
+                directory.mkdir()
+                namespace[test_name](directory, profile)
+                result["regression"]["profiles"][profile] = "PASS"
         result["cgroups"] = {name: Path("/sys/fs/cgroup", name).read_text().strip()
             for name in ("memory.max", "memory.current", "memory.peak", "memory.events", "cpu.max")
             if Path("/sys/fs/cgroup", name).is_file()}
@@ -221,8 +246,10 @@ def host(args) -> int:
             or inspected["os"] != "linux" or inspected["arch"] != "amd64"):
         raise ValueError("Registered immutable Linux backend image drifted.")
     git = lambda *values: subprocess.check_output(["git", *values], cwd=ROOT, text=True).strip()
-    if git("rev-parse", args.runtime_sha + ":backend") != git("rev-parse", "HEAD:backend"):
-        raise ValueError("Diagnostic harness backend differs from immutable runtime source.")
+    changed = git("diff", "--name-only", args.runtime_sha, "HEAD", "--", "backend").splitlines()
+    allowed = {"backend/pyproject.toml", "backend/uv.lock", "backend/tests/test_reports_executor.py"}
+    if set(changed) - allowed or changed and not args.dependency_wheel:
+        raise ValueError("Diagnostic harness product code differs from immutable runtime source.")
     if git("status", "--porcelain", "--untracked-files=no"):
         raise ValueError("Commit the diagnostic harness before execution.")
     project = "trackvance-v070-test-native-probe-" + uuid.uuid4().hex[:12]
@@ -233,6 +260,32 @@ def host(args) -> int:
                "runtime_image_labels": inspected["labels"], "cpu_limit": 2, "memory_limit_bytes": 4 * 1024**3,
                "before": {key: sorted(values) for key, values in before.items()}, "status": "REGISTERED"}
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    dependency_arguments = []
+    if args.dependency_wheel:
+        lock = tomllib.loads((ROOT / "backend/uv.lock").read_text(encoding="utf-8"))
+        package = next(package for package in lock["package"] if package["name"] == "pytz")
+        wheel = package["wheels"][0]
+        if (digest(args.dependency_wheel) != wheel["hash"].removeprefix("sha256:")
+                or args.dependency_wheel.stat().st_size != wheel["size"]):
+            raise ValueError("Runtime dependency wheel differs from frozen lock.")
+        overlay = args.output.parent / (project + "-pytz")
+        overlay.mkdir()
+        with zipfile.ZipFile(args.dependency_wheel) as archive:
+            members = [entry for entry in archive.infolist() if entry.filename.startswith("pytz/")]
+            if sum(entry.file_size for entry in members) > 16 * 1024**2:
+                raise ValueError("Dependency overlay is oversized.")
+            for entry in members:
+                destination = overlay / entry.filename
+                if not destination.resolve().is_relative_to(overlay.resolve()):
+                    raise ValueError("Unsafe dependency member path.")
+                if not entry.is_dir():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(archive.read(entry))
+        dependency_arguments = ["--mount", f"type=bind,src={overlay.resolve() / 'pytz'},dst=/app/backend/.venv/lib/python3.12/site-packages/pytz,readonly",
+            "--mount", f"type=bind,src={ROOT / 'backend/tests/test_reports_executor.py'},dst=/probe/test_reports_executor.py,readonly"]
+        receipt["dependency_overlay"] = {"name": "pytz", "version": package["version"],
+                                         "wheel_sha256": digest(args.dependency_wheel), "wheel_bytes": wheel["size"],
+                                         "changed_backend_paths": changed}
 
     def save():
         partial = args.output.with_suffix(".partial")
@@ -249,6 +302,7 @@ def host(args) -> int:
             "--label", "com.docker.compose.project=" + project, "--network", "none",
             "--read-only", "--cpus", "2", "--memory", "4g", "--memory-swap", "4g", "--pids-limit", "128",
             "--mount", f"type=bind,src={ROOT / 'scripts' / 'tests'},dst=/probe/scripts/tests,readonly",
+            *dependency_arguments,
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
             "--entrypoint", "python", image_id, "/probe/scripts/tests/delivery_native_query_probe.py", "--native").strip()
         receipt["container_id"] = identifier
@@ -276,6 +330,8 @@ def main() -> int:
     parser.add_argument("--docker-host")
     parser.add_argument("--runtime-sha")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--dependency-wheel", type=Path,
+                        help="Optional frozen-lock pytz package overlay, diagnostic only; preserves image labels.")
     args = parser.parse_args()
     if args.native:
         print(json.dumps(native(), ensure_ascii=False, separators=(",", ":")))
