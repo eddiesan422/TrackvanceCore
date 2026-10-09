@@ -200,6 +200,20 @@ tests con API simulada de los ciclos con bases reales.
 
 La fuente documental oficial es el repositorio privado [TrackvanceCore-docs](https://github.com/eddiesan422/TrackvanceCore-docs); `ProductOne/Documentación` es su checkout vigente. Los perfiles `functional` (Actions) y `deep` (certificación local) tienen cierres independientes. Véanse [instrucciones de trabajo](AGENTS.md) y [guía de CI](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/ci.md).
 
+El transporte de imágenes conserva `images.json` y los TAR originales de Actions.
+`DOCKER_ENGINE_IMAGE_ID` distingue el ID inmutable del Engine del SHA de
+configuración: un almacén clásico usa la configuración y containerd puede usar
+un manifiesto o índice. `scripts/ci/image_bundle.py load` valida configuración,
+árbol de descriptores y capas completas; reexporta el ID host mediante un stream
+limitado a 8 GiB/600 segundos y publica `host-images.json` separado, vinculado al
+SHA exacto y al hash del manifiesto original. Los adapters usan ese mapping junto
+al manifiesto, o la ruta explícita `TRACKVANCE_CI_HOST_IMAGE_MAPPING`. El recibo
+`image-load.json` registra ambos IDs y el hash del mapping; no cambia etiquetas
+OCI, no reconstruye y no activa contenedores. La metadata del mapping tiene un
+límite de 96 MiB; los layers se verifican sin extraer rutas del filesystem.
+Los manifiestos clásicos anteriores sólo admiten identidad de configuración real;
+un digest de manifiesto no puede declararse como SHA de configuración.
+
 Documentación del ciclo:
 
 - [Arquitectura local y evolución del producto](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md).

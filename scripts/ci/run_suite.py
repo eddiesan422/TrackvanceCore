@@ -36,6 +36,31 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def ci_transfer_metadata(proof_path: Path, manifest_path: Path, sha: str) -> tuple[dict, Path]:
+    """Bind actual loaded identities to immutable original image evidence."""
+    from ci.common import load_json, sha256
+    from ci.image_bundle import validated_host_mapping
+
+    if proof_path.is_symlink() or not proof_path.is_file() or proof_path.stat().st_size > 65536:
+        raise ValueError("Missing or excessive same-commit image load proof.")
+    proof = load_json(proof_path)
+    if (proof.get("schema_version") != 1 or proof.get("kind") != "IMAGE_TRANSFER_PROOF"
+            or proof.get("status") != "PASS" or proof.get("source_sha") != sha
+            or proof.get("manifest_sha256") != sha256(manifest_path) or proof.get("rebuilds") != 0):
+        raise ValueError("Missing actual same-commit image load proof.")
+    mapping_path = Path(proof["host_mapping"])
+    if sha256(mapping_path) != proof["host_mapping_sha256"]:
+        raise ValueError("Altered host image mapping after transfer.")
+    mapped = validated_host_mapping(manifest_path, sha, mapping_path)
+    measurements = proof.get("measurements")
+    if (not isinstance(measurements, list) or len(measurements) != 2
+            or {row.get("role") for row in measurements} != {"backend", "web"}
+            or {row["role"]: row.get("image_id") for row in measurements} != mapped):
+        raise ValueError("Transfer receipt differs from verified host image identities.")
+    return {"image_bundle_sha256": proof["manifest_sha256"],
+            "host_image_mapping_sha256": proof["host_mapping_sha256"], "runtime_images": mapped}, mapping_path
+
+
 class PhaseFailed(RuntimeError):
     def __init__(self, record: dict):
         super().__init__("Certification phase failed; sanitized diagnostic retained.")
@@ -302,11 +327,10 @@ def main() -> None:
             from ci_images import verified_images
             resources["runtime_images"] = verified_images(environment)
         if args.group not in {"backend", "frontend"} and not local:
-            proof = json.loads((args.output_dir / "image-load.json").read_text(encoding="utf-8"))
-            if proof.get("status") != "PASS" or proof.get("source_sha") != sha:
-                raise ValueError("Missing actual same-commit image load proof.")
-            resources.update(image_bundle_sha256=proof["manifest_sha256"],
-                runtime_images={row["role"]: row["image_id"] for row in proof["measurements"]})
+            transfer, mapping_path = ci_transfer_metadata(args.output_dir / "image-load.json",
+                Path(environment["TRACKVANCE_CI_IMAGE_MANIFEST"]), sha)
+            sources["image_host_mapping"] = mapping_path
+            resources.update(transfer)
         phase = 'evidence-validation'
         wrap_group(args.group, sources, args.output_dir / "evidence", source_sha=sha,
             ci=ci,
