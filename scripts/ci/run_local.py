@@ -52,7 +52,9 @@ def capacity(group):
         return {"memory_bytes": 4 * GIB, "cpus": 3, "disk_bytes": 20 * GIB}
     if group == "frontend":
         return {"memory_bytes": int(0.75 * GIB), "cpus": 1, "disk_bytes": GIB}
-    if group in {"catalog-reports", "delivery"}:
+    if group == "catalog-reports":
+        return {"memory_bytes": 8 * GIB, "cpus": 4, "disk_bytes": 20 * GIB}
+    if group == "delivery":
         return {"memory_bytes": 8 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     if group.startswith("async-volume-"):
         tier = int(group.rsplit("-", 1)[1])

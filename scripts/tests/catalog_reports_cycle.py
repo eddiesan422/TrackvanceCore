@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts/tests"))
 import certification_v080 as guard
 from browser_evidence import run_browser
 from report_resources_085 import configure as configure_report_resources
+from report_resources_085 import effective_cgroups
 
 
 def run(arguments, directory, name):
@@ -143,6 +144,9 @@ def main():
         started = True
         run([*guard.compose_args(directory, context), "up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
              "postgres", "api", "worker", "acquisition-worker", "report-worker", "web"], directory, "startup")
+        summary["effective_cgroups"] = effective_cgroups(
+            json.loads((directory / "compose.json").read_text(encoding="utf-8")), context["project"],
+            {"postgres", "api", "worker", "acquisition-worker", "report-worker", "web"})
         run([*guard.compose_args(directory, context), "exec", "-T", "api", "python",
              "/app/scripts/tests/reports_postgres_snapshot.py"], directory, "postgres-snapshot")
         summary["postgres_joint_snapshot"] = json.loads((directory / "postgres-snapshot.private.log").read_text(encoding="utf-8"))

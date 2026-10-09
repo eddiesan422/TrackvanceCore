@@ -205,14 +205,17 @@ def test_ephemeral_outputs_publication_idempotency_and_native_intake(authenticat
         # Requiring a complete synthetic stable row-number would invent a
         # business column; validate a simple nullable-safe type rule instead.
         config.config = {"rules": [{"rule_id": "amount_type", "type": "type", "column": "exact_amount",
-                                    "parameters": {"logical_type": "DECIMAL"}, "when": {"column": "exact_amount", "operator": "not_null"}}]}
+                                    "parameters": {"logical_type": "DECIMAL", "null_policy": "ALLOW"}}]}
         db.add(config)
         db.flush()
         run = enqueue(db, config, version, None, "Test User")
         db.commit()
         execute_run(db, run)
         db.commit()
-        assert strict_approval(db, run)["approved"], run.metrics
+        assessment = strict_approval(db, run)
+        assert assessment["approved"], run.metrics
+        assert run.metrics["validation_coverage_rows"] == run.metrics["total_rows"] == 3
+        assert assessment["criterion_version"] == 2
     assert client.post("/api/v1/reports/datasets", json=body).json()["output_version_id"] == result["output_version_id"]
 
 

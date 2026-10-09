@@ -1,6 +1,37 @@
 # Trackvance Core
 
-## Catálogo de gobierno y Reportes 0.8.0
+## Trackvance Core 0.8.5
+
+Esta línea implementa R080-01–R080-04 y R085-01–R085-06. El cierre requiere
+certificación aislada, GitHub Actions funcional del SHA final, publicación
+documental y actualización verificada. Los informes conservan el resultado real
+de cada etapa; esta versión del código no acredita por sí sola su aprobación.
+
+Reportes reserva los parámetros internos, valida TIMESTAMP con offset y hasta
+seis cifras fraccionarias, y admite Contiene/Comienza por literales. El criterio
+estricto vigente exige cobertura de todas las filas y población mayor que cero,
+calculada como unión de identidades evaluadas; las decisiones anteriores
+conservan su criterio e historia.
+
+Las descargas CSV/XLSX admiten por defecto hasta 1.000.000 de filas de datos
+(1.000.001 filas físicas con encabezado en XLSX), con preview de diez filas.
+El preconteo limitado aplica a la consulta FINAL. La generación incremental
+mantiene límites de tiempo, bytes y memoria, y el navegador confirma el estado
+terminal antes de declarar éxito. Chrome/Edge permiten escribir directamente
+con File System Access; el fallback en memoria se limita a 32 MiB. Los anchos,
+recursos y aperturas en Excel realmente verificados se publican en la evidencia.
+
+Delivery incorpora PK simple/compuesta sobre nombres finales del mapping,
+separada de UPSERT, con validación nativa de toda la población en PostgreSQL y
+SQL Server. Los contratos anteriores conservan sus hashes y semántica. Intake y
+las proyecciones directas/renombradas de Reportes conservan los tipos y etiquetas
+de columnas no transformadas. La etiqueta Identificador protege texto y ceros;
+no acredita unicidad ni define una PK.
+
+Las fuentes ofrecen enlaces a su salida aprobada exacta, origen y validación.
+Seleccionar/Deseleccionar todas conserva orden y alias explícitos. Los tres
+papeles de gobierno reutilizan un catálogo de personas con identidad estable,
+vínculo opcional verificable a User, permiso propio y auditoría.
 
 Catálogo organiza datasets por macrodominio y dominio controlados. La clasificación
 es opcional al cargar; las entradas existentes conservan su texto e historia y
@@ -65,17 +96,16 @@ UNKNOWN bloquea target hasta revisión y decisión explícita; reparar evidencia
 no vuelve a escribir. La bandeja entrega resúmenes al iniciador/responsable real,
 sin enviar correo ni credenciales y con permisos vigentes al consultar.
 
-Alembic añade `0013_async_acquisition`, `0014_automation_outbox` y
-`0015_sentinel_execution_identity`, más la adición `0016_acquisition_diagnostics`
-del ciclo C01–C06. Las migraciones `0001..0015` permanecen intactas.
-El modelo tiene 42 tablas/state 7, compatible con backups state 6 anteriores;
-backup/restore verifica conjuntos multipartes
+Alembic conserva las migraciones aplicadas `0001..0017` y añade
+`0018_strict_approval_criterion` y `0019_governance_people`. El modelo vigente
+tiene 56 tablas de aplicación y backup state 9; los backups state 8 de 0.8.0
+conservan su proyección histórica de 55 tablas. Backup/restore verifica conjuntos multipartes
 con metadata, secretos fuente/destino y claves separados. Sentinel legacy sin
 usuario verificable queda pausado hasta asignación explícita. Roles personalizados,
 actores y notification_deliveries históricos se conservan.
 
-Compose inicia nueve servicios: postgres, api, web, worker, acquisition-worker,
-delivery-worker, scheduler, events-chaining y events-notifications. Todos mantienen
+Compose inicia diez servicios: postgres, api, web, worker, acquisition-worker,
+delivery-worker, report-worker, scheduler, events-chaining y events-notifications. Todos mantienen
 `restart: "no"`. Cada worker tiene su lane; adquisición monta sólo secretos de
 fuentes y Delivery sólo secretos de destinos. Calidad/Spark y procesos ligeros no
 tienen credenciales SQL de negocio. Los parámetros efectivos y unidades
@@ -83,16 +113,16 @@ están en [parámetros](https://github.com/eddiesan422/TrackvanceCore-docs/blob/
 cotas y salud separadas. La instalación principal conserva proyecto/volúmenes,
 puerto/origen y SSO desactivado; nunca sirve como entorno de pruebas.
 
-- [Arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md) y [especificación v1.1, producto 0.8.0](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf).
+- [Arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md) y [especificación v1.1](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/specification/Trackvance_Core_Especificacion_Tecnica_v1.1.pdf). El repositorio documental identifica la implementación y los gates de su publicación vigente.
 - [Contrato HTTP](backend/API_CONTRACT.md) y [permisos](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/permission-matrix.md).
 - [Operación y recuperación](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/operations.md).
 - [ADRs 0020–0025](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0020-async-acquisition-multipart.md).
 
 Los apartados históricos siguientes conservan contexto de 0.5.x/0.6.x y sus
-propias cifras; no sustituyen la certificación 0.7.0. Credenciales temporales de
+propias cifras; no sustituyen la certificación 0.8.5. Credenciales temporales de
 una presentación, primer acceso y RBAC/SSO opcional continúan vigentes. No se
-reactiva SMTP ni Mailpit. Redis/Celery, Kubernetes, masking, gobierno y conectores
-adicionales continúan fuera del alcance.
+reactiva SMTP ni Mailpit. Redis/Celery, Kubernetes, masking y conectores
+adicionales continúan fuera del alcance del catálogo de gobierno descrito arriba.
 
 ### Base funcional conservada de 0.5.1
 
@@ -597,7 +627,7 @@ Las dependencias resueltas se registran en `backend/uv.lock` y
 
 ## Estructura
 
-Las capas se organizan por responsabilidades dentro del monolito; la API y los tres
+Las capas se organizan por responsabilidades dentro del monolito; la API y los cuatro
 workers comparten modelos y servicios. Los puertos permiten sustituir la
 infraestructura sin cambiar las reglas. El [mapa de arquitectura](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/architecture.md)
 identifica los archivos y los límites pendientes de esa separación.
@@ -621,8 +651,9 @@ compose.yml    Entorno PostgreSQL local
 - La adquisición asíncrona admite CSV/TXT UTF-8, JSONL/NDJSON, Parquet y snapshots
   PostgreSQL/SQL Server con límites efectivos de filas, bytes observados, celda,
   lote, memoria, disco y tiempo. Sus defaults son 1 GiB de recepción, 5 millones
-  de filas y 100 columnas. XLSX y JSON no lineal mantienen una cota de 10 MiB y
-  100.000 filas. El endpoint síncrono histórico conserva sus límites originales.
+  de filas y 100 columnas. XLSX normal conserva los defaults de 1.000.000 de
+  filas, 1 GiB comprimido y 4 GiB expandido. JSON no lineal y el endpoint
+  síncrono histórico conservan sus límites menores propios.
 - La inspección de recepción usa hasta 100 filas; el perfil publicado corresponde
   a toda la población. La muestra de presentación del perfil tiene hasta veinte
   filas y 8 MiB de JSON UTF-8, con metadatos que indican su límite.
@@ -636,7 +667,7 @@ compose.yml    Entorno PostgreSQL local
 - PySpark 4.0.3/Java 17 funciona en local[2] y en Standalone con dos executors.
   Redis/Celery, conectores adicionales y object storage continúan en backlog.
 - El despliegue local usa cola persistente en PostgreSQL, leases y heartbeat.
-  `DEFAULT`, `DELIVERY` y `ACQUISITION` tienen workers y heartbeats separados.
+  `DEFAULT`, `DELIVERY`, `ACQUISITION` y `REPORT` tienen workers y heartbeats separados.
   Scheduler, consumidor de notificaciones y consumidor de encadenamiento son
   procesos independientes con estado persistente; requieren procesos activos.
 - Data Delivery escribe realmente en PostgreSQL/SQL Server. No incluye otros

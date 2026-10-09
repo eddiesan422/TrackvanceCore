@@ -1,6 +1,8 @@
 # Convenciones de trabajo de Trackvance Core
 
-El producto vigente es 0.8.0; la especificación técnica conserva su edición v1.1.
+Esta línea implementa 0.8.5; la especificación técnica conserva su edición v1.1.
+Implementación, pruebas y despliegue se registran por separado: cambiar esta
+versión no acredita el cierre ni modifica una instalación existente.
 La fuente documental oficial está en el repositorio privado
 https://github.com/eddiesan422/TrackvanceCore-docs. La carpeta local
 `ProductOne/Documentación` es su checkout de trabajo, con sólo la edición vigente

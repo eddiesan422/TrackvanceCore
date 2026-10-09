@@ -38,9 +38,11 @@ from isolation_profile import (
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-delivery-e2e-"
 FIXTURES = Path(__file__).with_name("fixtures")
+# Acquisition's measured status probe at 0.10 CPU exceeded Doctor's 15-second
+# deadline. Transfer CPU from Delivery while preserving the aggregate budget.
 PRIVATE_RESOURCES = {
     "postgres": (512, 0.10), "api": (768, 0.30), "worker": (512, 0.20),
-    "acquisition-worker": (512, 0.10), "delivery-worker": (512, 0.30),
+    "acquisition-worker": (512, 0.20), "delivery-worker": (512, 0.20),
     "report-worker": (768, 0.20), "web": (128, 0.05), "mock-oidc": (128, 0.05),
     "destination-postgres": (256, 0.10), "destination-postgres18": (256, 0.10),
     "destination-sqlserver": (3072, 0.41), "scheduler": (256, 0.03),
@@ -400,9 +402,11 @@ def publish_and_run(
     credentials: list[str],
 ) -> dict[str, Any]:
     preview = api.post("/api/v1/delivery/preview", draft, expected=(200,))
+    expected_names = [column["target_name"] for column in sorted(draft["columns"], key=lambda column: column["ordinal"])]
     checks.verify(
         preview["sampled_rows"] == len(DATASET_ROWS)
-        and [item["target_name"] for item in preview["columns"]] == DATASET_COLUMNS,
+        and len(expected_names) == len(DATASET_COLUMNS)
+        and [item["target_name"] for item in preview["columns"]] == expected_names,
         f"{label}: preview acotada respeta selección, orden y nombres",
     )
     preflight = api.post("/api/v1/delivery/preflight", draft, expected=(200,))

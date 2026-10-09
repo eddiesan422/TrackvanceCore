@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -16,14 +17,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def command_check(arguments: list[str], timeout: int = 15) -> tuple[bool, str]:
+def command_check(arguments: list[str], timeout: float = 15) -> tuple[bool, dict[str, object]]:
+    started = time.monotonic()
+    exit_code: int | None = None
     try:
         result = subprocess.run(
             arguments, capture_output=True, text=True, timeout=timeout, check=False, cwd=ROOT
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
-        return False, type(error).__name__
-    return result.returncode == 0, "OK" if result.returncode == 0 else "No disponible"
+        exit_code = result.returncode
+        reason = "OK" if exit_code == 0 else "EXIT_CODE"
+    except FileNotFoundError:
+        reason = "EXECUTABLE_NOT_FOUND"
+    except subprocess.TimeoutExpired:
+        reason = "TIMEOUT"
+    # Arguments, output, exception messages and environment may contain secrets.
+    # Retain only the measured duration and fixed diagnostic codes.
+    return reason == "OK", {
+        "reason": reason,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "timeout_seconds": timeout,
+        "exit_code": exit_code,
+    }
 
 
 def inspect_health(base_url: str) -> dict[str, bool]:
@@ -230,17 +244,24 @@ def main() -> int:
         print("ERROR: --min-free-mib debe ser positivo.", file=sys.stderr)
         return 2
     checks = inspect_health(options.base_url)
+    command_diagnostics: dict[str, dict[str, object]] = {}
+
+    def checked(label: str, arguments: list[str]) -> None:
+        passed, diagnostic = command_check(arguments)
+        checks[label] = passed
+        command_diagnostics[label] = diagnostic
+
     if options.docker:
         try:
             prefix = _compose_prefix(options.project, options.certification_context)
         except (OSError, ValueError, RuntimeError) as error:
             print(f"ERROR: contexto de diagnóstico inválido ({type(error).__name__}).", file=sys.stderr)
             return 2
-        checks["Docker Linux disponible"] = command_check(
+        checked("Docker Linux disponible",
             ["docker", "info", "--format", "{{.OSType}}"]
-        )[0]
-        checks["Configuración Compose"] = command_check([*prefix, "config", "--quiet"])[0]
-        checks["Worker Compose DEFAULT"] = command_check(
+        )
+        checked("Configuración Compose", [*prefix, "config", "--quiet"])
+        checked("Worker Compose DEFAULT",
             [
                 *prefix,
                 "exec",
@@ -253,8 +274,8 @@ def main() -> int:
                     "raise SystemExit(0 if worker_status('DEFAULT')['status'] == 'RUNNING' else 1)"
                 ),
             ]
-        )[0]
-        checks["Worker Compose DELIVERY"] = command_check(
+        )
+        checked("Worker Compose DELIVERY",
             [
                 *prefix,
                 "exec",
@@ -267,23 +288,29 @@ def main() -> int:
                     "raise SystemExit(0 if worker_status('DELIVERY')['status'] == 'RUNNING' else 1)"
                 ),
             ]
-        )[0]
-        checks["Worker Compose ACQUISITION"] = command_check([*prefix, "exec", "-T", "acquisition-worker", "python", "-c",
-            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])[0]
-        checks["Worker Compose REPORT"] = command_check([*prefix, "exec", "-T", "report-worker", "python", "-c",
-            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"])[0]
+        )
+        checked("Worker Compose ACQUISITION", [*prefix, "exec", "-T", "acquisition-worker", "python", "-c",
+            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])
+        checked("Worker Compose REPORT", [*prefix, "exec", "-T", "report-worker", "python", "-c",
+            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"])
         for component in ("scheduler", "events-notifications", "events-chaining"):
-            checks[f"Componente Compose {component}"] = command_check([*prefix, "exec", "-T", component, "python", "-c",
-                f"from trackvance.component_health import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])[0]
+            checked(f"Componente Compose {component}", [*prefix, "exec", "-T", component, "python", "-c",
+                f"from trackvance.component_health import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])
     if options.storage_dir:
         checks.update(local_storage_checks(options.storage_dir))
     if options.recovery_ready:
         checks.update(recovery_checks(options.project, options.min_free_mib))
     if options.as_json:
-        print(json.dumps({"checks": checks, "ok": all(checks.values())}, sort_keys=True))
+        print(json.dumps({"checks": checks, "ok": all(checks.values()),
+                          "command_diagnostics": command_diagnostics}, sort_keys=True))
     else:
         for label, passed in checks.items():
-            print(f"{'OK' if passed else 'FAIL'}  {label}")
+            detail = command_diagnostics.get(label)
+            suffix = ""
+            if not passed and detail:
+                suffix = (f" ({detail['reason']}; duration_seconds={detail['duration_seconds']}; "
+                          f"timeout_seconds={detail['timeout_seconds']}; exit_code={detail['exit_code']})")
+            print(f"{'OK' if passed else 'FAIL'}  {label}{suffix}")
     return 0 if all(checks.values()) else 1
 
 

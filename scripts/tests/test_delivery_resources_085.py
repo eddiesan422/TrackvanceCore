@@ -31,6 +31,8 @@ def test_full_fourteen_service_profile_keeps_sqlserver_headroom_and_exact_aggreg
     receipt = runner.configure_private_resources(profile, "trackvance-delivery-e2e-123456789abc")
     assert receipt["memory_bytes"] == 8192 * 1024**2 == 8 * 1024**3
     assert receipt["cpus"] == 2 and len(profile["services"]) == 14
+    assert profile["services"]["acquisition-worker"]["cpus"] == .20
+    assert profile["services"]["delivery-worker"]["cpus"] == .20
     for name, (mib, _) in runner.PRIVATE_RESOURCES.items():
         assert profile["services"][name]["mem_limit"] == mib * 1024**2
     sql = profile["services"]["destination-sqlserver"]
@@ -82,12 +84,12 @@ def test_optional_connector_overlay_is_expanded_with_explicit_known_limits(monke
     assert set(profile["services"]) == set(runner.PRIVATE_RESOURCES)
 
 
-@pytest.mark.parametrize("group", ["delivery", "catalog-reports"])
-def test_local_capacity_gate_matches_full_private_stack_requirement(group):
+@pytest.mark.parametrize("group,cpus", [("delivery", 2), ("catalog-reports", 4)])
+def test_local_capacity_gate_matches_full_private_stack_requirement(group, cpus):
     from ci.run_local import capacity
 
     assert capacity(group)["memory_bytes"] == 8 * 1024**3
-    assert capacity(group)["cpus"] == 2
+    assert capacity(group)["cpus"] == cpus
 
 
 def probe_profile(monkeypatch):

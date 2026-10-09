@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -176,3 +178,98 @@ def test_invalid_context_aborts_before_any_docker_command(monkeypatch, tmp_path,
     assert doctor.main() == 2
     assert not calls
     assert "contexto de diagnóstico inválido" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_command_diagnostic_measures_real_process_without_exposing_output_or_environment(
+    exit_code, monkeypatch
+):
+    marker = "private-doctor-diagnostic-test-value"
+    monkeypatch.setenv("TV_DOCTOR_PRIVATE_TEST", marker)
+    passed, detail = doctor.command_check([
+        sys.executable, "-c",
+        ("import os,sys; print(os.environ['TV_DOCTOR_PRIVATE_TEST']); "
+         "print(os.environ['TV_DOCTOR_PRIVATE_TEST'], file=sys.stderr); "
+         f"sys.exit({exit_code})"),
+    ])
+    assert passed is (exit_code == 0)
+    assert detail["reason"] == ("OK" if passed else "EXIT_CODE")
+    assert detail["exit_code"] == exit_code
+    assert 0 < detail["duration_seconds"] < 15
+    assert detail["timeout_seconds"] == 15
+    assert set(detail) == {"reason", "duration_seconds", "timeout_seconds", "exit_code"}
+    assert marker not in json.dumps(detail)
+
+
+def test_real_command_timeout_is_distinct_from_nonzero_exit_and_redacts_arguments():
+    marker = "private-doctor-timeout-argument"
+    passed, detail = doctor.command_check(
+        [sys.executable, "-c", "import time; time.sleep(10)", marker], timeout=.2
+    )
+    assert not passed and detail["reason"] == "TIMEOUT"
+    assert detail["exit_code"] is None
+    assert detail["duration_seconds"] >= .2
+    assert detail["timeout_seconds"] == .2
+    assert marker not in json.dumps(detail)
+
+
+def test_missing_executable_diagnostic_does_not_expose_exception_filename(tmp_path):
+    command = str(tmp_path / "private-missing-doctor-command")
+    passed, detail = doctor.command_check([command])
+    assert not passed and detail["reason"] == "EXECUTABLE_NOT_FOUND"
+    assert detail["exit_code"] is None and detail["duration_seconds"] >= 0
+    assert command not in json.dumps(detail)
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("reason,exit_code", [("TIMEOUT", None), ("EXIT_CODE", 1)])
+def test_doctor_reports_safe_acquisition_failure_and_keeps_all_real_probes(
+    monkeypatch, capsys, as_json, reason, exit_code
+):
+    monkeypatch.setattr(sys, "argv", ["doctor.py", "--docker", "--project", "private-fixture"]
+                        + (["--json"] if as_json else []))
+    monkeypatch.setattr(doctor, "inspect_health", lambda _url: {"API": True})
+    calls = []
+
+    def diagnostic(arguments, timeout=15):
+        calls.append((arguments, timeout))
+        failed = "acquisition-worker" in arguments
+        return not failed, {"reason": reason if failed else "OK",
+                            "duration_seconds": 15.123 if failed else 1.234,
+                            "timeout_seconds": timeout,
+                            "exit_code": exit_code if failed else 0}
+
+    monkeypatch.setattr(doctor, "command_check", diagnostic)
+    assert doctor.main() == 1
+    output = capsys.readouterr().out
+    assert "15.123" in output and reason in output
+    assert len(calls) == 9 and all(timeout == 15 for _, timeout in calls)
+    probes = {args[args.index("-T") + 1]: args[-1] for args, _ in calls if "exec" in args}
+    assert set(probes) == {"worker", "delivery-worker", "acquisition-worker", "report-worker",
+                           "scheduler", "events-notifications", "events-chaining"}
+    for service, lane in (("worker", "DEFAULT"), ("delivery-worker", "DELIVERY"),
+                          ("acquisition-worker", "ACQUISITION"), ("report-worker", "REPORT")):
+        assert probes[service] == ("from trackvance.worker import worker_status; "
+                                  f"raise SystemExit(0 if worker_status('{lane}')['status'] == 'RUNNING' else 1)")
+    for component in ("scheduler", "events-notifications", "events-chaining"):
+        assert probes[component] == ("from trackvance.component_health import component_status; "
+                                    f"raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)")
+    if as_json:
+        payload = json.loads(output)
+        assert not payload["ok"] and not payload["checks"]["Worker Compose ACQUISITION"]
+        assert payload["command_diagnostics"]["Worker Compose ACQUISITION"]["exit_code"] == exit_code
+    else:
+        assert "FAIL  Worker Compose ACQUISITION (" + reason in output
+        assert "OK  Worker Compose DEFAULT\n" in output
+
+
+def test_timeout_exception_output_and_command_are_never_included(monkeypatch):
+    marker = "private-doctor-timeout-output"
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired([marker], 15, output=marker, stderr=marker)
+
+    monkeypatch.setattr(doctor.subprocess, "run", timeout)
+    passed, detail = doctor.command_check([marker])
+    assert not passed and detail["reason"] == "TIMEOUT"
+    assert marker not in json.dumps(detail)

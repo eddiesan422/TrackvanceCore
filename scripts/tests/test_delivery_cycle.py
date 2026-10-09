@@ -66,6 +66,43 @@ def test_target_commands_never_embed_passwords():
     assert "SELECT 1" in postgres_input and "SELECT 1" in sqlserver_input
 
 
+@pytest.mark.parametrize("damage", [None, "source_names", "order", "rows", "preview_columns", "mapping_columns"])
+def test_publication_preview_checks_renamed_final_mapping_and_exact_population(damage):
+    """Exercise only the harness assertion; this is not remote SQL evidence."""
+    draft = delivery_cycle.delivery_draft("dataset-version", {"id": "destination", "destination_version_id": "version"},
+                                         mode="CREATE_TABLE", schema_name="existing_delivery", table_name="pk_composite_085",
+                                         strategy="CREATE_AND_LOAD", primary_key_columns=["transaction_code", "quantity"])
+    draft["columns"] = [dict(column) for column in draft["columns"]]
+    draft["columns"][0]["target_name"] = "transaction_code"
+    # Storage order need not equal the explicit ordinal order.
+    draft["columns"].reverse()
+    names = ["transaction_code", *delivery_cycle.DATASET_COLUMNS[1:]]
+    rows = len(delivery_cycle.DATASET_ROWS)
+    if damage == "source_names":
+        names = list(delivery_cycle.DATASET_COLUMNS)
+    elif damage == "order":
+        names.reverse()
+    elif damage == "rows":
+        rows -= 1
+    elif damage == "preview_columns":
+        names.pop()
+    elif damage == "mapping_columns":
+        draft["columns"].pop()
+
+    class ReachedPreflight(Exception):
+        pass
+
+    def post(path, _body, **_kwargs):
+        if path == "/api/v1/delivery/preflight":
+            raise ReachedPreflight
+        assert path == "/api/v1/delivery/preview"
+        return {"sampled_rows": rows, "columns": [{"target_name": name} for name in names]}
+
+    expected = delivery_cycle.smoke.SmokeFailure if damage else ReachedPreflight
+    with pytest.raises(expected):
+        delivery_cycle.publish_and_run(SimpleNamespace(post=post), delivery_cycle.smoke.Checks(), draft, "renamed mapping", [])
+
+
 def test_destructive_runner_detects_a_preexisting_network():
     calls = []
 

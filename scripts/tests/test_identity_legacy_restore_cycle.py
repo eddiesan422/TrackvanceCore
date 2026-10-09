@@ -12,7 +12,9 @@ import pytest
 
 def test_historical_sources_are_fixed_authentic_commits_not_current_checkout():
     from ci.local_resources import HISTORICAL_SOURCES
-    assert HISTORICAL_SOURCES == {version: spec[0] for version, spec in runner.SOURCES.items()}
+    assert set(runner.SOURCES) == {"0.5.1", "0.6.0", "0.6.1"}
+    assert {version: HISTORICAL_SOURCES[version] for version in runner.SOURCES} == {
+        version: spec[0] for version, spec in runner.SOURCES.items()}
     assert runner.SOURCES["0.6.1"] == (
         "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5)
     assert runner.TARGET_VERSION == "0.8.0"
@@ -20,6 +22,19 @@ def test_historical_sources_are_fixed_authentic_commits_not_current_checkout():
         "587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5)
     assert runner.SOURCES["0.5.1"] == (
         "4519ed354202ea8f220682758da234e07b6df3ed", "0009_delivery_reviews", 4)
+
+
+def test_shared_historical_catalog_has_five_exact_sources_without_expanding_identity_matrix():
+    from ci.local_resources import HISTORICAL_SOURCES
+
+    assert HISTORICAL_SOURCES == {
+        "0.5.1": "4519ed354202ea8f220682758da234e07b6df3ed",
+        "0.6.0": "587909bc4462683e87e403dd2ea29a1d6d4afe08",
+        "0.6.1": "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd",
+        "0.7.0": "d9b6856e757a2a1fcab3913209146f3b7b79d70c",
+        "0.8.0": "4eaaeb774878bca62d7d6f758157107f0557512e",
+    }
+    assert set(runner.SOURCES) == {"0.5.1", "0.6.0", "0.6.1"}
 
 
 @pytest.mark.parametrize("failure", [None, RuntimeError("Failed build"), subprocess.TimeoutExpired("build", 1), KeyboardInterrupt()])

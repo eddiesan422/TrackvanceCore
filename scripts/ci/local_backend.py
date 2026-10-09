@@ -3,16 +3,61 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
+import subprocess
+import tomllib
 from pathlib import Path
 
 
+def _git(repository: Path, *arguments: str) -> str:
+    return subprocess.run(["git", "-C", str(repository), *arguments], check=True,
+        capture_output=True, text=True, encoding="utf-8", timeout=90).stdout.strip()
+
+
+def _historical_sources(repository: Path) -> dict[str, dict[str, str]]:
+    from ci.local_resources import HISTORICAL_SOURCES
+
+    sources = {}
+    for version, source in HISTORICAL_SOURCES.items():
+        if _git(repository, "rev-parse", source + "^{commit}") != source:
+            raise ValueError("Historical source commit differs from its fixed identity")
+        metadata = tomllib.loads(_git(repository, "show", source + ":backend/pyproject.toml"))
+        if metadata["project"]["version"] != version:
+            raise ValueError("Historical source version differs from its fixed commit")
+        sources[version] = {"source_sha": source, "tree_sha": _git(repository, "rev-parse", source + "^{tree}")}
+    return sources
+
+
 def test_context(root: Path, directory: Path, sha: str, execute, environment=None) -> Path:
+    if Path(_git(root, "rev-parse", "--show-toplevel")).resolve() != root.resolve():
+        raise ValueError("Backend test source repository root is ambiguous")
+    origin = _git(root, "remote", "get-url", "origin")
+    if not re.fullmatch(r"(?:https://github\.com/|git@github\.com:)eddiesan422/TrackvanceCore(?:\.git)?", origin):
+        raise ValueError("Backend test source is not from the expected repository")
+    sources = _historical_sources(root)
     context = directory / "backend-test-context"
     execute(["git", "clone", "--no-local", "--depth", "1", "--no-hardlinks", str(root), str(context)],
             directory, "backend-test-source-clone", 180, environment=environment)
+    # Fetch only these fixed local commits. Own refs keep their objects reachable
+    # in the Linux image without copying the host's worktree Git configuration.
+    execute(["git", "fetch", "--no-tags", "--depth", "1", "origin",
+        *[row["source_sha"] + ":refs/trackvance/historical/" + version for version, row in sources.items()]],
+        directory, "backend-test-historical-fetch", 180, cwd=context, environment=environment)
+    if _historical_sources(context) != sources:
+        raise ValueError("Cloned historical sources differ from their verified local trees")
     execute(["git", "checkout", "--detach", sha], directory, "backend-test-source-checkout", 60,
             cwd=context, environment=environment)
+    if _git(context, "rev-parse", "HEAD") != sha:
+        raise ValueError("Backend test checkout differs from the requested source commit")
+    execute(["git", "remote", "set-url", "origin", origin], directory,
+        "backend-test-source-origin", 60, cwd=context, environment=environment)
+    if _git(context, "remote", "get-url", "origin") != origin:
+        raise ValueError("Cloned source origin differs from its verified repository")
+    (directory / "backend-test-source-proof.json").write_text(json.dumps({"schema_version": 1,
+        "status": "PASS", "repository": "eddiesan422/TrackvanceCore", "source_sha": sha,
+        "historical_sources": sources, "transport": "Fixed commits fetched from the verified local source only"},
+        sort_keys=True, indent=2) + "\n", encoding="utf-8")
     # Docker excludes .git by default. This is a fresh source-only clone, with no
     # worktree settings, secrets or ignored files copied from the working host.
     shutil.move(str(context / ".git"), context / ".ci-source-git")

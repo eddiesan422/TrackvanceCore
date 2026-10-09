@@ -38,6 +38,7 @@ from ci.host_resources import limit_cpu_affinity, sample_process_tree, set_cpu_a
 from ci.owned_cleanup import cleanup as cleanup_owned
 from ci.owned_cleanup import snapshot as docker_snapshot
 from ci_images import verified_images
+from report_resources_085 import HOST_CLIENT_CPUS, effective_cgroups
 from report_resources_085 import configure as configure_resources
 from report_resources_085 import validate as validate_resources
 
@@ -579,6 +580,7 @@ def main():
     require(not any(value > 120 for value in args.rows) or args.with_browser, "DEEP_REAL_BROWSER_REQUIRED")
     require(not os.getenv("GITHUB_ACTIONS") or args.rows == [120] and args.limit == 120, "DEEP_VOLUME_FORBIDDEN_IN_ACTIONS")
     require(128 <= args.client_memory_mib <= 2048 and 1 <= args.client_cpus <= 4 and 60 <= args.timeout <= 10800, "FINITE_CLIENT_BUDGET")
+    require(args.client_cpus == HOST_CLIENT_CPUS, "OWNED_HOST_CLIENT_CPU_BUDGET")
     images = verify_code(args.source_sha)
     before = docker_snapshot()
     directory, context = guard.load_context(args.context) if args.context else prepare(args.port, args.main_project, args.limit)
@@ -588,16 +590,19 @@ def main():
     if args.prepare_only:
         print(json.dumps({"status": "PREPARED", "context": str(directory), "project": context["project"]}))
         return
-    summary, began, affinity = {"status": "FAIL"}, time.monotonic(), None
+    summary, began, affinity, actual_cgroups = {"status": "FAIL"}, time.monotonic(), None, None
     try:
         guard.preflight(directory, context)
         affinity = limit_cpu_affinity(args.client_cpus)
         if not args.context or args.start:
             guard.command([*guard.compose_args(directory, context), "up", "--no-build", "--detach", "--wait", "--wait-timeout", "240", *SCOPES], timeout=300)
+        actual_cgroups = effective_cgroups(json.loads((directory / "compose.json").read_text(encoding="utf-8")),
+                                          context["project"], set(SCOPES))
         with Resources(args.client_memory_mib * 1024**2, time.monotonic() + args.timeout) as resources:
             summary = certify(directory, context, args.rows, args.limit, args.source_sha, resources, with_browser=args.with_browser)
     finally:
         summary.update(duration_seconds=round(time.monotonic() - began, 3), client_affinity=affinity,
+                       effective_cgroups=actual_cgroups,
                        private_resource_profile=resource_profile,
                        main_unchanged=guard.inventory(context["main_project"]) == context["main_before"])
         if not args.keep:

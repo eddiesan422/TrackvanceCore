@@ -59,6 +59,11 @@ def test_unexecuted_capacity_cannot_be_mistaken_for_smaller_historical_fixture()
     assert set(profile_groups(manifest, "deep")) - set(profile_groups(manifest, "functional"))
 
 
+def test_catalog_reserves_docker_three_plus_host_one_without_expanding_delivery():
+    assert capacity("catalog-reports") == {"memory_bytes": 8 * 1024**3, "cpus": 4, "disk_bytes": 20 * 1024**3}
+    assert capacity("delivery")["cpus"] == 2
+
+
 def test_small_cancel_requires_real_controlled_observation_and_no_partial_version():
     spec = {"validator": "xlsx-cancel", "rows": 120, "variant": "shared", "min_observed_rows": 20}
     value = {"status": "CANCELLED", "versions": 0, "observed_records_before_cancel": 20,
