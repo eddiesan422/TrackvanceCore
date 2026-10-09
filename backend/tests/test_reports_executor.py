@@ -9,6 +9,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+
 from trackvance.operations_common import OperationError
 from trackvance.report_executor import execute_messages
 from trackvance.report_query import compile_draft

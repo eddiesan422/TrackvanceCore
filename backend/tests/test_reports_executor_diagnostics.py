@@ -8,6 +8,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+
 from trackvance import report_executor as executor
 from trackvance.operations_common import OperationError
 
