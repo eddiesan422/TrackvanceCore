@@ -31,7 +31,7 @@ class CertificationProgress:
 
     def __init__(self, rows, directory):
         self.directory, self.began = directory, time.monotonic()
-        self.result = {"version": "0.8.0", "status": "RUNNING", "rows_per_source": rows,
+        self.result = {"version": "0.8.5", "status": "RUNNING", "rows_per_source": rows,
                        "sources": [], "joins": [], "active_phase": "SCOPE_VALIDATION"}
 
     def save(self):
@@ -358,6 +358,7 @@ def _certify(rows, directory, progress):
         print(json.dumps({"stage": "JOIN_VERIFIED", "join": kind, "rows": integrity["rows"]}), flush=True)
         if kind == "INNER":
             # SQL and guided mode share the same frozen inputs and join policy.
+            effective_limits = client.call("/reports/limits")["profiles"]
             sql = {**query, "mode": "SQL", "sql": 'SELECT a.key AS a_key,a.value AS a_value,b.key AS b_key,b.value AS b_value FROM a INNER JOIN b ON a.key=b.key AND a.zone=b.zone ORDER BY a.key,b.key'}
             progress.phase("SQL_GUIDED_PARITY")
             sql_context = client.call("/reports/resolve", {"draft": sql})
@@ -375,10 +376,12 @@ def _certify(rows, directory, progress):
             assert_download_oracle(progress, 'CSV', downloaded,
                                    rows_hash(islice(oracle_rows("INNER", rows), 100000)),
                                    client=client, execution_id=execution_id)
-            transmission = client.call("/reports/executions/" + execution_id)
+            transmission = wait(client, "/reports/executions/" + execution_id)
             progress.phase("CSV_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"
-            result["csv"] = {"status": "PASS", **downloaded, "max_rows": 100000, "generation": transmission["generation_status"], "transmission": transmission["transmission_status"]}
+            result["csv"] = {"status": "PASS", **downloaded, "query_limit": 100000,
+                             "max_rows": effective_limits["DOWNLOAD"]["max_rows"],
+                             "generation": transmission["generation_status"], "transmission": transmission["transmission_status"]}
             xlsx_context = client.call("/reports/resolve", {"draft": {**sql, "sql": sql["sql"] + " LIMIT 50000"}})
             progress.phase("XLSX_DOWNLOAD")
             with client.stream(xlsx_context["context_id"], "XLSX") as response:
@@ -392,28 +395,16 @@ def _certify(rows, directory, progress):
             assert_download_oracle(progress, 'XLSX', exported,
                                    rows_hash(islice(oracle_rows("INNER", rows), 50000)),
                                    client=client, execution_id=execution_id)
-            transmission = client.call("/reports/executions/" + execution_id)
+            transmission = wait(client, "/reports/executions/" + execution_id)
             progress.phase("XLSX_TERMINAL_ASSERT", transmission)
             assert transmission["status"] == "SUCCESS" and transmission["transmission_status"] == "COMPLETE"
-            result["xlsx"] = {"status": "PASS", **exported, "bytes": len(content), "max_rows": 50000,
+            result["xlsx"] = {"status": "PASS", **exported, "bytes": len(content), "query_limit": 50000,
+                              "max_rows": effective_limits["XLSX"]["max_rows"],
                               "generation": transmission["generation_status"], "transmission": transmission["transmission_status"]}
-            for export_format, limit in (("CSV", 100000), ("XLSX", 50000)) if rows > 200000 else ():
-                progress.phase(export_format + "_ABOVE_LIMIT_NEGATIVE")
-                excessive = {**sql, "sql": sql["sql"] + f" LIMIT {limit + 1}"}
-                exceeded = client.call("/reports/resolve", {"draft": excessive})
-                execution_id = None
-                try:
-                    with client.stream(exceeded["context_id"], export_format) as response:
-                        execution_id = response.headers["X-Report-Execution-Id"]
-                        while response.read(65536):
-                            pass
-                except (http.client.IncompleteRead, urllib.error.URLError, OSError):
-                    pass  # HTTP headers may already be transmitted; terminal state remains authoritative.
-                assert execution_id is not None
-                failed = wait(client, "/reports/executions/" + execution_id)
-                assert failed["status"] == "FAILED" and failed["generation_status"] == "FAILED" and failed["transmission_status"] == "INTERRUPTED"
-                assert failed["output_version_id"] is None and failed["error_code"] == "REPORT_RESULT_LIMIT"
-                result[export_format.lower() + "_above_limit"] = {"status": "PASS", "requested_rows": limit + 1, "execution_status": failed["status"], "error_code": failed["error_code"]}
+            # The product boundary is exercised by the mandatory host download
+            # fixture, whose FINAL result has cap+1 rows. These query LIMITs
+            # remain independent regression cases and are not product limits.
+            result["above_limit_gate"] = "HOST_DOWNLOAD_085_REQUIRED"
     progress.phase("TRIPLE_RESOLVE_PREVIEW")
     triple = draft(sources, "LEFT", triple=True)
     context = client.call("/reports/resolve", {"draft": triple})

@@ -31,14 +31,14 @@ def require_current_snapshot(state):
     if (state.get('schema_version') != docker_state.VERIFY_SCHEMA_VERSION
             or state.get('migration') != docker_state.CURRENT_MIGRATION
             or set(state.get('tables', {})) != docker_state.CURRENT_STATE_TABLES):
-        raise ValueError('La huella nativa no contiene el estado completo 0.8.0.')
+        raise ValueError('La huella nativa no contiene el estado completo 0.8.5.')
 
 
 def require_preserved_061_history(before, after, normalized):
     require_current_snapshot(after)
     if normalized != before:
         raise ValueError('La proyección restaurada no conserva exactamente la historia 0.6.1.')
-    if any(after['tables'][name] for name in docker_state.ASYNC_STATE_TABLES | docker_state.CATALOG_STATE_TABLES):
+    if any(after['tables'][name] for name in docker_state.ASYNC_STATE_TABLES | docker_state.CATALOG_STATE_TABLES | {'governance_people'}):
         raise ValueError('La actualización produjo actividad nueva o gobierno histórico inventado.')
 
 
@@ -264,7 +264,7 @@ def native_cycle(context_path, evidence_path=None):
 
 
 def authentic_061_cycle(commit, evidence_path=None):
-    """Archive an immutable 0.6.1 source and destroy it before restoring 0.8.0."""
+    """Archive an immutable 0.6.1 source and destroy it before restoring 0.8.5."""
     from docker_backup_cycle import (
         RecoveryApi,
         RecoveryCommandError,
@@ -327,7 +327,7 @@ def authentic_061_cycle(commit, evidence_path=None):
     source_claimed = target_claimed = False
     main_project = 'trackvance-certification'
     main_before = certification_v070.inventory(main_project)
-    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.8.0', 'baseline_commit': commit,
+    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.8.5', 'baseline_commit': commit,
               'source_project': source, 'target_project': target, 'automatic_processes_started': False}
     stage, started = 'authentic_archive', time.monotonic()
     def run(arguments, *, input_text=None):
@@ -422,8 +422,8 @@ with SessionLocal() as db:
         if any(item['running'] for item in docker_state.inventory(target)['containers']):
             raise ValueError('El destino activó procesos antes de verificar la preservación.')
         docker_state.compose(target, 'up', '-d', '--wait', 'api', 'web', environment=target_environment)
-        if health_version(target_port) != '0.8.0':
-            raise ValueError('El destino no ejecuta 0.8.0.')
+        if health_version(target_port) != '0.8.5':
+            raise ValueError('El destino no ejecuta 0.8.5.')
         api_container = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api_container['id'], evidence / 'restored-state.json')
         normalized = docker_state._copy_snapshot(api_container['id'], evidence / 'legacy-state.json', command='snapshot-legacy-v5')

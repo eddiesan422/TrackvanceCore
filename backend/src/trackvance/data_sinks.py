@@ -421,6 +421,25 @@ def technical_type(sink_type: str, column: dict[str, Any]) -> str:
     return "BOOLEAN" if sink_type == "POSTGRESQL" else "BIT"
 
 
+def primary_key_mappings(sink_type: str, columns: list[dict[str, Any]], keys: list[str]) -> list[dict[str, Any]]:
+    """Resolve final names without conflating a new PK with an UPSERT arbiter."""
+    if len(keys) > 32 or len(set(keys)) != len(keys):
+        raise DeliveryError("PRIMARY_KEY_INVALID", "La clave primaria admite hasta 32 columnas distintas y ordenadas.")
+    by_name = {column["target_name"]: column for column in columns}
+    mappings = []
+    validator = validate_postgresql_identifier if sink_type == "POSTGRESQL" else validate_identifier
+    for key in keys:
+        validator(key)
+        if key not in by_name or by_name[key].get("nullable", True):
+            raise DeliveryError("PRIMARY_KEY_INVALID", "Las columnas de clave primaria deben existir en el mapping y ser NOT NULL.")
+        column = by_name[key]
+        native = technical_type(sink_type, column)
+        if sink_type == "SQLSERVER" and native == "NVARCHAR(MAX)":
+            raise DeliveryError("PRIMARY_KEY_TYPE_NOT_INDEXABLE", "Una clave primaria SQL Server requiere STRING de longitud explícita hasta 4000; NVARCHAR(MAX) no es indexable.")
+        mappings.append(column)
+    return mappings
+
+
 def convert_value(value: Any, column: dict[str, Any]) -> Any:
     if value is None:
         if not column.get("nullable", True):
@@ -597,6 +616,8 @@ class DataSink(Protocol):
 
     def permissions(self, target: dict[str, Any], strategy: str) -> dict[str, bool]: ...
 
+    def validate_primary_key(self, records: Sequence[dict[str, Any]], columns: list[dict[str, Any]], keys: list[str]) -> dict[str, Any]: ...
+
     def prepare(
         self,
         records: Sequence[dict[str, Any]],
@@ -651,6 +672,69 @@ class DatabaseDataSink:
     def permissions(self, target: dict[str, Any], strategy: str) -> dict[str, bool]:
         raise NotImplementedError
 
+    def validate_primary_key(self, records: Sequence[dict[str, Any]], columns: list[dict[str, Any]], keys: list[str]) -> dict[str, Any]:
+        """Validate every key with native types, collation and index limits.
+
+        Only a session-local table is written. Its transaction is rolled back,
+        including on cancellation or failure; the final target is never touched.
+        """
+        selected = primary_key_mappings(self.sink_type, columns, keys)
+        if not selected:
+            raise DeliveryError("PRIMARY_KEY_INVALID", "Selecciona al menos una columna de clave primaria.")
+        count = 0
+        with self._connection() as connection:
+            try:
+                with connection.cursor() as cursor:
+                    if self.sink_type == "POSTGRESQL":
+                        names = sql.SQL(", ").join(sql.Identifier(name) for name in keys)
+                        definitions = sql.SQL(", ").join(sql.SQL("{} {} NOT NULL").format(
+                            sql.Identifier(column["target_name"]), sql.SQL(technical_type(self.sink_type, column)),
+                        ) for column in selected)
+                        cursor.execute(sql.SQL("CREATE TEMP TABLE {} ({}, PRIMARY KEY ({})) ON COMMIT DROP").format(
+                            sql.Identifier("trackvance_primary_key_preflight"), definitions, names,
+                        ))
+                        query: Any = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+                            sql.Identifier("trackvance_primary_key_preflight"), names,
+                            sql.SQL(", ").join(sql.Placeholder() for _ in keys),
+                        )
+                    else:
+                        names_sql = ", ".join(quote_sqlserver_identifier(name) for name in keys)
+                        definitions_sql = ", ".join(
+                            f"{quote_sqlserver_identifier(column['target_name'])} {technical_type(self.sink_type, column)} "
+                            f"{'COLLATE ' + SQLSERVER_UNICODE_COLLATION + ' ' if column['target_type'] == 'STRING' else ''}NOT NULL"
+                            for column in selected
+                        )
+                        cursor.execute(f"CREATE TABLE #trackvance_primary_key_preflight ({definitions_sql}, PRIMARY KEY CLUSTERED ({names_sql}))")
+                        query = f"INSERT INTO #trackvance_primary_key_preflight ({names_sql}) VALUES ({', '.join('%s' for _ in keys)})"
+                    for chunk in batches(records):
+                        cursor.executemany(query, prepare_rows(chunk, selected))
+                        count += len(chunk)
+                connection.rollback()
+            except (psycopg.Error, pymssql.Error) as exc:
+                # Inspect native codes while the connection is still open, before
+                # its context manager translates driver errors to DeliveryError.
+                try:
+                    connection.rollback()
+                except (psycopg.Error, pymssql.Error):
+                    pass
+                state = getattr(exc, "sqlstate", None)
+                number = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+                if state in {"54000", "54011"} or number in {1919, 1946, 1750}:
+                    raise DeliveryError("PRIMARY_KEY_DESTINATION_LIMIT", "El destino rechazó el tipo o tamaño de clave primaria.") from None
+                error = _safe_driver_error(exc)
+                if error.code == "DESTINATION_CONSTRAINT_VIOLATION":
+                    raise DeliveryError("PRIMARY_KEY_DESTINATION_COLLISION", "La población contiene claves duplicadas o nulas según tipos y collation del destino.") from None
+                raise DeliveryError(error.code, error.message) from None
+            except BaseException:
+                try:
+                    connection.rollback()
+                except (psycopg.Error, pymssql.Error):
+                    pass
+                raise
+        return {"columns": list(keys), "rows_validated": count,
+                "method": "NATIVE_PRIMARY_KEY_TRANSACTION", "persistent_changes": False,
+                "collation": SQLSERVER_UNICODE_COLLATION if self.sink_type == "SQLSERVER" else "DATABASE_DEFAULT"}
+
     def prepare(
         self,
         records: Sequence[dict[str, Any]],
@@ -680,6 +764,10 @@ class DatabaseDataSink:
             validator(column["target_name"])
             # Keep every deterministic DDL/type error before the durable marker.
             technical_type(self.sink_type, column)
+        primary_keys = prepared_target.get("_primary_key_columns", [])
+        if primary_keys and (target["mode"] != "CREATE_TABLE" or strategy != "CREATE_AND_LOAD"):
+            raise DeliveryError("PRIMARY_KEY_INVALID", "Delivery no modifica claves primarias de tablas existentes.")
+        primary_key_mappings(self.sink_type, prepared_columns, primary_keys)
         prepared_keys = [validator(name) for name in upsert_keys]
         rows = tuple(prepare_rows(records, prepared_columns))
         system_audit = prepared_target.get("_system_audit")
@@ -1201,6 +1289,11 @@ class PostgreSQLDataSink(DatabaseDataSink):
                         )
                         for column in columns
                     )
+                    if target.get("_primary_key_columns"):
+                        primary_key_mappings(self.sink_type, columns, target["_primary_key_columns"])
+                        definitions += sql.SQL(", PRIMARY KEY ({})").format(sql.SQL(", ").join(
+                            sql.Identifier(name) for name in target["_primary_key_columns"]
+                        ))
                     cursor.execute(
                         sql.SQL("CREATE TABLE {} ({})").format(
                             self._qualified(schema_name, table_name), definitions
@@ -1766,6 +1859,10 @@ class SQLServerDataSink(DatabaseDataSink):
                         f"{'NULL' if column.get('nullable', True) else 'NOT NULL'}"
                         for column in columns
                     )
+                    if target.get("_primary_key_columns"):
+                        primary_key_mappings(self.sink_type, columns, target["_primary_key_columns"])
+                        key_names = ", ".join(quote_sqlserver_identifier(name) for name in target["_primary_key_columns"])
+                        definitions += f", PRIMARY KEY CLUSTERED ({key_names})"
                     cursor.execute(
                         f"CREATE TABLE {self._qualified(schema_name, table_name)} ({definitions})"
                     )

@@ -49,9 +49,13 @@ test('destino real → builder → preflight → publicación → receipt', asyn
 
   await expect(page.getByRole('heading', { name: 'Mapping de salida', exact: true })).toBeVisible()
   await expect(page.locator('table tbody tr')).not.toHaveCount(0)
+  await expect(page.getByLabel('Tipo destino de quantity', { exact: true })).toHaveValue('INT64')
   await page.getByRole('button', { name: /Continuar/ }).click()
 
   await expect(page.getByText('Crear y cargar', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('radio', { name: 'Definir clave primaria' })).toBeChecked()
+  await page.getByRole('checkbox', { name: 'Clave primaria quantity', exact: true }).check()
+  await expect(page.getByRole('list', { name: 'Orden de la clave primaria' })).toContainText('quantity · NOT NULL')
   await page.getByRole('button', { name: /Continuar/ }).click()
 
   const previewResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/preview' && response.request().method() === 'POST')
@@ -78,7 +82,14 @@ test('destino real → builder → preflight → publicación → receipt', asyn
     target: expect.objectContaining({ mode: 'CREATE_TABLE', schema_name: 'existing_delivery', table_name: tableName }),
     write_strategy: 'CREATE_AND_LOAD',
     audit_columns_enabled: true,
+    schema_version: 2,
+    primary_key_mode: 'DEFINE',
+    primary_key_columns: ['quantity'],
   }))
+  const sourceProfile = await (await page.request.get(`/api/v1/dataset-versions/${configuration.config.dataset_version_id}/profile`)).json()
+  const numericKey = sourceProfile.profile.columns.find((column: { name: string }) => column.name === 'quantity')
+  expect(numericKey.logical_type).toBe('INT64')
+  expect(numericKey.semantic_tag).not.toBe('IDENTIFIER')
   await expect(page.getByText(/Publicada como versión 1/)).toBeVisible()
 
   const runResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/runs' && response.request().method() === 'POST')

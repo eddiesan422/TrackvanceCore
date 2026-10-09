@@ -79,6 +79,9 @@ class DatasetBody(ContextBody):
     business_owner_id: str | None = None
     steward_id: str | None = None
     technical_custodian_id: str | None = None
+    business_owner_person_id: str | None = None
+    steward_person_id: str | None = None
+    technical_custodian_person_id: str | None = None
     information_classification: Literal["UNKNOWN", "PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] = "UNKNOWN"
 
 
@@ -281,6 +284,7 @@ def download(body: DownloadBody, db: Session = Depends(get_db), user: User = Dep
     context = resolved_context(db, body.context_id, user)
     run = start_execution(db, user, context, "DOWNLOAD")
     identity = run.id
+    messages = None
     try:
         admission(db, run)
         inputs, plan = execution_sources(db, context), context.snapshot["plan"]
@@ -294,25 +298,42 @@ def download(body: DownloadBody, db: Session = Depends(get_db), user: User = Dep
             elif message["kind"] == "schema":
                 columns = message["columns"]
                 break
+        else:
+            raise OperationError(422, "REPORT_STREAM_UNVERIFIED", "El generador no confirmó el esquema antes de la transmisión.")
         check_execution(identity, "reports:download")
     except OperationError as exc:
+        if messages is not None:
+            messages.close()
         terminal(identity, status="FAILED", error=exc, generation="FAILED", transmission="NOT_STARTED")
+        exc.details = {**(exc.details if isinstance(exc.details, dict) else {}),
+                       "execution_id": identity, "context_id": context.id, "format": body.format}
         raise
+    except Exception as exc:
+        if messages is not None:
+            messages.close()
+        error = OperationError(422, "REPORT_PREPARATION_FAILED", "La preparación de la descarga falló antes de transmitir el resultado.",
+            {"execution_id": identity, "context_id": context.id, "format": body.format})
+        terminal(identity, status="FAILED", error=error, generation="FAILED", transmission="NOT_STARTED")
+        raise error from exc
 
     def batches():
+        generated = False
         try:
             for message in messages:
                 check_execution(identity, "reports:download")
                 if message["kind"] == "batch":
                     yield message["rows"]
                 elif message["kind"] == "complete":
+                    generated = True
                     with SessionLocal() as session:
                         item = session.get(ReportExecution, identity)
                         if item is None:
                             raise OperationError(404, "REPORT_EXECUTION_NOT_FOUND", "La ejecución ya no existe.")
-                        item.generation_status = "COMPLETE"
+                        item.progress_stage = "Cerrando serialización"
                         item.metrics = {**{k: v for k, v in message.items() if k != "kind"}, "cardinality": cardinality}
                         session.commit()
+            if not generated:
+                raise OperationError(422, "REPORT_STREAM_UNVERIFIED", "El generador terminó sin confirmar la población completa.")
         except OperationError as exc:
             terminal(identity, status="FAILED", error=exc, generation="FAILED", transmission="INTERRUPTED")
             raise
@@ -327,11 +348,26 @@ def download(body: DownloadBody, db: Session = Depends(get_db), user: User = Dep
             for chunk in chunks:
                 check_execution(identity, "reports:download")
                 count += len(chunk)
-                if count > limits.max_bytes:
+                if count > limits.serialized_max_bytes:
                     raise OperationError(422, "REPORT_DOWNLOAD_BYTES", "La serialización excedió los bytes autorizados.")
                 yield chunk
+            check_execution(identity, "reports:download")
+            with SessionLocal() as session:
+                item = session.get(ReportExecution, identity)
+                if item is None or item.status != "RUNNING":
+                    raise OperationError(409, "REPORT_EXECUTOR_LOST", "La ejecución perdió su cupo antes del cierre.")
+                item.generation_status = "COMPLETE"
+                item.progress_stage = "Transmitiendo cierre"
+                item.metrics = {**item.metrics, "serialized_bytes": count,
+                                "serialization": body.format, "serialization_complete": True}
+                session.commit()
         except OperationError as exc:
             terminal(identity, status="FAILED", error=exc, generation="FAILED", transmission="INTERRUPTED")
+            raise
+        except Exception:
+            terminal(identity, status="FAILED", error=OperationError(422, "REPORT_SERIALIZATION_FAILED",
+                     "La serialización falló; cualquier archivo recibido está incompleto."),
+                     generation="FAILED", transmission="INTERRUPTED")
             raise
         finally:
             chunks.close()
@@ -348,6 +384,9 @@ def download(body: DownloadBody, db: Session = Depends(get_db), user: User = Dep
 def generate(body: DatasetBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     context = resolved_context(db, body.context_id, user)
     publication = body.model_dump(exclude={"context_id", "idempotency_key"})
+    person_fields = {"business_owner_person_id", "steward_person_id", "technical_custodian_person_id"}
+    for field in person_fields - body.model_fields_set:
+        publication.pop(field, None)  # Keep v1 publication hashes exactly compatible.
     publication["name"] = publication["name"].strip()
     if not publication["name"]:
         raise OperationError(422, "DATASET_NAME_INVALID", "Escribe el nombre del nuevo dataset.")
@@ -361,6 +400,9 @@ def generate(body: DatasetBody, db: Session = Depends(get_db), user: User = Depe
             responsible = owned(db, User, publication[field], user)
             if not responsible.active or responsible.deleted:
                 raise OperationError(422, "RESPONSIBLE_INVALID", "Selecciona responsables activos de tu organización.")
+    if person_fields & body.model_fields_set:
+        from .governance_people import resolve_governance_assignments
+        publication = resolve_governance_assignments(db, user.organization_id, publication)
     try:
         item = start_execution(db, user, context, "DATASET", publication, body.idempotency_key)
     except IntegrityError:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import subprocess
@@ -19,6 +20,8 @@ HISTORICAL_SOURCES = {
     "0.5.1": "4519ed354202ea8f220682758da234e07b6df3ed",
     "0.6.0": "587909bc4462683e87e403dd2ea29a1d6d4afe08",
     "0.6.1": "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd",
+    "0.7.0": "d9b6856e757a2a1fcab3913209146f3b7b79d70c",
+    "0.8.0": "4eaaeb774878bca62d7d6f758157107f0557512e",
 }
 
 
@@ -157,7 +160,7 @@ def begin_image_build(path: Path, execution: str, project: str, source_sha: str,
     value = initialize_image_registry(path, execution, command)
     if (not re.fullmatch(r"trackvance-[a-z0-9-]+-[a-f0-9]{12}", project)
             or not re.fullmatch(r"[a-f0-9]{40}", source_sha)
-            or version not in {"0.5.1", "0.6.0", "0.6.1", "0.8.0"}
+            or version not in {"0.5.1", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.8.5"}
             or role not in {"backend", "web", "backend-tests"}):
         raise ValueError("Image intent needs authentic source/version and explicit project ownership")
     if not (reference == f"{project}:{role}" or re.fullmatch(
@@ -340,16 +343,24 @@ def apply_limits(override: dict, project: str, *, active_services=None) -> None:
         service.setdefault("labels", {})["io.trackvance.local-execution"] = os.environ["TRACKVANCE_LOCAL_EXECUTION_ID"]
 
 
-def build_legacy(compose: list[str], directory: Path, project: str, environment: dict[str, str]) -> None:
+def build_legacy(compose: list[str], directory: Path, project: str, environment: dict[str, str],
+                 *, source_context: Path | None = None) -> None:
     """Cold historical images use a bounded builder in an owned local run."""
     from ci.run_suite import execute
     execution = environment["TRACKVANCE_LOCAL_EXECUTION_ID"]
     image_registry = Path(environment["TRACKVANCE_LOCAL_IMAGE_REGISTRY"])
     source_sha = environment["TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA"]
     source_version = environment["TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION"]
-    if source_version not in {"0.5.1", "0.6.0", "0.6.1"}:
-        raise ValueError("Historical builds cannot claim the current product version")
-    source_context = directory / "baseline"
+    if HISTORICAL_SOURCES.get(source_version) != source_sha:
+        raise ValueError("Historical builds require their authentic fixed source/version")
+    max_memory = int(environment["TRACKVANCE_LOCAL_MAX_MEMORY_BYTES"])
+    max_cpus = float(environment["TRACKVANCE_LOCAL_MAX_CPUS"])
+    if max_memory <= 0 or not math.isfinite(max_cpus) or max_cpus <= 0:
+        raise ValueError("Historical builder requires finite positive resource budgets")
+    source_context = source_context if source_context is not None else directory / "baseline"
+    if (source_context.is_symlink() or getattr(source_context, "is_junction", lambda: False)()
+            or not source_context.resolve().is_relative_to(directory.resolve())):
+        raise ValueError("Historical source context must stay in the owned private directory")
     first_compose_file = Path(compose[compose.index("-f") + 1]).resolve()
     if first_compose_file != (source_context / "compose.yml").resolve():
         raise ValueError("Historical Compose root must use the verified private archive")
@@ -373,14 +384,16 @@ def build_legacy(compose: list[str], directory: Path, project: str, environment:
     ownership_file = directory / "local-legacy-image-ownership.json"
     ownership_file.write_text(json.dumps(owner_override), encoding="utf-8")
     name = "tv-local-legacy-" + execution[-12:] + project[-12:]
-    registry = Path(os.environ["TRACKVANCE_LOCAL_BUILDER_REGISTRY"])
+    registry = Path(environment["TRACKVANCE_LOCAL_BUILDER_REGISTRY"])
     names = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else []
     names.append(name)
     registry.write_text(json.dumps(names) + "\n", encoding="utf-8")
     config = directory / "local-buildkit.toml"
     config.write_text('[worker.oci]\n max-parallelism = 1\n', encoding="utf-8")
-    memory = min(3 * 1024**3, int(os.environ["TRACKVANCE_LOCAL_MAX_MEMORY_BYTES"]) // 2)
-    quota = int(min(2, float(os.environ["TRACKVANCE_LOCAL_MAX_CPUS"]) / 2) * 100000)
+    memory = min(3 * 1024**3, max_memory // 2)
+    quota = int(min(2, max_cpus / 2) * 100000)
+    if memory <= 0 or quota <= 0:
+        raise ValueError("Historical builder resource allocation is below the finite minimum")
     try:
         execute(["docker", "buildx", "create", "--name", name, "--driver", "docker-container",
             "--buildkitd-config", str(config), "--driver-opt", "memory=" + str(memory),

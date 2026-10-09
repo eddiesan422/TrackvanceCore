@@ -94,9 +94,10 @@ def _letter(index):
 
 
 def _text(value):
-    if any(ord(char) < 32 and char not in "\t\n\r" for char in value):
+    if any((ord(char) < 32 and char not in "\t\n\r") or 0xD800 <= ord(char) <= 0xDFFF
+           or ord(char) in {0xFFFE, 0xFFFF} for char in value):
         raise OperationError(422, "REPORT_XLSX_CHARACTER", "XLSX no admite un control XML presente en los datos; elige CSV.")
-    if len(value) > 32767:
+    if len(value.encode("utf-16-le")) // 2 > 32767:
         raise OperationError(422, "REPORT_XLSX_CELL_LIMIT", "Una celda excede 32.767 caracteres Excel; elige CSV.")
     return escape(value).replace("\r", "&#13;")
 
@@ -131,17 +132,27 @@ def xlsx_stream(columns, batches):
         for name, content in files.items():
             package.writestr(name, content.encode())
             yield from sink.drain()
-        with package.open("xl/worksheets/sheet1.xml", "w") as sheet:
-            sheet.write(f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{namespace}"><sheetData>'.encode())
-            sheet.write(_xlsx_row(1, [c["name"] for c in columns]))
+        # Excel rejects a streamed ZIP64 member whose local sizes are unknown,
+        # even though independent ZIP readers accept it. The effective expanded
+        # budget is below Python's ZIP32 boundary, so no member needs ZIP64.
+        with package.open("xl/worksheets/sheet1.xml", "w", force_zip64=False) as sheet:
+            expanded_bytes = 0
+            def write(content):
+                nonlocal expanded_bytes
+                expanded_bytes += len(content)
+                if expanded_bytes > limits.expanded_max_bytes:
+                    raise OperationError(422, "REPORT_XLSX_EXPANDED_BYTES", "El XML expandido excede el presupuesto autorizado.")
+                sheet.write(content)
+            write(f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{namespace}"><sheetData>'.encode())
+            write(_xlsx_row(1, [c["name"] for c in columns]))
             row_number = 1
             for rows in batches:
                 for row in rows:
                     row_number += 1
                     if row_number > min(1048576, limits.max_rows + 1):
                         raise OperationError(422, "REPORT_XLSX_ROWS", "XLSX excede su límite de filas; elige CSV.")
-                    sheet.write(_xlsx_row(row_number, row))
+                    write(_xlsx_row(row_number, row))
                 yield from sink.drain()
-            sheet.write(b"</sheetData></worksheet>")
+            write(b"</sheetData></worksheet>")
         yield from sink.drain()
     yield from sink.drain()

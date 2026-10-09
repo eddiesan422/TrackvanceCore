@@ -46,8 +46,8 @@ def inspect_image(reference: str, sha: str) -> dict:
     labels = row.get("Config", {}).get("Labels") or {}
     if labels.get("org.opencontainers.image.revision") != sha:
         raise ValueError("Image revision differs from the certified source commit.")
-    if labels.get("org.opencontainers.image.version") != "0.8.0":
-        raise ValueError("Image implementation version differs from 0.8.0.")
+    if labels.get("org.opencontainers.image.version") != "0.8.5":
+        raise ValueError("Image implementation version differs from 0.8.5.")
     if row.get("Os") != "linux" or row.get("Architecture") != "amd64":
         raise ValueError("CI images must use the certified Linux amd64 runtime.")
     return row

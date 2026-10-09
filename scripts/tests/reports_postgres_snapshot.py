@@ -153,7 +153,7 @@ def verify() -> dict:
             if (frozen_outputs != old_outputs or following_outputs != new_outputs
                     or set(old_outputs) & set(new_outputs) or observed_isolation != ["REPEATABLE READ"] * 2):
                 raise RuntimeError("Joint metadata resolution mixed source snapshots.")
-            result = {"version": "0.8.0", "status": "PASS", "database": "POSTGRESQL",
+            result = {"version": "0.8.5", "status": "PASS", "database": "POSTGRESQL",
                       "read_isolation": "REPEATABLE READ", "source_count": 2,
                       "old_input_versions": [source["input_version"] for source in frozen.snapshot["sources"]],
                       "next_input_versions": [source["input_version"] for source in following.snapshot["sources"]],

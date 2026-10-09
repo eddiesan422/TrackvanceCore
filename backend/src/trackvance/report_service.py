@@ -290,16 +290,22 @@ def check_execution(identity: str, permission_code: str) -> None:
 def terminal(identity: str, *, status: str, error: OperationError | None = None,
              metrics: dict | None = None, generation: str | None = None, transmission: str | None = None) -> None:
     with SessionLocal() as db:
-        execution = db.get(ReportExecution, identity)
+        execution = db.scalar(select(ReportExecution).where(ReportExecution.id == identity).with_for_update())
         if not execution:
             return
         # Transport interruption is a separate fact and never downgrades a
         # stronger persisted generation failure/revocation/cancellation cause.
-        if status == "INTERRUPTED" and execution.status in {"FAILED", "CANCELLED"}:
+        if status in {"INTERRUPTED", "SUCCESS"} and execution.status in {"FAILED", "CANCELLED", "INTERRUPTED"}:
             if transmission:
                 execution.transmission_status = transmission
             db.commit()
             return
+        if status == "SUCCESS" and execution.profile == "DOWNLOAD" and (
+                execution.generation_status != "COMPLETE" or not execution.metrics
+                or execution.metrics.get("serialization_complete") is not True
+                or not isinstance(execution.metrics.get("serialized_bytes"), int)):
+            status, generation = "FAILED", "FAILED"
+            error = OperationError(422, "REPORT_STREAM_UNVERIFIED", "La transmisión terminó sin generación completa verificada.")
         execution.status, execution.finished_at = status, utcnow()
         if metrics is not None:
             execution.metrics = metrics
@@ -370,6 +376,9 @@ def list_sources(db: Session, user: User, search: str, offset: int, limit: int,
             "version_total": version_total, "version_offset": version_offset, "version_limit": 100,
             "input_version_id": selection[1].id if selection else None, "input_version": selection[1].version if selection else None,
             "output_version_id": output.id if output else None, "output_version": output.version if output else None,
+            "output_dataset_id": output.dataset_id if output else None,
+            "approval_run_id": selection[0].id if selection else None,
+            "approval_finished_at": iso(selection[0].finished_at) if selection else None,
             "schema": output.schema_json if output else [], "eligibility": eligibility,
             "governance": governance_snapshot(db, dataset)})
     return {"items": items, "total": total, "offset": offset, "limit": limit}

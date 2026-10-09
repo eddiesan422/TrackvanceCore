@@ -13,8 +13,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "scripts/tests"))
 import certification_v080 as guard
 from browser_evidence import run_browser
+from report_resources_085 import configure as configure_report_resources
 
 
 def run(arguments, directory, name):
@@ -84,6 +86,31 @@ def browser_gate(directory, context):
     return result
 
 
+def download_gate(directory, context, rows, source_sha, *, with_browser=False):
+    """Receive results through nginx on the host and retain complete receipts."""
+    limit = 120 if rows == [120] else 1000000
+    uv = shutil.which("uv")
+    if not uv:
+        raise RuntimeError("uv no está disponible para los oráculos cliente de las dependencias bloqueadas.")
+    arguments = [uv, "run", "--frozen", "--project", "backend", "python", str(ROOT / "scripts/tests/reports_download_085.py"),
+                 "--context", str(directory), "--rows", *map(str, rows),
+                 "--limit", str(limit), "--source-sha", source_sha]
+    if with_browser:
+        arguments.append("--with-browser")
+    failure = None
+    try:
+        run(arguments, directory, "host-download-085")
+    except RuntimeError as error:
+        failure = error
+    evidence = directory / "reports-download-085.json"
+    if not evidence.is_file():
+        raise RuntimeError("Falta el receipt obligatorio de descarga HTTP al cliente.") from failure
+    result = json.loads(evidence.read_text(encoding="utf-8"))
+    if failure or result.get("status") != "PASS":
+        raise RuntimeError("La descarga HTTP y sus oráculos completos no pasaron.") from failure
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", nargs="+", type=int, choices=(120, 400000, 1000000), default=[120])
@@ -94,13 +121,19 @@ def main():
     parser.add_argument("--with-browser", action="store_true")
     parser.add_argument("--with-recovery", action="store_true")
     parser.add_argument("--with-ephemeral-observation", action="store_true")
+    parser.add_argument("--with-browser-streaming", action="store_true")
     args = parser.parse_args()
     directory = guard.init("catalog-reports", args.port, args.main_project)
     directory, context = guard.load_context(directory)
-    summary = {"version": "0.8.0", "status": "FAIL", "project": context["project"], "tiers": [],
+    # Only this owned functional scope lowers the product boundary, so the small
+    # fixture exercises both exact admission and rejection before transmission.
+    limit = 120 if args.rows == [120] else 1000000
+    resource_profile = configure_report_resources(directory, context, limit)
+    summary = {"version": "0.8.5", "status": "FAIL", "project": context["project"], "tiers": [],
                "source_sha": guard.command(["git", "rev-parse", "HEAD"]).strip(),
                "source_tree_dirty": bool(guard.command(["git", "status", "--porcelain"]).strip()),
-               "main_inventory_before": context["main_before"], "isolation": "RESOLVED_PREFLIGHT"}
+               "main_inventory_before": context["main_before"], "isolation": "RESOLVED_PREFLIGHT",
+               "private_resource_profile": resource_profile}
     started, began = False, time.monotonic()
     try:
         if not args.reuse_images:
@@ -126,6 +159,8 @@ def main():
             if args.with_browser and rows == 120 and not browser_done:
                 summary["browser"] = browser_gate(directory, context)
                 browser_done = True
+        summary["host_download_085"] = download_gate(directory, context, args.rows, summary["source_sha"],
+                                                    with_browser=args.with_browser_streaming or any(rows > 120 for rows in args.rows))
         if args.with_recovery or args.with_ephemeral_observation:
             # The population fixture has finished. Keep its owned volumes for
             # recovery, but release all running services before another bounded

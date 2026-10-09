@@ -52,17 +52,19 @@ def capacity(group):
         return {"memory_bytes": 4 * GIB, "cpus": 3, "disk_bytes": 20 * GIB}
     if group == "frontend":
         return {"memory_bytes": int(0.75 * GIB), "cpus": 1, "disk_bytes": GIB}
+    if group in {"catalog-reports", "delivery"}:
+        return {"memory_bytes": 8 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     if group.startswith("async-volume-"):
         tier = int(group.rsplit("-", 1)[1])
         return {"memory_bytes": 6 * GIB, "cpus": 2, "disk_bytes": tier * 1024**2 * 12 + 10 * GIB}
-    if group.startswith("corrections-") or group == "catalog-reports":
+    if group.startswith("corrections-"):
         return {"memory_bytes": 6 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     if group == "spark-standalone":
         return {"memory_bytes": 7 * GIB, "cpus": 4.5, "disk_bytes": 20 * GIB}
     if group == "spark-local":
         return {"memory_bytes": 3 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     # Connector fixtures contain separate source/sink DBs with their own limits.
-    if group in {"connections", "delivery", "backup-restore", "delivery-benchmark-smoke"}:
+    if group in {"connections", "backup-restore", "delivery-benchmark-smoke"}:
         return {"memory_bytes": 6 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
     return {"memory_bytes": 3 * GIB, "cpus": 1, "disk_bytes": 20 * GIB}
 
@@ -231,7 +233,7 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                     context = test_context(ROOT, directory, sha, execute, environment)
                 reference = f"trackvance-local-proof:{sha[:12]}-{directory.name[-12:]}-{role}"
                 labels = begin_image_build(image_registry, execution, owner_project, sha,
-                    "0.8.0", role, reference, image_command)
+                    "0.8.5", role, reference, image_command)
                 execute(["docker", "buildx", "build", "--builder", builder, "--load", "--platform", "linux/amd64",
                     *[argument for key, value in labels.items() for argument in ("--label", key + "=" + value)],
                     "-t", reference, "-f", dockerfile, "."],

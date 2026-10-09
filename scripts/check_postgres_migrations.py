@@ -223,6 +223,63 @@ def verify_catalog_preservation(connection, config) -> dict:
             "physical_schema": physical}
 
 
+def verify_people_preservation(connection, config) -> dict:
+    """Prove populated authentic 0017→0019→0017 on PostgreSQL, with frozen history."""
+    import sqlalchemy as sa
+    import verify_storage
+    from alembic import command
+    from physical_schema_guard import validate_physical_schema
+
+    from trackvance.db import Base
+
+    connection.rollback()
+    command.downgrade(config, verify_storage.CATALOG_MIGRATION)
+    connection.commit()
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    for name, table in metadata.tables.items():
+        if name in Base.metadata.tables:
+            for column in table.columns:
+                column.default = Base.metadata.tables[name].c[column.name].default
+    datasets, history = metadata.tables["datasets"], metadata.tables["governance_history"]
+    connection.execute(datasets.update().where(datasets.c.id == "c05-dataset").values(
+        business_owner_id="c05-user", steward_id="c05-user", owner="Texto sin identidad verificable"))
+    snapshot = {"schema_version": 1, "business_owner_id": "c05-user", "name": "Gobierno histórico íntegro"}
+    connection.execute(history.insert().values(id="c08-governance", organization_id="corrections-fixture",
+        dataset_id="c05-dataset", version=1, actor_id="c05-user", snapshot=snapshot))
+    connection.execute(metadata.tables["role_permissions"].insert().values(role_id="c05-role", permission_code="datasets:read"))
+    connection.commit()
+    before, _before_fks = corrections_rows(connection)
+    assert len(before) == 55 and before["datasets"] and before["users"] and before["governance_history"]
+    before_hashes = verify_storage._table_hashes(before)
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    after, after_fks = corrections_rows(connection)
+    projection = verify_storage.legacy_v8_report(after, after_fks, current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=len(before["artifacts"]), verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert projection["tables"] == before_hashes
+    assert len(after["governance_people"]) == 1
+    person = after["governance_people"][0]
+    dataset = next(row for row in after["datasets"] if row["id"] == "c05-dataset")
+    assert dataset["business_owner_person_id"] == dataset["steward_person_id"] == person["id"]
+    assert dataset["technical_custodian_person_id"] is None and person["user_id"] == "c05-user"
+    assert after["governance_history"] == before["governance_history"]
+    physical = validate_physical_schema(connection, Base.metadata)
+    connection.rollback()
+    command.downgrade(config, verify_storage.CATALOG_MIGRATION)
+    connection.commit()
+    restored, _ = corrections_rows(connection)
+    assert verify_storage._table_hashes(restored) == before_hashes
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.8.5",
+        "tables_before": 55, "tables_after": 56, "exact_historical_projection": "PASS", "roundtrip": "PASS",
+        "explicit_user_links_reused": True, "frozen_governance_history_preserved": True, "physical_schema": physical}
+
+
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     """Persist representative 0008 rows, not remote writes or credential files."""
     from sqlalchemy import MetaData
@@ -462,6 +519,7 @@ def check() -> dict:
                 "column_documentation", "glossary_associations", "dataset_blocks",
                 "dataset_security_dependencies", "strict_approvals", "report_definitions",
                 "report_revisions", "report_contexts", "report_executions",
+                "governance_people",
             }
             for name, historical in identity_rows.items():
                 actual = [dict(row) for row in connection.execute(
@@ -472,6 +530,8 @@ def check() -> dict:
                         if row["id"] == "0008-schedule-unresolved":
                             assert row["enabled"] is False
                             row["enabled"] = True  # Only the documented legacy safety pause is projected.
+                if name == "role_permissions":
+                    actual = [row for row in actual if row["permission_code"] != "people:read"]
                 assert actual == historical, f"0012→0016 changed {name}"
             schedule_table, revision_table = upgraded.tables["monitor_schedules"], upgraded.tables["monitor_schedule_versions"]
             unresolved = connection.execute(sa.select(schedule_table).where(schedule_table.c.id == "0008-schedule-unresolved")).mappings().one()
@@ -533,6 +593,7 @@ def check() -> dict:
             connection.commit()
             corrections = verify_corrections_preservation(connection, config)
             catalog = verify_catalog_preservation(connection, config)
+            people = verify_people_preservation(connection, config)
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
                 "0008_0016_roundtrip": "PASS", "0012_0016_preservation": "PASS",
@@ -541,7 +602,7 @@ def check() -> dict:
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
                 "0008_delivery_lineage_edges_preserved": 8,
                 "0015_0017_preservation": corrections,
-                "0016_0017_preservation": catalog}
+                "0016_0017_preservation": catalog, "0017_0019_preservation": people}
     finally:
         if test_engine is not None:
             test_engine.dispose()

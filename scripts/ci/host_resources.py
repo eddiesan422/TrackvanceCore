@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 
 
 def current_cpu_affinity() -> list[int]:
@@ -63,6 +64,8 @@ def limit_cpu_affinity(max_cpus: float) -> dict:
 def sample_process_tree(root_pid: int) -> dict:
     if os.name == "nt":
         return _windows(root_pid)
+    if Path("/proc").is_dir():
+        return _linux(root_pid)
     try:
         import psutil
     except ImportError:
@@ -78,6 +81,37 @@ def sample_process_tree(root_pid: int) -> dict:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return {"status": "PASS", "processes": rows}
+
+
+def _linux(root_pid: int, *, proc_root: Path = Path("/proc")) -> dict:
+    """Read only one owned process and children listed by its own threads."""
+    page_size, ticks = os.sysconf("SC_PAGE_SIZE"), os.sysconf("SC_CLK_TCK")
+    owned, pending, rows = set(), [root_pid], []
+    while pending:
+        pid = pending.pop()
+        if pid in owned:
+            continue
+        try:
+            # comm may contain whitespace or parentheses; fields after its final
+            # delimiter retain their kernel-defined positions.
+            fields = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").rsplit(") ", 1)[1].split()
+            parent = int(fields[1])
+            if pid != root_pid and parent not in owned:
+                continue
+            rows.append({"pid": pid, "rss_bytes": int(fields[21]) * page_size,
+                         "cpu_seconds": (int(fields[11]) + int(fields[12])) / ticks})
+            owned.add(pid)
+            # A process launched by a worker thread belongs to that thread's
+            # children list, so the main thread alone is insufficient.
+            for thread in (proc_root / str(pid) / "task").iterdir():
+                try:
+                    pending.extend(int(child) for child in (thread / "children").read_text(encoding="ascii").split())
+                except (FileNotFoundError, ProcessLookupError, PermissionError):
+                    continue
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue  # A child can exit between ancestry and metric reads.
+    return {"status": "PASS" if root_pid in owned else "UNAVAILABLE", "processes": rows,
+            "mechanism": "OWNED_PROC_TASK_CHILDREN"}
 
 
 def _windows(root_pid: int) -> dict:

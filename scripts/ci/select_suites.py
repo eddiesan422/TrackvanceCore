@@ -116,7 +116,8 @@ def select(mode: str, changed_files: list[str] | None, *, source_sha: str,
     browser_groups = {"compose-functional", "compose-critical", "identity-sso", "connections-functional", "connections",
                       "delivery", "catalog-reports-functional", "catalog-reports", "corrections-browser", "async-volume-100"}
     matrix = {"include": [{"group": g["id"], "job_key": g["job_key"], "timeout_minutes": g["timeout_minutes"],
-                           "python": g["id"].startswith("async-volume-"), "browser": g["id"] in browser_groups}
+                           "python": g["id"].startswith("async-volume-") or g["id"].startswith("catalog-reports"),
+                           "browser": g["id"] in browser_groups}
                           for g in suites]}
     return {"schema_version": 1, "mode": selected_mode, "profile": profile, "requested_mode": mode,
             "source_sha": source_sha, "certifies_final": False,

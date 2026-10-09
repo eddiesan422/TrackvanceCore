@@ -9,8 +9,10 @@ Generated credentials are passed through environment/stdin and never written to 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
@@ -36,6 +38,73 @@ from isolation_profile import (
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-delivery-e2e-"
 FIXTURES = Path(__file__).with_name("fixtures")
+PRIVATE_RESOURCES = {
+    "postgres": (512, 0.10), "api": (768, 0.30), "worker": (512, 0.20),
+    "acquisition-worker": (512, 0.10), "delivery-worker": (512, 0.30),
+    "report-worker": (768, 0.20), "web": (128, 0.05), "mock-oidc": (128, 0.05),
+    "destination-postgres": (256, 0.10), "destination-postgres18": (256, 0.10),
+    "destination-sqlserver": (3072, 0.41), "scheduler": (256, 0.03),
+    "events-notifications": (256, 0.03), "events-chaining": (256, 0.03),
+}
+
+
+def validate_private_resources(profile: dict) -> dict:
+    """Every connector belongs to the same finite aggregate cgroup budget."""
+    from ci.local_resources import memory_bytes
+
+    services = profile["services"]
+    if set(services) != set(PRIVATE_RESOURCES):
+        raise ValueError("DELIVERY_PRIVATE_RESOURCE_TOPOLOGY")
+    memory, cpus = 0, 0.0
+    for name, (mib, cpu_ceiling) in PRIVATE_RESOURCES.items():
+        row = services[name]
+        allocated, cpu = memory_bytes(row["mem_limit"]), float(row["cpus"])
+        if (allocated != mib * 1024**2 or not math.isfinite(cpu)
+                or cpu <= 0 or cpu > cpu_ceiling + 0.000001):
+            raise ValueError("PENDING_CAPACITY: DELIVERY_PRIVATE_PROFILE_REQUIRES_8192_MIB")
+        if row.get("profiles"):
+            raise ValueError("DELIVERY_ALL_FOURTEEN_SERVICES_REQUIRED")
+        memory += allocated
+        cpus += cpu
+    if memory > 8 * 1024**3 or cpus > 2.000001:
+        raise ValueError("DELIVERY_PRIVATE_AGGREGATE_BUDGET")
+    sql = services["destination-sqlserver"]
+    pool = int(sql.get("environment", {}).get("MSSQL_MEMORY_LIMIT_MB", "0"))
+    if pool != 2048 or pool * 1024**2 >= memory_bytes(sql["mem_limit"]):
+        raise ValueError("DELIVERY_SQLSERVER_ENGINE_CGROUP_MISMATCH")
+    for name in ("api", "report-worker"):
+        env = services[name].get("environment", {})
+        engine = int(env.get("REPORT_MEMORY_MB", "512"))
+        process = int(env.get("REPORT_PROCESS_MEMORY_MB", "2048"))
+        if engine != 512 or process != 2048 or engine * 1024**2 >= memory_bytes(services[name]["mem_limit"]):
+            raise ValueError("DELIVERY_REPORT_ENGINE_CGROUP_MISMATCH")
+    return {"status": "PASS", "scope": "OWNED_SMALL_DELIVERY_085_ONLY",
+            "memory_bytes": memory, "memory_ceiling_bytes": 8 * 1024**3,
+            "cpus": round(cpus, 6), "cpu_ceiling": 2,
+            "sqlserver_engine_memory_mib": pool, "sqlserver_cgroup_memory_mib": 3072,
+            "report_engine_memory_mib": 512, "report_process_virtual_memory_mib": 2048,
+            "active_services": sorted(PRIVATE_RESOURCES),
+            "capacity_claim": "FINITE_CONFIG_ONLY_REAL_PEAK_MEASUREMENT_REQUIRED"}
+
+
+def configure_private_resources(profile: dict, project: str) -> dict:
+    """Restore explicit connector budgets after the generic private overlay."""
+    from ci.local_resources import apply_limits
+
+    validated_project_name(project)
+    services = profile["services"]
+    optional = {"report-worker", "destination-postgres", "destination-postgres18", "destination-sqlserver"}
+    if (set(services) - set(PRIVATE_RESOURCES)
+            or not set(PRIVATE_RESOURCES) - optional <= set(services)):
+        raise ValueError("DELIVERY_PRIVATE_RESOURCE_TOPOLOGY")
+    for name, (mib, cpus) in PRIVATE_RESOURCES.items():
+        row = services.setdefault(name, {"pids_limit": 128 if name == "report-worker" else 256})
+        row.update(mem_limit=mib * 1024**2, cpus=cpus)
+        row.pop("profiles", None)
+    services["destination-sqlserver"].setdefault("environment", {}).setdefault("MSSQL_MEMORY_LIMIT_MB", "2048")
+    validate_private_resources(profile)
+    apply_limits(profile, project)
+    return validate_private_resources(profile)  # A reduced SQL cgroup never passes.
 
 _spec = importlib.util.spec_from_file_location(
     "delivery_smoke", ROOT / "scripts" / "smoke_test.py"
@@ -208,9 +277,10 @@ def delivery_draft(
     table_name: str,
     strategy: str,
     create_schema: bool = False,
+    primary_key_columns: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 1 if primary_key_columns is None else 2,
         "dataset_version_id": dataset_version_id,
         "destination_id": destination["id"],
         "destination_version_id": destination["destination_version_id"],
@@ -223,6 +293,8 @@ def delivery_draft(
         "columns": COLUMN_MAPPING,
         "write_strategy": strategy,
         "upsert_keys": ["record_id"] if strategy == "UPSERT" else [],
+        **({"primary_key_mode": "DEFINE" if primary_key_columns else "NONE",
+            "primary_key_columns": primary_key_columns} if primary_key_columns is not None else {}),
     }
 
 
@@ -273,7 +345,7 @@ def publish_and_run(
     checks.verify(
         preflight["status"] == "PASS"
         and all(item["status"] == "PASS" for item in preflight["checks"]),
-        f"{label}: preflight real de solo lectura supera todas las comprobaciones",
+        f"{label}: preflight real sin cambios persistentes supera todas las comprobaciones",
     )
     configuration = api.post(
         "/api/v1/delivery/configurations",
@@ -976,8 +1048,10 @@ def certify_engine(
         if engine == "SQLSERVER"
         else None
     )
+    primary_keys = certify_primary_keys(api, checks, engine, dataset_version_id, destination, credentials, run)
     audit_columns = certify_audit_columns(api, checks, engine, dataset_version_id, destination, password, credentials, run)
     return {
+        "primary_keys": primary_keys,
         "audit_columns": audit_columns,
         "sink_type": engine,
         "destination_id": destination["id"],
@@ -987,6 +1061,97 @@ def certify_engine(
         "collation_guard": collation_guard,
         "status": "PASS",
     }
+
+
+def certify_primary_keys(api, checks, engine, version_id, destination, credentials, run):
+    """R085-02 oracle: real SQL constraints, one backing index and all source rows."""
+    cases = []
+    for table, keys in (("pk_simple_085", ["quantity"]), ("pk_composite_085", ["transaction_code", "quantity"])):
+        draft = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+                               table_name=table, strategy="CREATE_AND_LOAD", primary_key_columns=keys)
+        draft["columns"] = [dict(column) for column in draft["columns"]]
+        if table == "pk_composite_085":
+            draft["columns"][0]["target_name"] = "transaction_code"
+        delivered = publish_and_run(api, checks, draft, f"R085-02 {engine} {table}", credentials)
+        metadata = api.get(f"/api/v1/delivery/destinations/{destination['id']}/table-metadata?" + urlencode(
+            {"schema_name": "existing_delivery", "table_name": table}))
+        constraints = [item for item in metadata["constraints"] if item["type"] == "PRIMARY_KEY"]
+        checks.verify(len(constraints) == 1 and constraints[0]["columns"] == keys,
+                      f"R085-02 {engine}: PK real respeta orden y nombres finales {table}")
+        checks.verify(all(not item["nullable"] for item in metadata["columns"] if item["name"] in keys),
+                      f"R085-02 {engine}: todas las columnas PK son NOT NULL")
+        locator = f'"existing_delivery"."{table}"' if engine == "POSTGRESQL" else f"[existing_delivery].[{table}]"
+        count = int(target_scalar(run, engine, f"SELECT COUNT(*) FROM {locator};"))
+        if engine == "POSTGRESQL":
+            indexes = int(target_scalar(run, engine, f"SELECT COUNT(*) FROM pg_index WHERE indrelid='existing_delivery.{table}'::regclass;"))
+        else:
+            indexes = int(target_scalar(run, engine, f"SELECT COUNT(*) FROM sys.indexes WHERE object_id=OBJECT_ID(N'existing_delivery.{table}') AND index_id>0;"))
+        checks.verify(count == len(DATASET_ROWS) and indexes == 1,
+                      f"R085-02 {engine}: carga completa y único índice de respaldo, sin duplicación")
+        existing = {**draft, "schema_version": 1, "target": {**draft["target"], "mode": "EXISTING_TABLE"}}
+        existing.pop("primary_key_mode")
+        existing.pop("primary_key_columns")
+        existing["write_strategy"] = "APPEND"
+        append_failure = failed_attempt(api, checks, existing, f"R085-02 {engine} APPEND PK", credentials)
+        checks.verify(int(target_scalar(run, engine, f"SELECT COUNT(*) FROM {locator};")) == count,
+                      f"R085-02 {engine}: APPEND duplicado revierte población, conserva PK")
+        existing["write_strategy"] = "OVERWRITE"
+        overwritten = publish_and_run(api, checks, existing, f"R085-02 {engine} OVERWRITE PK", credentials)
+        existing.update(write_strategy="UPSERT", upsert_keys=keys)
+        upserted = publish_and_run(api, checks, existing, f"R085-02 {engine} UPSERT PK", credentials)
+        checks.verify(int(target_scalar(run, engine, f"SELECT COUNT(*) FROM {locator};")) == count,
+                      f"R085-02 {engine}: OVERWRITE/UPSERT posteriores conservan estructura y conteo")
+        after = api.get(f"/api/v1/delivery/destinations/{destination['id']}/table-metadata?" + urlencode(
+            {"schema_name": "existing_delivery", "table_name": table}))
+        checks.verify([item for item in after["constraints"] if item["type"] == "PRIMARY_KEY"] == constraints
+                      and all(not item["nullable"] for item in after["columns"] if item["name"] in keys),
+                      f"R085-02 {engine}: estrategias posteriores preservan la PK y NOT NULL")
+        cases.append({"status": "PASS", "table": table, "primary_key_columns": keys, "rows": count,
+                      "backing_indexes": indexes, "not_null": True, "existing_strategies_preserve_pk": True,
+                      "run": delivered, "append_failure": append_failure, "overwrite": overwritten, "upsert": upserted})
+    none = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+                          table_name="pk_none_085", strategy="CREATE_AND_LOAD", primary_key_columns=[])
+    publish_and_run(api, checks, none, f"R085-02 {engine} sin PK explícita", credentials)
+    metadata = api.get(f"/api/v1/delivery/destinations/{destination['id']}/table-metadata?" + urlencode(
+        {"schema_name": "existing_delivery", "table_name": "pk_none_085"}))
+    checks.verify(not any(item["type"] == "PRIMARY_KEY" for item in metadata["constraints"]),
+                  f"R085-02 {engine}: NONE explícito crea sin inferir una PK")
+    cases.append({"case": "EXPLICIT_NONE", "status": "PASS", "primary_key_mode": "NONE"})
+    repeated = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+                              table_name="pk_repeated_rejected_085", strategy="CREATE_AND_LOAD", primary_key_columns=["is_active"])
+    error = api.request("POST", "/api/v1/delivery/preflight", repeated, expected=(412,)).json()
+    checks.verify(any(item["code"] == "PRIMARY_KEY_SOURCE_KEYS" and item["status"] == "FAIL"
+                      for item in error["error"]["details"]["checks"]),
+                  f"R085-02 {engine}: clave repetida rechazada sobre población completa")
+    cases.append({"case": "REPEATED_POPULATION", "status": "REJECTED_PREFLIGHT"})
+    for problem in ("NULL_BEYOND_PREVIEW", "COLLATION", "NATIVE_KEY_BYTES"):
+        if problem == "COLLATION" and engine != "SQLSERVER":
+            continue
+        rows = [list(DATASET_ROWS[0]) for _ in range(13 if problem == "NULL_BEYOND_PREVIEW" else 2)]
+        for index, row in enumerate(rows):
+            row[0] = ("" if index == 12 else f"K-{index:03}") if problem == "NULL_BEYOND_PREVIEW" else ("COLLIDE" if index == 0 else "collide")
+        if problem == "NATIVE_KEY_BYTES":
+            rows = [list(DATASET_ROWS[0])]
+            rows[0][0] = "X" * 500 if engine == "SQLSERVER" else "".join(hashlib.sha256(str(index).encode()).hexdigest() for index in range(256))
+        dataset = api.post("/api/v1/datasets", {"name": f"R085-02 {engine} {problem}", "domain": "Certificación"})
+        source = api.upload(f"/api/v1/datasets/{dataset['id']}/versions/upload", "pk-rejected.csv",
+                            smoke.csv_bytes(DATASET_COLUMNS, rows), fields={"column_overrides": json.dumps(COLUMN_OVERRIDES)})
+        draft = delivery_draft(source["id"], destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+                               table_name="pk_" + problem.lower() + "_085", strategy="CREATE_AND_LOAD", primary_key_columns=["record_id"])
+        draft["columns"] = [dict(column) for column in draft["columns"]]
+        if problem == "NATIVE_KEY_BYTES":
+            draft["columns"][0]["length"] = 600 if engine == "SQLSERVER" else 20000
+        error = api.request("POST", "/api/v1/delivery/preflight", draft, expected=(412,)).json()
+        code = {"NULL_BEYOND_PREVIEW": "PRIMARY_KEY_SOURCE_KEYS", "COLLATION": "PRIMARY_KEY_DESTINATION_COLLISION", "NATIVE_KEY_BYTES": "PRIMARY_KEY_DESTINATION_LIMIT"}[problem]
+        checks.verify(any(item["code"] == code and item["status"] == "FAIL" for item in error["error"]["details"]["checks"]),
+                      f"R085-02 {engine}: {problem} rechazado sin crear target")
+        if engine == "POSTGRESQL":
+            created = target_scalar(run, engine, f"SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='existing_delivery' AND c.relname='{draft['target']['table_name']}';")
+        else:
+            created = target_scalar(run, engine, f"SELECT COUNT(*) FROM sys.tables WHERE object_id=OBJECT_ID(N'existing_delivery.{draft['target']['table_name']}');")
+        checks.verify(int(created) == 0, f"R085-02 {engine}: preflight inválido no deja tabla final")
+        cases.append({"case": problem, "status": "REJECTED_PREFLIGHT", "source_rows": len(rows)})
+    return {"status": "PASS", "requirement": "R085-02", "cases": cases}
 
 
 def main() -> int:
@@ -1049,19 +1214,13 @@ def main() -> int:
     evidence = args.evidence_dir or ROOT / ".codex-local" / "delivery-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
     compose = isolate_compose(compose, environment, evidence, project)
-    # This focal suite submits only Delivery jobs. Keep the other real processes
-    # available to doctor/heartbeat checks without reserving a Spark-sized JVM.
+    # The integral browser adds a small Polars Intake and real Reportes worker.
+    # No Spark-sized JVM is required for this functional fixture.
     private_profile = evidence / "private-compose.json"
     profile = json.loads(private_profile.read_text(encoding="utf-8"))
-    limits = {"postgres": "512m", "api": "768m", "worker": "256m", "acquisition-worker": "256m",
-              "delivery-worker": "768m", "scheduler": "256m", "events-chaining": "256m",
-              "events-notifications": "256m", "web": "128m", "mock-oidc": "256m"}
-    for name, memory in limits.items():
-        if name in profile["services"]:
-            profile["services"][name]["mem_limit"] = memory
-    from ci.local_resources import apply_limits
-    apply_limits(profile, project)
+    resource_profile = configure_private_resources(profile, project)
     private_profile.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    (evidence / "private-resource-profile.json").write_text(json.dumps(resource_profile, indent=2), encoding="utf-8")
 
     def command(arguments, **kwargs):
         return execute(arguments, environment=environment, credentials=credentials, **kwargs)
@@ -1083,6 +1242,8 @@ def main() -> int:
         existing = preexisting_project_resources(command, project)
         if any(existing.values()):
             raise RuntimeError(f"El proyecto {project} ya tiene recursos; utiliza otro nombre.")
+        resolved_profile = json.loads(command([*compose, "config", "--format", "json"], capture=True))
+        resource_profile = validate_private_resources(resolved_profile)
         started = True
         run(
             ["up", "-d", "--wait", "--wait-timeout", "300",
@@ -1183,13 +1344,38 @@ def main() -> int:
         checks.verify(True, "Secretos ausentes de logs, metadata, auditoría y evidencia")
 
         playwright = "SKIPPED"
+        integral = None
         if not args.skip_playwright:
             pnpm = shutil.which("pnpm")
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
-            browser_args = [] if args.full_playwright else ["tests-e2e/delivery.spec.ts"]
-            run_browser(pnpm, browser_args, root=ROOT, project=project,
-                        environment=environment, evidence=evidence)
+            environment["TV_INTEGRAL_085"] = "true"
+            environment["TV_E2E_DELIVERY_DESTINATION_ID"] = next(item["destination_id"] for item in results if item["sink_type"] == "POSTGRESQL")
+            local_python = ROOT / "backend/.venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            environment["TV_E2E_PYTHON"] = str(local_python) if local_python.is_file() else sys.executable
+            browser_args = [] if args.full_playwright else ["tests-e2e/delivery.spec.ts", "tests-e2e/catalog-reports.spec.ts"]
+            browser_result = run_browser(pnpm, browser_args, root=ROOT, project=project,
+                                         environment=environment, evidence=evidence)
+            if browser_result.get("skipped", 0) or browser_result.get("unexpected", 0):
+                raise RuntimeError("El recorrido integral obligatorio no admite pruebas omitidas o fallidas.")
+            candidates = list((ROOT / ".codex-local/browser-results" / project).rglob("catalog-reports-cycle.json"))
+            if len(candidates) != 1:
+                raise RuntimeError("Falta evidencia única del recorrido integral obligatorio R085.")
+            journey = json.loads(candidates[0].read_text(encoding="utf-8"))
+            delivered = journey.get("delivery") or {}
+            table = delivered.get("table", "")
+            if (journey.get("scope") != "R085_INTEGRAL" or not re.fullmatch(r"ui_integral_085_[0-9]+", table)
+                    or delivered.get("destination_id") != environment["TV_E2E_DELIVERY_DESTINATION_ID"]
+                    or delivered.get("decision") != "COMMITTED" or journey.get("excel", {}).get("rows") != 3):
+                raise RuntimeError("El gate integral no acreditó personas, Excel completo y Delivery confirmado.")
+            remote_rows = int(target_scalar(run, "POSTGRESQL", f'SELECT COUNT(*) FROM "existing_delivery"."{table}";'))
+            ids = target_scalar(run, "POSTGRESQL", f'SELECT string_agg(client_code,\',\' ORDER BY client_code) FROM "existing_delivery"."{table}";')
+            indexes = int(target_scalar(run, "POSTGRESQL", f"SELECT COUNT(*) FROM pg_index WHERE indrelid='existing_delivery.{table}'::regclass;"))
+            checks.verify(remote_rows == 3 and ids == "001,002,003" and indexes == 1,
+                          "R085 integral: SQL independiente confirma todas las filas, ceros iniciales y único índice PK")
+            integral = {"status": "PASS", "scope": "R085_INTEGRAL", "browser": journey,
+                        "remote_sql": {"rows": remote_rows, "client_codes": ids, "backing_indexes": indexes}}
+            (evidence / "integral-085.json").write_text(json.dumps(integral, ensure_ascii=False, indent=2), encoding="utf-8")
             playwright = "PASS"
 
         result = {
@@ -1200,6 +1386,7 @@ def main() -> int:
             "destinations": results,
             "checks": checks.completed,
             "playwright": playwright,
+            "integral": integral,
             "unknown_reproduction": "NOT_RUN_NONDETERMINISTIC",
             "unknown_reproduction_scope": "PHYSICAL_NONDETERMINISTIC_NETWORK_FAILURE",
             "controlled_ack_loss": {

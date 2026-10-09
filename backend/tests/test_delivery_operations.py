@@ -574,7 +574,7 @@ def test_startup_backfill_preserves_all_tables_after_real_preflight(
         assert db.get(Configuration, run.config_id).status == "VALIDATION_PRIVATE"
         assert run.execution_plan["canonical_sha256"]
         before = snapshot(db)
-        assert len(before) == 55
+        assert len(before) == 56
         for _ in range(2):
             backfill_artifacts(db)
             db.commit()

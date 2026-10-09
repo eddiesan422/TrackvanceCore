@@ -145,7 +145,7 @@ describe('Guided delivery builder', () => {
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/delivery/configurations', expect.objectContaining({
       name: 'Publicar ventas', owner: 'Equipo de datos', dataset_version_id: 'version-3', destination_id: 'destination-1', destination_version_id: 'destination-version-2',
-      audit_columns_enabled: true, schema_version: 1, write_strategy: 'UPSERT', upsert_keys: ['sale_id'], target: { mode: 'EXISTING_TABLE', schema_name: 'public', table_name: 'sales', create_schema: false }, columns: expect.arrayContaining([expect.objectContaining({ source_name: 'amount', target_name: 'total_amount', target_type: 'DECIMAL', precision: 12, scale: 2 })]),
+      audit_columns_enabled: true, schema_version: 2, write_strategy: 'UPSERT', upsert_keys: ['sale_id'], target: { mode: 'EXISTING_TABLE', schema_name: 'public', table_name: 'sales', create_schema: false }, columns: expect.arrayContaining([expect.objectContaining({ source_name: 'amount', target_name: 'total_amount', target_type: 'DECIMAL', precision: 12, scale: 2 })]),
     })))
     await act(async () => finishPublication?.())
     expect(await screen.findByText(/Publicada como versión 1/)).toBeInTheDocument()

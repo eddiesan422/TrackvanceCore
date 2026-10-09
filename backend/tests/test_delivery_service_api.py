@@ -131,6 +131,7 @@ def delivery_runtime(monkeypatch, tmp_path):
         test_error=None,
         deliver_error=None,
         deliver_hook=None,
+        primary_key_error=None,
         schemas_items=["sales"],
         tables_by_schema={"sales": ["orders"]},
         metadata=default_metadata(),
@@ -187,6 +188,12 @@ def delivery_runtime(monkeypatch, tmp_path):
         def permissions(self, target, strategy):
             state.calls.append(("permissions", deepcopy(target), strategy))
             return deepcopy(state.permissions)
+
+        def validate_primary_key(self, records, columns, keys):
+            state.calls.append(("validate_primary_key", list(keys), len(records)))
+            if state.primary_key_error is not None:
+                raise state.primary_key_error
+            return {"columns": list(keys), "rows_validated": len(records), "method": "TEST_DOUBLE"}
 
         def deliver_prepared(self, payload):
             state.calls.append(
@@ -500,7 +507,7 @@ def test_delivery_schema_sorts_snapshot_and_rejects_ambiguous_plans(delivery_cas
     draft = DeliveryDraft.model_validate(payload)
 
     assert [item["ordinal"] for item in draft.snapshot()["columns"]] == [0, 1, 2, 3]
-    assert draft.snapshot() == draft.model_dump(mode="json", exclude={"audit_columns_enabled"})
+    assert draft.snapshot() == draft.model_dump(mode="json", exclude={"audit_columns_enabled", "primary_key_mode", "primary_key_columns"})
     assert "audit_columns_enabled" not in draft.snapshot()  # Historical hash compatibility.
 
     invalid_payloads = []

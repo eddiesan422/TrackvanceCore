@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,10 @@ SPARK_REAL_CASES = {
     ("test_spark_engine", name)
     for name in (
         "test_real_spark_catalog_intake_global_references_and_exact_values",
+        "test_r08004_real_spark_effective_coverage_union_parity[overlap-2]",
+        "test_r08004_real_spark_effective_coverage_union_parity[complementary-3]",
+        "test_r08004_real_spark_effective_coverage_union_parity[none-0]",
+        "test_r08004_real_spark_effective_coverage_union_parity[ignore-2]",
         "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[None]",
         "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[SOURCE]",
         "test_real_spark_recon_partitions_decimals_nulls_and_aggregation[TARGET]",
@@ -31,7 +36,8 @@ SPARK_REAL_CASES = {
         "test_real_spark_recon_count_aggregation_preserves_lineage[SOURCE]",
         "test_real_spark_recon_count_aggregation_preserves_lineage[TARGET]",
     )
-} | {("test_spark_service_e2e", "test_real_local_spark_run_publishes_complete_registered_lineage")}
+} | {("test_spark_service_e2e", "test_real_local_spark_run_publishes_complete_registered_lineage"),
+     ("test_spark_service_e2e", "test_r08503_real_spark_publication_preserves_declared_schema_and_identifiers")}
 
 
 def junit_document(path: Path) -> dict[str, Any]:
@@ -98,6 +104,68 @@ def browser(value: dict[str, Any], expected: int | None = None) -> None:
     require(all(value.get(k) == 0 for k in ("skipped", "unexpected", "flaky")), "BROWSER_SKIP_FAILURE_OR_FLAKY")
 
 
+def ephemeral_http_observation(value: dict[str, Any]) -> None:
+    """Observe real syscalls for success, before/after-header failure and disconnect."""
+    passing(value)
+    names = {"PREVIEW_SUCCESS", "PREVIEW_LARGE_CONTEXT_REQUEST", "PREVIEW_RESOURCE_FAILURE", "PREVIEW_CONSUMER_DISCONNECT",
+             "CSV_SUCCESS", "CSV_RESOURCE_FAILURE", "CSV_CONSUMER_DISCONNECT", "XLSX_SUCCESS", "XLSX_RESOURCE_FAILURE",
+             "XLSX_CONSUMER_DISCONNECT", "XLSX_LATE_SERIALIZATION_FAILURE", "XLSX_CELL_LIMIT", "CSV_CELL_BYTES",
+             "CSV_SERIALIZED_BYTES", "CSV_DEADLINE_EXPIRED", "CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"}
+    stream_errors = {"XLSX_CELL_LIMIT": "REPORT_XLSX_CELL_LIMIT", "CSV_CELL_BYTES": "REPORT_CELL_LIMIT",
+                     "CSV_SERIALIZED_BYTES": "REPORT_DOWNLOAD_BYTES", "CSV_DEADLINE_EXPIRED": "REPORT_TIMEOUT",
+                     "CSV_APPROVAL_REVOKED": "REPORT_SOURCE_REVOKED", "CSV_FROZEN_VERSION_DRIFT": "REPORT_SOURCE_CHANGED"}
+    cases = value.get("cases", [])
+    require(len(cases) == len(names) and {case.get("name") for case in cases} == names and value.get("main_unchanged") is True
+            and value.get("version") == "0.8.5" and value.get("requirement") == "R085-01", "EPHEMERAL_CASES_MISSING")
+    require(value.get("trace_scope") == "REAL_NGINX_API_AND_CONFINED_CHILDREN" and value.get("privileges_added") is False
+            and value.get("raw_traces_published") is False, "EPHEMERAL_OBSERVATION_SCOPE")
+    source_metadata = value.get("metadata_storage_baseline", {}).get("protected_source_metadata_sha256")
+    digest(source_metadata)
+    for case in cases:
+        passing(case)
+        require(case.get("storage_and_artifact_metadata_unchanged") is True and case.get("active_report_children_after") == 0,
+                "EPHEMERAL_TEMPORALS_OR_CHILDREN")
+        require(case.get("source_metadata_sha256_after") == source_metadata, "EPHEMERAL_SOURCE_METADATA_CHANGED")
+        traces = case.get("during_execution", {})
+        require(set(traces) == {"api", "proxy"}, "EPHEMERAL_TRACES_MISSING")
+        for trace in traces.values():
+            passing(trace, "EPHEMERAL_TRACE_NOT_PASS")
+            require(trace.get("violations") == {} and trace.get("raw_trace_published") is False
+                    and type(trace.get("observed_syscalls")) is int and trace["observed_syscalls"] > 0
+                    and bool(trace.get("syscall_counts")), "EPHEMERAL_TRACE_INCOMPLETE")
+            digest(trace.get("sha256"))
+        if case["name"] in {"CSV_RESOURCE_FAILURE", "XLSX_RESOURCE_FAILURE"}:
+            require(case.get("execution_status") == "FAILED" and case.get("generation") == "FAILED"
+                    and case.get("transmission") == "NOT_STARTED" and case.get("http_status") == 422
+                    and case.get("bytes_delivered") == 0 and case.get("error_code") == "REPORT_RESULT_LIMIT"
+                    and case.get("failure_stage") == "FINAL_COUNT_BEFORE_HEADERS", "EPHEMERAL_PREFLIGHT_FAILURE_MISSING")
+        elif case["name"] == "XLSX_LATE_SERIALIZATION_FAILURE":
+            require(case.get("execution_status") == "FAILED" and case.get("generation") == "FAILED"
+                    and case.get("transmission") == "INTERRUPTED" and case.get("http_status") == 200
+                    and case.get("bytes_delivered", 0) > 0 and case.get("error_code") == "REPORT_XLSX_CHARACTER"
+                    and case.get("incomplete_zip") is True and case.get("original_error_preserved") is True
+                    and case.get("failure_stage") == "SERIALIZATION_AFTER_HEADERS", "EPHEMERAL_LATE_FAILURE_MISSING")
+        elif case["name"] in {"CSV_SUCCESS", "XLSX_SUCCESS"}:
+            require(case.get("execution_status") == "SUCCESS" and case.get("generation") == "COMPLETE"
+                    and case.get("transmission") == "COMPLETE" and case.get("rows") == 180 and case.get("bytes", 0) > 1048576,
+                    "EPHEMERAL_COMPLETE_POPULATION_MISSING")
+            digest(case.get("population_sha256"))
+        elif case["name"] in {"CSV_CONSUMER_DISCONNECT", "XLSX_CONSUMER_DISCONNECT"}:
+            require(case.get("execution_status") == "INTERRUPTED" and case.get("transmission") == "INTERRUPTED",
+                    "EPHEMERAL_DISCONNECT_MISSING")
+        elif case["name"] in stream_errors:
+            require(case.get("execution_status") == "FAILED" and case.get("generation") == "FAILED"
+                    and case.get("transmission") == "INTERRUPTED" and case.get("http_status") == 200
+                    and case.get("bytes_delivered", 0) > 0 and case.get("error_code") == stream_errors[case["name"]]
+                    and case.get("original_error_preserved") is True and case.get("failure_stage") == "DURING_STREAM",
+                    "EPHEMERAL_STREAM_FAILURE_MISSING")
+            if case["name"] == "CSV_DEADLINE_EXPIRED":
+                require(case.get("fault_injection") == "PERSISTED_DEADLINE_EXPIRED", "EPHEMERAL_DEADLINE_PROOF_MISSING")
+            elif case["name"] in {"CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"}:
+                require(case.get("fault_injection") == "OWNED_SYNTHETIC_METADATA"
+                        and case.get("fixture_source_metadata_restored") is True, "EPHEMERAL_SOURCE_FAULT_PROOF_MISSING")
+
+
 def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
     """All applicable specs run; foreign fixtures are covered by dedicated groups."""
     opt_ins = {
@@ -109,7 +177,9 @@ def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
         'volume.spec.ts': ('TV_VOLUME_E2E', 'async-volume-100'),
         'identity-sso.spec.ts': ('TV_IDENTITY_SSO_E2E', 'identity-sso'),
         'roadmap-source-cycle.spec.ts': ('TV_CONNECTIONS_E2E', 'connections'),
+        'reports-download-opfs.spec.ts': ('TV_REPORT_DOWNLOAD_OPFS', 'catalog-reports'),
     }
+
     required = spec['browser_required_specs']
     selected = value.get('selected_spec_files')
     require(isinstance(selected, list) and sorted(selected) == sorted(required)
@@ -126,6 +196,38 @@ def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
             and inventory == set(required) | {row['file'] for row in expected_exclusions},
             'BROWSER_UNEXPECTED_SPEC_OMISSION')
 
+
+def selective_cleanup_receipt(value: dict, source_sha: str) -> None:
+    """Require the real PostgreSQL owned-copy trial, including restore and crash recovery."""
+    passing(value)
+    require(value.get("scope") == "OWNED_RESTORED_POSTGRES_COPY" and value.get("database") == "POSTGRESQL"
+            and bool(re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", value.get("project", "")))
+            and value.get("source_sha") == source_sha, "SELECTIVE_CLEANUP_NATIVE_SCOPE_OR_COMMIT")
+    require(value.get("schema_version") == 9 and value.get("migration") == "0019_governance_people"
+            and value.get("tables") == 56, "SELECTIVE_CLEANUP_NATIVE_SCHEMA")
+    require(value.get("verified_restore") == "STOPPED_VERIFIED"
+            and bool(re.fullmatch(r"trackvance-v080-test-cleanuprestore085-[a-f0-9]{12}", value.get("verified_restore_project", "")))
+            and value.get("verified_restore_project") != value.get("project"), "SELECTIVE_CLEANUP_REAL_RESTORE_MISSING")
+    for field in ("backup_manifest_sha256", "verified_state_sha256", "plan_sha256"):
+        digest(value.get(field))
+    require(all(value.get(field) == "PASS" for field in ("dry_plan_read_only", "fault_rollback", "abrupt_fault_recovery",
+        "metadata_transaction", "sql_relationships", "protected_hashes", "protected_secret_bytes", "unknown_barrier_preserved", "files_quarantined", "reset_audit")),
+        "SELECTIVE_CLEANUP_FAULT_PROTECTION_OR_SQL_MISSING")
+    require(value.get("external_destinations_touched") is False and value.get("backup_retained") is True
+            and value.get("usual_inventory") == "UNCHANGED" and value.get("reset_audit_added") == 1,
+            "SELECTIVE_CLEANUP_EXTERNAL_BACKUP_OR_AUDIT")
+    protected = {"users", "roles", "role_permissions", "sessions", "external_identities", "oidc_login_attempts",
+        "external_connections", "external_connection_versions", "delivery_destinations", "delivery_destination_versions",
+        "delivery_target_guards", "delivery_target_policies", "delivery_target_decisions", "macro_domains", "data_domains",
+        "glossary_terms", "governance_people", "dataset_blocks", "dataset_security_dependencies"}
+    removed = value.get("removed_counts", {})
+    require(set(value.get("protected_tables", [])) == protected and all(removed.get(name) == 0 for name in protected | {"audit_events"})
+            and removed.get("datasets") == 2 and all(removed.get(name, 0) > 0 for name in ("dataset_versions", "runs", "jobs",
+                "configurations", "monitor_schedules", "monitor_schedule_versions", "report_definitions", "report_revisions",
+                "report_contexts", "report_executions", "strict_approvals", "outbox_events", "event_consumptions", "internal_notifications"))
+            and value.get("quarantined_files", 0) > 0 and value.get("verified_surviving_artifacts", 0) > 0
+            and value.get("protected_secret_volumes") == 4 and value.get("unknown_run_id") and value.get("protected_dataset_id"),
+            "SELECTIVE_CLEANUP_IDS_DEPENDENCIES_OR_FILES")
 
 def full_profile(value: dict[str, Any], fixture: dict[str, Any], rows: int) -> None:
     require(value.get("row_count") == rows, "INCOMPLETE_GLOBAL_PROFILE")
@@ -158,8 +260,8 @@ def restore(value: dict[str, Any], version: str) -> None:
     require(value.get("source_destroyed_before_restore") is True, "RESTORE_SOURCE_NOT_DESTROYED")
     require(value.get("main_inventory") == "UNCHANGED", "RESTORE_MAIN_CHANGED")
     require(not value.get("cleanup_error_type") and not value.get("error_type"), "RESTORE_CLEANUP_OR_RUNTIME_ERROR")
-    if version == "0.8.0":
-        require(value.get("state_schema_version") == 8 and value.get("alembic_revision") == "0017_catalog_reports", "RESTORE_SCHEMA_MISMATCH")
+    if version == "0.8.5":
+        require(value.get("state_schema_version") == 9 and value.get("alembic_revision") == "0019_governance_people", "RESTORE_SCHEMA_MISMATCH")
         require(value.get("persistence_exact_comparison") == "PASS"
                 and value.get("immutable_comparison_before_automatic_processes") == "PASS", "RESTORE_NOT_EXACT")
         passing(value.get("plaintext_backup_scan", {}))
@@ -169,18 +271,18 @@ def restore(value: dict[str, Any], version: str) -> None:
         migration = value.get("postgres_migration", {})
         passing(migration)
         physical = migration.get("0016_0017_preservation", {}).get("physical_schema", {})
-        require(physical.get("tables") == 55, "RESTORE_PHYSICAL_SCHEMA")
+        require(physical.get("tables") == 56, "RESTORE_PHYSICAL_SCHEMA")
     else:
-        require(value.get("source_version") == version and value.get("target_version") == "0.8.0", "HISTORICAL_RESTORE_VERSION")
+        require(value.get("source_version") == version and value.get("target_version") == "0.8.5", "HISTORICAL_RESTORE_VERSION")
         require(value.get("restore") == "STOPPED_VERIFIED" and value.get("automatic_processes_started") is False,
                 "RESTORE_CONSUMERS_ACTIVATED")
         require(value.get("exact_historical_state") == "PASS", "HISTORICAL_STATE_NOT_EXACT")
         digest(value.get("source_state_sha256"))
         require(value.get("source_state_sha256") == value.get("restored_legacy_sha256"), "HISTORICAL_STATE_HASH_MISMATCH")
         if version == "0.6.1":
-            require(value.get("native_tables") == 55 and value.get("new_catalog_tables_empty") is True, "LEGACY061_NEW_TABLES")
+            require(value.get("native_tables") == 56 and value.get("new_catalog_tables_empty") is True, "LEGACY061_NEW_TABLES")
         else:
-            require(value.get("migration") == "0017_catalog_reports" and value.get("state_schema_version") == 8,
+            require(value.get("migration") == "0019_governance_people" and value.get("state_schema_version") == 9,
                     "HISTORICAL_SCHEMA_MISMATCH")
             require(value.get("cleanup") == "PASS" and value.get("log_secret_scan") == "PASS", "HISTORICAL_CLEANUP_OR_SECRETS")
 
@@ -190,8 +292,8 @@ def native_fixture_restore(value: dict[str, Any]) -> None:
     passing(value, "NATIVE_FIXTURE_RESTORE_NOT_PASS")
     require(value.get("main_inventory") == "UNCHANGED" and value.get("automatic_processes_started") is False
             and value.get("restore") == "STOPPED_VERIFIED", "NATIVE_FIXTURE_RESTORE_CONSUMERS_OR_MAIN")
-    require(value.get("revision") == "0017_catalog_reports" and value.get("state_schema_version") == 8
-            and value.get("tables") == 55, "NATIVE_FIXTURE_RESTORE_SCHEMA")
+    require(value.get("revision") == "0019_governance_people" and value.get("state_schema_version") == 9
+            and value.get("tables") == 56, "NATIVE_FIXTURE_RESTORE_SCHEMA")
     require(all(value.get(k) == "PASS" for k in ("multipart_integrity", "historical_bytes_and_hashes", "exact_state_comparison")),
             "NATIVE_FIXTURE_RESTORE_NOT_EXACT")
     digest(value.get("source_state_sha256"))
@@ -224,20 +326,93 @@ def catalog_population(value: dict[str, Any], rows: int) -> None:
     for kind, limit in (("csv", 100000), ("xlsx", 50000)):
         exported = value.get(kind, {})
         passing(exported)
-        require(exported.get("rows") == min(counts["INNER"], limit) and exported.get("max_rows") == limit,
+        require(exported.get("rows") == min(counts["INNER"], limit) and exported.get("query_limit") == limit
+                and exported.get("max_rows") in {120, 1000000},
                 "CATALOG_EXPORT_POPULATION")
         require(exported.get("generation") == "COMPLETE" and exported.get("transmission") == "COMPLETE", "CATALOG_EXPORT_INTERRUPTED")
         digest(exported.get("sha256"))
-        if rows > 200000:
-            rejected = value.get(kind + "_above_limit", {})
-            passing(rejected)
-            require(rejected.get("requested_rows") == limit + 1 and rejected.get("execution_status") == "FAILED"
-                    and rejected.get("error_code") == "REPORT_RESULT_LIMIT", "CATALOG_EXPORT_LIMIT_NEGATIVE_MISSING")
+    require(value.get("above_limit_gate") == "HOST_DOWNLOAD_085_REQUIRED", "CATALOG_FINAL_LIMIT_GATE_MISSING")
     require(value.get("parent_block_propagation") == "PASS", "DERIVED_AUTHORIZATION_MISSING")
     if rows == 120:
         passing(value.get("bounded_many_to_many", {}))
     else:
         passing(value.get("many_to_many_expansion_rejected", {}))
+
+
+def catalog_download_receipt(value: dict[str, Any], expected_rows: list[int], source_sha: str) -> None:
+    """Require actual host transfers, full oracles and rejected final cap+1."""
+    passing(value, "CATALOG_HOST_DOWNLOAD_RECEIPT_MISSING")
+    limit = 120 if expected_rows == [120] else 1000000
+    require(value.get("source_sha") == source_sha and value.get("main_unchanged") is True,
+            "CATALOG_HOST_DOWNLOAD_SOURCE_OR_MAIN")
+    require(value.get("requested_result_rows") == expected_rows and value.get("product_row_limit_under_test") == limit
+            and value.get("customers") == min(100000, limit // 10)
+            and value.get("transactions_input") == limit + 1, "CATALOG_HOST_DOWNLOAD_POPULATION")
+    limits = value.get("effective_limits", {}).get("profiles", {})
+    require(limits.get("DOWNLOAD", {}).get("max_rows") == limits.get("XLSX", {}).get("max_rows") == limit
+            and limits.get("PREVIEW", {}).get("max_rows") == 10, "CATALOG_HOST_EFFECTIVE_LIMITS")
+    require(value.get("client_result_storage") == "PRIVATE_HOST_ONLY" and value.get("output_data_published") is False,
+            "CATALOG_HOST_DOWNLOAD_CLIENT_STORAGE")
+    resources = value.get("client_resources", {})
+    passing(resources, "CATALOG_HOST_RESOURCES_UNAVAILABLE")
+    require(0 < resources.get("samples", 0) and 0 < resources.get("sampled_peak_rss_bytes", 0)
+            <= resources.get("budget_bytes", 0), "CATALOG_HOST_RESOURCE_BUDGET")
+    sources = value.get("sources", [])
+    require(len(sources) == 2 and {item.get("alias") for item in sources} == {"t", "c"}, "CATALOG_HOST_SOURCE_COVERAGE")
+    require(all(item.get("status") == "PASS" and item.get("approval_id") and item.get("output_version_id") for item in sources),
+            "CATALOG_HOST_SOURCE_APPROVAL")
+    for item in sources:
+        require(item.get("rows") == (limit + 1 if item["alias"] == "t" else min(100000, limit // 10)),
+                "CATALOG_HOST_SOURCE_POPULATION")
+        digest(item.get("input_fixture_sha256"))
+        require(item.get("input_fixture_bytes", 0) > 0, "CATALOG_HOST_INPUT_BYTES")
+    downloads = value.get("downloads", [])
+    require(len(downloads) == len(expected_rows) * 2, "CATALOG_HOST_DOWNLOAD_FORMAT_COVERAGE")
+    expected = {(rows, kind) for rows in expected_rows for kind in ("CSV", "XLSX")}
+    observed = set()
+    for download in downloads:
+        passing(download)
+        kind = download.get("format")
+        oracle_key = "independent_csv" if kind == "CSV" else "independent_xml"
+        oracle = download.get(oracle_key, {})
+        rows = oracle.get("rows")
+        require((rows, kind) in expected and (rows, kind) not in observed, "CATALOG_HOST_DOWNLOAD_ORACLE_COVERAGE")
+        observed.add((rows, kind))
+        require(oracle == value.get("oracles", {}).get(str(rows)), "CATALOG_HOST_DOWNLOAD_ORACLE_MISMATCH")
+        digest(oracle.get("ordered_logical_sha256"))
+        digest(download.get("file_sha256"))
+        require(download.get("terminal_status") == "SUCCESS" and download.get("generation_status") == "COMPLETE"
+                and download.get("transmission_status") == "COMPLETE" and download.get("bytes_received", 0) > 0
+                and download.get("server_metrics", {}).get("serialized_bytes") == download["bytes_received"]
+                and download.get("server_metrics", {}).get("rows") == rows
+                and download.get("server_metrics", {}).get("serialization_complete") is True, "CATALOG_HOST_DOWNLOAD_TERMINAL")
+        if kind == "XLSX":
+            passing(download.get("ooxml", {}))
+            require(download.get("independent_openpyxl") == oracle and download.get("physical_rows") == rows + 1
+                    and download["ooxml"].get("crc") == "ALL_ENTRIES_PASS", "CATALOG_HOST_XLSX_READER")
+    excess = value.get("excess", [])
+    require(len(excess) == 2 and {item.get("format") for item in excess} == {"CSV", "XLSX"}, "CATALOG_HOST_EXCESS_COVERAGE")
+    for item in excess:
+        passing(item)
+        require(item.get("http_status") == 422 and item.get("result_bytes_received") == 0
+                and item.get("error_code") == "REPORT_RESULT_LIMIT" and item.get("terminal_status") == "FAILED"
+                and item.get("generation_status") == "FAILED" and item.get("transmission_status") == "NOT_STARTED"
+                and item.get("output_version_id") is None and item.get("execution_id"),
+                "CATALOG_HOST_EXCESS_BEFORE_TRANSFER")
+    final = value.get("final_limit", {})
+    passing(final)
+    require(final.get("independent_csv") == value.get("oracles", {}).get(str(expected_rows[0])),
+            "CATALOG_HOST_FINAL_LIMIT_NOT_INTERMEDIATE")
+    if any(rows > 120 for rows in expected_rows) or value.get("browser_streaming_requested") is True:
+        streamed = value.get("browser_streaming", {})
+        passing(streamed, "CATALOG_HOST_BROWSER_STREAMING_MISSING")
+        require(streamed.get("method") == "REAL_OPFS_FILE_HANDLE" and streamed.get("rows") == max(expected_rows)
+                and streamed.get("independent_xml") == streamed.get("independent_openpyxl")
+                == value.get("oracles", {}).get(str(max(expected_rows)))
+                and streamed.get("physical_rows") == max(expected_rows) + 1
+                and streamed.get("generation_status") == streamed.get("transmission_status") == "COMPLETE"
+                and streamed.get("bounded_memory_fallback_used") is False, "CATALOG_HOST_BROWSER_STREAMING_ORACLE")
+        browser(streamed.get("browser", {}), 1)
 
 
 def valid_fingerprint(value: Any) -> bool:
@@ -386,6 +561,34 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
             passing(destination)
             require(len(destination.get("runs", [])) >= 4 and destination.get("audit_columns", {}).get("status") == "PASS",
                     "DELIVERY_STRATEGY_OR_AUDIT_MISSING")
+            primary = destination.get("primary_keys", {})
+            passing(primary)
+            cases = primary.get("cases", [])
+            require(primary.get("requirement") == "R085-02"
+                    and {case.get("table") for case in cases if case.get("table")} == {"pk_simple_085", "pk_composite_085"}
+                    and all(case.get("status") == "PASS" and case.get("backing_indexes") == 1 and case.get("rows") == 3
+                            and case.get("not_null") is True and case.get("existing_strategies_preserve_pk") is True
+                            and case.get("primary_key_columns") == ({"pk_simple_085": ["quantity"],
+                                 "pk_composite_085": ["transaction_code", "quantity"]}.get(case.get("table")))
+                            for case in cases if case.get("table"))
+                    and {"NULL_BEYOND_PREVIEW", "REPEATED_POPULATION", "NATIVE_KEY_BYTES"} <= {
+                        case.get("case") for case in cases if case.get("status") == "REJECTED_PREFLIGHT"}
+                    and any(case.get("case") == "EXPLICIT_NONE" and case.get("status") == "PASS"
+                            and case.get("primary_key_mode") == "NONE" for case in cases),
+                    "DELIVERY_PRIMARY_KEY_COVERAGE_MISSING")
+            if destination.get("sink_type") == "SQLSERVER":
+                require(any(case.get("case") == "COLLATION" and case.get("status") == "REJECTED_PREFLIGHT" for case in cases),
+                        "DELIVERY_PRIMARY_KEY_COLLATION_MISSING")
+        integral = value.get("integral", {})
+        passing(integral)
+        require(integral.get("scope") == "R085_INTEGRAL"
+                and integral.get("remote_sql", {}).get("rows") == 3
+                and integral.get("remote_sql", {}).get("backing_indexes") == 1
+                and integral.get("remote_sql", {}).get("client_codes") == "001,002,003"
+                and integral.get("browser", {}).get("person_id")
+                and integral.get("browser", {}).get("excel", {}).get("crc") == "PASS"
+                and integral.get("browser", {}).get("delivery", {}).get("decision") == "COMMITTED",
+                "DELIVERY_INTEGRAL_085_MISSING")
         passing(value.get("controlled_ack_loss", {}))
         require(value.get("controlled_ack_loss", {}).get("automatic_replay") is False and value.get("playwright") == "PASS"
                 and value.get("postgres_metrics_matrix"), "DELIVERY_UNKNOWN_OR_METRICS_MISSING")
@@ -394,6 +597,8 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
     elif profile.startswith("catalog-"):
         passing(value)
         require(value.get("main_unchanged") is True and value.get("source_tree_dirty") is False, "CATALOG_MAIN_OR_DIRTY_TREE")
+        catalog_download_receipt(value.get("host_download_085", {}),
+                                 [tier["rows_per_source"] for tier in value.get("tiers", [])], value.get("source_sha", ""))
         if profile == "catalog-population":
             tiers = [t for t in value.get("tiers", []) if t.get("rows_per_source") == rows]
             require(len(tiers) == 1, "CATALOG_TIER_MISSING_OR_DUPLICATE")
@@ -411,27 +616,28 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
                     and snapshot.get("existing_application_tables_and_artifacts_touched") is False,
                     "JOINT_SNAPSHOT_INCONSISTENT_OR_NOT_ISOLATED")
         elif profile == "catalog-http":
-            observation = value.get("ephemeral_http_observation", {})
-            passing(observation)
-            cases = observation.get("cases", [])
-            require(len(cases) == 10 and len({c.get("name") for c in cases}) == 10 and observation.get("main_unchanged") is True,
-                    "EPHEMERAL_CASES_MISSING")
-            for case in cases:
-                passing(case)
-                require(case.get("storage_and_artifact_metadata_unchanged") is True
-                        and case.get("active_report_children_after") == 0, "EPHEMERAL_TEMPORALS_OR_CHILDREN")
+            ephemeral_http_observation(value.get("ephemeral_http_observation", {}))
+        elif profile == "catalog-cleanup":
+            passing(value.get("recovery", {}))
+            selective_cleanup_receipt(value.get("recovery", {}).get("native", {}).get("selective_cleanup", {}), value.get("source_sha", ""))
         else:
             recovery = value.get("recovery", {})
             passing(recovery)
             recovered = recovery.get(spec["mode"], {})
             passing(recovered)
-            require(recovered.get("tables_after") == 55 and recovered.get("automatic_processes_started") is False
+            require(recovered.get("tables_after") == 56 and recovered.get("automatic_processes_started") is False
                     and recovered.get("exact_state_comparison") == "PASS", "CATALOG_RECOVERY_INCOMPLETE")
             digest(recovered.get("source_state_sha256"))
             require(recovered.get("source_state_sha256") == recovered.get("restored_projection_sha256"), "CATALOG_RECOVERY_HASH_MISMATCH")
             if spec["mode"] == "legacy":
                 require(recovered.get("source_version") == "0.7.0" and recovered.get("tables_before") == 42
                         and recovered.get("new_tables_empty") is True, "AUTHENTIC070_RECOVERY_NOT_AUTHENTIC")
+            elif spec["mode"] == "legacy080":
+                require(recovered.get("source_version") == "0.8.0" and recovered.get("target_version") == "0.8.5"
+                        and recovered.get("tables_before") == 55 and recovered.get("source_destroyed_before_restore") is True
+                        and recovered.get("baseline_commit") == "4eaaeb774878bca62d7d6f758157107f0557512e"
+                        and recovered.get("functional_restored_bindings") == "DEFINITION_REVISIONS_EXECUTION_PROFILE_LINEAGE_CURRENT_BLOCK_PASS",
+                        "AUTHENTIC080_RECOVERY_NOT_AUTHENTIC")
             else:
                 before, after = recovered.get("new_entity_counts_before", {}), recovered.get("new_entity_counts_after", {})
                 require(recovered.get("all_thirteen_new_entities_populated") is True
@@ -443,6 +649,7 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
                         "CATALOG_RESTORED_BLOCK_NOT_ENFORCED")
                 if before or after:
                     require(len(before) == 13 and all(n > 0 for n in before.values()) and before == after, "CATALOG_ENTITIES_NOT_PRESERVED")
+                selective_cleanup_receipt(recovered.get("selective_cleanup", {}), value.get("source_sha", ""))
     elif profile == "benchmark":
         passing(value)
         require(value.get("requested", {}).get("rows") == rows and value.get("requested", {}).get("file_only") is True

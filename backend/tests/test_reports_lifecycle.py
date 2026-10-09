@@ -12,7 +12,7 @@ from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from trackvance.db import utcnow
-from trackvance.governance import strict_approval
+from trackvance.governance import dataset_eligibility, strict_approval
 from trackvance.governance_models import (
     DataDomain,
     DatasetBlock,
@@ -96,6 +96,19 @@ def test_joint_resolution_freezes_approved_output_and_rejects_fallback(database,
         assert rejected.value.code == "REPORT_SOURCE_INELIGIBLE"
 
 
+def test_r08504_input_links_exact_approved_output_without_inheriting_approval(database, report_draft):
+    with database() as db:
+        user = db.get(User, "test-user")
+        source = resolve(db, user, report_draft).snapshot["sources"][0]
+        eligibility = dataset_eligibility(db, user, db.get(DatasetVersion, source["input_version_id"]))
+        assert not eligibility["eligible"] and not eligibility["strict_approval"]["approved"]
+        assert eligibility["related_approved_output"] == {key: source[key] for key in (
+            "output_dataset_id", "output_version_id", "approval_run_id", "input_dataset_id", "input_version_id")}
+        assert "INPUT_HAS_APPROVED_OUTPUT" in {reason["code"] for reason in eligibility["reasons"]}
+        output = db.get(DatasetVersion, source["output_version_id"])
+        assert dataset_eligibility(db, user, output)["strict_approval"]["approved"]
+
+
 def test_context_expiry_owner_and_integrity(database, report_draft):
     with database() as db:
         user = db.get(User, "test-user")
@@ -119,6 +132,24 @@ def test_context_expiry_owner_and_integrity(database, report_draft):
         with pytest.raises(OperationError) as error:
             resolved_context(db, context.id, user)
         assert error.value.code == "REPORT_CONTEXT_INTEGRITY"
+
+
+def test_r08004_frozen_source_rechecks_current_full_coverage_criterion(database, report_draft):
+    with database() as db:
+        user = db.get(User, "test-user")
+        context = resolve(db, user, report_draft)
+        frozen, digest = copy.deepcopy(context.snapshot), context.integrity_hash
+        run = db.get(Run, frozen["sources"][0]["approval_run_id"])
+        original_decision = run.decision
+        # Emulate a historical index accepted under the prior partial criterion.
+        run.metrics = {**run.metrics, "validation_coverage_rows": run.metrics["total_rows"] - 1}
+        db.commit()
+        with pytest.raises(OperationError) as revoked:
+            revalidate(db, context, user, "reports:preview")
+        assert revoked.value.code == "REPORT_SOURCE_REVOKED"
+        assert "VALIDATION_COVERAGE_INCOMPLETE" in {reason["code"] for reason in revoked.value.details["reasons"]}
+        assert run.decision == original_decision
+        assert context.snapshot == frozen and context.integrity_hash == digest
 
 
 def test_full_evidence_hashing_runs_outside_resolution_and_detects_corruption(database, report_draft):

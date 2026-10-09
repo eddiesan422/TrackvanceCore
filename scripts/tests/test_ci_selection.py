@@ -80,13 +80,17 @@ def test_deep_preserves_all_historical_large_populations_xlsx_and_recovery():
     assert len(groups) == 19
     assert len({j for g in groups for j in g['covers_legacy_jobs']}) == 16
     scenarios = [s for g in groups for s in g['scenarios']]
-    assert len(scenarios) == len({s['id'] for s in scenarios}) == 64
+    assert len(scenarios) == len({s['id'] for s in scenarios}) == 66
     acquisitions = next(g for g in groups if g['id'] == 'corrections-acquisition')['scenarios']
     assert {(s.get('rows'), s.get('variant')) for s in acquisitions if s['validator'] == 'xlsx-acquisition'} == {
         (rows, variant) for rows in (100000, 100001, 400000, 1000000) for variant in ('inline', 'shared')}
     catalog = next(g for g in groups if g['id'] == 'catalog-reports')['scenarios']
     assert {s.get('rows') for s in catalog if s['validator'] == 'catalog-population'} == {120, 400000, 1000000}
-    assert {s.get('mode') for s in catalog if s['validator'] == 'catalog-recovery'} == {'native', 'legacy'}
+    assert {s.get('mode') for s in catalog if s['validator'] == 'catalog-recovery'} == {'native', 'legacy', 'legacy080'}
+    assert [s for s in catalog if s['id'] == 'catalog-populated080-upgrade085'] == [
+        {'id': 'catalog-populated080-upgrade085', 'validator': 'catalog-recovery', 'mode': 'legacy080'}]
+    assert [s for s in catalog if s['id'] == 'catalog-selective-operational-cleanup085'] == [
+        {'id': 'catalog-selective-operational-cleanup085', 'validator': 'catalog-cleanup'}]
     assert {s.get('tier_mib') for s in scenarios if 'tier_mib' in s} == {100, 500, 1024}
     assert len(select('deep', [], source_sha=SHA)['matrix']['include']) == 17
 
@@ -118,7 +122,8 @@ def test_matrix_selects_browser_dependencies_only_where_browser_executes():
     assert matrix['connections-functional']['browser'] is True
     assert matrix['backup-basic']['browser'] is False
     assert matrix['corrections-functional']['browser'] is False
-    assert all(row['python'] is False for row in matrix.values())
+    assert matrix['catalog-reports-functional']['python'] is True
+    assert all(row['python'] is False for group, row in matrix.items() if group != 'catalog-reports-functional')
 
 
 @pytest.mark.parametrize('payload,expected', [

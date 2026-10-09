@@ -213,7 +213,7 @@ jobs:
           platforms: linux/amd64
           labels: |
             org.opencontainers.image.revision=${{ env.CI_SOURCE_SHA }}
-            org.opencontainers.image.version=0.8.0
+            org.opencontainers.image.version=0.8.5
           no-cache: ${{ env.CI_CACHE_MODE == 'cold' }}
           cache-from: ${{ env.CI_CACHE_MODE == 'warm' && 'type=gha,scope=trackvance-backend-linux-amd64-v1' || '' }}
           cache-to: type=gha,scope=trackvance-backend-linux-amd64-v1,mode=max
@@ -228,7 +228,7 @@ jobs:
           platforms: linux/amd64
           labels: |
             org.opencontainers.image.revision=${{ env.CI_SOURCE_SHA }}
-            org.opencontainers.image.version=0.8.0
+            org.opencontainers.image.version=0.8.5
           no-cache: ${{ env.CI_CACHE_MODE == 'cold' }}
           cache-from: ${{ env.CI_CACHE_MODE == 'warm' && 'type=gha,scope=trackvance-web-linux-amd64-v1' || '' }}
           cache-to: type=gha,scope=trackvance-web-linux-amd64-v1,mode=max
@@ -243,7 +243,7 @@ jobs:
           platforms: linux/amd64
           labels: |
             org.opencontainers.image.revision=${{ env.CI_SOURCE_SHA }}
-            org.opencontainers.image.version=0.8.0
+            org.opencontainers.image.version=0.8.5
       - name: Export immutable images and byte hashes without application state
         run: |
           python scripts/ci/image_bundle.py export --sha "$CI_SOURCE_SHA" --directory .codex-local/ci/images \

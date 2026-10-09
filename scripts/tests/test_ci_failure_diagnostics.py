@@ -279,7 +279,7 @@ def recovery_result(root, profile='native', **changes):
         base = '.codex-local/v070' if profile == 'legacy061' else '.codex-local/recovery'
         directory = root / base / (f'legacy061-{suffix}' if profile == 'legacy061' else f'identity-legacy-{suffix}')
         version = {'source_version': {'legacy051': '0.5.1', 'legacy060': '0.6.0', 'legacy061': '0.6.1'}[profile],
-                   'target_version': '0.8.0'}
+                   'target_version': '0.8.5'}
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / 'result.json'
     value = {'status': 'FAIL', 'source_project': source, 'target_project': target,
@@ -756,9 +756,9 @@ def catalog_nested_failure(root):
     (child / 'result.json').write_text(json.dumps({'status': 'FAIL', 'mode': 'both',
         'source_project': context.name, 'failed_stage': 'legacy', 'error_type': 'ComposePreflightError',
         'error_code': 'LIVE_CREDENTIAL_INHERITANCE', 'duration_seconds': 125, 'main_inventory': 'UNCHANGED',
-        'native': {'status': 'PASS', 'source_version': '0.8.0', 'target_version': '0.8.0',
+        'native': {'status': 'PASS', 'source_version': '0.8.5', 'target_version': '0.8.5',
                    'source_state_sha256': 'SECRET_TOKEN', 'fixture': {'rows': ['PRIVATE_ROW']}},
-        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.0'},
+        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.5'},
         'sql': 'PRIVATE_ROW', 'message': 'SECRET_TOKEN'}))
     (child / 'diagnostic.private.log').write_text(
         '  File "/app/scripts/tests/catalog_reports_recovery.py", line 91, in compose_adapter\n'
@@ -779,8 +779,8 @@ def test_catalog_nested_recovery_and_http_preserve_closed_facts_not_payloads(tmp
     assert nested == {'status': 'FAIL', 'mode': 'both', 'failed_stage': 'legacy',
         'error_type': 'ComposePreflightError', 'error_code': 'LIVE_CREDENTIAL_INHERITANCE',
         'duration_seconds': 125, 'main_inventory': 'UNCHANGED',
-        'native': {'status': 'PASS', 'source_version': '0.8.0', 'target_version': '0.8.0'},
-        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.0'}}
+        'native': {'status': 'PASS', 'source_version': '0.8.5', 'target_version': '0.8.5'},
+        'legacy': {'status': 'FAIL', 'source_version': '0.7.0', 'target_version': '0.8.5'}}
     facts = next(item for item in result if item['kind'] == 'CATALOG_RECOVERY_LOG_FACTS')['facts']
     assert facts['frames'] == [{'file': 'scripts/tests/catalog_reports_recovery.py', 'line': 91, 'function': 'compose_adapter'}]
     assert facts['error_codes'] == ['LIVE_CREDENTIAL_INHERITANCE']

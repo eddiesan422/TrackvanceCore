@@ -15,6 +15,7 @@ from .governance_models import (
     DatasetBlock,
     DatasetSecurityDependency,
     GovernanceHistory,
+    GovernancePerson,
     MacroDomain,
     StrictApproval,
 )
@@ -24,6 +25,8 @@ from .operations_common import OperationError
 from .permissions import effective_permissions
 
 MAX_ANCESTORS = 128
+STRICT_APPROVAL_CRITERION_VERSION = 2
+STRICT_APPROVAL_CRITERION = "ALL_ROWS_EFFECTIVELY_VALIDATED_V2"
 
 
 def contract_identity(db: Session, config: Configuration) -> str:
@@ -91,11 +94,20 @@ def governance_snapshot(db: Session, dataset: Dataset) -> dict:
     domain = db.get(DataDomain, current.domain_id) if current.domain_id else None
     complete = bool(macro and domain and macro.active and domain.active and domain.macro_domain_id == macro.id
                     and macro.organization_id == dataset.organization_id and domain.organization_id == dataset.organization_id)
-    identities = {}
+    identities: dict[str, Any] = {}
     for field in ("business_owner_id", "steward_id", "technical_custodian_id"):
+        role = field.removesuffix("_id")
+        person_id = getattr(current, f"{role}_person_id")
+        person = db.get(GovernancePerson, person_id) if person_id else None
         user = db.get(User, getattr(current, field)) if getattr(current, field) else None
-        identities[field.removesuffix("_id")] = {"id": user.id, "name": user.name, "active": user.active and not user.deleted} if user else None
-    return {"dataset_id": dataset.id, "source_dataset_id": current.id, "inherited": current.id != dataset.id,
+        if person and person.organization_id == dataset.organization_id:
+            identities[role] = {"id": person.id, "name": person.name, "active": person.active,
+                                "identity_kind": "PERSON", "user_id": person.user_id, "version": person.version}
+        else:
+            identities[role] = {"id": user.id, "name": user.name, "active": user.active and not user.deleted,
+                                "identity_kind": "LEGACY_USER", "user_id": user.id} if user else None
+        identities[f"{role}_person_id"] = person_id
+    return {"schema_version": 2, "dataset_id": dataset.id, "source_dataset_id": current.id, "inherited": current.id != dataset.id,
             "version": current.governance_version, "macro_domain_id": current.macro_domain_id, "domain_id": current.domain_id,
             "macro_domain": {"id": macro.id, "name": macro.name, "active": macro.active, "version": macro.version} if macro else None,
             "domain": {"id": domain.id, "name": domain.name, "active": domain.active, "version": domain.version} if domain else None,
@@ -243,8 +255,10 @@ def strict_approval(db: Session, run: Run) -> dict:
             reject("QUALITY_FINDINGS", "Existen errores, advertencias o descartes.")
         if any(metrics[key] != total for key in ("processed_rows", "valid_rows", "output_rows")) or source and source.row_count != total or output and output.row_count != total:
             reject("ROW_COUNTS_INCONSISTENT", "Los conteos de entrada, procesamiento y salida no coinciden.")
-        if not 0 < metrics["validation_coverage_rows"] <= total:
-            reject("NO_EFFECTIVE_VALIDATION", "No consta una evaluación efectiva positiva de validación.")
+        if metrics["validation_coverage_rows"] == 0:
+            reject("NO_EFFECTIVE_VALIDATION", "Ninguna fila recibió una validación efectiva.")
+        if metrics["validation_coverage_rows"] != total:
+            reject("VALIDATION_COVERAGE_INCOMPLETE", "La aprobación estricta requiere que cada fila reciba al menos una validación efectiva; las condiciones no aplicables y exclusiones IGNORE no aportan cobertura.")
     rules = metrics.get("rules")
     try:
         from .processing import configured_rules
@@ -289,6 +303,7 @@ def strict_approval(db: Session, run: Run) -> dict:
         except OperationError:
             reject("CONTRACT_LINEAGE_INVALID", "La identidad del contrato no se puede comprobar.")
     return {"approved": not reasons, "reasons": reasons, "run_id": run.id,
+            "criterion_version": STRICT_APPROVAL_CRITERION_VERSION, "criterion": STRICT_APPROVAL_CRITERION,
             "input_version_id": source.id if source else None, "output_version_id": output.id if output else None,
             "contract_id": identity, "contract_revision_id": config.id if config else None,
             "finished_at": iso(run.finished_at), "verified_bytes": False}
@@ -307,6 +322,7 @@ def index_strict_approval(db: Session, run: Run) -> None:
     # classification to an earlier run.
     db.add(StrictApproval(organization_id=run.organization_id, run_id=run.id, input_version_id=source.id,
         output_version_id=result["output_version_id"], contract_id=result["contract_id"],
+        criterion_version=STRICT_APPROVAL_CRITERION_VERSION,
         contract_revision_id=run.config_id, evidence_hash=configuration_hash({"run_id": run.id, "metrics": run.metrics,
             "evidence_path": run.evidence_path}), governance_snapshot=snapshot or {"historical_governance": "UNKNOWN"}))
 
@@ -399,6 +415,29 @@ def dataset_eligibility(db: Session, user: User, version: DatasetVersion, purpos
     governance = governance_snapshot(db, dataset)
     run = db.get(Run, version.source_run_id) if version.source_run_id else None
     approval: dict = strict_approval(db, run) if run else {"approved": False, "reasons": [{"code": "NO_INTAKE_APPROVAL", "message": "Pendiente de validación de calidad en Data Intake."}]}
+    related_output = None
+    if not run and "intake:read" in effective_permissions(db, user):
+        # A validated input remains an input. Navigate through exact registered
+        # relationships without transferring its output's approval to it.
+        candidates = select(Run).where(Run.organization_id == user.organization_id,
+            Run.dataset_version_id == version.id, Run.module == "intake", Run.output_version_id.is_not(None))
+        with db.scalars(candidates.order_by(Run.finished_at.desc(), Run.id.desc())
+                        .execution_options(yield_per=32)) as runs:
+            for candidate in runs:
+                if not strict_approval(db, candidate)["approved"]:
+                    continue
+                output = db.get(DatasetVersion, candidate.output_version_id)
+                if not output:
+                    continue
+                try:
+                    authorize_dataset_content(db, user, output, purpose)
+                except OperationError:
+                    continue
+                related_output = {"output_dataset_id": output.dataset_id, "output_version_id": output.id,
+                    "approval_run_id": candidate.id, "input_dataset_id": dataset.id, "input_version_id": version.id}
+                approval = {**approval, "reasons": [{"code": "INPUT_HAS_APPROVED_OUTPUT",
+                    "message": "Esta versión de entrada tiene una salida Intake aprobada. Reportes consume esa salida exacta; la entrada conserva su estado propio."}]}
+                break
     reasons = list(approval["reasons"])
     if not governance["classification_complete"]:
         reasons.append({"code": "CLASSIFICATION_INCOMPLETE", "message": "Completa macrodominio y dominio activos para Reportes."})
@@ -414,10 +453,11 @@ def dataset_eligibility(db: Session, user: User, version: DatasetVersion, purpos
         reasons.append({"code": exc.code, "message": exc.message})
     return {"eligible": not reasons, "classification_complete": governance["classification_complete"],
             "strict_approval": approval, "availability": {"available": available, "verified_bytes": False},
-            "reasons": reasons, "governance": governance}
+            "reasons": reasons, "governance": governance, "related_approved_output": related_output}
 
 
 def update_governance(db: Session, dataset: Dataset, user: User, expected_version: int, changes: dict) -> None:
+    from .governance_people import resolve_governance_assignments
     from .services import audit
     if verified_intake_parent(db, dataset):
         raise OperationError(409, "GOVERNANCE_INHERITED", "Edita el gobierno en el dataset de entrada; esta salida lo hereda.")
@@ -425,13 +465,7 @@ def update_governance(db: Session, dataset: Dataset, user: User, expected_versio
     domain = changes.get("domain_id", dataset.domain_id)
     classification_changed = (macro, domain) != (dataset.macro_domain_id, dataset.domain_id)
     validate_classification(db, user.organization_id, macro, domain, require_active=classification_changed)
-    for field in ("business_owner_id", "steward_id", "technical_custodian_id"):
-        identity_id = changes.get(field, getattr(dataset, field))
-        if identity_id:
-            identity = db.get(User, identity_id)
-            changed = identity_id != getattr(dataset, field)
-            if not identity or identity.organization_id != user.organization_id or changed and (not identity.active or identity.deleted):
-                raise OperationError(422, "RESPONSIBLE_INVALID", "Selecciona una identidad activa de la organización.")
+    changes = resolve_governance_assignments(db, user.organization_id, changes, dataset)
     result = db.execute(update(Dataset).where(Dataset.id == dataset.id, Dataset.organization_id == user.organization_id,
         Dataset.governance_version == expected_version).values(**changes, governance_version=expected_version + 1)
         .execution_options(synchronize_session=False))

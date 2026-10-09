@@ -31,8 +31,8 @@ with engine.connect() as connection:
     assert result["failed_acquisition_preserved"]
     assert result["historical_notification_read_at_preserved"]
     assert result["domain_options_numbering_limits_preserved"]
-    assert result["physical_schema"]["tables"] == 55
-    assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0017_catalog_reports"
+    assert result["physical_schema"]["tables"] == 56
+    assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0019_governance_people"
 engine.dispose()
 '''
     result = subprocess.run([sys.executable, "-c", script], env=environment,

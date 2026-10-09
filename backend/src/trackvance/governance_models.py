@@ -50,6 +50,25 @@ class GovernanceHistory(Record, Base):
     reason: Mapped[str] = mapped_column(String(500), default="")
 
 
+class GovernancePerson(Record, Base):
+    """A governance contact is independent of accounts, roles and passwords."""
+    __tablename__ = "governance_people"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id"),
+        UniqueConstraint("organization_id", "normalized_reference"),
+        UniqueConstraint("organization_id", "normalized_email"),
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    normalized_name: Mapped[str] = mapped_column(String(200))
+    reference: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    normalized_reference: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    normalized_email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
 class GlossaryTerm(Record, Base):
     __tablename__ = "glossary_terms"
     __table_args__ = (UniqueConstraint("organization_id", "normalized_name"),)
@@ -115,4 +134,7 @@ class StrictApproval(Record, Base):
     contract_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"), index=True)
     contract_revision_id: Mapped[str] = mapped_column(ForeignKey("configurations.id"))
     evidence_hash: Mapped[str] = mapped_column(String(64))
+    # Legacy decisions retain version 1 through the additive migration. The
+    # current evaluator applies version 2 independently of this historical index.
+    criterion_version: Mapped[int] = mapped_column(Integer, default=2, server_default="1")
     governance_snapshot: Mapped[dict] = mapped_column(JSON)

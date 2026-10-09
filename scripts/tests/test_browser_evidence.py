@@ -84,7 +84,7 @@ def test_raw_artifact_containing_password_blocks_publication(monkeypatch, tmp_pa
     assert not list(evidence.iterdir())
 
 
-@pytest.mark.parametrize("outcome", ["PASS", "TIMEOUT", "INTERRUPTED", "WRAPPER_TERM"])
+@pytest.mark.parametrize("outcome", ["PASS", "TIMEOUT", "INTERRUPTED", "WRAPPER_TERM", "BUDGET"])
 def test_bounded_browser_reaps_only_its_own_session_on_success_timeout_and_interrupt(monkeypatch, tmp_path, outcome):
     events, handlers = [], {}
     class Child:
@@ -92,6 +92,8 @@ def test_bounded_browser_reaps_only_its_own_session_on_success_timeout_and_inter
         returncode = None
         def communicate(self, *, timeout):
             events.append(("communicate", timeout))
+            if outcome == "BUDGET" and timeout != 15:
+                raise subprocess.TimeoutExpired("browser", timeout)
             if timeout == 60:
                 if outcome == "TIMEOUT":
                     raise subprocess.TimeoutExpired("browser", 60, output="synthetic-private-body")
@@ -122,12 +124,20 @@ def test_bounded_browser_reaps_only_its_own_session_on_success_timeout_and_inter
     monkeypatch.setattr(browser_evidence.subprocess, "Popen", popen)
     monkeypatch.setattr(browser_evidence.signal, "SIGKILL", 9, raising=False)
     monkeypatch.setattr(browser_evidence.signal, "signal", handler)
-    errors = {"TIMEOUT": subprocess.TimeoutExpired, "INTERRUPTED": KeyboardInterrupt, "WRAPPER_TERM": InterruptedError}
+    errors = {"TIMEOUT": subprocess.TimeoutExpired, "INTERRUPTED": KeyboardInterrupt,
+              "WRAPPER_TERM": InterruptedError, "BUDGET": RuntimeError}
     if outcome == "PASS":
         assert browser_evidence.bounded_browser_command(["pnpm"], cwd=tmp_path, environment={}, timeout_seconds=60).returncode == 0
     else:
+        checks = 0
+        def budget():
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise RuntimeError("OWNED_BROWSER_MEMORY_BUDGET")
         with pytest.raises(errors[outcome]):
-            browser_evidence.bounded_browser_command(["pnpm"], cwd=tmp_path, environment={}, timeout_seconds=60)
+            browser_evidence.bounded_browser_command(["pnpm"], cwd=tmp_path, environment={}, timeout_seconds=60,
+                resource_check=budget if outcome == "BUDGET" else None)
     assert ("killpg", Child.pid, browser_evidence.signal.SIGKILL) in events
     assert events[-1] == ("communicate", 15)
     assert handlers[browser_evidence.signal.SIGTERM] is None
@@ -162,7 +172,7 @@ def real_spec_names(tmp_path):
     return tmp_path, sorted(names)
 
 
-def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_eight_opt_ins(real_spec_names):
+def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_nine_opt_ins(real_spec_names):
     root, names = real_spec_names
     environment = {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}
     selected, metadata = browser_evidence.ci_spec_selection([], root, environment)
@@ -171,7 +181,7 @@ def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_eight_op
     assert metadata["excluded_opt_in_specs"] == [
         {"file": name, "required_flag": flag, "covered_by_group": group}
         for name, (flag, group) in sorted(browser_evidence.CI_OPT_IN_SPECS.items())]
-    assert len(metadata["excluded_opt_in_specs"]) == 8
+    assert len(metadata["excluded_opt_in_specs"]) == 9
 
 
 @pytest.mark.parametrize("flag", sorted({flag for flag, _ in browser_evidence.CI_OPT_IN_SPECS.values()}))
@@ -263,4 +273,4 @@ def test_ci_browser_publishes_exact_selection_and_keeps_unexpected_skip_failure(
     assert summary["selected_spec_files"] == expected
     assert summary["skipped"] == skipped
     assert summary["status"] == ("FAIL" if skipped else "PASS")
-    assert len(summary["excluded_opt_in_specs"]) == 8
+    assert len(summary["excluded_opt_in_specs"]) == 9

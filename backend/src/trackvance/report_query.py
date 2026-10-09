@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, NoReturn
 
@@ -17,6 +17,7 @@ from sqlglot import exp
 from sqlglot.errors import ParseError
 
 from .operations_common import OperationError
+from .portable_temporal import exact_timestamp
 
 MAX_SOURCES = 8
 MAX_COLUMNS = 100
@@ -28,7 +29,7 @@ ALLOWED_NODES = frozenset({
     "eq", "neq", "gt", "gte", "lt", "lte", "is", "in", "between",
     "add", "sub", "mul", "div", "mod", "neg", "count", "sum", "avg", "min",
     "max", "coalesce", "cast", "datatype", "datatypeparam", "case", "if",
-    "abs", "round", "distinct", "star",
+    "abs", "round", "distinct", "star", "contains", "startswith", "strposition",
 })
 
 
@@ -51,7 +52,7 @@ def column_ref(alias: str, name: str) -> str:
     return f"{quote(alias)}.{quote(name)}"
 
 
-def typed_parameters(raw: list[dict]) -> dict:
+def typed_parameters(raw: list[dict], *, internal: bool = False) -> dict:
     if not isinstance(raw, list) or len(raw) > 100:
         fail("REPORT_PARAMETERS", "Se admiten hasta 100 parámetros tipados.")
     result: dict = {}
@@ -59,8 +60,10 @@ def typed_parameters(raw: list[dict]) -> dict:
         if not isinstance(item, dict):
             fail("REPORT_PARAMETERS", "Cada parámetro requiere nombre, tipo y valor.")
         name, kind, value = item.get("name"), item.get("type"), item.get("value")
-        if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or name in result:
+        if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or name.casefold() in {key.casefold() for key in result}:
             fail("REPORT_PARAMETERS", "Los nombres de parámetros deben ser únicos y válidos.")
+        if not internal and name.casefold().startswith("tv_internal_"):
+            fail("REPORT_PARAMETER_RESERVED", "El prefijo tv_internal_ está reservado para filtros internos.")
         if kind not in ("TEXT", "INTEGER", "DECIMAL", "DATE", "TIMESTAMP", "BOOLEAN"):
             fail("REPORT_PARAMETER_TYPE", "Tipo de parámetro no admitido.")
         try:
@@ -80,12 +83,12 @@ def typed_parameters(raw: list[dict]) -> dict:
             elif kind == "DATE" and isinstance(value, str):
                 result[name] = {"type": "DATE", "value": date.fromisoformat(value).isoformat()}
             elif kind == "TIMESTAMP" and isinstance(value, str):
-                result[name] = {"type": "TIMESTAMP", "value": datetime.fromisoformat(value).isoformat()}
+                result[name] = {"type": "TIMESTAMP", "value": exact_timestamp(value).isoformat()}
             elif kind == "BOOLEAN" and (type(value) is bool or value in {"true", "false"}):
                 result[name] = value if type(value) is bool else value == "true"
             else:
                 raise ValueError()
-        except (ValueError, InvalidOperation, TypeError):
+        except (ValueError, InvalidOperation, TypeError, OverflowError):
             fail("REPORT_PARAMETER_TYPE", f"Valor incompatible con el parámetro {name}.")
     return result
 
@@ -100,6 +103,8 @@ def _conjunction(node: exp.Expression) -> list[exp.Expression]:
 
 def validate_sql(sql: str, schemas: dict[str, list[dict]], join_policy: list[dict],
                  parameters: dict) -> dict:
+    if len({name.casefold() for name in parameters}) != len(parameters):
+        fail("REPORT_PARAMETERS", "Los parámetros no pueden diferir sólo por mayúsculas.")
     if not isinstance(sql, str) or not 1 <= len(sql.encode()) <= 65536:
         fail("REPORT_SQL_SIZE", "La consulta debe tener entre 1 y 65.536 bytes.")
     try:
@@ -109,6 +114,12 @@ def validate_sql(sql: str, schemas: dict[str, list[dict]], join_policy: list[dic
     if len(expressions) != 1 or not isinstance(expressions[0], exp.Select):
         fail("REPORT_SQL_STATEMENT", "Solo se admite una sentencia SELECT.")
     tree = expressions[0]
+    for value in parameters.values():
+        if isinstance(value, dict) and value.get("type") == "TIMESTAMP":
+            try:
+                exact_timestamp(value.get("value"))
+            except (ValueError, OverflowError):
+                fail("REPORT_TIMESTAMP_EXACT", "TIMESTAMP requiere offset explícito y hasta seis cifras fraccionales.")
     if len(list(tree.walk())) > 4000:
         fail("REPORT_SQL_COMPLEXITY", "La consulta supera la complejidad admitida.")
     for node in tree.walk():
@@ -125,7 +136,7 @@ def validate_sql(sql: str, schemas: dict[str, list[dict]], join_policy: list[dic
             if kind.this not in {exp.DataType.Type.TEXT, exp.DataType.Type.VARCHAR,
                                  exp.DataType.Type.BIGINT, exp.DataType.Type.INT,
                                  exp.DataType.Type.BOOLEAN, exp.DataType.Type.DATE,
-                                 exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIMESTAMPTZ,
+                                 exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIMESTAMPNTZ, exp.DataType.Type.TIMESTAMPTZ,
                                  exp.DataType.Type.DECIMAL}:
                 fail("REPORT_CAST_TYPE", "Conversión no admitida; no se permite perder precisión.")
             if kind.this == exp.DataType.Type.DECIMAL:
@@ -135,7 +146,88 @@ def validate_sql(sql: str, schemas: dict[str, list[dict]], join_policy: list[dic
                     fail("REPORT_DECIMAL_PRECISION", "DECIMAL requiere precisión y escala enteras explícitas.")
                 if len(values) != 2 or not 1 <= values[0] <= 38 or not 0 <= values[1] <= values[0]:
                     fail("REPORT_DECIMAL_PRECISION", "DECIMAL requiere precisión y escala explícitas hasta 38.")
+            if kind.this in {exp.DataType.Type.TIMESTAMP, exp.DataType.Type.TIMESTAMPNTZ, exp.DataType.Type.TIMESTAMPTZ}:
+                operand = node.this
+                value = operand.this if isinstance(operand, exp.Literal) and operand.is_string else None
+                if isinstance(operand, exp.Placeholder):
+                    bound = parameters.get(operand.name)
+                    if isinstance(bound, dict) and bound.get("type") == "TIMESTAMP":
+                        value = bound.get("value")
+                try:
+                    exact_timestamp(value)
+                except (ValueError, OverflowError):
+                    fail("REPORT_TIMESTAMP_EXACT", "CAST temporal requiere un literal ISO o parámetro TIMESTAMP con offset y hasta seis cifras; confirma el tipo de la fuente para conversiones de columnas.")
+                # The portable type is an instant. DuckDB TIMESTAMP would drop
+                # the validated offset, so lower this spelling to TIMESTAMPTZ.
+                kind.set("this", exp.DataType.Type.TIMESTAMPTZ)
     allowed_columns = {a: {c["name"]: c for c in cols} for a, cols in schemas.items()}
+    def temporal_expression(expression: exp.Expression | None) -> bool:
+        if expression is None:
+            return False
+        if isinstance(expression, exp.Column):
+            return allowed_columns.get(expression.table, {}).get(expression.name, {}).get("logical_type") == "TIMESTAMP"
+        if isinstance(expression, exp.Placeholder):
+            value = parameters.get(expression.name)
+            return isinstance(value, dict) and value.get("type") == "TIMESTAMP"
+        if isinstance(expression, exp.Cast):
+            return expression.args["to"].this == exp.DataType.Type.TIMESTAMPTZ
+        if isinstance(expression, exp.Case):
+            return any(temporal_expression(item.args.get("true")) for item in expression.args.get("ifs", [])) or temporal_expression(expression.args.get("default"))
+        return any(temporal_expression(child) for child in expression.iter_expressions())
+
+    def validate_temporal_branch(expression: exp.Expression | None) -> None:
+        if expression is None or isinstance(expression, exp.Null):
+            return
+        if isinstance(expression, exp.Case):
+            for item in expression.args.get("ifs", []):
+                validate_temporal_branch(item.args.get("true"))
+            validate_temporal_branch(expression.args.get("default"))
+            return
+        if isinstance(expression, exp.Coalesce):
+            for child in expression.iter_expressions():
+                validate_temporal_branch(child)
+            return
+        if temporal_expression(expression):
+            return
+        try:
+            exact_timestamp(expression.this if isinstance(expression, exp.Literal) and expression.is_string else None)
+        except (ValueError, OverflowError):
+            fail("REPORT_TIMESTAMP_EXACT", "Cada rama temporal requiere TIMESTAMP validado; no se admite conversión implícita de STRING.")
+
+    for branch in tree.find_all(exp.Case):
+        if temporal_expression(branch):
+            validate_temporal_branch(branch)
+    def value_leaves(expression: exp.Expression) -> list[exp.Expression]:
+        if isinstance(expression, exp.Case):
+            branches = [item.args.get("true") for item in expression.args.get("ifs", [])]
+            branches.append(expression.args.get("default"))
+            return [leaf for branch in branches if branch is not None for leaf in value_leaves(branch)]
+        if isinstance(expression, (exp.Column, exp.Placeholder, exp.Literal, exp.Null, exp.Cast)):
+            return [expression]
+        return [leaf for child in expression.iter_expressions() for leaf in value_leaves(child)]
+
+    for predicate in tree.walk():
+        if not isinstance(predicate, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Between, exp.In, exp.Coalesce)):
+            continue
+        if not temporal_expression(predicate):
+            continue
+        # CASE conditions choose a value; their business labels/numbers are not
+        # operands being converted into TIMESTAMP by the outer comparison.
+        for value in value_leaves(predicate):
+            if isinstance(value, exp.Column):
+                if allowed_columns.get(value.table, {}).get(value.name, {}).get("logical_type") not in {None, "TIMESTAMP"}:
+                    fail("REPORT_TIMESTAMP_EXACT", "No se admite conversión temporal implícita entre columnas de distinto tipo lógico.")
+            elif isinstance(value, exp.Literal):
+                try:
+                    exact_timestamp(value.this if value.is_string else None)
+                except (ValueError, OverflowError):
+                    fail("REPORT_TIMESTAMP_EXACT", "Los literales comparados con TIMESTAMP requieren offset explícito y hasta seis cifras fraccionales.")
+            elif isinstance(value, exp.Placeholder):
+                bound = parameters.get(value.name)
+                if bound is not None and not (isinstance(bound, dict) and bound.get("type") == "TIMESTAMP"):
+                    fail("REPORT_TIMESTAMP_EXACT", "Una comparación TIMESTAMP requiere un parámetro del mismo tipo lógico.")
+            elif isinstance(value, exp.Cast) and value.args["to"].this != exp.DataType.Type.TIMESTAMPTZ:
+                fail("REPORT_TIMESTAMP_EXACT", "Una comparación TIMESTAMP requiere una conversión del mismo tipo lógico.")
     projection_names = [p.alias_or_name for p in tree.expressions]
     if (not projection_names or len(projection_names) > MAX_COLUMNS
             or any(not name or name.casefold().startswith("__tv_") for name in projection_names)
@@ -254,13 +346,15 @@ def _filter(group: dict, schemas: dict, params: dict, default_alias: str | None 
     reference = column_ref(alias, column)
     if operator in {"IS_NULL", "IS_NOT_NULL"}:
         return reference + (" IS NULL" if operator == "IS_NULL" else " IS NOT NULL")
-    if operator not in {"EQ", "NE", "GT", "GE", "LT", "LE", "IN"}:
+    if operator not in {"EQ", "NE", "GT", "GE", "LT", "LE", "IN", "CONTAINS", "STARTS_WITH"}:
         fail("REPORT_FILTER_OPERATOR", "Operador de filtro no admitido.")
     values = group.get("value") if operator == "IN" else [group.get("value")]
     if not isinstance(values, list) or not 1 <= len(values) <= 100:
         fail("REPORT_FILTER_VALUE", "El filtro IN requiere entre 1 y 100 valores.")
     placeholders = []
     logical = columns[column].get("logical_type", "STRING")
+    if operator in {"CONTAINS", "STARTS_WITH"} and logical != "STRING":
+        fail("REPORT_FILTER_TYPE", "Contiene y Comienza por requieren una columna STRING.")
     parameter_type = {"STRING": "TEXT", "INTEGER": "INTEGER", "INT64": "INTEGER", "DECIMAL": "DECIMAL",
                       "DATE": "DATE", "TIMESTAMP": "TIMESTAMP", "BOOLEAN": "BOOLEAN"}.get(logical)
     if parameter_type is None:
@@ -268,12 +362,34 @@ def _filter(group: dict, schemas: dict, params: dict, default_alias: str | None 
     for value in values:
         if value is None:
             fail("REPORT_FILTER_NULL", "Usa Es nulo o No es nulo para comparar nulos.")
-        name = f"tv_filter_{len(params)}"
-        params.update(typed_parameters([{"name": name, "type": parameter_type, "value": value}]))
+        ordinal = len(params)
+        name = f"tv_internal_filter_{ordinal}"
+        while name in params:
+            ordinal += 1
+            name = f"tv_internal_filter_{ordinal}"
+        params.update(typed_parameters([{"name": name, "type": parameter_type, "value": value}], internal=True))
         placeholders.append("$" + name)
     if operator == "IN":
-        return reference + " IN (" + ",".join(placeholders) + ")"
+        return reference + " IN (" + ", ".join(placeholders) + ")"
+    if operator in {"CONTAINS", "STARTS_WITH"}:
+        function = "contains" if operator == "CONTAINS" else "starts_with"
+        return f"{function}({reference},{placeholders[0]})"
     return reference + " " + {"EQ": "=", "NE": "<>", "GT": ">", "GE": ">=", "LT": "<", "LE": "<="}[operator] + " " + placeholders[0]
+
+
+def projection_schema(sql: str, schemas: dict[str, list[dict]]) -> dict[str, dict]:
+    """Derive direct projection metadata from authorized, frozen source schemas."""
+    tree = sqlglot.parse_one(sql, read="duckdb")
+    projected = {}
+    for projection in tree.expressions:
+        expression = projection.this if isinstance(projection, exp.Alias) else projection
+        if isinstance(expression, exp.Column):
+            original = next((c for c in schemas.get(expression.table, []) if c["name"] == expression.name), None)
+            if original is None or not original.get("logical_type"):
+                fail("REPORT_PUBLICATION_SCHEMA", "La proyección directa carece de esquema de origen congelado verificable.")
+            projected[projection.alias_or_name] = {"logical_type": original["logical_type"],
+                                                  "semantic_tag": original.get("semantic_tag")}
+    return projected
 
 
 def compile_draft(draft: dict, schemas: dict[str, list[dict]]) -> dict:
@@ -288,6 +404,8 @@ def compile_draft(draft: dict, schemas: dict[str, list[dict]]) -> dict:
     if set(aliases) != set(schemas):
         fail("REPORT_SOURCE_SCHEMA", "No se resolvió el esquema de cada fuente.")
     params = typed_parameters(draft.get("parameters", []))
+    if (draft.get("source_filters") or draft.get("post_filter")) and any(re.fullmatch(r"tv_filter_[0-9]+", name.casefold()) for name in params):
+        fail("REPORT_LEGACY_PARAMETER_COLLISION", "La definición usa nombres tv_filter_N que podían colisionar con filtros internos. Renombra esos parámetros en una nueva revisión antes de ejecutarla.")
     source_filters = {}
     raw_filters = draft.get("source_filters", {})
     if not isinstance(raw_filters, dict) or not set(raw_filters) <= set(schemas):
@@ -343,5 +461,8 @@ def compile_draft(draft: dict, schemas: dict[str, list[dict]]) -> dict:
         fields = {c.name for c in sqlglot.parse_one(condition, read="duckdb").find_all(exp.Column)}
         plan["used_columns"][alias] = sorted(set(plan["used_columns"][alias]) | fields)
     plan["expected_schemas"] = schemas
+    # Direct projections retain the exact logical type and semantic tag even
+    # when renamed. Expressions derive their type from the checked result schema.
+    plan["projection_schema"] = projection_schema(plan["sql"], schemas)
     plan["query_hash"] = digest({"draft": draft, "plan": plan})
     return plan

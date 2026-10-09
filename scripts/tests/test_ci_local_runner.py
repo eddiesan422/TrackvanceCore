@@ -95,7 +95,7 @@ def test_local_build_is_bounded_unique_and_labels_the_version_before_verificatio
     def inspect(reference, _sha):
         assert reference.startswith("trackvance-local-proof:")
         build = next(row for row in observed if reference in row)
-        assert "org.opencontainers.image.version=0.8.0" in build
+        assert "org.opencontainers.image.version=0.8.5" in build
         assert "--builder" in build and "--load" in build
         return {"Id": "sha256:" + "b" * 64}
     monkeypatch.setattr(run_local, "inspect_image", inspect)
@@ -339,10 +339,10 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
         thread=SimpleNamespace(start=lambda: None), finish=dict))
     executed, validated, image_cleanup = [], [], []
     historical_result = {"status": "PASS", "source_destroyed_before_restore": True,
-        "main_inventory": "UNCHANGED", "source_version": "0.6.1", "target_version": "0.8.0",
+        "main_inventory": "UNCHANGED", "source_version": "0.6.1", "target_version": "0.8.5",
         "restore": "STOPPED_VERIFIED", "automatic_processes_started": False,
         "exact_historical_state": "PASS", "source_state_sha256": "c" * 64,
-        "restored_legacy_sha256": "c" * 64, "native_tables": 55, "new_catalog_tables_empty": True}
+        "restored_legacy_sha256": "c" * 64, "native_tables": 56, "new_catalog_tables_empty": True}
     def execute(arguments, *_args, **_kwargs):
         executed.append(arguments)
         output = Path(arguments[arguments.index("--evidence-dir") + 1])

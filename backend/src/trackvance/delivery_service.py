@@ -1166,7 +1166,7 @@ def preflight_delivery(
         if target["mode"] == "EXISTING_TABLE" and inspected["missing_columns"]:
             _check(checks, "AUDIT_ALTER_PERMISSION", bool(permissions.get("alter_table")),
                    "Se requiere permiso ALTER remoto para agregar los campos de auditoría.")
-    prepared_target = dict(target)
+    prepared_target = draft.prepared_target()
     if (
         destination.sink_type == "POSTGRESQL"
         and draft.write_strategy == "UPSERT"
@@ -1218,6 +1218,30 @@ def preflight_delivery(
             keys_valid,
             "Las claves UPSERT de la fuente no tienen nulls ni duplicados.",
         )
+    primary_key_validation: dict[str, Any] | None = None
+    if draft.schema_version == 2 and target["mode"] == "CREATE_TABLE":
+        if draft.primary_key_mode == "DEFINE":
+            key_ok = values_ok and mapping_ok
+            if key_ok:
+                mapping_by_target = {column.target_name: column for column in draft.columns}
+                key_ok = unique_keys(
+                    tuple(convert_value(record.get(mapping_by_target[key].source_name),
+                                        mapping_by_target[key].model_dump())
+                          for key in draft.primary_key_columns) for record in records
+                )
+            _check(checks, "PRIMARY_KEY_SOURCE_KEYS", key_ok, "Toda la población tiene claves primarias no nulas y únicas.")
+            native_ok = False
+            if key_ok:
+                try:
+                    primary_key_validation = sink.validate_primary_key(
+                        records, [column.model_dump() for column in draft.columns], draft.primary_key_columns,
+                    )
+                    native_ok = primary_key_validation["rows_validated"] == version.row_count
+                except DeliveryError as error:
+                    _check(checks, error.code, False, error.message)
+            _check(checks, "PRIMARY_KEY_NATIVE", native_ok, "Los tipos, longitudes, tamaño de clave y collation nativos admiten toda la población.")
+        else:
+            _check(checks, "PRIMARY_KEY_EXPLICIT_NONE", True, "Se eligió explícitamente crear sin clave primaria.")
     resource_ok = (
         frame.height == version.row_count
         and frame.width == version.column_count
@@ -1251,6 +1275,8 @@ def preflight_delivery(
         },
         "target": {**target, "metadata": metadata},
         "system_audit": system_audit,
+        **({"primary_key": {"mode": draft.primary_key_mode, "columns": draft.primary_key_columns,
+                             "validation": primary_key_validation}} if draft.schema_version == 2 else {}),
     }
     if failures and raise_on_failure:
         raise DeliveryOperationError(
@@ -1467,6 +1493,8 @@ def enqueue_delivery(
             "engine": "DATA_SINK",
             "lane": "DELIVERY",
             "schema_version": draft.schema_version,
+            **({"primary_key_mode": draft.primary_key_mode, "primary_key_columns": draft.primary_key_columns}
+               if draft.schema_version == 2 else {}),
             "destination_id": draft.destination_id,
             "destination_name": destination.name,
             "destination_version_id": draft.destination_version_id,
@@ -1806,7 +1834,7 @@ def _publish_delivery_evidence(
     metrics = _evidence_metrics(run)
     destination_name = run.execution_plan.get("destination_name", destination.name)
     receipt_payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2 if draft.schema_version == 2 else 1,
         "kind": "DELIVERY_RECEIPT",
         "run_id": run.id,
         "dataset_version_id": source.id,
@@ -1821,6 +1849,8 @@ def _publish_delivery_evidence(
         "config_hash": destination_version.config_hash,
         "target": target,
         "write_strategy": draft.write_strategy,
+        **({"primary_key_mode": draft.primary_key_mode, "primary_key_columns": draft.primary_key_columns}
+           if draft.schema_version == 2 else {}),
         "rows_attempted": attempt.rows_attempted,
         "rows_written": attempt.rows_written,
         "rows_inserted": attempt.rows_inserted,
@@ -1888,6 +1918,8 @@ def _publish_delivery_evidence(
         },
         "delivery": {
             **({"system_audit": attempt.system_audit} if attempt.system_audit else {}),
+            **({"primary_key_mode": draft.primary_key_mode, "primary_key_columns": draft.primary_key_columns}
+               if draft.schema_version == 2 else {}),
             "destination": {
                 "destination_id": destination.id,
                 "destination_name": destination_name,
@@ -2045,7 +2077,7 @@ def execute_delivery_run(
         )
         selected_records = frame.select([column.source_name for column in draft.columns])
         sink = sink_registry.create(settings_for(destination, destination_version))
-        prepared_target = draft.target.model_dump()
+        prepared_target = draft.prepared_target()
         if system_audit:
             prepared_target["_system_audit"] = {
                 **system_audit,

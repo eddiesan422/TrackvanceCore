@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 CI_OPT_IN_SPECS = {
@@ -20,6 +21,7 @@ CI_OPT_IN_SPECS = {
     "tests-e2e/delivery.spec.ts": ("TV_DELIVERY_E2E", "delivery"),
     "tests-e2e/identity-sso.spec.ts": ("TV_IDENTITY_SSO_E2E", "identity-sso"),
     "tests-e2e/demo-access-clean.spec.ts": ("TV_EXPECT_CLEAN_DEMO", "compose-critical"),
+    "tests-e2e/reports-download-opfs.spec.ts": ("TV_REPORT_DOWNLOAD_OPFS", "catalog-reports"),
 }
 
 
@@ -84,7 +86,7 @@ def credential_privacy_reports(report: dict) -> list[dict]:
 
 
 def bounded_browser_command(arguments: list[str], *, cwd: Path, environment: dict[str, str],
-                            timeout_seconds: int) -> subprocess.CompletedProcess:
+                            timeout_seconds: int, resource_check=None) -> subprocess.CompletedProcess:
     """Own one browser process group and reap it on timeout or interruption."""
     if not 0 < timeout_seconds <= 3600:
         raise ValueError("Browser deadline must be positive and at most one hour")
@@ -98,7 +100,20 @@ def bounded_browser_command(arguments: list[str], *, cwd: Path, environment: dic
             raise InterruptedError("BROWSER_WRAPPER_INTERRUPTED")
         previous_term = signal.signal(signal.SIGTERM, interrupted)
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        if resource_check is None:
+            stdout, stderr = process.communicate(timeout=timeout_seconds)
+        else:
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                resource_check()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(arguments, timeout_seconds)
+                try:
+                    stdout, stderr = process.communicate(timeout=min(1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         return subprocess.CompletedProcess(arguments, process.returncode, stdout, stderr)
     finally:
         if term_handler:
@@ -119,7 +134,8 @@ def bounded_browser_command(arguments: list[str], *, cwd: Path, environment: dic
 
 
 def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
-                environment: dict[str, str], evidence: Path, timeout_seconds: int | None = None) -> dict:
+                environment: dict[str, str], evidence: Path, timeout_seconds: int | None = None,
+                resource_check=None) -> dict:
     raw = root / ".codex-local" / "browser-results" / project
     raw.mkdir(parents=True, exist_ok=True)
     selected, selection = ci_spec_selection(arguments, root, environment)
@@ -131,7 +147,7 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
     else:
         try:
             completed = bounded_browser_command(command, cwd=root / "frontend", environment=child_environment,
-                                                timeout_seconds=timeout_seconds)
+                                                timeout_seconds=timeout_seconds, resource_check=resource_check)
         except BaseException as error:
             summary = {"status": "FAIL", "error_type": type(error).__name__, "raw_artifacts_published": False,
                        "deadline_seconds": timeout_seconds, **(selection or {})}

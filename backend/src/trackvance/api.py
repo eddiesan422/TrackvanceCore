@@ -1570,9 +1570,11 @@ app.include_router(automation_router)
 app.include_router(notifications_router)
 app.include_router(delivery_validation_router)
 from .governance_api import router as governance_router
+from .governance_people import router as people_router
 from .report_api import router as report_router
 
 app.include_router(governance_router)
+app.include_router(people_router)
 app.include_router(report_router)
 
 

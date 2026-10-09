@@ -1,3 +1,6 @@
+import { prepareReportFile, receiveReport } from './reportDownload'
+import type { TransferPhase } from './reportDownload'
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Evidence records retain heterogeneous API fields until a generated DTO client is adopted.
 export type RecordData = Record<string, any> // API-defined, heterogeneous evidence and configuration records.
 export interface Collection { items: RecordData[]; total: number }
@@ -53,14 +56,19 @@ export function uploadBinary<T>(path: string, file: File, progress: (bytes: numb
     request.send(file)
   })
 }
-export async function download(path: string, fileName: string, options: RequestInit = {}) {
+export async function download(path: string, fileName: string, options: RequestInit = {}, phase?: (value: TransferPhase) => void) {
+  const report = path === '/reports/download'
+  phase?.('PREPARING')
+  const writable = report ? await prepareReportFile(fileName) : undefined
   let response: Response
   const headers = new Headers(options.headers)
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   if (options.method && options.method !== 'GET') headers.set('X-CSRF-Token', csrfToken)
+  phase?.('GENERATING')
   try { response = await fetch(`/api/v1${path}`, { ...options, headers, credentials: 'same-origin' }) }
-  catch { throw new ApiError(options.signal?.aborted ? 'Transferencia cancelada.' : 'No pudimos conectar con el servicio local para descargar el archivo.', 0, undefined, options.signal?.aborted ? 'TRANSFER_CANCELLED' : undefined) }
+  catch { await writable?.abort().catch(() => {}); throw new ApiError(options.signal?.aborted ? 'Transferencia cancelada.' : 'No pudimos conectar con el servicio local para descargar el archivo.', 0, undefined, options.signal?.aborted ? 'TRANSFER_CANCELLED' : undefined) }
   if (!response.ok) {
+    await writable?.abort().catch(() => {})
     const body = await response.json().catch(() => ({}))
     const detail = body.error || body.detail || {}
     if (response.status === 401 || response.status === 403) window.dispatchEvent(new Event('trackvance:session-refresh'))
@@ -73,6 +81,7 @@ export async function download(path: string, fileName: string, options: RequestI
   if (encoded) { try { suggested = decodeURIComponent(encoded) } catch { suggested = fileName } }
   // eslint-disable-next-line no-control-regex -- Download filenames must exclude literal control characters.
   const safeName = suggested.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/^\.+/, '').trim().slice(0, 180) || fileName
+  if (report) { await receiveReport(response, safeName, writable, options.signal, phase); return }
   let content: Blob
   try { content = await response.blob() }
   catch { throw new ApiError(options.signal?.aborted ? 'Transferencia cancelada.' : 'La transferencia se interrumpió antes de recibir el archivo completo.', 0, undefined, options.signal?.aborted ? 'TRANSFER_CANCELLED' : undefined) }

@@ -175,7 +175,7 @@ def test_prepare_failure_keeps_durable_intent_and_recovers_only_actual_partial_l
             pending = json.loads(path.read_text())
             record = pending["builds"][0]
             assert record["status"] == "BUILD_PENDING" and record["image"] is None
-            assert record["execution_id"] == EXECUTION and record["source_sha"] == SOURCE and record["version"] == "0.8.0"
+            assert record["execution_id"] == EXECUTION and record["source_sha"] == SOURCE and record["version"] == "0.8.5"
             assert record["expected_labels"]["io.trackvance.local-project"] == "trackvance-v070-test-images-" + EXECUTION[-12:]
             assert "--load" in arguments
             if partial_load != "not_loaded":

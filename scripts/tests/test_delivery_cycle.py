@@ -45,6 +45,17 @@ def test_delivery_draft_separates_target_and_strategy():
     assert draft["write_strategy"] == "UPSERT"
     assert draft["upsert_keys"] == ["record_id"]
     assert [column["ordinal"] for column in draft["columns"]] == list(range(8))
+    assert draft["schema_version"] == 1
+    assert "primary_key_mode" not in draft and "primary_key_columns" not in draft
+
+
+@pytest.mark.parametrize("keys,mode", [(["record_id", "quantity"], "DEFINE"), ([], "NONE")])
+def test_delivery_draft_pk_is_explicit_versioned_and_ordered(keys, mode):
+    draft = delivery_cycle.delivery_draft("dataset-version", {"id": "destination", "destination_version_id": "version"},
+                                         mode="CREATE_TABLE", schema_name="public", table_name="pk",
+                                         strategy="CREATE_AND_LOAD", primary_key_columns=keys)
+    assert draft["schema_version"] == 2 and draft["primary_key_mode"] == mode
+    assert draft["primary_key_columns"] == keys and draft["upsert_keys"] == []
 
 
 def test_target_commands_never_embed_passwords():

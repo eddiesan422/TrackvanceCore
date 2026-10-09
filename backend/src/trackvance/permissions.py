@@ -10,11 +10,11 @@ GROUPS = {"datasets": "Datasets", "connections": "Conexiones", "intake": "Data I
 ACTIONS = {"read": "Consultar", "write": "Crear y editar", "use": "Utilizar", "manage": "Administrar", "configure": "Configurar", "execute": "Ejecutar", "schedule": "Programar", "overwrite": "Reemplazar contenido", "alter_target": "Crear o modificar target", "review_unknown": "Revisar UNKNOWN", "repair_evidence": "Reparar evidencia", "close": "Cerrar", "download": "Descargar"}
 _ACTIONS_BY_GROUP = {"datasets": "read write", "connections": "read use manage", "intake": "read configure execute", "recon": "read configure execute", "sentinel": "read configure execute schedule", "delivery": "read configure execute schedule overwrite alter_target review_unknown repair_evidence", "destinations": "read use manage", "exceptions": "read write close", "rules": "read", "exports": "download", "artifacts": "download", "audit": "read", "users": "read manage", "roles": "read manage", "notifications": "read manage", "system": "read", "runs": "read execute"}
 GROUPS.update({"catalog": "Catálogo", "governance": "Gobierno", "domains": "Dominios",
-               "glossary": "Glosario", "blocks": "Restricciones", "reports": "Reportes"})
+               "glossary": "Glosario", "blocks": "Restricciones", "reports": "Reportes", "people": "Personas de gobierno"})
 ACTIONS.update({"preview": "Previsualizar", "generate": "Generar dataset"})
 _ACTIONS_BY_GROUP.update({"catalog": "read", "governance": "read write", "domains": "read manage",
                          "glossary": "read manage", "blocks": "read manage",
-                         "reports": "read write preview download generate"})
+                         "reports": "read write preview download generate", "people": "read manage"})
 CATALOG = frozenset(f"{group}:{action}" for group, actions in _ACTIONS_BY_GROUP.items() for action in actions.split())
 NON_DELEGABLE = frozenset({"users:manage", "roles:manage"})
 DEPENDENCIES: dict[str, frozenset[str]] = {}
@@ -34,6 +34,9 @@ DEPENDENCIES["delivery:configure"] |= {"destinations:read", "destinations:use"}
 for _code in ("catalog:read", "governance:read", "reports:read", "domains:read", "glossary:read", "blocks:read"):
     DEPENDENCIES[_code] = frozenset({"datasets:read"})
 DEPENDENCIES["reports:generate"] |= {"datasets:write"}
+DEPENDENCIES["people:read"] = frozenset({"datasets:read"})
+DEPENDENCIES["governance:write"] |= {"people:read"}
+DEPENDENCIES["reports:generate"] |= {"people:read"}
 for _code in ("reports:preview", "reports:download", "reports:generate"):
     DEPENDENCIES[_code] |= {"intake:read"}
 
@@ -75,7 +78,7 @@ def dependency_closure(grants: set[str]) -> set[str]:
 
 
 # Defaults seed new organizations only; editing a role never reapplies these grants.
-_READ = {f"{group}:read" for group in ("datasets", "connections", "intake", "recon", "sentinel", "delivery", "destinations", "exceptions", "rules", "runs", "notifications")}
+_READ = {f"{group}:read" for group in ("datasets", "connections", "intake", "recon", "sentinel", "delivery", "destinations", "exceptions", "rules", "runs", "notifications", "people")}
 _EXPORT = {"exports:download", "artifacts:download"}
 _AUTHOR = {"datasets:write", "runs:execute", "exceptions:write", "connections:use", "destinations:use"} | {f"{group}:{action}" for group in ("intake", "recon", "sentinel", "delivery") for action in ("configure", "execute")} | {"sentinel:schedule", "delivery:schedule", "delivery:overwrite", "delivery:alter_target", "delivery:review_unknown", "delivery:repair_evidence"}
 DEFAULT_ROLE_GRANTS = {
@@ -124,6 +127,10 @@ _routes("audit:read", "GET", "/audit-events")
 _routes("rules:read", "GET", "/rules")
 _routes("system:read", "GET", "/system/engines")
 _routes("users:read", "GET", "/users", "/users/{id}", "/users/roles")
+_routes("people:manage", "GET", "/governance/people/users")
+_routes("people:read", "GET", "/governance/people", "/governance/people/{id}")
+_routes("people:manage", "POST", "/governance/people")
+_routes("people:manage", "PATCH", "/governance/people/{id}")
 _routes("users:manage", "POST", "/users", "/users/{id}/regenerate-credentials", "/users/{id}/resend-credentials", "/users/{id}/reset-password")
 _routes("users:manage", "PATCH", "/users/{id}")
 _routes("users:manage", "DELETE", "/users/{id}", "/users/{id}/external-identities/{identity_id}")

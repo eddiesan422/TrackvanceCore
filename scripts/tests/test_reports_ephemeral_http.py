@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,9 @@ SPEC = importlib.util.spec_from_file_location("reports_ephemeral_http", Path(__f
 assert SPEC and SPEC.loader
 observer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(observer)
+
+from scripts.ci.common import EvidenceError
+from scripts.ci.validators import ephemeral_http_observation
 
 
 def test_real_descriptor_annotations_allow_only_ipc_and_read_only_files():
@@ -41,3 +45,133 @@ def test_during_execution_rejects_attempts_even_denied_or_deleted_later(line, re
 
 def test_an_empty_trace_cannot_certify_a_flow():
     assert observer.analyze_trace("")["status"] == "FAIL"
+
+
+def test_late_serialization_fixture_uses_final_case_parameter_without_mutating_sources():
+    from trackvance.report_query import compile_draft
+
+    source = {"alias": "a", "input_dataset_id": "dataset", "contract_id": "contract"}
+    draft = observer.late_serialization_draft([source])
+    assert draft["sources"] == [source]
+    assert draft["parameters"] == [
+        {"name": "last_key", "type": "TEXT", "value": observer.cycle.source_key(119)},
+        {"name": "bad_text", "type": "TEXT", "value": "invalid\ufffe"},
+    ]
+    schemas = {"a": [{"name": "key", "logical_type": "STRING"}, {"name": "value", "logical_type": "STRING"}]}
+    plan = compile_draft(draft, schemas)
+    assert "CASE" in plan["sql"] and plan["parameters"]["bad_text"] == "invalid\ufffe"
+    assert "invalid\ufffe" not in plan["sql"]
+
+
+def observation_receipt():
+    trace = {"status": "PASS", "violations": {}, "observed_syscalls": 1, "syscall_counts": {"write": 1},
+             "sha256": "a" * 64, "raw_trace_published": False}
+    cases = []
+    for name in sorted(observer.HTTP_CASES):
+        case = {"name": name, "status": "PASS", "storage_and_artifact_metadata_unchanged": True,
+                "active_report_children_after": 0, "source_metadata_sha256_after": "c" * 64,
+                "during_execution": {"api": deepcopy(trace), "proxy": deepcopy(trace)}}
+        if name in {"CSV_SUCCESS", "XLSX_SUCCESS"}:
+            case.update(execution_status="SUCCESS", generation="COMPLETE", transmission="COMPLETE", rows=180,
+                        bytes=1048577, population_sha256="b" * 64)
+        elif name in {"CSV_RESOURCE_FAILURE", "XLSX_RESOURCE_FAILURE"}:
+            case.update(execution_status="FAILED", generation="FAILED", transmission="NOT_STARTED", http_status=422,
+                        bytes_delivered=0, error_code="REPORT_RESULT_LIMIT", failure_stage="FINAL_COUNT_BEFORE_HEADERS")
+        elif name in {"CSV_CONSUMER_DISCONNECT", "XLSX_CONSUMER_DISCONNECT"}:
+            case.update(execution_status="INTERRUPTED", transmission="INTERRUPTED")
+        elif name == "XLSX_LATE_SERIALIZATION_FAILURE":
+            case.update(execution_status="FAILED", generation="FAILED", transmission="INTERRUPTED", http_status=200,
+                        bytes_delivered=1000, error_code="REPORT_XLSX_CHARACTER", failure_stage="SERIALIZATION_AFTER_HEADERS",
+                        incomplete_zip=True, original_error_preserved=True)
+        elif name in observer.STREAM_FAILURE_CODES:
+            case.update(execution_status="FAILED", generation="FAILED", transmission="INTERRUPTED", http_status=200,
+                        bytes_delivered=1000, error_code=observer.STREAM_FAILURE_CODES[name], failure_stage="DURING_STREAM",
+                        original_error_preserved=True,
+                        fixture_source_metadata_restored=True,
+                        fault_injection="PERSISTED_DEADLINE_EXPIRED" if name == "CSV_DEADLINE_EXPIRED" else
+                            "OWNED_SYNTHETIC_METADATA" if name in {"CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"} else "REAL_OUTPUT_BUDGET")
+        cases.append(case)
+    return {"status": "PASS", "version": "0.8.5", "requirement": "R085-01", "cases": cases,
+            "main_unchanged": True, "trace_scope": "REAL_NGINX_API_AND_CONFINED_CHILDREN", "privileges_added": False,
+            "raw_traces_published": False,
+            "metadata_storage_baseline": {"protected_source_metadata_sha256": "c" * 64}}
+
+
+@pytest.mark.parametrize("name", sorted(observer.HTTP_CASES))
+def test_http_gate_preserves_all_old_cases_and_requires_late_serialization(name):
+    receipt = observation_receipt()
+    ephemeral_http_observation(receipt)
+    receipt["cases"] = [case for case in receipt["cases"] if case["name"] != name]
+    with pytest.raises(EvidenceError, match="EPHEMERAL_CASES_MISSING"):
+        ephemeral_http_observation(receipt)
+
+
+@pytest.mark.parametrize("damage,code", [
+    ("late-no-bytes", "EPHEMERAL_LATE_FAILURE_MISSING"), ("late-success", "EPHEMERAL_LATE_FAILURE_MISSING"),
+    ("late-lost-cause", "EPHEMERAL_LATE_FAILURE_MISSING"), ("preflight-started", "EPHEMERAL_PREFLIGHT_FAILURE_MISSING"),
+    ("proxy-missing", "EPHEMERAL_TRACES_MISSING"), ("empty-trace", "EPHEMERAL_TRACE_INCOMPLETE"),
+    ("transient-write", "EPHEMERAL_TRACE_INCOMPLETE"), ("child-left", "EPHEMERAL_TEMPORALS_OR_CHILDREN"),
+    ("sample-only", "EPHEMERAL_COMPLETE_POPULATION_MISSING"), ("raw-private-trace", "EPHEMERAL_OBSERVATION_SCOPE"),
+])
+def test_http_gate_rejects_missing_failure_semantics_population_and_syscall_observation(damage, code):
+    receipt = observation_receipt()
+    ephemeral_http_observation(receipt)
+    late = next(case for case in receipt["cases"] if case["name"] == "XLSX_LATE_SERIALIZATION_FAILURE")
+    preflight = next(case for case in receipt["cases"] if case["name"] == "CSV_RESOURCE_FAILURE")
+    success = next(case for case in receipt["cases"] if case["name"] == "CSV_SUCCESS")
+    if damage == "late-no-bytes":
+        late["bytes_delivered"] = 0
+    elif damage == "late-success":
+        late["execution_status"] = "SUCCESS"
+    elif damage == "late-lost-cause":
+        late["error_code"] = "REPORT_TRANSFER_INTERRUPTED"
+    elif damage == "preflight-started":
+        preflight["transmission"] = "INTERRUPTED"
+    elif damage == "proxy-missing":
+        late["during_execution"].pop("proxy")
+    elif damage == "empty-trace":
+        late["during_execution"]["api"]["observed_syscalls"] = 0
+    elif damage == "transient-write":
+        late["during_execution"]["proxy"]["violations"] = {"writable_open": 1}
+    elif damage == "child-left":
+        late["active_report_children_after"] = 1
+    elif damage == "sample-only":
+        success["rows"] = 10
+    else:
+        receipt["raw_traces_published"] = True
+    with pytest.raises(EvidenceError, match=code):
+        ephemeral_http_observation(receipt)
+
+
+@pytest.mark.parametrize("name", sorted(observer.STREAM_FAILURE_CODES))
+@pytest.mark.parametrize("damage", ["status", "error_code", "bytes", "cause"])
+def test_stream_failure_gate_requires_real_partial_transport_and_original_cause(name, damage):
+    receipt = observation_receipt()
+    case = next(item for item in receipt["cases"] if item["name"] == name)
+    if damage == "status":
+        case["execution_status"] = "SUCCESS"
+    elif damage == "error_code":
+        case["error_code"] = "REPORT_TRANSFER_INTERRUPTED"
+    elif damage == "bytes":
+        case["bytes_delivered"] = 0
+    else:
+        case["original_error_preserved"] = False
+    with pytest.raises(EvidenceError, match="EPHEMERAL_STREAM_FAILURE_MISSING"):
+        ephemeral_http_observation(receipt)
+
+
+def test_source_metadata_restore_must_match_exact_original_rows():
+    receipt = observation_receipt()
+    receipt["cases"][-1]["source_metadata_sha256_after"] = "d" * 64
+    with pytest.raises(EvidenceError, match="EPHEMERAL_SOURCE_METADATA_CHANGED"):
+        ephemeral_http_observation(receipt)
+
+
+@pytest.mark.parametrize("name", ["CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"])
+@pytest.mark.parametrize("damage", ["missing-injection", "missing-restore"])
+def test_source_fault_gate_requires_owned_injection_and_restore(name, damage):
+    receipt = observation_receipt()
+    case = next(item for item in receipt["cases"] if item["name"] == name)
+    case["fault_injection" if damage == "missing-injection" else "fixture_source_metadata_restored"] = "NOT_RUN" if damage == "missing-injection" else False
+    with pytest.raises(EvidenceError, match="EPHEMERAL_SOURCE_FAULT_PROOF_MISSING"):
+        ephemeral_http_observation(receipt)

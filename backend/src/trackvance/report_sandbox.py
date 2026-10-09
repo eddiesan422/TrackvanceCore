@@ -22,6 +22,8 @@ from typing import Any, cast
 import sqlglot
 from sqlglot import exp
 
+from trackvance.portable_temporal import TIMESTAMP_PATTERN, exact_timestamp
+
 duckdb = None
 # This script is Linux-only; Windows typeshed omits the rusage API.
 linux_resource = cast(Any, resource)
@@ -50,14 +52,20 @@ def parameter(value):
         if kind == "DATE":
             return date.fromisoformat(raw)
         if kind == "TIMESTAMP":
-            return datetime.fromisoformat(raw)
+            try:
+                return exact_timestamp(raw)
+            except (ValueError, OverflowError):
+                raise SandboxError("REPORT_TIMESTAMP_EXACT", "TIMESTAMP requiere offset y precisión máxima de seis cifras.") from None
         raise SandboxError("REPORT_PARAMETER_TYPE", "Tipo de parámetro no admitido.")
     return value
 
 
 def bind_parameters(sql, params):
     names = {n.name for n in sqlglot.parse_one(sql, read="duckdb").find_all(exp.Placeholder)}
-    return {k: v for k, v in params.items() if k in names}
+    bound = {k: v for k, v in params.items() if k in names}
+    if len({name.casefold() for name in bound}) != len(bound):
+        raise SandboxError("REPORT_PARAMETERS", "Los parámetros no pueden diferir sólo por mayúsculas.")
+    return bound
 
 
 def filter_literal(sql, params):
@@ -283,10 +291,10 @@ def typed_view(connection, source, params):
                 raise SandboxError("REPORT_SOURCE_TYPE", "DATE requiere representación canónica ISO; una conversión ambigua no es admisible.")
             cast = f"CAST({ref} AS DATE)"
         elif logical == "TIMESTAMP":
-            aware, naive = connection.execute(f"SELECT count(*) FILTER(WHERE regexp_matches(CAST({ref} AS VARCHAR),'(Z|[+-][0-9]{{2}}:[0-9]{{2}})$')), count(*) FILTER(WHERE {ref} IS NOT NULL AND NOT regexp_matches(CAST({ref} AS VARCHAR),'(Z|[+-][0-9]{{2}}:[0-9]{{2}})$')) FROM {quote(raw)}").fetchone()
-            if aware and naive:
-                raise SandboxError("REPORT_TIMESTAMP_ZONE", "No se permite mezclar timestamps con zona y sin zona.")
-            cast = f"CAST({ref} AS {'TIMESTAMPTZ' if aware else 'TIMESTAMP'})"
+            bad = connection.execute(f"SELECT count(*) FROM {quote(raw)} WHERE {ref} IS NOT NULL AND (NOT regexp_full_match(CAST({ref} AS VARCHAR),'{TIMESTAMP_PATTERN}') OR TRY_CAST({ref} AS TIMESTAMPTZ) IS NULL)").fetchone()[0]
+            if bad:
+                raise SandboxError("REPORT_TIMESTAMP_EXACT", "TIMESTAMP requiere ISO válido con offset explícito y hasta seis cifras fraccionales.")
+            cast = f"CAST({ref} AS TIMESTAMPTZ)"
         elif logical == "BOOLEAN":
             bad = connection.execute(f"SELECT count(*) FROM {quote(raw)} WHERE {ref} IS NOT NULL AND lower(CAST({ref} AS VARCHAR)) NOT IN ('true','false')").fetchone()[0]
             if bad:
@@ -421,6 +429,15 @@ def run(payload):
         connection.execute("SET lock_configuration=true")
         checks = cardinality(connection, plan, params, limits)
         emit("cardinality", items=checks)
+        final_rows = None
+        if payload["profile"] in {"DOWNLOAD", "XLSX"}:
+            # Count the FINAL relational result, including DISTINCT/GROUP/HAVING
+            # and the user's LIMIT. max+1 proves excess without counting further.
+            count_sql = (f'SELECT count(*) FROM (SELECT * FROM ({plan["sql"]}) '
+                         f'AS __tv_final LIMIT {limits["max_rows"] + 1}) AS __tv_bounded')
+            final_rows = int(connection.execute(count_sql, bind_parameters(count_sql, params)).fetchone()[0])
+            if final_rows > limits["max_rows"]:
+                raise SandboxError("REPORT_RESULT_LIMIT", "La consulta final excede el límite de filas de datos; no se inició la descarga.")
         cursor = connection.execute(plan["sql"], bind_parameters(plan["sql"], params))
         columns = [{"name": c[0], "type": str(c[1])} for c in cursor.description]
         emit("schema", columns=columns)
@@ -448,7 +465,10 @@ def run(payload):
                 observed[metric] = int(Path(path).read_text().strip())
             except (OSError, ValueError):
                 pass  # Optional counter; never report an unavailable measure as zero.
-        emit("complete", rows=rows, bytes=bytes_out, elapsed_seconds=time.monotonic() - started,
+        if final_rows is not None and rows != final_rows:
+            raise SandboxError("REPORT_RESULT_DRIFT", "El conteo final no coincide con la población generada.")
+        emit("complete", rows=rows, bytes=bytes_out, logical_bytes=bytes_out, total_rows=final_rows,
+             elapsed_seconds=time.monotonic() - started,
              max_rss_bytes=usage.ru_maxrss * 1024,
              cpu_user_seconds=usage.ru_utime - initial_usage.ru_utime,
              cpu_system_seconds=usage.ru_stime - initial_usage.ru_stime,

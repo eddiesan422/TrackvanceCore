@@ -127,7 +127,7 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ("types", [*uv, "mypy", "src/trackvance", "--check-untyped-defs", "--ignore-missing-imports"], ROOT / "backend"),
             ("contracts", [*uv, "python", "../scripts/export_contracts.py"], ROOT / "backend"),
             ("contracts-diff", ["git", "diff", "--exit-code", "--", "backend/openapi.json",
-                "docs/specification/model_contract_0.8.0.json", "docs/specification/permission_contract_0.8.0.json",
+                "docs/specification/model_contract_0.8.5.json", "docs/specification/permission_contract_0.8.5.json",
                 "docs/development/permission-matrix.md"], ROOT),
             *[("migration-" + name, [*uv, "alembic", *args], ROOT / "backend")
               for name, args in (("upgrade", ["upgrade", "head"]), ("check", ["check"]),

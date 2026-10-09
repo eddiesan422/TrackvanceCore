@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.8.0",
+  "version": "0.8.5",
   "legacy_workflow_instances": 16,
   "groups": [
     {
@@ -349,7 +349,7 @@
           "id": "backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.8.0"
+          "version": "0.8.5"
         },
         {
           "id": "backup-authentic051",
@@ -418,6 +418,15 @@
           "id": "catalog-authentic070-recovery",
           "validator": "catalog-recovery",
           "mode": "legacy"
+        },
+        {
+          "id": "catalog-populated080-upgrade085",
+          "validator": "catalog-recovery",
+          "mode": "legacy080"
+        },
+        {
+          "id": "catalog-selective-operational-cleanup085",
+          "validator": "catalog-cleanup"
         }
       ],
       "timeout_minutes": 120
@@ -725,7 +734,7 @@
           "id": "functional-backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.8.0"
+          "version": "0.8.5"
         }
       ],
       "timeout_minutes": 25,

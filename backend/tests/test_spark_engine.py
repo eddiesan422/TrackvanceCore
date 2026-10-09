@@ -218,6 +218,26 @@ def test_real_spark_catalog_intake_global_references_and_exact_values(real_spark
     assert runtime.metadata["engine_version"] == "4.0.3"
 
 
+@pytest.mark.parametrize("kind,expected", [("overlap", 2), ("complementary", 3), ("none", 0), ("ignore", 2)])
+def test_r08004_real_spark_effective_coverage_union_parity(real_spark, tmp_path, kind, expected):
+    engine, _ = real_spark
+    frame = pl.DataFrame({"country": ["CO", "US", "CO"], "value": ["1", None, "3"]})
+    condition = {"column": "country", "operator": "eq", "value": "NONE" if kind == "none" else "CO"}
+    rules = [{"type": "numeric", "column": "value", "rule_id": "first", "when": condition}]
+    if kind in {"overlap", "complementary"}:
+        rules.append({"type": "numeric", "column": "value", "rule_id": "second", "when": {
+            "column": "country", "operator": "eq", "value": "US" if kind == "complementary" else "CO"}})
+    if kind == "ignore":
+        rules = [{"type": "numeric", "column": "value", "parameters": {"null_policy": "IGNORE"}}]
+    config = {"rules": rules}
+    _, metrics, _ = intake(frame, config, NOW)
+    _, _, actual, _ = engine.intake(dataset(tmp_path, frame, "coverage"), config, NOW, {}, tmp_path / "coverage-output")
+    assert actual == metrics
+    assert actual["validation_coverage_rows"] == expected
+    if kind == "overlap":
+        assert sum(rule["evaluated_count"] for rule in actual["rules"]) == 4
+
+
 @pytest.mark.parametrize("aggregation_side", [None, "SOURCE", "TARGET"])
 def test_real_spark_recon_partitions_decimals_nulls_and_aggregation(real_spark, tmp_path, aggregation_side):
     engine, _ = real_spark

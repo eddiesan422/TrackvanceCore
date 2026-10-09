@@ -28,7 +28,7 @@ describe('Identifier override during upload', () => {
     await screen.findByText('CSV delimitado')
     expect(screen.queryByLabelText('Otros identificadores por nombre')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Columnas identificadoras (opcional): abrir selector' }))
-    await user.click(screen.getByRole('checkbox', { name: 'document_id (STRING)' }))
+    expect(screen.getByRole('checkbox', { name: 'document_id (STRING)' })).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Cargar y analizar' }))
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/customers/versions/upload')).toBe(true))
     const [path, options] = vi.mocked(api).mock.calls.find(([candidate]) => candidate === '/datasets/customers/versions/upload')!
@@ -88,7 +88,7 @@ describe('Identifier override during upload', () => {
     await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/customers/versions/upload')).toBe(true))
     const uploadCall = vi.mocked(api).mock.calls.find(([path]) => path === '/datasets/customers/versions/upload')!
     expect(JSON.parse(String((uploadCall[1]?.body as FormData).get('column_overrides')))).toEqual({
-      amount: { logical_type: 'INT64' },
+      amount: { logical_type: 'INT64', semantic_tag: null },
       document_id: { logical_type: 'STRING', semantic_tag: 'IDENTIFIER' },
     })
   })
@@ -114,7 +114,7 @@ describe('Identifier override during upload', () => {
     }))
     expect(api).toHaveBeenCalledWith('/datasets/risk-events/versions/upload', expect.objectContaining({ method: 'POST' }))
     const uploadCall = vi.mocked(api).mock.calls.find(([path]) => path === '/datasets/risk-events/versions/upload')!
-    expect(JSON.parse(String((uploadCall[1]?.body as FormData).get('column_overrides')))).toEqual({ risk_score: { logical_type: 'INT64' } })
+    expect(JSON.parse(String((uploadCall[1]?.body as FormData).get('column_overrides')))).toEqual({ risk_score: { logical_type: 'INT64', semantic_tag: null } })
   })
 
   it.each([

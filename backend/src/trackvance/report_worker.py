@@ -109,7 +109,7 @@ def _checkpoint(identity, owner):
         _lease(db, execution, owner)
 
 
-def _logical_columns(columns):
+def _logical_columns(columns, projection_schema=None):
     result = {}
     for column in columns:
         kind = column["type"]
@@ -120,8 +120,10 @@ def _logical_columns(columns):
             raise OperationError(422, "REPORT_PUBLICATION_TYPE", "El resultado contiene un tipo no compatible con la publicación canónica.")
         if kind in {"HUGEINT", "UBIGINT"}:
             logical = "DECIMAL"
-        result[column["name"]] = {"logical_type": logical,
-                                   **({"semantic_tag": "IDENTIFIER"} if logical == "STRING" else {})}
+        inherited = (projection_schema or {}).get(column["name"])
+        if inherited and inherited.get("logical_type") != logical:
+            raise OperationError(422, "REPORT_PUBLICATION_SCHEMA", "La proyección directa no conserva el tipo lógico congelado.")
+        result[column["name"]] = inherited or {"logical_type": logical, "semantic_tag": None}
     return result
 
 
@@ -235,7 +237,13 @@ def materialize(identity, owner):
         from .dataset_scans import profile_paths
         profile_limits = replace(AcquisitionLimits.configured(), max_rows=limits.max_rows,
                                  timeout_seconds=limits.timeout_seconds, memory_bytes=limits.memory_bytes)
-        overrides = _logical_columns(columns)
+        from .report_query import projection_schema
+        inherited_projection = plan.get("projection_schema")
+        if inherited_projection is None:
+            # Old contexts keep their exact stored bytes/hashes. Reconstruct
+            # metadata only from their already authorized SQL and frozen schemas.
+            inherited_projection = projection_schema(plan["sql"], {source["alias"]: source["schema"] for source in sources})
+        overrides = _logical_columns(columns, inherited_projection)
         profiling_started = time.monotonic()
         profiled = profile_paths(parts, column_overrides=overrides, limits=profile_limits,
                                  check=checkpoint, temp_byte_limit=limits.temp_bytes,
@@ -262,6 +270,8 @@ def materialize(identity, owner):
             job = _lease(db, item, owner, lock=True)
             revalidate(db, context, user, "reports:generate")
             validate_classification(db, organization_id, publication.get("macro_domain_id"), publication.get("domain_id"))
+            from .governance_people import resolve_governance_assignments
+            assignments = resolve_governance_assignments(db, organization_id, publication)
             sensitivities = {s["governance"].get("information_classification", "UNKNOWN") for s in sources}
             rank = {"PUBLIC": 0, "INTERNAL": 1, "CONFIDENTIAL": 2, "RESTRICTED": 3, "UNKNOWN": 4}
             requested = publication.get("information_classification", "UNKNOWN")
@@ -271,6 +281,9 @@ def materialize(identity, owner):
                 criticality=publication.get("criticality", "HIGH"), macro_domain_id=publication.get("macro_domain_id"),
                 domain_id=publication.get("domain_id"), business_owner_id=publication.get("business_owner_id"),
                 steward_id=publication.get("steward_id"), technical_custodian_id=publication.get("technical_custodian_id"),
+                business_owner_person_id=assignments.get("business_owner_person_id"),
+                steward_person_id=assignments.get("steward_person_id"),
+                technical_custodian_person_id=assignments.get("technical_custodian_person_id"),
                 information_classification=inherited)
             db.add(dataset)
             db.flush()

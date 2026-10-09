@@ -34,7 +34,7 @@ def test_saved_definition_resolves_its_exact_persisted_schema_draft():
 
 def test_native_recovery_requires_populated_new_entities():
     tables = {name: {"row": "hash"} for name in recovery.docker_state.CURRENT_STATE_TABLES}
-    state = {"schema_version": 8, "migration": "0017_catalog_reports", "tables": tables}
+    state = {"schema_version": recovery.docker_state.VERIFY_SCHEMA_VERSION, "migration": recovery.docker_state.CURRENT_MIGRATION, "tables": tables}
     recovery.assert_native_state(state)
     for name in recovery.docker_state.CATALOG_STATE_TABLES:
         state["tables"] = {**tables, name: {}}
@@ -192,7 +192,7 @@ def test_native_sequence_starts_fixture_services_then_stops_source_after_restore
     monkeypatch.setattr(recovery, "restore_compare", lambda *_args, **_kwargs: events.append("restore") or {})
     monkeypatch.setattr(recovery, "stop_quiescent_population", lambda *_args: events.append("stop") or "STOPPED_QUIESCENT")
     result = recovery.native_cycle(tmp_path, {"project": project}, tmp_path)
-    assert events == ["start", "create_inactive", "fixture", "backup", "verify", "state", "privacy", "restore", "stop"]
+    assert events == ["start", "create_inactive", "fixture", "backup", "verify", "state", "privacy", "stop", "restore"]
     assert result["source_final_state"] == "STOPPED_QUIESCENT"
     assert recovery.docker_state.compose is original
 
@@ -245,3 +245,16 @@ def test_restored_block_is_checked_independently_of_context_expiry(expired):
     assert calls[0] == ("/reports/resolve", 422) and result["current_block_new_resolution"] == "PASS"
     assert result["frozen_context_preview"] == ("NOT_RUN_EXPIRED" if expired else "PASS_CURRENT_BLOCK")
     assert calls == [("/reports/resolve", 422)] + ([] if expired else [("/reports/preview", 403)])
+
+
+def test_authentic_populated_080_source_is_a_distinct_fixed_commit():
+    assert recovery.AUTHENTIC_080 == "4eaaeb774878bca62d7d6f758157107f0557512e"
+    assert recovery.AUTHENTIC_080 != recovery.AUTHENTIC_070
+
+
+def test_current_native_person_population_is_mandatory():
+    tables = {name: {"row": "hash"} for name in recovery.docker_state.CURRENT_STATE_TABLES}
+    state = {"schema_version": recovery.docker_state.VERIFY_SCHEMA_VERSION, "migration": recovery.docker_state.CURRENT_MIGRATION, "tables": tables}
+    state["tables"]["governance_people"] = {}
+    with pytest.raises(ValueError, match="personas reales"):
+        recovery.assert_native_state(state)

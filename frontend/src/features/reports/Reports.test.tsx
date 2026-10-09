@@ -35,7 +35,7 @@ it('uses frozen approved outputs for separate preview and download actions while
   expect(screen.getByText('1234567890123456.78')).toBeInTheDocument()
   expect(screen.getByText('Existe una entrada posterior pendiente.')).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Descargar reporte' }))
-  await waitFor(() => expect(download).toHaveBeenCalledWith('/reports/download', 'reporte.csv', expect.objectContaining({ method: 'POST', body: JSON.stringify({ context_id: 'frozen', format: 'CSV' }), signal: expect.any(AbortSignal) })))
+  await waitFor(() => expect(download).toHaveBeenCalledWith('/reports/download', 'reporte.csv', expect.objectContaining({ method: 'POST', body: JSON.stringify({ context_id: 'frozen', format: 'CSV' }), signal: expect.any(AbortSignal) }), expect.any(Function)))
   expect(vi.mocked(post).mock.calls.some(([path]) => path === '/reports/definitions' || path === '/reports/datasets')).toBe(false)
 })
 

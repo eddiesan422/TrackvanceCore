@@ -138,7 +138,7 @@ class ColumnMapping(StrictModel):
 
 
 class DeliveryDraft(StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     dataset_version_id: str = Field(min_length=1, max_length=64)
     destination_id: str = Field(min_length=1, max_length=64)
     destination_version_id: str = Field(min_length=1, max_length=64)
@@ -146,6 +146,8 @@ class DeliveryDraft(StrictModel):
     columns: list[ColumnMapping] = Field(min_length=1, max_length=100)
     write_strategy: Literal["CREATE_AND_LOAD", "APPEND", "OVERWRITE", "UPSERT"]
     upsert_keys: list[str] = Field(default_factory=list, max_length=100)
+    primary_key_mode: Literal["DEFINE", "NONE"] | None = None
+    primary_key_columns: list[str] = Field(default_factory=list, max_length=32)
     audit_columns_enabled: bool = False
 
     @model_validator(mode="after")
@@ -171,6 +173,23 @@ class DeliveryDraft(StrictModel):
                 raise ValueError("Las claves UPSERT deben pertenecer al mapping de destino.")
         elif self.upsert_keys:
             raise ValueError("Las claves UPSERT solo aplican a esa estrategia.")
+        if self.schema_version == 1:
+            if {"primary_key_mode", "primary_key_columns"} & self.model_fields_set:
+                raise ValueError("La clave primaria requiere el contrato Delivery v2.")
+        elif self.target.mode == "CREATE_TABLE":
+            if self.primary_key_mode is None:
+                raise ValueError("Elige definir clave primaria o crear explícitamente sin ella.")
+            if self.primary_key_mode == "DEFINE":
+                if not self.primary_key_columns or len(set(self.primary_key_columns)) != len(self.primary_key_columns):
+                    raise ValueError("La clave primaria requiere columnas distintas y orden explícito.")
+                if set(self.primary_key_columns) - set(targets):
+                    raise ValueError("La clave primaria utiliza nombres finales del mapping.")
+                if any(column.nullable for column in self.columns if column.target_name in self.primary_key_columns):
+                    raise ValueError("Cada columna de la clave primaria debe ser NOT NULL.")
+            elif self.primary_key_columns:
+                raise ValueError("Crear sin clave primaria no admite columnas de clave primaria.")
+        elif self.primary_key_mode is not None or self.primary_key_columns:
+            raise ValueError("La clave primaria sólo se define para una tabla nueva.")
         return self
 
     def snapshot(self) -> dict[str, Any]:
@@ -179,7 +198,16 @@ class DeliveryDraft(StrictModel):
         # 0.6.0, which did not carry this optional field.
         if "audit_columns_enabled" not in self.model_fields_set:
             snapshot.pop("audit_columns_enabled", None)
+        if self.schema_version == 1:
+            snapshot.pop("primary_key_mode", None)
+            snapshot.pop("primary_key_columns", None)
         return snapshot
+
+    def prepared_target(self) -> dict[str, Any]:
+        target = self.target.model_dump()
+        if self.schema_version == 2 and self.target.mode == "CREATE_TABLE":
+            target["_primary_key_columns"] = list(self.primary_key_columns)
+        return target
 
 
 class DeliveryPreviewResponse(BaseModel):

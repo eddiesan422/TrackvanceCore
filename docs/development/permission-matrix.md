@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.8.0
+# Matriz de permisos HTTP y catálogo 0.8.5
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 56 códigos; la matriz tiene 170 entradas protegidas.
+El catálogo contiene 58 códigos; la matriz tiene 175 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -40,17 +40,19 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | `glossary:manage` | Glosario | glossary:read | Sí |
 | `glossary:read` | Glosario | datasets:read | Sí |
 | `governance:read` | Gobierno | datasets:read | Sí |
-| `governance:write` | Gobierno | governance:read | Sí |
+| `governance:write` | Gobierno | governance:read, people:read | Sí |
 | `intake:configure` | Data Intake | datasets:read, intake:read | Sí |
 | `intake:execute` | Data Intake | datasets:read, intake:read | Sí |
 | `intake:read` | Data Intake | — | Sí |
 | `notifications:manage` | Notificaciones | notifications:read | Sí |
 | `notifications:read` | Notificaciones | — | Sí |
+| `people:manage` | Personas de gobierno | people:read | Sí |
+| `people:read` | Personas de gobierno | datasets:read | Sí |
 | `recon:configure` | ReconOps | datasets:read, recon:read | Sí |
 | `recon:execute` | ReconOps | datasets:read, recon:read | Sí |
 | `recon:read` | ReconOps | — | Sí |
 | `reports:download` | Reportes | intake:read, reports:read | Sí |
-| `reports:generate` | Reportes | datasets:write, intake:read, reports:read | Sí |
+| `reports:generate` | Reportes | datasets:write, intake:read, people:read, reports:read | Sí |
 | `reports:preview` | Reportes | intake:read, reports:read | Sí |
 | `reports:read` | Reportes | datasets:read | Sí |
 | `reports:write` | Reportes | reports:read | Sí |
@@ -124,6 +126,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/governance/domains` | `datasets:read` |
 | GET | `/governance/glossary` | `glossary:read` |
 | GET | `/governance/macrodomains` | `datasets:read` |
+| GET | `/governance/people` | `people:read` |
+| GET | `/governance/people/users` | `people:manage` |
+| GET | `/governance/people/{id}` | `people:read` |
 | GET | `/intake/contracts` | `intake:read` |
 | GET | `/intake/runs/{id}/errors` | `intake:read` |
 | GET | `/monitors` | `sentinel:read` |
@@ -172,6 +177,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | PATCH | `/governance/domains/{id}` | `domains:manage` |
 | PATCH | `/governance/glossary/{id}` | `glossary:manage` |
 | PATCH | `/governance/macrodomains/{id}` | `domains:manage` |
+| PATCH | `/governance/people/{id}` | `people:manage` |
 | PATCH | `/roles/{id}` | `roles:manage` |
 | PATCH | `/users/{id}` | `users:manage` |
 | POST | `/acquisitions/{id}/cancel` | `datasets:write` |
@@ -215,6 +221,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/governance/domains` | `domains:manage` |
 | POST | `/governance/glossary` | `glossary:manage` |
 | POST | `/governance/macrodomains` | `domains:manage` |
+| POST | `/governance/people` | `people:manage` |
 | POST | `/intake/contracts` | `intake:configure` |
 | POST | `/intake/contracts/{id}/versions` | `intake:configure` |
 | POST | `/intake/runs` | `intake:execute` |

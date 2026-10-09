@@ -1,0 +1,1393 @@
+{
+  "version": "0.8.5",
+  "catalog": [
+    {
+      "code": "artifacts:download",
+      "group": "Evidencia / exports",
+      "label": "Descargar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "audit:read",
+      "group": "Auditoría",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "blocks:manage",
+      "group": "Restricciones",
+      "label": "Administrar",
+      "dependencies": [
+        "blocks:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "blocks:read",
+      "group": "Restricciones",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "catalog:read",
+      "group": "Catálogo",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "connections:manage",
+      "group": "Conexiones",
+      "label": "Administrar",
+      "dependencies": [
+        "connections:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "connections:read",
+      "group": "Conexiones",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "connections:use",
+      "group": "Conexiones",
+      "label": "Utilizar",
+      "dependencies": [
+        "connections:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "datasets:read",
+      "group": "Datasets",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "datasets:write",
+      "group": "Datasets",
+      "label": "Crear y editar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:alter_target",
+      "group": "Data Delivery",
+      "label": "Crear o modificar target",
+      "dependencies": [
+        "delivery:execute",
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:configure",
+      "group": "Data Delivery",
+      "label": "Configurar",
+      "dependencies": [
+        "datasets:read",
+        "delivery:read",
+        "destinations:read",
+        "destinations:use"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:execute",
+      "group": "Data Delivery",
+      "label": "Ejecutar",
+      "dependencies": [
+        "datasets:read",
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:overwrite",
+      "group": "Data Delivery",
+      "label": "Reemplazar contenido",
+      "dependencies": [
+        "delivery:execute",
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:read",
+      "group": "Data Delivery",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "delivery:repair_evidence",
+      "group": "Data Delivery",
+      "label": "Reparar evidencia",
+      "dependencies": [
+        "delivery:execute",
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:review_unknown",
+      "group": "Data Delivery",
+      "label": "Revisar UNKNOWN",
+      "dependencies": [
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "delivery:schedule",
+      "group": "Data Delivery",
+      "label": "Programar",
+      "dependencies": [
+        "delivery:configure",
+        "delivery:execute",
+        "delivery:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "destinations:manage",
+      "group": "Destinos",
+      "label": "Administrar",
+      "dependencies": [
+        "destinations:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "destinations:read",
+      "group": "Destinos",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "destinations:use",
+      "group": "Destinos",
+      "label": "Utilizar",
+      "dependencies": [
+        "destinations:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "domains:manage",
+      "group": "Dominios",
+      "label": "Administrar",
+      "dependencies": [
+        "domains:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "domains:read",
+      "group": "Dominios",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "exceptions:close",
+      "group": "Excepciones",
+      "label": "Cerrar",
+      "dependencies": [
+        "exceptions:read",
+        "exceptions:write"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "exceptions:read",
+      "group": "Excepciones",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "exceptions:write",
+      "group": "Excepciones",
+      "label": "Crear y editar",
+      "dependencies": [
+        "exceptions:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "exports:download",
+      "group": "Evidencia / exports",
+      "label": "Descargar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "glossary:manage",
+      "group": "Glosario",
+      "label": "Administrar",
+      "dependencies": [
+        "glossary:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "glossary:read",
+      "group": "Glosario",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "governance:read",
+      "group": "Gobierno",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "governance:write",
+      "group": "Gobierno",
+      "label": "Crear y editar",
+      "dependencies": [
+        "governance:read",
+        "people:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "intake:configure",
+      "group": "Data Intake",
+      "label": "Configurar",
+      "dependencies": [
+        "datasets:read",
+        "intake:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "intake:execute",
+      "group": "Data Intake",
+      "label": "Ejecutar",
+      "dependencies": [
+        "datasets:read",
+        "intake:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "intake:read",
+      "group": "Data Intake",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "notifications:manage",
+      "group": "Notificaciones",
+      "label": "Administrar",
+      "dependencies": [
+        "notifications:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "notifications:read",
+      "group": "Notificaciones",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "people:manage",
+      "group": "Personas de gobierno",
+      "label": "Administrar",
+      "dependencies": [
+        "people:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "people:read",
+      "group": "Personas de gobierno",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "recon:configure",
+      "group": "ReconOps",
+      "label": "Configurar",
+      "dependencies": [
+        "datasets:read",
+        "recon:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "recon:execute",
+      "group": "ReconOps",
+      "label": "Ejecutar",
+      "dependencies": [
+        "datasets:read",
+        "recon:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "recon:read",
+      "group": "ReconOps",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "reports:download",
+      "group": "Reportes",
+      "label": "Descargar",
+      "dependencies": [
+        "intake:read",
+        "reports:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "reports:generate",
+      "group": "Reportes",
+      "label": "Generar dataset",
+      "dependencies": [
+        "datasets:write",
+        "intake:read",
+        "people:read",
+        "reports:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "reports:preview",
+      "group": "Reportes",
+      "label": "Previsualizar",
+      "dependencies": [
+        "intake:read",
+        "reports:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "reports:read",
+      "group": "Reportes",
+      "label": "Consultar",
+      "dependencies": [
+        "datasets:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "reports:write",
+      "group": "Reportes",
+      "label": "Crear y editar",
+      "dependencies": [
+        "reports:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "roles:manage",
+      "group": "Roles",
+      "label": "Administrar",
+      "dependencies": [
+        "roles:read"
+      ],
+      "delegable": false
+    },
+    {
+      "code": "roles:read",
+      "group": "Roles",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "rules:read",
+      "group": "Reglas",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "runs:execute",
+      "group": "Ejecuciones",
+      "label": "Ejecutar",
+      "dependencies": [
+        "runs:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "runs:read",
+      "group": "Ejecuciones",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "sentinel:configure",
+      "group": "Sentinel",
+      "label": "Configurar",
+      "dependencies": [
+        "datasets:read",
+        "sentinel:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "sentinel:execute",
+      "group": "Sentinel",
+      "label": "Ejecutar",
+      "dependencies": [
+        "datasets:read",
+        "sentinel:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "sentinel:read",
+      "group": "Sentinel",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "sentinel:schedule",
+      "group": "Sentinel",
+      "label": "Programar",
+      "dependencies": [
+        "sentinel:execute",
+        "sentinel:read"
+      ],
+      "delegable": true
+    },
+    {
+      "code": "system:read",
+      "group": "Sistema",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    },
+    {
+      "code": "users:manage",
+      "group": "Usuarios",
+      "label": "Administrar",
+      "dependencies": [
+        "users:read"
+      ],
+      "delegable": false
+    },
+    {
+      "code": "users:read",
+      "group": "Usuarios",
+      "label": "Consultar",
+      "dependencies": [],
+      "delegable": true
+    }
+  ],
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/catalog/glossary-associations/{id}",
+      "permission": "glossary:manage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/connections/{id}",
+      "permission": "connections:manage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/delivery/destinations/{id}",
+      "permission": "destinations:manage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/roles/{id}",
+      "permission": "roles:manage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/users/{id}",
+      "permission": "users:manage"
+    },
+    {
+      "method": "DELETE",
+      "path": "/users/{id}/external-identities/{identity_id}",
+      "permission": "users:manage"
+    },
+    {
+      "method": "GET",
+      "path": "/acquisitions",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/acquisitions/limits",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/acquisitions/{id}",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/{id}/download",
+      "permission": "artifacts:download"
+    },
+    {
+      "method": "GET",
+      "path": "/audit-events",
+      "permission": "audit:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/datasets",
+      "permission": "catalog:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/datasets/{id}",
+      "permission": "catalog:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/datasets/{id}/blocks",
+      "permission": "catalog:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/domains",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/macrodomains",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/resources",
+      "permission": "catalog:read"
+    },
+    {
+      "method": "GET",
+      "path": "/catalog/tree",
+      "permission": "catalog:read"
+    },
+    {
+      "method": "GET",
+      "path": "/connections",
+      "permission": "connections:read"
+    },
+    {
+      "method": "GET",
+      "path": "/connections/{id}",
+      "permission": "connections:read"
+    },
+    {
+      "method": "GET",
+      "path": "/connections/{id}/objects",
+      "permission": "connections:use"
+    },
+    {
+      "method": "GET",
+      "path": "/connections/{id}/preview",
+      "permission": "connections:use"
+    },
+    {
+      "method": "GET",
+      "path": "/connections/{id}/schemas",
+      "permission": "connections:use"
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/dataset-versions/{id}/profile",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/datasets",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/datasets/uploads/{id}/inspect",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "GET",
+      "path": "/datasets/{id}",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/datasets/{id}/schema",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/automations",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/automations/{id}",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/automations/{id}/occurrences",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/configurations",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations",
+      "permission": "destinations:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations/{id}",
+      "permission": "destinations:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations/{id}/schemas",
+      "permission": "destinations:use"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations/{id}/table-metadata",
+      "permission": "destinations:use"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations/{id}/tables",
+      "permission": "destinations:use"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/destinations/{id}/target-policy",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/runs",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/runs/{id}/attempts",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/runs/{id}/receipt",
+      "permission": "artifacts:download"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/runs/{id}/reviews",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/validations",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/delivery/validations/{id}",
+      "permission": "delivery:read"
+    },
+    {
+      "method": "GET",
+      "path": "/exceptions",
+      "permission": "exceptions:read"
+    },
+    {
+      "method": "GET",
+      "path": "/exceptions/assignees",
+      "permission": "exceptions:read"
+    },
+    {
+      "method": "GET",
+      "path": "/exceptions/{id}",
+      "permission": "exceptions:read"
+    },
+    {
+      "method": "GET",
+      "path": "/exceptions/{id}/attachments/{attachment_id}/download",
+      "permission": "artifacts:download"
+    },
+    {
+      "method": "GET",
+      "path": "/findings",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/domains",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/glossary",
+      "permission": "glossary:read"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/macrodomains",
+      "permission": "datasets:read"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/people",
+      "permission": "people:read"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/people/users",
+      "permission": "people:manage"
+    },
+    {
+      "method": "GET",
+      "path": "/governance/people/{id}",
+      "permission": "people:read"
+    },
+    {
+      "method": "GET",
+      "path": "/intake/contracts",
+      "permission": "intake:read"
+    },
+    {
+      "method": "GET",
+      "path": "/intake/runs/{id}/errors",
+      "permission": "intake:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors/{id}/alerts",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors/{id}/metrics",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors/{id}/occurrences",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors/{id}/schedule",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/monitors/{id}/series",
+      "permission": "sentinel:read"
+    },
+    {
+      "method": "GET",
+      "path": "/notifications/deliveries",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "GET",
+      "path": "/notifications/inbox",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "GET",
+      "path": "/notifications/status",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "GET",
+      "path": "/notifications/unread-count",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "GET",
+      "path": "/recon/controls",
+      "permission": "recon:read"
+    },
+    {
+      "method": "GET",
+      "path": "/recon/runs/{id}/results",
+      "permission": "recon:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/definitions",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/definitions/{id}",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/executions",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/executions/{id}",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/limits",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/reports/sources",
+      "permission": "reports:read"
+    },
+    {
+      "method": "GET",
+      "path": "/roles",
+      "permission": "roles:read"
+    },
+    {
+      "method": "GET",
+      "path": "/roles/permissions",
+      "permission": "roles:read"
+    },
+    {
+      "method": "GET",
+      "path": "/roles/{id}",
+      "permission": "roles:read"
+    },
+    {
+      "method": "GET",
+      "path": "/rules",
+      "permission": "rules:read"
+    },
+    {
+      "method": "GET",
+      "path": "/runs",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/diagnostics",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/evidence",
+      "permission": "artifacts:download"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/execution-plan",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/export.csv",
+      "permission": "exports:download"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/export.xlsx",
+      "permission": "exports:download"
+    },
+    {
+      "method": "GET",
+      "path": "/runs/{id}/results",
+      "permission": "runs:read"
+    },
+    {
+      "method": "GET",
+      "path": "/system/engines",
+      "permission": "system:read"
+    },
+    {
+      "method": "GET",
+      "path": "/users",
+      "permission": "users:read"
+    },
+    {
+      "method": "GET",
+      "path": "/users/roles",
+      "permission": "users:read"
+    },
+    {
+      "method": "GET",
+      "path": "/users/{id}",
+      "permission": "users:read"
+    },
+    {
+      "method": "PATCH",
+      "path": "/catalog/blocks/{id}",
+      "permission": "blocks:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/catalog/datasets/{id}/columns",
+      "permission": "governance:write"
+    },
+    {
+      "method": "PATCH",
+      "path": "/catalog/domains/{id}",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/catalog/macrodomains/{id}",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/catalog/security-dependencies/{id}",
+      "permission": "blocks:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/connections/{id}",
+      "permission": "connections:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/datasets/{id}/governance",
+      "permission": "governance:write"
+    },
+    {
+      "method": "PATCH",
+      "path": "/delivery/destinations/{id}",
+      "permission": "destinations:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/exceptions/{id}",
+      "permission": "exceptions:write"
+    },
+    {
+      "method": "PATCH",
+      "path": "/governance/domains/{id}",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/governance/glossary/{id}",
+      "permission": "glossary:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/governance/macrodomains/{id}",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/governance/people/{id}",
+      "permission": "people:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/roles/{id}",
+      "permission": "roles:manage"
+    },
+    {
+      "method": "PATCH",
+      "path": "/users/{id}",
+      "permission": "users:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/acquisitions/{id}/cancel",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/catalog/datasets/{id}/blocks",
+      "permission": "blocks:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/catalog/datasets/{id}/terms",
+      "permission": "glossary:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/catalog/domains",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/catalog/macrodomains",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/connections",
+      "permission": "connections:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/connections/test",
+      "permission": "connections:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/connections/{id}/acquisitions",
+      "permission": "connections:use"
+    },
+    {
+      "method": "POST",
+      "path": "/connections/{id}/datasets",
+      "permission": "connections:use"
+    },
+    {
+      "method": "POST",
+      "path": "/connections/{id}/test",
+      "permission": "connections:use"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/uploads/inspect",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/uploads/stage",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/{id}/acquisitions",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/{id}/acquisitions/refresh",
+      "permission": "connections:use"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/{id}/refresh-source",
+      "permission": "connections:use"
+    },
+    {
+      "method": "POST",
+      "path": "/datasets/{id}/versions/upload",
+      "permission": "datasets:write"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/automations",
+      "permission": "delivery:schedule"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/automations/{id}/dispatch",
+      "permission": "delivery:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/automations/{id}/versions",
+      "permission": "delivery:schedule"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/configurations",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/configurations/{id}/versions",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/destinations",
+      "permission": "destinations:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/destinations/test",
+      "permission": "destinations:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/destinations/{id}/test",
+      "permission": "destinations:use"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/preflight",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/preview",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/runs",
+      "permission": "delivery:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/runs/{id}/repair-evidence",
+      "permission": "delivery:repair_evidence"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/runs/{id}/resume-target",
+      "permission": "delivery:review_unknown"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/runs/{id}/reviews",
+      "permission": "delivery:review_unknown"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/validations",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/delivery/validations/{id}/cancel",
+      "permission": "delivery:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/exceptions/{id}/attachments",
+      "permission": "exceptions:write"
+    },
+    {
+      "method": "POST",
+      "path": "/exceptions/{id}/comments",
+      "permission": "exceptions:write"
+    },
+    {
+      "method": "POST",
+      "path": "/exceptions/{id}/validate",
+      "permission": "exceptions:write"
+    },
+    {
+      "method": "POST",
+      "path": "/execution-plans/preview",
+      "permission": "runs:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/findings/{id}/exceptions",
+      "permission": "exceptions:write"
+    },
+    {
+      "method": "POST",
+      "path": "/governance/domains",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/governance/glossary",
+      "permission": "glossary:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/governance/macrodomains",
+      "permission": "domains:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/governance/people",
+      "permission": "people:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/intake/contracts",
+      "permission": "intake:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/intake/contracts/{id}/versions",
+      "permission": "intake:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/intake/runs",
+      "permission": "intake:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/monitors",
+      "permission": "sentinel:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/monitors/{id}/runs",
+      "permission": "sentinel:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/monitors/{id}/schedule",
+      "permission": "sentinel:schedule"
+    },
+    {
+      "method": "POST",
+      "path": "/monitors/{id}/versions",
+      "permission": "sentinel:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/notifications/inbox/read-all",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "POST",
+      "path": "/notifications/inbox/{id}/read",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "POST",
+      "path": "/notifications/inbox/{id}/unread",
+      "permission": "notifications:read"
+    },
+    {
+      "method": "POST",
+      "path": "/recon/controls",
+      "permission": "recon:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/recon/controls/{id}/versions",
+      "permission": "recon:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/recon/runs",
+      "permission": "recon:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/datasets",
+      "permission": "reports:generate"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/definitions",
+      "permission": "reports:write"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/definitions/{id}/revisions",
+      "permission": "reports:write"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/download",
+      "permission": "reports:download"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/executions/{id}/cancel",
+      "permission": "reports:generate"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/preview",
+      "permission": "reports:preview"
+    },
+    {
+      "method": "POST",
+      "path": "/reports/resolve",
+      "permission": "reports:read"
+    },
+    {
+      "method": "POST",
+      "path": "/roles",
+      "permission": "roles:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{id}/cancel",
+      "permission": "runs:execute"
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "permission": "users:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/users/{id}/regenerate-credentials",
+      "permission": "users:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/users/{id}/resend-credentials",
+      "permission": "users:manage"
+    },
+    {
+      "method": "POST",
+      "path": "/users/{id}/reset-password",
+      "permission": "users:manage"
+    }
+  ]
+}

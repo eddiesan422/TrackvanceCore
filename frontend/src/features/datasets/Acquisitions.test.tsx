@@ -17,6 +17,22 @@ function mockApi(value: Record<string, unknown> | ((path: string, options?: Requ
 beforeEach(() => { vi.clearAllMocks(); mockApi({}); vi.mocked(uploadBinary).mockResolvedValue(received) })
 
 describe('Durable asynchronous acquisition', () => {
+  it('lets an inferred identifier be unprotected explicitly before selecting INT64', async () => {
+    mockApi(queued)
+    const user = userEvent.setup()
+    renderApp(<AcquisitionDialog open onClose={vi.fn()} datasetId="orders" datasetName="Pedidos"/>, { permissions: ['datasets:write'] })
+    await user.upload(screen.getByLabelText('Archivo'), new File(['id\n1'], 'orders.csv'))
+    const identifier = await screen.findByRole('checkbox', { name: 'Identificador id' })
+    expect(identifier).toBeChecked()
+    expect(screen.getByLabelText('Tipo de id')).toBeDisabled()
+    await user.click(identifier)
+    await user.selectOptions(screen.getByLabelText('Tipo de id'), 'INT64')
+    await user.click(screen.getByRole('button', { name: 'Registrar adquisición' }))
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => path === '/datasets/orders/acquisitions')).toBe(true))
+    const options = vi.mocked(api).mock.calls.find(([path]) => path === '/datasets/orders/acquisitions')![1]
+    expect(JSON.parse(String(options?.body)).column_overrides).toEqual({ id: { logical_type: 'INT64', semantic_tag: null } })
+  })
+
   it.each([
     ['CSV', 'CSV', 'orders.csv'],
     ['XLSX', 'Excel XLSX', 'orders.xlsx'],

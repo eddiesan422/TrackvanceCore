@@ -182,6 +182,78 @@ def test_expansion_and_result_limits_fail_without_truncation(tmp_path, monkeypat
     assert rejected.value.code == "REPORT_RESULT_LIMIT"
 
 
+def final_result_fixture(tmp_path, data):
+    path = tmp_path / "final.parquet"
+    pl.DataFrame(data).write_parquet(path)
+    schema = [{"name": name, "logical_type": "STRING"} for name in data]
+    return [{"alias": "a", "schema": schema, "paths": [str(path)]}], {"a": schema}
+
+
+@pytest.mark.parametrize("profile", ["DOWNLOAD", "XLSX"])
+@pytest.mark.parametrize("sql,cap,expected", [
+    ("SELECT a.category AS category, COUNT(*) AS n FROM a GROUP BY a.category HAVING COUNT(*) >= 4 ORDER BY category",
+     1, [("kept", 5)]),
+    ("SELECT DISTINCT a.category AS category FROM a ORDER BY category", 2, [("dropped",), ("kept",)]),
+    ("SELECT a.category AS category, COUNT(*) AS n FROM a GROUP BY a.category ORDER BY category",
+     2, [("dropped", 2), ("kept", 5)]),
+])
+def test_final_aggregate_having_distinct_cap_counts_the_relational_result(tmp_path, monkeypatch, profile, sql, cap, expected):
+    sources, schemas = final_result_fixture(tmp_path, {"category": ["kept"] * 5 + ["dropped"] * 2})
+    monkeypatch.setenv(f"REPORT_{profile}_MAX_ROWS", str(cap))
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}], "sql": sql, "parameters": []}, schemas)
+    messages = list(execute_messages(sources, plan, profile))
+    assert _rows(messages) == expected
+    completed = next(message for message in messages if message["kind"] == "complete")
+    assert completed["rows"] == completed["total_rows"] == len(expected) <= cap
+
+
+@pytest.mark.parametrize("profile", ["DOWNLOAD", "XLSX"])
+@pytest.mark.parametrize("sql", [
+    "SELECT DISTINCT a.category AS category FROM a ORDER BY category",
+    "SELECT a.category AS category, COUNT(*) AS n FROM a GROUP BY a.category HAVING COUNT(*) >= 2 ORDER BY category",
+])
+def test_final_cap_plus_one_is_rejected_before_schema_or_first_result_batch(tmp_path, monkeypatch, profile, sql):
+    sources, schemas = final_result_fixture(tmp_path, {"category": ["kept"] * 5 + ["dropped"] * 2})
+    monkeypatch.setenv(f"REPORT_{profile}_MAX_ROWS", "1")
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}], "sql": sql, "parameters": []}, schemas)
+    observed = []
+    with pytest.raises(OperationError) as caught:
+        observed.extend(execute_messages(sources, plan, profile))
+    assert caught.value.code == "REPORT_RESULT_LIMIT"
+    assert not any(message["kind"] in {"schema", "batch", "complete"} for message in observed)
+
+
+@pytest.mark.parametrize("profile", ["DOWNLOAD", "XLSX"])
+def test_native_stream_enforces_utf8_cell_bytes_without_truncation(tmp_path, profile):
+    # Each cell has only 16,385 code points, but 65,540 UTF-8 bytes. This must
+    # exercise the byte guard rather than the older 65,536-character guard.
+    value = "😀" * 16385
+    sources, schemas = final_result_fixture(tmp_path, {"value": [value]})
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}],
+                          "sql": "SELECT a.value AS value FROM a", "parameters": []}, schemas)
+    observed = []
+    with pytest.raises(OperationError) as caught:
+        observed.extend(execute_messages(sources, plan, profile))
+    assert caught.value.code == "REPORT_CELL_LIMIT"
+    assert any(message["kind"] == "schema" for message in observed)
+    assert not any(message["kind"] in {"batch", "complete"} for message in observed)
+
+
+@pytest.mark.parametrize("profile", ["DOWNLOAD", "XLSX"])
+def test_native_logical_byte_budget_interrupts_stream_without_complete_result(tmp_path, monkeypatch, profile):
+    sources, schemas = final_result_fixture(tmp_path, {"value": ["001", "002", "003"]})
+    monkeypatch.setenv("REPORT_BATCH_ROWS", "1")
+    monkeypatch.setenv(f"REPORT_{profile}_MAX_BYTES", "16")
+    plan = compile_draft({"mode": "SQL", "sources": [{"alias": "a"}],
+                          "sql": "SELECT a.value AS value FROM a ORDER BY a.value", "parameters": []}, schemas)
+    observed = []
+    with pytest.raises(OperationError) as caught:
+        observed.extend(execute_messages(sources, plan, profile))
+    assert caught.value.code == "REPORT_RESULT_LIMIT"
+    assert _rows(observed) == [("001",)]
+    assert not any(message["kind"] == "complete" for message in observed)
+
+
 def test_exact_decimal_overflow_is_rejected_before_publication(tmp_path):
     sources, schemas, _, _ = fixture_sources(tmp_path)
     path = tmp_path / "a.parquet"

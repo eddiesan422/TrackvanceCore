@@ -148,7 +148,7 @@ export interface DeliveryTarget {
 }
 
 export interface DeliveryDraft {
-  schema_version: 1
+  schema_version: 1 | 2
   dataset_version_id: string
   destination_id: string
   destination_version_id: string
@@ -156,6 +156,8 @@ export interface DeliveryDraft {
   columns: Omit<ColumnMapping, 'selected' | 'source_type'>[]
   write_strategy: WriteStrategy
   upsert_keys: string[]
+  primary_key_mode?: 'DEFINE' | 'NONE' | null
+  primary_key_columns?: string[]
   audit_columns_enabled: boolean
 }
 

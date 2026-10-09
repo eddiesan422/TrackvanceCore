@@ -8,6 +8,18 @@ import { CatalogDataset, CatalogRoutes } from './Catalog'
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: vi.fn() }))
 beforeEach(() => vi.clearAllMocks())
 
+it('links the exact approved child while keeping the original unapproved', async () => {
+  vi.mocked(api).mockImplementation(async path => path.endsWith('/blocks') ? { items: [], total: 0 } : {
+    dataset: { id: 'input', name: 'Entrada' }, governance: {}, items: [], total: 0,
+    eligibility: { strict_approval: { approved: false }, eligible: false, reasons: [{ message: 'La entrada tiene una salida aprobada exacta.' }],
+      related_approved_output: { output_dataset_id: 'approved-output', output_version_id: 'frozen-version', approval_run_id: 'verified-run' } },
+  })
+  renderApp(<CatalogDataset/>, { path: '/catalog/datasets/input?version_id=input-version', route: '/catalog/datasets/:id', permissions: ['catalog:read'] })
+  expect(await screen.findByRole('link', { name: 'Ver salida aprobada' })).toHaveAttribute('href', '/catalog/datasets/approved-output?version_id=frozen-version')
+  expect(screen.getByRole('link', { name: 'Ver validación Intake' })).toHaveAttribute('href', '/runs/verified-run')
+  expect(screen.getByText('Cierre histórico sin validar')).toBeVisible()
+})
+
 it('loads tree branches only when expanded and keeps resource type leaves scoped to their domain', async () => {
   vi.mocked(api).mockImplementation(async path => {
     if (path.startsWith('/catalog/resources')) return { items: [], total: 0 }

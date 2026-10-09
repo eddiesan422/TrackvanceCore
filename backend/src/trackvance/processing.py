@@ -23,7 +23,6 @@ from .config_semantics import (
     rule_columns,
 )
 from .portable_engine import (
-    TIMESTAMP_PATTERN,
     PolarsCompiler,
     compile_metric,
     compile_rule,
@@ -185,11 +184,10 @@ def iso_date(value) -> date | None:
 
 
 def iso_timestamp(value) -> datetime | None:
-    if not isinstance(value, str) or not re.fullmatch(TIMESTAMP_PATTERN, value):
-        return None
+    from .portable_temporal import exact_timestamp
     try:
-        return datetime.fromisoformat(value).astimezone(UTC)
-    except ValueError:
+        return exact_timestamp(value).astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
 
 
@@ -412,6 +410,28 @@ def apply_transforms(frame: pl.DataFrame, transforms: list[dict]) -> pl.DataFram
             pl.Series(column, [transform_value(v, kind, p) for v in result[column]], dtype=pl.String)
         )
     return result
+
+
+def intake_output_overrides(schema: list[dict], config: dict) -> dict[str, dict]:
+    """Carry declared schema through Intake; derive only explicitly transformed columns.
+
+    A fresh statistical profile cannot reinfer types from canonical String cells.
+    Type-producing transforms are validated against their full accepted output by
+    the common profile override validator; invalid parsing is not published.
+    """
+    result = {column["name"]: {"logical_type": column.get("logical_type", "STRING"),
+                               "semantic_tag": column.get("semantic_tag")} for column in schema}
+    for transform in config.get("transforms", []):
+        name, kind = transform["column"], transform["type"]
+        if name not in result:
+            raise ProcessingError(f"Columna de transformación ausente: {name}")
+        if kind in {"decimal_parse", "date_parse"}:
+            result[name] = {"logical_type": "DECIMAL" if kind == "decimal_parse" else "DATE", "semantic_tag": None}
+        elif kind in {"id_padding", "remove_characters"}:
+            result[name]["logical_type"] = "STRING"
+        elif kind not in {"trim", "empty_to_null", "case", "unicode_normalization"}:
+            raise ProcessingError(f"Transformación no soportada: {kind}")
+    return validate_column_overrides(result, list(result))
 
 
 def configured_rules(config: dict) -> list[RuleDefinition]:

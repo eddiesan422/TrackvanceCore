@@ -33,7 +33,8 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 8
+VERIFY_SCHEMA_VERSION = 9
+CATALOG_VERIFY_SCHEMA_VERSION = 8
 CORRECTIONS_VERIFY_SCHEMA_VERSION = 7
 CORRECTIONS_MIGRATION = "0016_acquisition_diagnostics"
 PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION = 6
@@ -46,7 +47,8 @@ DELIVERY_BASELINE_VERIFY_SCHEMA_VERSION = 3
 DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
-CURRENT_MIGRATION = "0017_catalog_reports"
+CATALOG_MIGRATION = "0017_catalog_reports"
+CURRENT_MIGRATION = "0019_governance_people"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
@@ -136,7 +138,8 @@ CATALOG_STATE_TABLES = frozenset({
     "dataset_security_dependencies", "strict_approvals", "report_definitions",
     "report_revisions", "report_contexts", "report_executions",
 })
-CURRENT_STATE_TABLES = CORRECTIONS_STATE_TABLES | CATALOG_STATE_TABLES
+CATALOG_STATE_TABLES_ALL = CORRECTIONS_STATE_TABLES | CATALOG_STATE_TABLES
+CURRENT_STATE_TABLES = CATALOG_STATE_TABLES_ALL | {"governance_people"}
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -529,7 +532,7 @@ def snapshot_stdin_source() -> str:
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     bootstrap = snapshot_bootstrap()
     for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
@@ -695,6 +698,7 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         REVIEW_VERIFY_SCHEMA_VERSION: REVIEW_MIGRATION, IDENTITY_VERIFY_SCHEMA_VERSION: IDENTITY_MIGRATION,
         PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION: PRE_CORRECTIONS_MIGRATION,
         CORRECTIONS_VERIFY_SCHEMA_VERSION: CORRECTIONS_MIGRATION,
+        CATALOG_VERIFY_SCHEMA_VERSION: CATALOG_MIGRATION,
         VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
     if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
             or state.get("migration") != expected_migrations[state["schema_version"]]):
@@ -708,6 +712,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         if state.get("schema_version") == IDENTITY_VERIFY_SCHEMA_VERSION
         else CORRECTIONS_STATE_TABLES
         if state.get("schema_version") in {PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION, CORRECTIONS_VERIFY_SCHEMA_VERSION}
+        else CATALOG_STATE_TABLES_ALL
+        if state.get("schema_version") == CATALOG_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -810,6 +816,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CORRECTIONS_MIGRATION:
         expected_state_schema = CORRECTIONS_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == CATALOG_MIGRATION:
+        expected_state_schema = CATALOG_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -872,6 +880,12 @@ def validate_restored_state(
     schema_version = manifest.get("schema_version")
     validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == CATALOG_MIGRATION:
+            if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                    or restored_state.get("migration") != CURRENT_MIGRATION
+                    or normalized_legacy_state != expected_state):
+                raise OperationError("La huella v8 normalizada no coincide con el respaldo 0.8.0.")
+            return
         if manifest.get("migration") == CORRECTIONS_MIGRATION:
             if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                     or restored_state.get("migration") != CURRENT_MIGRATION
@@ -1171,6 +1185,8 @@ def _restore_verified(
             if manifest.get("migration") == PRE_CORRECTIONS_MIGRATION
             else "snapshot-legacy-v7"
             if manifest.get("migration") == CORRECTIONS_MIGRATION
+            else "snapshot-legacy-v8"
+            if manifest.get("migration") == CATALOG_MIGRATION
             else None
         )
         if legacy_command:

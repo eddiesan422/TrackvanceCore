@@ -22,13 +22,10 @@ from .config_semantics import (
     _comparison,
     portable_regex_pattern,
 )
+from .portable_temporal import TIMESTAMP_PATTERN
 
 DECIMAL_PATTERN = r"^[+-]?[0-9]+(?:\.[0-9]+)?$"
 DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-TIMESTAMP_PATTERN = (
-    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
-    r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
-)
 
 
 def exact_decimal_context(*values: Decimal):

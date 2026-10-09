@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -26,12 +27,21 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import catalog_reports_api_cycle as cycle
 import certification_v080 as guard
+import report_http_debug_images as debug_images
 
 TRACE_CALLS = "%file,write,writev,pwrite64,pwritev,pwritev2,ftruncate,mmap,clone,fork,vfork,exit_group"
 MUTATIONS = {"creat", "mkdir", "mkdirat", "unlink", "unlinkat", "rename", "renameat", "renameat2",
              "link", "linkat", "symlink", "symlinkat", "truncate", "ftruncate", "chmod", "fchmod",
              "fchmodat", "chown", "fchown", "fchownat", "utime", "utimes", "utimensat"}
 WRITES = {"write", "writev", "pwrite64", "pwritev", "pwritev2"}
+HTTP_CASES = {"PREVIEW_SUCCESS", "PREVIEW_LARGE_CONTEXT_REQUEST", "PREVIEW_RESOURCE_FAILURE",
+              "PREVIEW_CONSUMER_DISCONNECT", "CSV_SUCCESS", "CSV_RESOURCE_FAILURE", "CSV_CONSUMER_DISCONNECT",
+              "XLSX_SUCCESS", "XLSX_RESOURCE_FAILURE", "XLSX_CONSUMER_DISCONNECT", "XLSX_LATE_SERIALIZATION_FAILURE",
+              "XLSX_CELL_LIMIT", "CSV_CELL_BYTES", "CSV_SERIALIZED_BYTES", "CSV_DEADLINE_EXPIRED",
+              "CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"}
+STREAM_FAILURE_CODES = {"XLSX_CELL_LIMIT": "REPORT_XLSX_CELL_LIMIT", "CSV_CELL_BYTES": "REPORT_CELL_LIMIT",
+                        "CSV_SERIALIZED_BYTES": "REPORT_DOWNLOAD_BYTES", "CSV_DEADLINE_EXPIRED": "REPORT_TIMEOUT",
+                        "CSV_APPROVAL_REVOKED": "REPORT_SOURCE_REVOKED", "CSV_FROZEN_VERSION_DRIFT": "REPORT_SOURCE_CHANGED"}
 
 
 def analyze_trace(content: str) -> dict:
@@ -85,21 +95,15 @@ def prepare(port: int, main_project: str | None) -> tuple[Path, dict]:
         # The enclosing context is 0700; the mounted leaf must be writable by
         # the image's unprivileged uid on Linux runners, too.
         (observer / service).chmod(0o777)
-    # Diagnostic images add only strace, never extra Linux capabilities.
-    (directory / "backend.Dockerfile").write_text(
-        "FROM trackvance-v080-isolated:backend\nUSER root\n"
-        "RUN apt-get update && apt-get install -y --no-install-recommends strace && rm -rf /var/lib/apt/lists/*\n"
-        "USER trackvance\n", encoding="utf-8")
-    (directory / "web.Dockerfile").write_text(
-        "FROM trackvance-v080-isolated:web\nUSER root\nRUN apk add --no-cache strace "
-        "&& mkdir -p /var/cache/nginx && chown -R nginx:nginx /var/cache/nginx\nUSER nginx\n", encoding="utf-8")
+    # Diagnostic images inherit the exact verified candidate and own UUID refs.
+    image_proof = debug_images.prepare(directory, context)
     (observer / "proxy" / "reports.conf").write_bytes((ROOT / "deploy/nginx/default.conf").read_bytes())
     (observer / "proxy" / "nginx.conf").write_text(
         "worker_processes 1;\npid /tmp/nginx.pid;\nerror_log /dev/stderr warn;\n"
         "events { worker_connections 256; }\nhttp { include /etc/nginx/mime.types; "
         "access_log /dev/stdout; include /observe/reports.conf; }\n", encoding="utf-8")
     configuration = json.loads((directory / "compose.json").read_text(encoding="utf-8"))
-    images = {"api": "trackvance-v080-http-debug:backend", "web": "trackvance-v080-http-debug:web"}
+    images = {"api": image_proof["references"]["backend"], "web": image_proof["references"]["web"]}
     for service, trace_service in (("api", "api"), ("web", "proxy")):
         entry = configuration["services"][service]
         entry.update(image=images[service], cap_drop=["ALL"], security_opt=["no-new-privileges:true"])
@@ -111,7 +115,8 @@ def prepare(port: int, main_project: str | None) -> tuple[Path, dict]:
             entry["entrypoint"] = []  # Avoid root entrypoint writes; nginx runs as nginx with cap-drop ALL.
         else:
             entry["environment"].update(PYTHONDONTWRITEBYTECODE="1", REPORT_BATCH_ROWS="16", REPORT_PREVIEW_MAX_BYTES="65536",
-                REPORT_DOWNLOAD_MAX_ROWS="300", REPORT_XLSX_MAX_ROWS="300", REPORT_MAX_JOIN_ROWS="3000")
+                REPORT_DOWNLOAD_MAX_ROWS="300", REPORT_XLSX_MAX_ROWS="300", REPORT_MAX_JOIN_ROWS="3000",
+                REPORT_DOWNLOAD_SERIALIZED_MAX_BYTES=str(8 * 1024**2))
             # The production ready probe intentionally writes a .ready file.
             # Verify it explicitly before the observation baseline below; use
             # the real read-only liveness endpoint for concurrent Docker checks.
@@ -213,7 +218,7 @@ def storage_snapshot(directory: Path, context: dict) -> dict:
 from pathlib import Path
 from sqlalchemy import select,func
 from trackvance.db import SessionLocal
-from trackvance.models import Artifact,DatasetVersion,Job
+from trackvance.models import Artifact,DatasetVersion,Job,Run
 digest,files,total=hashlib.sha256(),0,0
 for path in sorted(Path('/var/lib/trackvance').rglob('*')):
     if path.is_file():
@@ -224,6 +229,10 @@ for path in sorted(Path('/var/lib/trackvance').rglob('*')):
 with SessionLocal() as db:
     counts={name:db.scalar(select(func.count()).select_from(model)) for name,model in [('artifacts',Artifact),('versions',DatasetVersion)]}
     counts['jobs']=dict(db.execute(select(Job.status,func.count()).group_by(Job.status)).all())
+    source_metadata={name:sorted([dict(row) for row in db.execute(select(model.__table__)).mappings()],key=lambda row:row['id'])
+                     for name,model in [('artifacts',Artifact),('versions',DatasetVersion),('runs',Run)]}
+    counts['protected_source_metadata_sha256']=hashlib.sha256(json.dumps(source_metadata,sort_keys=True,
+        separators=(',',':'),default=str,ensure_ascii=False).encode()).hexdigest()
 active=0
 for path in Path('/proc').glob('[0-9]*/cmdline'):
     try:
@@ -235,13 +244,13 @@ print(json.dumps(dict(counts,files=files,total_bytes=total,storage_sha256=digest
     return json.loads(output)
 
 
-def verify_trace_privacy(directory: Path) -> None:
+def verify_trace_privacy(directory: Path, image_proof: dict) -> None:
     sentinel = "TV_HTTP_PRIVATE_BUFFER_SENTINEL_079431"
     for service, image in (("api", "backend"), ("proxy", "web")):
         private_run(["docker", "run", "--rm", "--network", "none", "--cap-drop", "ALL",
                      "--security-opt", "no-new-privileges", "--cpus", "0.25", "--memory", "128m", "--pids-limit", "32",
                      "--mount", f"type=bind,source={directory / 'observer' / service},target=/observe",
-                     "--entrypoint", "strace", "trackvance-v080-http-debug:" + image,
+                     "--entrypoint", "strace", image_proof["images"][image],
                      "-yy", "-s", "0", "-e", "trace=write,writev", "-o", "/observe/privacy-check",
                      "/bin/sh", "-c", "printf " + sentinel], directory, service + "-privacy-check")
         trace = (directory / "observer" / service / "privacy-check").read_text(encoding="utf-8")
@@ -258,8 +267,92 @@ def phase(progress: dict, stage: str, case: str | None = None) -> None:
     progress["current_case"] = case
 
 
+def late_serialization_draft(sources: list[dict], bad_text: str = "invalid\ufffe") -> dict:
+    # Use the existing CASE/typed-parameter AST contract. The source remains
+    # unchanged; the final result contains one XML-forbidden value at its end.
+    return {"mode": "SQL", "sources": sources[:1], "joins": [], "columns": [], "order_by": [],
+            "sql": 'SELECT a.key AS a_key, CASE WHEN a.key=$last_key THEN $bad_text ELSE a.value END AS a_value FROM a ORDER BY a.key ASC',
+            "parameters": [{"name": "last_key", "type": "TEXT", "value": cycle.source_key(119)},
+                           {"name": "bad_text", "type": "TEXT", "value": bad_text}]}
+
+
+def fixture_fault(directory: Path, context: dict, identity: str, action: str, original: dict | None = None) -> dict:
+    """Modify only this owned synthetic execution's metadata, then restore it.
+
+    Deadline expiry is injected into the real persisted clock; it is not a
+    claim of waiting 900 seconds. Approval/version faults never change files.
+    """
+    guard.preflight(directory, context)
+    script = '''import json,sys
+from datetime import timedelta
+from trackvance.db import SessionLocal,utcnow
+from trackvance.models import DatasetVersion,Run
+from trackvance.report_models import ReportContext,ReportExecution
+identity,action,original=sys.argv[1],sys.argv[2],json.loads(sys.argv[3])
+with SessionLocal() as db:
+    execution=db.get(ReportExecution,identity)
+    assert execution is not None
+    frozen=db.get(ReportContext,execution.context_id).snapshot['sources'][0]
+    run=db.get(Run,frozen['approval_run_id'])
+    version=db.get(DatasetVersion,frozen['output_version_id'])
+    if action=='RESTORE':
+        if 'coverage' in original:
+            run.metrics={**run.metrics,'validation_coverage_rows':original['coverage']}
+        if 'schema_hash' in original:version.schema_hash=original['schema_hash']
+        result={}
+    else:
+        assert execution.status=='RUNNING','The fault must affect an active HTTP stream'
+        if action=='CSV_DEADLINE_EXPIRED':
+            execution.started_at=utcnow()-timedelta(seconds=1000)
+            result={'injection':'PERSISTED_DEADLINE_EXPIRED'}
+        elif action=='CSV_APPROVAL_REVOKED':
+            result={'coverage':run.metrics['validation_coverage_rows']}
+            run.metrics={**run.metrics,'validation_coverage_rows':0}
+        elif action=='CSV_FROZEN_VERSION_DRIFT':
+            result={'schema_hash':version.schema_hash}
+            version.schema_hash='f'*64 if version.schema_hash!='f'*64 else 'e'*64
+        else:raise ValueError('Unsupported owned fault')
+    db.commit()
+print(json.dumps(result))
+'''
+    output = guard.command([*guard.compose_args(directory, context), "exec", "-T", "api", "python", "-B", "-c", script,
+                            identity, action, json.dumps(original or {})])
+    return json.loads(output)
+
+
+def failed_stream(client: ProxyClient, frozen: str, format_name: str, *, after_headers=None) -> tuple[str, int]:
+    connection = http.client.HTTPConnection("127.0.0.1", client.port, timeout=60)
+    identity, received = None, 0
+    try:
+        connection.connect()
+        assert connection.sock is not None
+        # Keep a large real output in flight until the fault is committed.
+        connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        connection.request("POST", "/api/v1/reports/download",
+            json.dumps({"context_id": frozen, "format": format_name}), client.headers())
+        response = connection.getresponse()
+        assert response.status == 200
+        identity = response.headers["X-Report-Execution-Id"]
+        received += len(response.read(1))
+        assert received > 0
+        if after_headers:
+            after_headers(identity)
+        connection.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256 * 1024)
+        try:
+            while chunk := response.read(65536):
+                received += len(chunk)
+        except http.client.IncompleteRead as error:
+            received += len(error.partial)
+        except OSError:
+            pass
+    finally:
+        connection.close()
+    assert identity is not None
+    return identity, received
+
+
 def certify(directory: Path, context: dict, progress: dict) -> dict:
-    progress.update(version="0.8.0", project=context["project"], sources=2, rows_per_source=120, cases=[])
+    progress.update(version="0.8.5", requirement="R085-01", project=context["project"], sources=2, rows_per_source=120, cases=[])
     client = ProxyClient(context["port"])
     phase(progress, "SYNTHETIC_AUTHORIZATION")
     client.call("/auth/demo", {})
@@ -271,18 +364,32 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
     for alias in ("a", "b"):
         phase(progress, "REAL_ACQUISITION_AND_STRICT_INTAKE", alias)
         sources.append(cycle.acquire(client, directory, alias, 120, macro["id"], domain["id"])[0])
+    phase(progress, "REAL_OVERSIZE_CELL_SOURCE")
+    cycle.source_value = lambda alias, index: "\u00e9" * 32769 if index == 119 else source_value(alias, index)
+    try:
+        cell_source = cycle.acquire(client, directory, "c", 120, macro["id"], domain["id"])[0]
+    finally:
+        cycle.source_value = source_value
     broad = cycle.draft(sources, "FULL")
     narrow = {**broad, "columns": [column for column in broad["columns"] if column["column"] == "key"]}
     excessive = cycle.draft(sources)
     excessive["joins"][0].update(keys=[{"left_column": "zone", "right_column": "zone"}], expected_cardinality="N:M", allow_many_to_many=True)
     excessive["columns"] = narrow["columns"]
     frozen = {}
-    for name, query in (("broad", broad), ("narrow", narrow), ("excessive", excessive), ("preview_disconnect", narrow)):
+    byte_query = {**broad, "columns": [*broad["columns"],
+        {"source_alias": "a", "column": "value", "alias": "a_value_copy"},
+        {"source_alias": "b", "column": "value", "alias": "b_value_copy"}]}
+    cell_query = {"mode": "SQL", "sources": [cell_source], "columns": [], "joins": [], "order_by": [],
+                  "sql": "SELECT c.key AS c_key,c.value AS c_value FROM c ORDER BY c.key ASC", "parameters": []}
+    for name, query in (("broad", broad), ("narrow", narrow), ("excessive", excessive),
+                        ("preview_disconnect", narrow), ("late_serialization", late_serialization_draft(sources)),
+                        ("xlsx_cell", late_serialization_draft(sources, "x" * 32768)),
+                        ("cell_bytes", cell_query), ("serialized_bytes", byte_query)):
         phase(progress, "FREEZE_JOINT_CONTEXT", name)
         frozen[name] = client.call("/reports/resolve", {"draft": query})["context_id"]
     phase(progress, "VERIFY_FIXTURE_JOBS_TERMINAL")
     progress["fixture_job_counts_before_stop"] = storage_snapshot(directory, context)["jobs"]
-    assert progress["fixture_job_counts_before_stop"] == {"SUCCESS": 4}, "Los cuatro trabajos de adquisición/Intake deben terminar antes del baseline."
+    assert progress["fixture_job_counts_before_stop"] == {"SUCCESS": 6}, "Los seis trabajos de adquisición/Intake deben terminar antes del baseline."
     phase(progress, "STOP_COMPLETED_FIXTURE_WORKERS")
     private_run([*guard.compose_args(directory, context), "stop", "worker", "acquisition-worker"],
                 directory, "freeze-fixture-workers")
@@ -307,7 +414,8 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
         cases.append({"name": name, "status": "PASS", "execution_status": execution["status"],
                       "generation": execution["generation_status"], "transmission": execution["transmission_status"],
                       "error_code": execution.get("error_code"), "during_execution": observed,
-                      "storage_and_artifact_metadata_unchanged": True, "active_report_children_after": 0, **evidence})
+                      "storage_and_artifact_metadata_unchanged": True, "active_report_children_after": 0,
+                      "source_metadata_sha256_after": after["protected_source_metadata_sha256"], **evidence})
 
     baseline = trace_positions(directory)
     phase(progress, "EXECUTE_HTTP_CASE", "PREVIEW_SUCCESS")
@@ -365,25 +473,75 @@ def certify(directory: Path, context: dict, progress: dict) -> dict:
         record(format_name + "_SUCCESS", baseline, complete, bytes=len(content), rows=actual["rows"], population_sha256=actual["sha256"])
         baseline = trace_positions(directory)
         phase(progress, "EXECUTE_HTTP_CASE", format_name + "_RESOURCE_FAILURE")
-        identity = None
-        try:
-            with client.stream(frozen["excessive"], format_name) as response:
-                identity = response.headers["X-Report-Execution-Id"]
-                while response.read(65536):
-                    pass
-        except (http.client.IncompleteRead, OSError):
-            pass  # Midstream failure: committed execution state is authoritative.
-        assert identity is not None
-        failed = terminal(client, identity)
+        rejected = client.call("/reports/download", {"context_id": frozen["excessive"], "format": format_name}, expected=422)
+        error = rejected["error"]
+        assert error["code"] == "REPORT_RESULT_LIMIT" and error["details"]["format"] == format_name
+        failed = terminal(client, error["details"]["execution_id"])
         assert failed["status"] == "FAILED" and failed["error_code"] == "REPORT_RESULT_LIMIT"
-        assert failed["transmission_status"] == "INTERRUPTED" and failed["output_version_id"] is None
-        record(format_name + "_RESOURCE_FAILURE", baseline, failed)
+        assert failed["generation_status"] == "FAILED" and failed["transmission_status"] == "NOT_STARTED" and failed["output_version_id"] is None
+        record(format_name + "_RESOURCE_FAILURE", baseline, failed, http_status=422, bytes_delivered=0,
+               failure_stage="FINAL_COUNT_BEFORE_HEADERS")
         baseline = trace_positions(directory)
         phase(progress, "EXECUTE_HTTP_CASE", format_name + "_CONSUMER_DISCONNECT")
         interrupted = terminal(client, client.disconnect(frozen["broad"], format_name))
         assert interrupted["status"] == "INTERRUPTED" and interrupted["transmission_status"] == "INTERRUPTED"
         record(format_name + "_CONSUMER_DISCONNECT", baseline, interrupted)
-    assert len(cases) == 10
+    baseline = trace_positions(directory)
+    phase(progress, "EXECUTE_HTTP_CASE", "XLSX_LATE_SERIALIZATION_FAILURE")
+    identity, partial = None, bytearray()
+    try:
+        with client.stream(frozen["late_serialization"], "XLSX") as response:
+            identity = response.headers["X-Report-Execution-Id"]
+            while chunk := response.read(16384):
+                partial.extend(chunk)
+                time.sleep(0.002)
+    except http.client.IncompleteRead as error:
+        partial.extend(error.partial)
+    except OSError:
+        pass  # A broken HTTP body still requires its original durable failure.
+    assert identity is not None and len(partial) > 0, "El fallo debe ocurrir tras entregar bytes reales de XLSX."
+    failed = terminal(client, identity)
+    assert failed["status"] == "FAILED" and failed["generation_status"] == "FAILED"
+    assert failed["error_code"] == "REPORT_XLSX_CHARACTER" and failed["error_message"]
+    assert failed["transmission_status"] == "INTERRUPTED" and failed["output_version_id"] is None
+    try:
+        with zipfile.ZipFile(io.BytesIO(partial)) as archive:
+            archive.testzip()
+    except (zipfile.BadZipFile, EOFError):
+        pass
+    else:
+        raise AssertionError("Un XLSX interrumpido no puede presentarse como ZIP completo.")
+    record("XLSX_LATE_SERIALIZATION_FAILURE", baseline, failed, http_status=200, bytes_delivered=len(partial),
+           failure_stage="SERIALIZATION_AFTER_HEADERS", incomplete_zip=True, original_error_preserved=True)
+    for name, (format_name, frozen_name) in {
+        "XLSX_CELL_LIMIT": ("XLSX", "xlsx_cell"), "CSV_CELL_BYTES": ("CSV", "cell_bytes"),
+        "CSV_SERIALIZED_BYTES": ("CSV", "serialized_bytes"), "CSV_DEADLINE_EXPIRED": ("CSV", "broad"),
+        "CSV_APPROVAL_REVOKED": ("CSV", "broad"), "CSV_FROZEN_VERSION_DRIFT": ("CSV", "broad"),
+    }.items():
+        baseline = trace_positions(directory)
+        phase(progress, "EXECUTE_HTTP_CASE", name)
+        originals = {}
+        injected_identity = None
+        def inject(identity, fault=name, saved=originals):
+            nonlocal injected_identity
+            injected_identity = identity
+            saved.update(fixture_fault(directory, context, identity, fault))
+        try:
+            identity, received = failed_stream(client, frozen[frozen_name], format_name,
+                after_headers=inject if name in {"CSV_DEADLINE_EXPIRED", "CSV_APPROVAL_REVOKED", "CSV_FROZEN_VERSION_DRIFT"} else None)
+            failed = terminal(client, identity)
+            assert failed["status"] == "FAILED" and failed["generation_status"] == "FAILED"
+            assert failed["transmission_status"] == "INTERRUPTED" and failed["output_version_id"] is None
+            assert failed["error_code"] == STREAM_FAILURE_CODES[name] and failed["error_message"]
+        finally:
+            if injected_identity is not None and originals:
+                fixture_fault(directory, context, injected_identity, "RESTORE", originals)
+        record(name, baseline, failed, http_status=200, bytes_delivered=received,
+               failure_stage="DURING_STREAM", original_error_preserved=True,
+               fixture_source_metadata_restored=bool(injected_identity and originals),
+               fault_injection="PERSISTED_DEADLINE_EXPIRED" if name == "CSV_DEADLINE_EXPIRED" else
+                               "OWNED_SYNTHETIC_METADATA" if injected_identity else "REAL_OUTPUT_BUDGET")
+    assert len(cases) == len(HTTP_CASES) and {case["name"] for case in cases} == HTTP_CASES
     phase(progress, "COMPLETE")
     return {**progress, "status": "PASS", "trace_scope": "REAL_NGINX_API_AND_CONFINED_CHILDREN",
             "baseline": "AFTER_STARTUP_REAL_ACQUISITION_STRICT_APPROVAL_AND_FROZEN_CONTEXTS",
@@ -396,7 +554,6 @@ def main() -> None:
     parser.add_argument("--main-project")
     parser.add_argument("--context", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
-    parser.add_argument("--reuse-debug-images", action="store_true")
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
     directory, context = guard.load_context(args.context) if args.context else prepare(args.port, args.main_project)
@@ -412,18 +569,23 @@ def main() -> None:
     try:
         phase(summary, "RESOLVED_ISOLATION_PREFLIGHT")
         guard.preflight(directory, context)
-        if not args.reuse_debug_images:
-            for service, image in (("backend", "backend"), ("web", "web")):
-                phase(summary, "BUILD_DIAGNOSTIC_IMAGE", service)
-                private_run(["docker", "build", "-t", "trackvance-v080-http-debug:" + image,
-                             "-f", str(directory / (service + ".Dockerfile")), str(directory)], directory, service + "-debug-build")
+        phase(summary, "BUILD_VERIFIED_OWNED_DIAGNOSTIC_IMAGES")
+        image_proof = debug_images.build(directory, context)
+        configuration = json.loads((directory / "compose.json").read_text(encoding="utf-8"))
+        configuration["services"]["api"]["image"] = image_proof["images"]["backend"]
+        configuration["services"]["web"]["image"] = image_proof["images"]["web"]
+        (directory / "compose.json").write_text(json.dumps(configuration, indent=2), encoding="utf-8")
+        guard.preflight(directory, context)
         phase(summary, "VERIFY_TRACE_BUFFER_REDACTION")
-        verify_trace_privacy(directory)
+        verify_trace_privacy(directory, image_proof)
         started = True
         phase(summary, "START_PRIVATE_BOUNDED_PROJECT")
         private_run([*guard.compose_args(directory, context), "up", "--no-build", "--detach", "--wait", "--wait-timeout", "240",
                      "postgres", "api", "worker", "acquisition-worker", "web"], directory, "startup")
         summary = certify(directory, context, summary)
+        summary["diagnostic_images"] = {key: image_proof[key] for key in
+            ("source_sha", "project", "ownership_execution_id", "base_images", "base_layouts", "images",
+             "builder_memory_limit_bytes", "builder_cpu_limit")}
         summary["nginx_configuration_sha256"] = hashlib.sha256(proxy_configuration.read_bytes()).hexdigest()
     except Exception as exc:  # noqa: BLE001 - publish a sanitized failed gate and keep diagnostics private.
         summary["error_type"] = type(exc).__name__
@@ -442,10 +604,12 @@ def main() -> None:
         summary.update(duration_seconds=round(time.monotonic() - began, 3), main_unchanged=guard.inventory(context["main_project"]) == context["main_before"])
         if not summary["main_unchanged"]:
             summary["status"] = "FAIL"
-        (directory / "reports-ephemeral-http.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         if started and not args.keep:
             guard.preflight(directory, context)
             guard.command([*guard.compose_args(directory, context), "down", "--volumes", "--remove-orphans"])
+        if not args.keep:
+            summary["diagnostic_image_cleanup"] = debug_images.cleanup(directory)
+        (directory / "reports-ephemeral-http.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"status": summary["status"], "evidence": str(directory / "reports-ephemeral-http.json"), "main_unchanged": summary["main_unchanged"]}))
     if summary["status"] != "PASS":
         raise SystemExit(1)

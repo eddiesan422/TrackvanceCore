@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import fs from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 
 test.setTimeout(240_000)
 
@@ -25,7 +26,7 @@ async function upload(page: Page, name: string, csv: string) {
   await page.waitForURL(/\/datasets\//)
   return run.dataset_id as string
 }
-async function classify(page: Page, datasetId: string, macro: string, domain: string) {
+async function classify(page: Page, datasetId: string, macro: string, domain: string, personId?: string) {
   const before = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
   await page.goto(`/catalog/datasets/${datasetId}`)
   await page.getByRole('button', { name: 'Editar gobierno', exact: true }).click()
@@ -33,12 +34,28 @@ async function classify(page: Page, datasetId: string, macro: string, domain: st
   await dialog.getByLabel('Macrodominio (opcional)', { exact: true }).selectOption(macro)
   await dialog.getByLabel('Dominio (opcional)', { exact: true }).selectOption(domain)
   await dialog.getByLabel('Descripción funcional', { exact: true }).fill('Fuente sintética de certificación de gobierno y Reportes.')
+  if (!personId) {
+    await dialog.getByRole('button', { name: 'Agregar nuevo · Responsable de negocio', exact: true }).click()
+    const personDialog = page.getByRole('dialog', { name: 'Agregar persona de gobierno' })
+    await personDialog.getByLabel('Nombre de la persona', { exact: true }).fill(`Responsable E2E ${datasetId.slice(0, 8)}`)
+    const createdPerson = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/governance/people' && response.request().method() === 'POST')
+    await personDialog.getByRole('button', { name: 'Agregar persona', exact: true }).click()
+    const createdResponse = await createdPerson
+    expect(createdResponse.ok(), await createdResponse.text()).toBeTruthy()
+    personId = (await createdResponse.json()).id as string
+    await expect(personDialog).not.toBeVisible()
+    await expect(dialog.getByLabel('Responsable de negocio', { exact: true })).toHaveValue(personId)
+    await expect(dialog.getByLabel('Descripción funcional', { exact: true })).toHaveValue('Fuente sintética de certificación de gobierno y Reportes.')
+  } else await dialog.getByLabel('Responsable de negocio', { exact: true }).selectOption(personId)
+  for (const role of ['Gestor del dato', 'Custodio técnico']) await dialog.getByLabel(role, { exact: true }).selectOption(personId)
   await dialog.getByRole('button', { name: 'Guardar gobierno', exact: true }).click()
   await expect(dialog).not.toBeVisible()
   const after = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
   expect(after.versions.map((version: { id: string }) => version.id)).toEqual(before.versions.map((version: { id: string }) => version.id))
+  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(after[role]).toBe(personId)
   await page.reload()
   await expect(page.getByText('Fuente sintética de certificación de gobierno y Reportes.').first()).toBeVisible()
+  return personId
 }
 async function strictIntake(page: Page, datasetId: string, name: string, required: string[], headers: Record<string, string>) {
   const dataset = await (await page.request.get(`/api/v1/datasets/${datasetId}`)).json()
@@ -50,8 +67,62 @@ async function strictIntake(page: Page, datasetId: string, name: string, require
   return { contract, run }
 }
 
+async function deliverApprovedOutput(page: Page, destinationId: string, source: { output_dataset_id: string; output_version_id: string }, stamp: number) {
+  expect(destinationId, 'El gate integral exige un destino PostgreSQL sintético provisionado por el runner').toBeTruthy()
+  const table = `ui_integral_085_${stamp}`
+  await page.goto(`/delivery/new?destination=${encodeURIComponent(destinationId)}`)
+  await page.getByLabel('Nombre de la entrega', { exact: true }).fill(`R085 integral ${stamp}`)
+  await page.getByLabel('Dataset', { exact: true }).selectOption(source.output_dataset_id)
+  await page.getByLabel('DatasetVersion exacta', { exact: true }).selectOption(source.output_version_id)
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  await expect(page.getByLabel('Destino de publicación', { exact: true })).toHaveValue(destinationId)
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  await page.getByRole('button', { name: /Crear tabla nueva/ }).click()
+  await page.getByLabel('Schema', { exact: true }).selectOption('existing_delivery')
+  await page.getByLabel('Nueva tabla', { exact: true }).fill(table)
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  await expect(page.getByLabel('Tipo destino de fuente1_customer_id', { exact: true })).toHaveValue('STRING')
+  await page.getByLabel('Nombre destino de fuente1_customer_id', { exact: true }).fill('client_code')
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  await expect(page.getByRole('radio', { name: 'Definir clave primaria', exact: true })).toBeChecked()
+  await page.getByRole('checkbox', { name: 'Clave primaria client_code', exact: true }).check()
+  await expect(page.getByRole('list', { name: 'Orden de la clave primaria' })).toContainText('client_code · NOT NULL')
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  const checked = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/preflight' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Ejecutar preflight', exact: true }).click()
+  const preflight = await checked
+  expect(preflight.ok(), await preflight.text()).toBeTruthy()
+  const validation = await preflight.json()
+  expect(validation.primary_key.validation.rows_validated).toBe(3)
+  expect(validation.checks).toContainEqual(expect.objectContaining({ code: 'PRIMARY_KEY_NATIVE', status: 'PASS' }))
+  await expect(page.getByRole('heading', { name: 'Preflight aprobado', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /Continuar/ }).click()
+  const publication = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/configurations' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Publicar configuración', exact: true }).click()
+  const publicationResponse = await publication
+  expect(publicationResponse.ok(), await publicationResponse.text()).toBeTruthy()
+  const configuration = await publicationResponse.json()
+  expect(configuration.config).toEqual(expect.objectContaining({ schema_version: 2, primary_key_mode: 'DEFINE', primary_key_columns: ['client_code'], upsert_keys: [] }))
+  const execution = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/delivery/runs' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Ejecutar entrega', exact: true }).click()
+  const executionResponse = await execution
+  expect(executionResponse.status(), await executionResponse.text()).toBe(202)
+  const run = await executionResponse.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/runs/${run.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
+  const final = await (await page.request.get(`/api/v1/runs/${run.id}`)).json()
+  expect(final.decision).toBe('COMMITTED')
+  await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
+  const metadata = await (await page.request.get(`/api/v1/delivery/destinations/${destinationId}/table-metadata?schema_name=existing_delivery&table_name=${table}`)).json()
+  expect(metadata.constraints.filter((constraint: { type: string }) => constraint.type === 'PRIMARY_KEY')).toEqual([expect.objectContaining({ columns: ['client_code'] })])
+  expect(metadata.columns.find((column: { name: string }) => column.name === 'client_code').nullable).toBe(false)
+  return { run_id: run.id, configuration_id: configuration.id, destination_id: destinationId, schema: 'existing_delivery', table, primary_key_columns: ['client_code'], source_version_id: source.output_version_id, rows: 3, decision: final.decision }
+}
+
 test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join → preview → descarga → dataset → nueva aprobación', async ({ page }, testInfo) => {
   const browserErrors: string[] = []; page.on('pageerror', error => browserErrors.push(error.message))
+  // This small fixture certifies the bounded compatibility fallback. The massive
+  // client-side streaming oracle is a separate mandatory deep run.
+  await page.addInitScript(() => Object.defineProperty(window, 'showSaveFilePicker', { value: undefined }))
   await page.goto('/'); await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
   const me = await (await page.request.get('/api/v1/me')).json(), headers = { 'X-CSRF-Token': me.csrf_token as string }, stamp = Date.now()
@@ -60,7 +131,8 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   const leftName = `E2E reportes ${stamp} saldos`, rightName = `E2E reportes ${stamp} segmentos`
   const left = await upload(page, leftName, 'customer_id,amount\n001,10.25\n002,20.50\n003,30.75\n')
   const right = await upload(page, rightName, 'customer_id,segment\n001,A\n002,B\n004,C\n')
-  await classify(page, left, macro.id, domain.id); await classify(page, right, macro.id, domain.id)
+  const personId = await classify(page, left, macro.id, domain.id)
+  await classify(page, right, macro.id, domain.id, personId)
   const approvalLeft = await strictIntake(page, left, leftName, ['customer_id', 'amount'], headers)
   const approvalRight = await strictIntake(page, right, rightName, ['customer_id', 'segment'], headers)
   await page.goto(`/catalog/datasets/${left}?section=columns`)
@@ -84,6 +156,12 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   for (const sourceName of [leftName, rightName]) {
     await page.getByLabel('Buscar datasets y contratos…').fill(sourceName)
     const candidate = page.locator('.report-source-candidate').filter({ has: page.getByRole('link', { name: sourceName, exact: true }) })
+    const availableSources = await (await page.request.get(`/api/v1/reports/sources?search=${encodeURIComponent(sourceName)}`)).json()
+    const exactSource = availableSources.items.find((source: { name: string }) => source.name === sourceName)
+    expect(exactSource.output_dataset_id).toBeTruthy()
+    expect(exactSource.output_version_id).toBeTruthy()
+    await expect(candidate.getByRole('link', { name: 'Ver salida candidata aprobada', exact: true })).toHaveAttribute('href', `/catalog/datasets/${exactSource.output_dataset_id}?version_id=${exactSource.output_version_id}`)
+    await expect(candidate.getByRole('link', { name: 'Ver validación Intake', exact: true })).toHaveAttribute('href', `/runs/${exactSource.approval_run_id}`)
     await expect(candidate.getByRole('button', { name: 'Añadir fuente' })).toBeEnabled()
     await candidate.getByRole('button', { name: 'Añadir fuente' }).click()
   }
@@ -91,7 +169,20 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   await page.getByLabel('Tipo de join, cruce 1').selectOption('LEFT')
   await page.getByLabel('Llave izquierda 1, cruce 1').selectOption('customer_id'); await page.getByLabel('Llave derecha 1, cruce 1').selectOption('customer_id')
   await page.getByRole('button', { name: '3. Columnas y filtros', exact: true }).click()
-  for (const name of [/fuente1.customer_id/, /fuente1.amount/, /fuente2.segment/]) await page.getByRole('checkbox', { name }).check()
+  await page.getByRole('button', { name: 'Seleccionar todas', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: 'Selección de todas las fuentes', exact: true })).toBeChecked()
+  await page.getByLabel('Nombre de resultado de fuente1.amount', { exact: true }).fill('amount_value')
+  await page.getByLabel('Filtrar columnas visibles…').fill('segment')
+  await page.getByRole('button', { name: 'Seleccionar todas', exact: true }).click()
+  await page.getByLabel('Filtrar columnas visibles…').fill('')
+  await expect(page.getByLabel('Nombre de resultado de fuente1.amount', { exact: true })).toHaveValue('amount_value')
+  await page.getByRole('checkbox', { name: /fuente2.customer_id/ }).uncheck()
+  await expect(page.getByRole('checkbox', { name: 'Selección de todas las fuentes', exact: true })).toHaveAttribute('aria-checked', 'mixed')
+  const filter = page.getByRole('group', { name: 'Filtro previo fuente1', exact: true })
+  await filter.getByRole('button', { name: 'Añadir condición', exact: true }).click()
+  await filter.getByLabel('Filtro previo fuente1, condición 1: columna', { exact: true }).selectOption(':customer_id')
+  await filter.getByLabel('Filtro previo fuente1, condición 1: operador', { exact: true }).selectOption('STARTS_WITH')
+  await filter.getByLabel('Filtro previo fuente1, condición 1: valor', { exact: true }).fill('00')
   await page.getByRole('button', { name: 'Añadir columna de orden', exact: true }).click()
   await page.getByRole('button', { name: 'Resolver fuentes y validar', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Ejecutar vista previa', exact: true })).toBeEnabled()
@@ -105,15 +196,46 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   const file = await downloadPromise; await file.saveAs(testInfo.outputPath('report-client.csv'))
   const csv = await fs.readFile(testInfo.outputPath('report-client.csv'), 'utf8')
   expect(csv).toContain('001'); expect(csv).toContain('003'); expect(csv).not.toContain('004')
+  await expect(page.getByText('Generación y transferencia completas verificadas en el historial. El navegador gestiona el guardado local.', { exact: true })).toBeVisible()
+  await page.getByLabel('Formato de descarga', { exact: true }).selectOption('XLSX')
+  const excelDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Descargar reporte', exact: true }).click()
+  const excel = await excelDownload
+  await excel.saveAs(testInfo.outputPath('report-client.xlsx'))
+  const excelVerification = JSON.parse(execFileSync(process.env.TV_E2E_PYTHON || 'python', ['-c', `
+import json,sys,zipfile,xml.etree.ElementTree as E
+with zipfile.ZipFile(sys.argv[1]) as z:
+ assert z.testzip() is None
+ for name in z.namelist():
+  if name.endswith('.xml') or name.endswith('.rels'): E.fromstring(z.read(name))
+ ns={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+ sheet=E.fromstring(z.read('xl/worksheets/sheet1.xml'))
+ rows=sheet.findall('s:sheetData/s:row',ns)
+ assert len(rows)==4
+ values=[]
+ for row in rows[1:]:
+  cells={c.attrib['r']: ''.join(c.itertext()) for c in row.findall('s:c',ns)}
+  values.append(list(cells.values()))
+ assert [row[0] for row in values]==['001','002','003'],values
+ assert [row[1] for row in values]==['10.25','20.50','30.75'],values
+ assert values[0][2]=='A' and values[1][2]=='B' and (len(values[2])==2 or values[2][2]=='')
+ print(json.dumps({'rows':3,'physical_rows':len(rows),'crc':'PASS','xml':'PASS','values':values,'reader':'Python zipfile and ElementTree'}))
+`, testInfo.outputPath('report-client.xlsx')], { encoding: 'utf8' }))
+  await expect(page.getByText('Generación y transferencia completas verificadas en el historial. El navegador gestiona el guardado local.', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Generar dataset', exact: true }).click()
   const dialog = page.getByRole('dialog'), generatedName = `E2E reportes ${stamp} resultado`
   await dialog.getByLabel('Nombre del nuevo dataset').fill(generatedName)
   await dialog.getByLabel('Macrodominio (opcional)', { exact: true }).selectOption(macro.id); await dialog.getByLabel('Dominio (opcional)', { exact: true }).selectOption(domain.id)
+  for (const role of ['Responsable de negocio', 'Gestor del dato', 'Custodio técnico']) await dialog.getByLabel(role, { exact: true }).selectOption(personId)
   const submitted = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/reports/datasets' && response.request().method() === 'POST')
   await dialog.getByRole('button', { name: 'Confirmar generación', exact: true }).click()
   const generationResponse = await submitted; expect(generationResponse.ok(), await generationResponse.text()).toBeTruthy(); const generation = await generationResponse.json()
   await expect.poll(async () => (await (await page.request.get(`/api/v1/reports/executions/${generation.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   const published = await (await page.request.get(`/api/v1/reports/executions/${generation.id}`)).json()
+  const derivedDataset = await (await page.request.get(`/api/v1/datasets/${published.output_dataset_id}`)).json()
+  for (const role of ['business_owner_person_id', 'steward_person_id', 'technical_custodian_person_id']) expect(derivedDataset[role]).toBe(personId)
+  const outputProfile = await (await page.request.get(`/api/v1/dataset-versions/${published.output_version_id}/profile`)).json()
+  expect(outputProfile.profile.columns.find((column: { name: string }) => column.name === 'fuente1_customer_id')).toEqual(expect.objectContaining({ logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }))
   await expect(page.getByText(/Pendiente de validación de calidad/)).toBeVisible()
   await expect(page.getByText('3 filas de resultado', { exact: true })).toBeVisible()
   await expect(page.getByText('1 partes', { exact: true })).toBeVisible()
@@ -168,5 +290,8 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   expect(afterInactiveEdit.domain_id).toBe(domain.id)
   expect(afterInactiveEdit.versions.map((version: { id: string }) => version.id)).toEqual(beforeInactiveEdit.versions.map((version: { id: string }) => version.id))
   expect(browserErrors).toEqual([])
-  await fs.writeFile(testInfo.outputPath('catalog-reports-cycle.json'), JSON.stringify({ left, right, approvals: [approvalLeft.run.id, approvalRight.run.id, derivedApproval.run.id], generation: generation.id, output_dataset: published.output_dataset_id, final_rows: finalPreview.rows.length }, null, 2))
+  const integral = process.env.TV_INTEGRAL_085 === 'true'
+  const delivery = integral ? await deliverApprovedOutput(page, process.env.TV_E2E_DELIVERY_DESTINATION_ID || '', followUp.sources[0], stamp) : null
+  expect(browserErrors).toEqual([])
+  await fs.writeFile(testInfo.outputPath('catalog-reports-cycle.json'), JSON.stringify({ scope: integral ? 'R085_INTEGRAL' : 'CATALOG_REPORTS', left, right, person_id: personId, approvals: [approvalLeft.run.id, approvalRight.run.id, derivedApproval.run.id], generation: generation.id, output_dataset: published.output_dataset_id, final_rows: finalPreview.rows.length, excel: excelVerification, download_transport: 'BOUNDED_BLOB_FALLBACK', delivery }, null, 2))
 })

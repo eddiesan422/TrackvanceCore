@@ -683,7 +683,7 @@ def catalog_upgrade_rows():
 
 def catalog_report(rows, fks):
     return verify_storage.legacy_v7_report(
-        rows, fks, current_migration=verify_storage.CURRENT_MIGRATION,
+        rows, fks, current_migration=verify_storage.CATALOG_MIGRATION,
         verified_artifacts=1, verified_source_secrets=0, verified_delivery_secrets=0)
 
 
@@ -740,7 +740,7 @@ def test_catalog_upgrade_chains_all_historical_projection_checks(schema):
         _, upgraded = asynchronous_upgrade_rows()
         fks = []
         upgraded.update({name: [] for name in verify_storage.CATALOG_TABLES})
-    kwargs = {"current_migration": verify_storage.CURRENT_MIGRATION,
+    kwargs = {"current_migration": verify_storage.CATALOG_MIGRATION,
               "verified_artifacts": 0, "verified_source_secrets": 0}
     if schema > 2:
         kwargs["verified_delivery_secrets"] = 0
@@ -751,10 +751,10 @@ def test_catalog_upgrade_chains_all_historical_projection_checks(schema):
 def test_native_catalog_snapshot_keeps_every_table_and_uses_state8(monkeypatch):
     _, upgraded, fks = catalog_upgrade_rows()
     monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
-        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+        verify_storage.CATALOG_MIGRATION, upgraded, fks, 1, 0, 0))
     report = verify_storage.snapshot()
     assert report["schema_version"] == 8
-    assert set(report["tables"]) == verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]
+    assert set(report["tables"]) == verify_storage.FINGERPRINT_TABLES[verify_storage.CATALOG_MIGRATION]
     assert len(report["tables"]) == 55
 
 
@@ -763,7 +763,7 @@ def test_cli_v7_projection_uses_verified_snapshot_inputs(monkeypatch, capsys):
 
     _, upgraded, fks = catalog_upgrade_rows()
     monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (
-        verify_storage.CURRENT_MIGRATION, upgraded, fks, 1, 0, 0))
+        verify_storage.CATALOG_MIGRATION, upgraded, fks, 1, 0, 0))
     monkeypatch.setattr(verify_storage.sys, "argv", ["verify_storage", "snapshot-legacy-v7"])
     assert verify_storage.main() == 0
     assert json.loads(capsys.readouterr().out) == catalog_report(upgraded, fks)

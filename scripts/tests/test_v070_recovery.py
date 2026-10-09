@@ -68,7 +68,7 @@ def private_adapter(tmp_path, monkeypatch):
             assert arguments[3] in images.values()
             return subprocess.CompletedProcess(arguments, 0, json.dumps([{'Id': arguments[3], 'Os': 'linux',
                 'Architecture': 'amd64', 'Config': {'Labels': {'org.opencontainers.image.revision': sha,
-                    'org.opencontainers.image.version': '0.8.0'}}}]), '')
+                    'org.opencontainers.image.version': '0.8.5'}}}]), '')
         if arguments[:2] == ['docker', 'ps']:
             output = 'e' * 12 if arguments[-1] == 'label=com.docker.compose.project=trackvance-certification' else ''
             return subprocess.CompletedProcess(arguments, 0, output, '')
@@ -267,7 +267,7 @@ def test_restored_061_keeps_exact_history_and_rejects_new_activity_or_classifica
     before = {'schema_version': 5, 'tables': {'users': {'legacy-user': 'hash'}}}
     after = current_snapshot()
     recovery.require_preserved_061_history(before, after, deepcopy(before))
-    assert len(after['tables']) == 55
+    assert len(after['tables']) == 56
     changed = deepcopy(before)
     changed['tables']['users']['legacy-user'] = 'different-hash'
     with pytest.raises(ValueError, match='exactamente'):

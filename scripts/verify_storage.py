@@ -14,8 +14,10 @@ import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
+CATALOG_SCHEMA_VERSION = 8
 CORRECTIONS_SCHEMA_VERSION = 7
 PRE_CORRECTIONS_SCHEMA_VERSION = 6
 IDENTITY_SCHEMA_VERSION = 5
@@ -28,7 +30,8 @@ REVIEW_MIGRATION = "0009_delivery_reviews"
 IDENTITY_MIGRATION = "0012_delivery_target_audit"
 PRE_CORRECTIONS_MIGRATION = "0015_sentinel_execution_identity"
 CORRECTIONS_MIGRATION = "0016_acquisition_diagnostics"
-CURRENT_MIGRATION = "0017_catalog_reports"
+CATALOG_MIGRATION = "0017_catalog_reports"
+CURRENT_MIGRATION = "0019_governance_people"
 CATALOG_TABLES = frozenset({
     "macro_domains", "data_domains", "governance_history", "glossary_terms",
     "column_documentation", "glossary_associations", "dataset_blocks",
@@ -91,7 +94,8 @@ FINGERPRINT_TABLES = {
     IDENTITY_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES,
     PRE_CORRECTIONS_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES,
     CORRECTIONS_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES,
-    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES,
+    CATALOG_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES,
+    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES | {"governance_people"},
 }
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
@@ -382,10 +386,64 @@ def validate_catalog_relationships(rows: Mapping[str, list[Mapping[str, Any]]], 
     return checks
 
 
+def project_people_upgrade(rows, foreign_keys):
+    """Remove only the deterministic 0018/0019 additions, proving populated 0.8.0."""
+    foreign_keys = list(foreign_keys)
+    if set(rows) != FINGERPRINT_TABLES[CURRENT_MIGRATION]:
+        raise ValueError("La proyección v8 requiere el inventario completo de 0.8.5.")
+    validate_relationships(rows, foreign_keys)
+    roles = ("business_owner", "steward", "technical_custodian")
+    users = {item["id"]: item for item in rows["users"]}
+    expected = {}
+    for dataset in rows["datasets"]:
+        for role in roles:
+            account = users.get(dataset.get(f"{role}_id"))
+            identity = None
+            if account and account["organization_id"] == dataset["organization_id"]:
+                identity = str(uuid5(NAMESPACE_URL, f"trackvance:governance:{account['organization_id']}:{account['id']}"))
+                expected[identity] = {"id": identity, "organization_id": account["organization_id"],
+                    "created_at": account["created_at"], "name": account["name"],
+                    "normalized_name": " ".join(account["name"].split()).casefold(), "reference": None,
+                    "normalized_reference": None, "email": None, "normalized_email": None,
+                    "user_id": account["id"], "active": account["active"] and not account["deleted"], "version": 1}
+            if dataset.get(f"{role}_person_id") != identity:
+                raise ValueError("La asignación de persona no coincide con el vínculo histórico comprobado.")
+    if {item["id"]: dict(item) for item in rows["governance_people"]} != expected:
+        raise ValueError("El catálogo contiene personas o cambios posteriores a la migración.")
+    if any(item.get("criterion_version") != 1 for item in rows["strict_approvals"]):
+        raise ValueError("La aprobación contiene un criterio posterior a la migración histórica.")
+    readers = {item["role_id"] for item in rows["role_permissions"] if item["permission_code"] == "datasets:read"}
+    if any(item["role_id"] not in readers for item in rows["role_permissions"] if item["permission_code"] == "people:read"):
+        raise ValueError("Los permisos de personas contienen actividad posterior a la migración.")
+    previous = {}
+    person_columns = {f"{role}_person_id" for role in roles}
+    for name, values in rows.items():
+        if name == "governance_people":
+            continue
+        excluded = person_columns if name == "datasets" else {"criterion_version"} if name == "strict_approvals" else set()
+        previous[name] = [{key: value for key, value in dict(item).items() if key not in excluded} for item in values
+                          if not (name == "role_permissions" and item["permission_code"] == "people:read")]
+    previous_fks = [fk for fk in foreign_keys if "governance_people" not in (fk[0], fk[2])]
+    return previous, previous_fks
+
+
+def legacy_v8_report(rows, foreign_keys, *, current_migration, verified_artifacts,
+                     verified_source_secrets, verified_delivery_secrets):
+    if current_migration != CURRENT_MIGRATION:
+        raise ValueError("La proyección v8 requiere la migración 0019.")
+    previous, previous_fks = project_people_upgrade(rows, foreign_keys)
+    return {"schema_version": CATALOG_SCHEMA_VERSION, "tables": _table_hashes(previous),
+        "verified_artifacts": verified_artifacts, "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets, "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(previous, previous_fks), "migration": CATALOG_MIGRATION}
+
+
 def project_catalog_upgrade(rows, foreign_keys):
     """Only untouched additive 0017 defaults can prove an exact state-7 upgrade."""
     foreign_keys = list(foreign_keys)
-    if set(rows) != FINGERPRINT_TABLES[CURRENT_MIGRATION]:
+    if "governance_people" in rows:
+        rows, foreign_keys = project_people_upgrade(rows, foreign_keys)
+    if set(rows) != FINGERPRINT_TABLES[CATALOG_MIGRATION]:
         raise ValueError("La proyección v7 requiere el inventario completo de 0017.")
     validate_relationships(rows, foreign_keys)
     if any(rows[name] for name in CATALOG_TABLES):
@@ -407,7 +465,7 @@ def project_catalog_upgrade(rows, foreign_keys):
 
 def legacy_v7_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration != CURRENT_MIGRATION:
+    if current_migration not in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección v7 requiere la migración 0017.")
     previous, previous_fks = project_catalog_upgrade(rows, foreign_keys)
     return {"schema_version": CORRECTIONS_SCHEMA_VERSION, "tables": _table_hashes(previous),
@@ -437,9 +495,9 @@ def project_corrections_upgrade(rows, foreign_keys):
 
 def legacy_v6_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration not in {CORRECTIONS_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration not in {CORRECTIONS_MIGRATION, CATALOG_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección v6 requiere la migración 0016.")
-    if current_migration == CURRENT_MIGRATION:
+    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
     previous, previous_fks = project_corrections_upgrade(rows, foreign_keys)
     return {"schema_version": PRE_CORRECTIONS_SCHEMA_VERSION, "tables": _table_hashes(previous),
@@ -488,7 +546,7 @@ def project_async_upgrade(rows, foreign_keys):
 
 def legacy_v5_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration == CURRENT_MIGRATION:
+    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -522,7 +580,7 @@ def legacy_v2_report(
     """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
 
     foreign_keys = list(foreign_keys)
-    if current_migration == CURRENT_MIGRATION:
+    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -584,7 +642,7 @@ def legacy_v3_report(
     verified_source_secrets: int, verified_delivery_secrets: int,
 ) -> dict[str, Any]:
     """Project a fresh 0009 upgrade onto the exact, unchanged 0.5.0 state."""
-    if current_migration == CURRENT_MIGRATION:
+    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {REVIEW_MIGRATION, IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION} or rows.get(REVIEW_TABLE):
@@ -648,7 +706,7 @@ def project_identity_upgrade(rows, foreign_keys):
 def legacy_v4_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
     """Recreate the exact 0.5.1 fingerprint after the additive 0.6.0 migration."""
-    if current_migration == CURRENT_MIGRATION:
+    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -783,6 +841,7 @@ def snapshot() -> dict[str, Any]:
             IDENTITY_SCHEMA_VERSION if migration == IDENTITY_MIGRATION else
             PRE_CORRECTIONS_SCHEMA_VERSION if migration == PRE_CORRECTIONS_MIGRATION else
             CORRECTIONS_SCHEMA_VERSION if migration == CORRECTIONS_MIGRATION else
+            CATALOG_SCHEMA_VERSION if migration == CATALOG_MIGRATION else
             SCHEMA_VERSION
         ),
         "tables": _table_hashes(rows),
@@ -828,7 +887,7 @@ def snapshot_legacy_v3() -> dict[str, Any]:
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
     if before.get("schema_version") not in {
         DELIVERY_BASELINE_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION, IDENTITY_SCHEMA_VERSION,
-        PRE_CORRECTIONS_SCHEMA_VERSION, CORRECTIONS_SCHEMA_VERSION, SCHEMA_VERSION,
+        PRE_CORRECTIONS_SCHEMA_VERSION, CORRECTIONS_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, SCHEMA_VERSION,
     }:
         raise ValueError("Versión del informe previo no reconocida.")
     if after.get("schema_version") != before.get("schema_version"):
@@ -855,6 +914,7 @@ def main() -> int:
     commands.add_parser("snapshot-legacy-v5")
     commands.add_parser("snapshot-legacy-v6")
     commands.add_parser("snapshot-legacy-v7")
+    commands.add_parser("snapshot-legacy-v8")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -881,6 +941,12 @@ def main() -> int:
         elif args.command == "snapshot-legacy-v6":
             migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
             print(json.dumps(legacy_v6_report(
+                rows, fks, current_migration=migration, verified_artifacts=artifacts,
+                verified_source_secrets=source, verified_delivery_secrets=delivery,
+            ), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v8":
+            migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
+            print(json.dumps(legacy_v8_report(
                 rows, fks, current_migration=migration, verified_artifacts=artifacts,
                 verified_source_secrets=source, verified_delivery_secrets=delivery,
             ), indent=2, sort_keys=True))

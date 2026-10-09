@@ -21,7 +21,7 @@ type DatasetFileFormat = 'CSV' | 'XLSX' | 'JSON' | 'PARQUET' | 'TXT'
 type ReaderOptions = { sheet_name?: string; delimiter?: string }
 type InspectedColumn = { name: string; logical_type: string; native_type?: string | null; nullable?: boolean; semantic_tag?: string | null; numeric?: boolean }
 type LogicalType = 'STRING' | 'DECIMAL' | 'INT64' | 'DATE' | 'TIMESTAMP' | 'BOOLEAN'
-type ColumnOverride = { logical_type?: LogicalType; semantic_tag?: 'IDENTIFIER' }
+type ColumnOverride = { logical_type?: LogicalType; semantic_tag?: 'IDENTIFIER' | null }
 type UploadInspection = {
   format: string
   format_label?: string
@@ -205,7 +205,7 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, datasetDom
       if (currentFile.current !== variables.candidate || inspectionSequence.current !== variables.requestId) return
       setInspection(result)
       setSheetName(result.selected_sheet || variables.options.sheet_name || result.sheets?.[0] || '')
-      setSelectedIdentifiers([])
+      setSelectedIdentifiers((result.columns || []).filter(column => column.semantic_tag === 'IDENTIFIER').map(column => column.name))
       setColumnTypeOverrides({})
     },
   })
@@ -261,8 +261,9 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, datasetDom
   function columnOverrides() {
     const overrides: Record<string, ColumnOverride> = {}
     Object.entries(columnTypeOverrides).forEach(([column, logicalType]) => {
-      overrides[column] = { logical_type: logicalType }
+      overrides[column] = { logical_type: logicalType, ...(logicalType !== 'STRING' ? { semantic_tag: null } : {}) }
     })
+    inspectedColumns.filter(column => column.semantic_tag === 'IDENTIFIER' && !selectedIdentifiers.includes(column.name)).forEach(column => { overrides[column.name] = { ...overrides[column.name], semantic_tag: null } })
     selectedIdentifiers.forEach(column => {
       overrides[column] = { ...overrides[column], logical_type: 'STRING', semantic_tag: 'IDENTIFIER' }
     })
@@ -382,7 +383,7 @@ export function UploadDialog({ open, onClose, datasetId, datasetName, datasetDom
       {!!inspectedColumns.length && <div className="identifier-fields">
         <ColumnMultiSelect
           label="Columnas identificadoras (opcional)"
-          hint="Selecciona campos del esquema. Las sugerencias se muestran como IDENTIFIER, pero tú decides cuáles aplicar."
+          hint="Selecciona campos del esquema. La protección conserva STRING y ceros iniciales; no garantiza unicidad ni define PK. Desmárcala para elegir otro tipo compatible."
           columns={inspectedColumns}
           selected={selectedIdentifiers}
           onChange={setSelectedIdentifiers}

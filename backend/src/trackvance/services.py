@@ -973,6 +973,8 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     accepted = None
     spark_result = None
     accepted_profile = None
+    from .processing import intake_output_overrides
+    output_overrides = intake_output_overrides(source.schema_json, effective) if run.module == "intake" else None
     if current_plan["engine"] == "PYSPARK":
         from .dataset_scans import profile_paths
         from .spark_execution import spark_input
@@ -1006,7 +1008,8 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
             # Global profile scans spill; publication retains the fence for only
             # verified immutable copies and metadata, rather than the scan itself.
             if spark_result.accepted_paths:
-                accepted_profile = profile_paths(list(spark_result.accepted_paths), check=profile_checkpoint)
+                accepted_profile = profile_paths(list(spark_result.accepted_paths), column_overrides=output_overrides,
+                                                 check=profile_checkpoint)
         except SparkRunCancelled:
             db.refresh(run)
             _verify_lease(db, run, lease_owner)
@@ -1093,6 +1096,7 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
             output = publish_materialized_version(db, output_dataset, list(spark_result.accepted_paths),
                 filename="accepted.parquet", actor=Actor("WORKER", lease_owner or "trackvance:worker", "Worker"),
                 parent_version_id=source.id, source_run_id=run.id, profiled=accepted_profile,
+                column_overrides=output_overrides,
                 metadata={"source_format": "PARQUET", "row_numbering": source_numbering,
                           "engine": "PYSPARK", "record_number_column": "__tv_record_number"})
         else:
@@ -1102,7 +1106,8 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
                 accepted.write_parquet(accepted_path)
                 output = create_version(db, output_dataset, accepted_path, "accepted.parquet",
                                         Actor("WORKER", lease_owner or "trackvance:worker", "Worker"), "INTAKE_OUTPUT",
-                                        parent_version_id=source.id, source_run_id=run.id)
+                                        parent_version_id=source.id, source_run_id=run.id,
+                                        column_overrides=output_overrides)
             finally:
                 accepted_path.unlink(missing_ok=True)
         run.output_version_id = output.id

@@ -17,7 +17,7 @@ import traceback
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -31,6 +31,7 @@ from docker_backup_cycle import (
 )
 
 AUTHENTIC_070 = "d9b6856e757a2a1fcab3913209146f3b7b79d70c"
+AUTHENTIC_080 = "4eaaeb774878bca62d7d6f758157107f0557512e"
 AUTOMATIC = ("worker", "acquisition-worker", "delivery-worker", "report-worker", "scheduler",
              "events-notifications", "events-chaining")
 NATIVE_FIXTURE_SERVICES = ("postgres", "api", "worker", "acquisition-worker", "report-worker", "web")
@@ -114,7 +115,7 @@ def cleanup(directory, context, evidence):
 
 def image_id(tag, role):
     if role not in {"backend", "web"} or tag != "trackvance-v080-isolated:" + role:
-        raise ValueError("La recuperación sólo admite imágenes privadas 0.8.0.")
+        raise ValueError("La recuperación sólo admite imágenes privadas 0.8.5.")
     from ci_images import verified_images
     images = verified_images()
     if images:
@@ -191,10 +192,20 @@ def resolve_saved_definition(api, definition):
     return api.json("POST", "/reports/resolve", {"draft": revision["draft"], "revision_id": revision["id"]})
 
 
-def prepare_native(context, environment):
+def prepare_native(context, environment, *, people=True):
     api = RecoveryApi(context["port"], (environment["POSTGRES_PASSWORD"],))
-    label = "Recovery080 " + uuid4().hex[:8]
+    label = ("Recovery085 " if people else "Authentic080 ") + uuid4().hex[:8]
     dataset, acquired, contract, approved = acquire_fixture(api, label, native=True)
+    if people:
+        person = api.json("POST", "/governance/people", {"name": label + " Responsible",
+            "reference": "recovery-person-" + uuid4().hex}, expected=201)
+        assignments = {f"{role}_person_id": person["id"] for role in ("business_owner", "steward", "technical_custodian")}
+    else:
+        identity = api.json("GET", "/me")
+        user = identity["user"]
+        assignments = {f"{role}_id": user["id"] for role in ("business_owner", "steward", "technical_custodian")}
+        person = {"id": str(uuid5(NAMESPACE_URL, f"trackvance:governance:{identity['organization']['id']}:{user['id']}")), "user_id": user["id"]}
+    api.json("PATCH", "/datasets/" + dataset["id"] + "/governance", {"expected_version": 2, **assignments})
     term = api.json("POST", "/governance/glossary", {"name": label + " Term", "definition": "Synthetic immutable recovery fixture"}, expected=201)
     api.json("PATCH", "/catalog/datasets/" + dataset["id"] + "/columns", {"version_id": acquired["output_version_id"],
         "column_name": "id", "description": "Stable recovery identifier", "term_ids": [term["id"]], "expected_version": 0})
@@ -215,14 +226,17 @@ def prepare_native(context, environment):
     return {"dataset_id": dataset["id"], "definition_id": definition["id"], "context_id": context_result["context_id"],
             "context_expires_at": context_result["expires_at"],
             "execution_id": completed["id"], "output_dataset_id": completed["output_dataset_id"],
-            "output_version_id": completed["output_version_id"], "approval_run_id": approved["id"], "block_id": block["id"]}
+            "output_version_id": completed["output_version_id"], "approval_run_id": approved["id"], "block_id": block["id"],
+            "person_id": person["id"], "person_user_id": person.get("user_id")}
 
 
 def assert_native_state(state):
-    if state["schema_version"] != 8 or state["migration"] != docker_state.CURRENT_MIGRATION or len(state["tables"]) != 55:
-        raise ValueError("La huella no corresponde a un runtime nativo 0.8.0 completo.")
+    if state["schema_version"] != docker_state.VERIFY_SCHEMA_VERSION or state["migration"] != docker_state.CURRENT_MIGRATION or set(state["tables"]) != docker_state.CURRENT_STATE_TABLES:
+        raise ValueError("La huella no corresponde a un runtime nativo 0.8.5 completo.")
     if any(not state["tables"].get(table) for table in docker_state.CATALOG_STATE_TABLES):
         raise ValueError("La recuperación nativa exige fixtures reales en las trece entidades nuevas.")
+    if not state["tables"].get("governance_people"):
+        raise ValueError("La recuperación nativa exige personas reales y sus asignaciones compartidas.")
 
 
 def verify_restored_restriction(api, definition, fixture):
@@ -265,8 +279,9 @@ def stop_quiescent_population(directory, context, environment):
     return "STOPPED_QUIESCENT"
 
 
-def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixture=None):
-    directory, target, target_env = target_context(parent, "restore070" if legacy else "restore080", environment)
+def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixture=None, legacy_version="0.7.0"):
+    source080 = legacy and legacy_version == "0.8.0"
+    directory, target, target_env = target_context(parent, "restore080migration" if source080 else "restore070" if legacy else "restore085", environment)
     before = json.loads((backup / "state.json").read_text(encoding="utf-8"))
     old_compose, claimed = docker_state.compose, False
     try:
@@ -278,13 +293,15 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
         docker_state.compose(target["project"], "up", "--no-build", "-d", "--wait", "api")
         api_id = next(item["id"] for item in docker_state.inventory(target["project"])["containers"] if item["service"] == "api")
         after = docker_state._copy_snapshot(api_id, evidence / "restored-state.json")
-        normalized = docker_state._copy_snapshot(api_id, evidence / "restored-legacy-state.json", command="snapshot-legacy-v7") if legacy else after
+        normalized = docker_state._copy_snapshot(api_id, evidence / "restored-legacy-state.json",
+            command="snapshot-legacy-v8" if source080 else "snapshot-legacy-v7") if legacy else after
         if normalized != before:
             raise ValueError("La huella restaurada no conserva exactamente la historia original.")
-        if legacy and any(after["tables"][table] for table in docker_state.CATALOG_STATE_TABLES):
+        if legacy and not source080 and any(after["tables"][table] for table in docker_state.CATALOG_STATE_TABLES | {"governance_people"}):
             raise ValueError("La actualización fabricó gobierno, aprobaciones o ejecuciones nuevas.")
         functional = None
         restriction = None
+        selective = None
         if fixture:
             # Authenticate only after comparing snapshots: sessions and audits
             # are new intentional actions, never hidden historical differences.
@@ -295,6 +312,9 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
             execution = api.json("GET", "/reports/executions/" + fixture["execution_id"])
             profile = api.json("GET", "/dataset-versions/" + fixture["output_version_id"] + "/profile")
             lineage = api.json("GET", "/catalog/datasets/" + fixture["output_dataset_id"] + "?section=lineage")
+            person = api.json("GET", "/governance/people/" + fixture["person_id"])
+            if person["id"] != fixture["person_id"] or person["user_id"] != fixture.get("person_user_id"):
+                raise ValueError("La persona restaurada perdió su identidad independiente.")
             restriction = verify_restored_restriction(api, definition, fixture)
             if definition["version"] != 2 or len(definition["revisions"]) != 2 or execution["status"] != "SUCCESS" or profile["row_count"] != 3:
                 raise ValueError("Las rutas restauradas no conservan la definición, publicación o perfil esperado.")
@@ -303,13 +323,16 @@ def restore_compare(parent, environment, backup, evidence, *, legacy=False, fixt
             if any(item["running"] and item["service"] in AUTOMATIC for item in docker_state.inventory(target["project"])["containers"]):
                 raise ValueError("Una comprobación funcional activó consumidores automáticos.")
             functional = "DEFINITION_REVISIONS_EXECUTION_PROFILE_LINEAGE_CURRENT_BLOCK_PASS"
+            if not legacy:
+                import selective_cleanup_recovery
+                selective = selective_cleanup_recovery.trial(sys.modules[__name__], directory, target, active_env, evidence)
         return {"restore": receipt["status"], "tables_before": len(before["tables"]), "tables_after": len(after["tables"]),
                 "source_state_sha256": docker_state.canonical_hash(before), "restored_projection_sha256": docker_state.canonical_hash(normalized),
                 "exact_state_comparison": "PASS", "verified_artifacts": after["verified_artifacts"],
                 "verified_source_secrets": after["verified_source_secrets"], "verified_delivery_secrets": after["verified_delivery_secrets"],
-                "automatic_processes_started": False, "new_tables_empty": True if legacy else None,
+                "automatic_processes_started": False, "new_tables_empty": True if legacy and not source080 else None,
                 "no_automatic_classification": True if legacy else None, "target_project": target["project"],
-                "functional_restored_bindings": functional, "restored_restrictions": restriction}
+                "functional_restored_bindings": functional, "restored_restrictions": restriction, "selective_cleanup": selective}
     finally:
         docker_state.compose = old_compose
         if claimed:
@@ -322,6 +345,7 @@ def native_cycle(directory, context, evidence):
     preflight(directory, context, environment)
     old_compose, started = docker_state.compose, False
     result = None
+    source_stopped = False
     try:
         docker_state.compose = compose_adapter(directory, context, environment)
         started = True
@@ -333,29 +357,54 @@ def native_cycle(directory, context, evidence):
         docker_state.verify_backup(backup)
         assert_native_state(json.loads((backup / "state.json").read_text(encoding="utf-8")))
         privacy = scan_backup_plaintext(backup, args_for(directory, context), {**os.environ, **environment}, (environment["POSTGRES_PASSWORD"],))
+        source_state = stop_quiescent_population(directory, context, environment)
+        source_stopped = True
         restored = restore_compare(context, environment, backup, evidence, fixture=fixture)
-        result = {"status": "PASS", "source_version": "0.8.0", "target_version": "0.8.0", "fixture": fixture,
-                  "backup_privacy": privacy, "all_thirteen_new_entities_populated": True, **restored}
+        result = {"status": "PASS", "source_version": "0.8.5", "target_version": "0.8.5", "fixture": fixture,
+                  "backup_privacy": privacy, "all_thirteen_new_entities_populated": True, "source_final_state": source_state, **restored}
         return result
     finally:
         try:
-            if started:
+            if started and not source_stopped:
                 source_state = stop_quiescent_population(directory, context, environment)
-                if result is not None:
+                if result is not None and source_state != "ALREADY_STOPPED":
                     result["source_final_state"] = source_state
         finally:
             docker_state.compose = old_compose
 
 
-def legacy_cycle(parent, evidence):
-    source_dir = guard.init("authentic070", available_port(), parent["main_project"])
+def build_historical_source(directory, context, baseline, version, environment):
+    """Historical images are never built through the unbounded default builder."""
+    from ci.local_resources import HISTORICAL_SOURCES, build_legacy
+
+    controlled = {**os.environ, **environment}
+    required = {"TRACKVANCE_LOCAL_EXECUTION_ID", "TRACKVANCE_LOCAL_IMAGE_REGISTRY",
+                "TRACKVANCE_LOCAL_BUILDER_REGISTRY", "TRACKVANCE_LOCAL_MAX_MEMORY_BYTES",
+                "TRACKVANCE_LOCAL_MAX_CPUS"}
+    if version not in {"0.7.0", "0.8.0"} or not all(controlled.get(key) for key in required):
+        raise ValueError("La construcción histórica requiere run_local con presupuesto y ownership explícitos.")
+    expected = AUTHENTIC_080 if version == "0.8.0" else AUTHENTIC_070
+    if HISTORICAL_SOURCES.get(version) != expected:
+        raise ValueError("El guard no coincide con el SHA histórico auténtico de recuperación.")
+    controlled.update(TRACKVANCE_LOCAL_HISTORICAL_SOURCE_SHA=expected,
+                      TRACKVANCE_LOCAL_HISTORICAL_SOURCE_VERSION=version)
+    build_legacy(args_for(directory, context), directory, context["project"], controlled,
+                 source_context=baseline)
+
+
+def legacy_cycle(parent, evidence, *, source_version="0.7.0"):
+    if source_version not in {"0.7.0", "0.8.0"}:
+        raise ValueError("La recuperación requiere una edición histórica auténtica admitida.")
+    source080 = source_version == "0.8.0"
+    baseline_commit = AUTHENTIC_080 if source080 else AUTHENTIC_070
+    source_dir = guard.init("authentic080" if source080 else "authentic070", available_port(), parent["main_project"])
     source_dir, source = guard.load_context(source_dir)
     environment = private_environment(source_dir)
     environment.update(DEMO_ACCESS_ENABLED="true", DEMO_SEED_ENABLED="false", TRACKVANCE_SMTP_ENABLED="false")
     (source_dir / "test.env").write_text("\n".join(f"{key}={value}" for key, value in environment.items()) + "\n", encoding="utf-8")
     archive, baseline = source_dir / "authentic.zip", source_dir / "authentic"
     baseline.mkdir()
-    run(["git", "archive", "--format=zip", "--output", str(archive), AUTHENTIC_070], environment)
+    run(["git", "archive", "--format=zip", "--output", str(archive), baseline_commit], environment)
     with zipfile.ZipFile(archive) as bundle:
         for entry in bundle.infolist():
             if not (baseline / entry.filename).resolve().is_relative_to(baseline.resolve()):
@@ -363,7 +412,8 @@ def legacy_cycle(parent, evidence):
         bundle.extractall(baseline)
     source["compose_base"] = str(baseline / "compose.yml")
     profile = json.loads((source_dir / "compose.json").read_text(encoding="utf-8"))
-    profile["services"].pop("report-worker")
+    if not source080:
+        profile["services"].pop("report-worker")
     for name, service in profile["services"].items():
         service.pop("volumes", None)
         service["restart"] = "no"
@@ -376,15 +426,17 @@ def legacy_cycle(parent, evidence):
     try:
         docker_state.compose = compose_adapter(source_dir, source, environment)
         claimed = True
-        run([*args_for(source_dir, source), "build", "api", "web"], environment)
-        run([*args_for(source_dir, source), "up", "--no-build", "-d", "--wait", "--wait-timeout", "300", "postgres", "api", "worker", "acquisition-worker", "web"], environment)
+        build_historical_source(source_dir, source, baseline, source_version, environment)
+        fixture_services = NATIVE_FIXTURE_SERVICES if source080 else ("postgres", "api", "worker", "acquisition-worker", "web")
+        run([*args_for(source_dir, source), "up", "--no-build", "-d", "--wait", "--wait-timeout", "300", *fixture_services], environment)
         # The backup inventory includes every historical service, while only the
         # workers required for real fixture ingestion are allowed to run.
         run([*args_for(source_dir, source), "create", "--no-build", "delivery-worker", "scheduler", "events-notifications", "events-chaining"], environment)
         api = RecoveryApi(source["port"], (environment["POSTGRES_PASSWORD"],))
-        if api.json("GET", "/health")["version"] != "0.7.0":
-            raise ValueError("La fuente no ejecuta el commit auténtico 0.7.0.")
-        dataset, _acquired, _contract, _approved = acquire_fixture(api, "Authentic070 " + uuid4().hex[:8])
+        if api.json("GET", "/health")["version"] != source_version:
+            raise ValueError("La fuente no ejecuta el commit auténtico histórico declarado.")
+        fixture = prepare_native(source, environment, people=False) if source080 else None
+        dataset = {"id": fixture["dataset_id"]} if fixture else acquire_fixture(api, "Authentic070 " + uuid4().hex[:8])[0]
         api.json("POST", "/roles", {"name": "Legacy recovery custom", "permissions": ["datasets:read"]}, expected=201)
         for path, kind in (("/connections", "source_type"), ("/delivery/destinations", "sink_type")):
             api.json("POST", path, {"name": "Encrypted authentic070 " + kind, kind: "POSTGRESQL", "host": "postgres", "port": 5432,
@@ -406,14 +458,17 @@ def legacy_cycle(parent, evidence):
         backup = evidence / "backup"
         docker_state.backup(source["project"], backup)
         before = json.loads((backup / "state.json").read_text(encoding="utf-8"))
-        if before["schema_version"] != 7 or before["migration"] != "0016_acquisition_diagnostics" or len(before["tables"]) != 42:
-            raise ValueError("El backup no procede del estado auténtico 0.7.0/0016.")
+        expected_state = (8, "0017_catalog_reports", 55) if source080 else (7, "0016_acquisition_diagnostics", 42)
+        if (before["schema_version"], before["migration"], len(before["tables"])) != expected_state:
+            raise ValueError("El backup no procede del estado histórico auténtico declarado.")
+        if source080 and any(not before["tables"].get(table) for table in docker_state.CATALOG_STATE_TABLES):
+            raise ValueError("La migración 0.8.0 requiere gobierno y reportes realmente poblados.")
         privacy = scan_backup_plaintext(backup, args_for(source_dir, source), {**os.environ, **environment}, (environment["POSTGRES_PASSWORD"],))
         cleanup(source_dir, source, evidence)
         claimed = False
         docker_state.ensure_fresh_project(source["project"])
-        result = restore_compare(parent, environment, backup, evidence, legacy=True)
-        return {"status": "PASS", "source_version": "0.7.0", "target_version": "0.8.0", "baseline_commit": AUTHENTIC_070,
+        result = restore_compare(parent, environment, backup, evidence, legacy=True, legacy_version=source_version, fixture=fixture)
+        return {"status": "PASS", "source_version": source_version, "target_version": "0.8.5", "baseline_commit": baseline_commit,
                 "source_destroyed_before_restore": True, "authentic_worker_diagnostics": "PASS", "backup_privacy": privacy, **result}
     finally:
         docker_state.compose = old_compose
@@ -425,7 +480,7 @@ def legacy_cycle(parent, evidence):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", type=Path, required=True)
-    parser.add_argument("--mode", choices=("native", "legacy", "both"), default="both")
+    parser.add_argument("--mode", choices=("native", "legacy", "legacy080", "both"), default="both")
     options = parser.parse_args()
     directory, context = guard.load_context(options.context)
     assert_main(context)
@@ -444,6 +499,11 @@ def main():
             legacy_evidence = evidence / "legacy"
             legacy_evidence.mkdir()
             result["legacy"] = legacy_cycle(context, legacy_evidence)
+        if options.mode in {"legacy080", "both"}:
+            stage = "legacy080"
+            legacy080_evidence = evidence / "legacy080"
+            legacy080_evidence.mkdir()
+            result["legacy080"] = legacy_cycle(context, legacy080_evidence, source_version="0.8.0")
         result["status"] = "PASS"
     except (ValueError, RuntimeError, OSError, KeyError, subprocess.SubprocessError) as error:
         result.update(error_type=type(error).__name__, failed_stage=stage)

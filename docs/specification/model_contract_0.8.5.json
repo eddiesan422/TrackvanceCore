@@ -1,0 +1,6621 @@
+{
+  "version": "0.8.5",
+  "tables": [
+    "acquisition_runs",
+    "acquisition_uploads",
+    "artifact_links",
+    "artifacts",
+    "audit_events",
+    "column_documentation",
+    "configurations",
+    "data_domains",
+    "dataset_blocks",
+    "dataset_security_dependencies",
+    "dataset_source_bindings",
+    "dataset_versions",
+    "datasets",
+    "delivery_attempts",
+    "delivery_automation_versions",
+    "delivery_automations",
+    "delivery_destination_versions",
+    "delivery_destinations",
+    "delivery_input_claims",
+    "delivery_occurrences",
+    "delivery_reviews",
+    "delivery_target_decisions",
+    "delivery_target_guards",
+    "delivery_target_policies",
+    "event_consumptions",
+    "exception_attachments",
+    "exceptions",
+    "external_connection_versions",
+    "external_connections",
+    "external_identities",
+    "findings",
+    "glossary_associations",
+    "glossary_terms",
+    "governance_history",
+    "governance_people",
+    "idempotency_keys",
+    "internal_notifications",
+    "jobs",
+    "macro_domains",
+    "metric_history",
+    "monitor_occurrences",
+    "monitor_schedule_versions",
+    "monitor_schedules",
+    "notification_deliveries",
+    "oidc_login_attempts",
+    "outbox_events",
+    "report_contexts",
+    "report_definitions",
+    "report_executions",
+    "report_revisions",
+    "role_permissions",
+    "roles",
+    "runs",
+    "sessions",
+    "strict_approvals",
+    "users"
+  ],
+  "entities": [
+    {
+      "table": "acquisition_runs",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "upload_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "acquisition_uploads.id"
+          ]
+        },
+        {
+          "name": "connection_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "external_connection_versions.id"
+          ]
+        },
+        {
+          "name": "source_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "filename",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_snapshot",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reader_options",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "column_overrides",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "effective_limits",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "request_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "idempotency_key",
+          "type": "VARCHAR(128)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "initiated_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "initiated_by_name",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "stage",
+          "type": "VARCHAR(50)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "attempt_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "attempts",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "processed_rows",
+          "type": "BIGINT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "processed_bytes",
+          "type": "BIGINT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "total_rows",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "total_bytes",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "cancel_requested",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "output_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_message",
+          "type": "VARCHAR(500)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_details",
+          "type": "JSON",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_reference",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "(source_type = 'UPLOAD' AND upload_id IS NOT NULL AND connection_version_id IS NULL) OR (source_type IN ('POSTGRESQL','SQLSERVER') AND upload_id IS NULL AND connection_version_id IS NOT NULL)",
+        "ForeignKeyConstraint(connection_version_id)",
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(initiated_by_id)",
+        "ForeignKeyConstraint(output_version_id)",
+        "ForeignKeyConstraint(upload_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,initiated_by_id,idempotency_key)",
+        "UniqueConstraint(output_version_id)",
+        "UniqueConstraint(upload_id)",
+        "status IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED')"
+      ],
+      "indexes": [
+        {
+          "name": "ix_acquisition_org_dataset_created",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "dataset_id",
+            "created_at"
+          ]
+        },
+        {
+          "name": "ix_acquisition_runs_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_acquisition_runs_initiated_by_id",
+          "unique": false,
+          "columns": [
+            "initiated_by_id"
+          ]
+        },
+        {
+          "name": "ix_acquisition_runs_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_acquisition_runs_status",
+          "unique": false,
+          "columns": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "acquisition_uploads",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "filename",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sha256",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "size_bytes",
+          "type": "BIGINT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_format",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)",
+        "status IN ('RECEIVED','REGISTERED','CONSUMED','EXPIRED')"
+      ],
+      "indexes": [
+        {
+          "name": "ix_acquisition_uploads_expires_at",
+          "unique": false,
+          "columns": [
+            "expires_at"
+          ]
+        },
+        {
+          "name": "ix_acquisition_uploads_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_acquisition_uploads_user_id",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "artifact_links",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "relation",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_type",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "target_type",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "target_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,relation,source_type,source_id,target_type,target_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_artifact_links_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_artifact_links_source_id",
+          "unique": false,
+          "columns": [
+            "source_id"
+          ]
+        },
+        {
+          "name": "ix_artifact_links_target_id",
+          "unique": false,
+          "columns": [
+            "target_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "artifacts",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "kind",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sha256",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "size_bytes",
+          "type": "BIGINT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "media_type",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(path)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_artifacts_kind",
+          "unique": false,
+          "columns": [
+            "kind"
+          ]
+        },
+        {
+          "name": "ix_artifacts_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "audit_events",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "event_type",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_type",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_legacy",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "request_id",
+          "type": "VARCHAR(128)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "subject_type",
+          "type": "VARCHAR(60)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "subject_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "metadata_json",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_audit_events_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_audit_events_request_id",
+          "unique": false,
+          "columns": [
+            "request_id"
+          ]
+        },
+        {
+          "name": "ix_audit_events_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "column_documentation",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "schema_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "column_name",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(dataset_version_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(dataset_version_id,column_name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_column_documentation_dataset_version_id",
+          "unique": false,
+          "columns": [
+            "dataset_version_id"
+          ]
+        },
+        {
+          "name": "ix_column_documentation_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "configurations",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "module",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "target_dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "owner",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "config",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "previous_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(previous_version_id)",
+        "ForeignKeyConstraint(target_dataset_id)",
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_configurations_module",
+          "unique": false,
+          "columns": [
+            "module"
+          ]
+        },
+        {
+          "name": "ix_configurations_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_configurations_previous_version_id",
+          "unique": true,
+          "columns": [
+            "previous_version_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "data_domains",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "macro_domain_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "macro_domains.id"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(macro_domain_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,macro_domain_id,normalized_name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_data_domains_macro_domain_id",
+          "unique": false,
+          "columns": [
+            "macro_domain_id"
+          ]
+        },
+        {
+          "name": "ix_data_domains_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "dataset_blocks",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "scope",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reason",
+          "type": "VARCHAR(1000)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "released_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "released_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "release_reason",
+          "type": "VARCHAR(1000)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(created_by_id)",
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(released_by_id)",
+        "PrimaryKeyConstraint(id)",
+        "scope IN ('REPORT','CONTENT')"
+      ],
+      "indexes": [
+        {
+          "name": "ix_dataset_blocks_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_blocks_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "dataset_security_dependencies",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "source_dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "released_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "release_reason",
+          "type": "VARCHAR(1000)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(released_by_id)",
+        "ForeignKeyConstraint(source_dataset_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(dataset_id,source_dataset_id)",
+        "dataset_id != source_dataset_id"
+      ],
+      "indexes": [
+        {
+          "name": "ix_dataset_security_dependencies_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_security_dependencies_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_security_dependencies_source_dataset_id",
+          "unique": false,
+          "columns": [
+            "source_dataset_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "dataset_source_bindings",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "connection_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "external_connections.id"
+          ]
+        },
+        {
+          "name": "schema_name",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "object_name",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "object_kind",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "column_overrides",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(connection_id)",
+        "ForeignKeyConstraint(dataset_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(dataset_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_dataset_source_bindings_connection_id",
+          "unique": false,
+          "columns": [
+            "connection_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_source_bindings_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "dataset_versions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "filename",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sha256",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "schema_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "size_bytes",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "row_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "column_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "profile_status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "original_path",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "canonical_path",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "schema_json",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "profile",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "ingestion_metadata",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "parent_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "original_artifact_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "artifacts.id"
+          ]
+        },
+        {
+          "name": "canonical_artifact_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "artifacts.id"
+          ]
+        },
+        {
+          "name": "source_run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(canonical_artifact_id)",
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(original_artifact_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(dataset_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_dataset_versions_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_versions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_dataset_versions_source_run_id",
+          "unique": false,
+          "columns": [
+            "source_run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "datasets",
+      "evolution": "MODIFIED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "domain",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "owner",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "criticality",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "macro_domain_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "macro_domains.id"
+          ]
+        },
+        {
+          "name": "domain_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "data_domains.id"
+          ]
+        },
+        {
+          "name": "governance_version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "business_owner_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "steward_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "technical_custodian_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "business_owner_person_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "governance_people.id"
+          ]
+        },
+        {
+          "name": "steward_person_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "governance_people.id"
+          ]
+        },
+        {
+          "name": "technical_custodian_person_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "governance_people.id"
+          ]
+        },
+        {
+          "name": "information_classification",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "intake_input_dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "intake_contract_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(business_owner_id)",
+        "ForeignKeyConstraint(business_owner_person_id)",
+        "ForeignKeyConstraint(domain_id)",
+        "ForeignKeyConstraint(intake_contract_id)",
+        "ForeignKeyConstraint(intake_input_dataset_id)",
+        "ForeignKeyConstraint(macro_domain_id)",
+        "ForeignKeyConstraint(steward_id)",
+        "ForeignKeyConstraint(steward_person_id)",
+        "ForeignKeyConstraint(technical_custodian_id)",
+        "ForeignKeyConstraint(technical_custodian_person_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,intake_input_dataset_id,intake_contract_id)",
+        "UniqueConstraint(organization_id,name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_datasets_domain_id",
+          "unique": false,
+          "columns": [
+            "domain_id"
+          ]
+        },
+        {
+          "name": "ix_datasets_macro_domain_id",
+          "unique": false,
+          "columns": [
+            "macro_domain_id"
+          ]
+        },
+        {
+          "name": "ix_datasets_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_attempts",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "destination_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_destination_versions.id"
+          ]
+        },
+        {
+          "name": "attempt_number",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "idempotency_key",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "target_locator",
+          "type": "VARCHAR(300)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "system_audit",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "rows_attempted",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "rows_written",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "rows_inserted",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "rows_updated",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "bytes_sent",
+          "type": "BIGINT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "remote_reference",
+          "type": "VARCHAR(300)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_message",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(destination_version_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(run_id,attempt_number)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_attempts_destination_version_id",
+          "unique": false,
+          "columns": [
+            "destination_version_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_attempts_idempotency_key",
+          "unique": false,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "ix_delivery_attempts_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_attempts_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_attempts_status",
+          "unique": false,
+          "columns": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_automation_versions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "automation_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_automations.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "configuration_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "responsible_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "settings",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(actor_id)",
+        "ForeignKeyConstraint(automation_id)",
+        "ForeignKeyConstraint(configuration_id)",
+        "ForeignKeyConstraint(responsible_user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(automation_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_automation_versions_automation_id",
+          "unique": false,
+          "columns": [
+            "automation_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_automation_versions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_automations",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "responsible_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "next_run_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(responsible_user_id)",
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_automations_next_run_at",
+          "unique": false,
+          "columns": [
+            "next_run_at"
+          ]
+        },
+        {
+          "name": "ix_delivery_automations_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_automations_responsible_user_id",
+          "unique": false,
+          "columns": [
+            "responsible_user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_destination_versions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "destination_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_destinations.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "config",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "secret_reference",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "config_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(destination_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(destination_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_destination_versions_destination_id",
+          "unique": false,
+          "columns": [
+            "destination_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_destination_versions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_destinations",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sink_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_message",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_destinations_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_input_claims",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "automation_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_automations.id"
+          ]
+        },
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "occurrence_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_occurrences.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(automation_id)",
+        "ForeignKeyConstraint(dataset_version_id)",
+        "ForeignKeyConstraint(occurrence_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(automation_id,dataset_version_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_input_claims_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_occurrences",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "automation_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_automations.id"
+          ]
+        },
+        {
+          "name": "automation_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_automation_versions.id"
+          ]
+        },
+        {
+          "name": "trigger_key",
+          "type": "VARCHAR(180)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "request_hash",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "origin",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "planned_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "dispatched_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reason_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "coalesced_intervals",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(automation_id)",
+        "ForeignKeyConstraint(automation_version_id)",
+        "ForeignKeyConstraint(dataset_version_id)",
+        "ForeignKeyConstraint(run_id)",
+        "ForeignKeyConstraint(source_run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(automation_id,trigger_key)",
+        "UniqueConstraint(run_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_occurrences_automation_id",
+          "unique": false,
+          "columns": [
+            "automation_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_occurrences_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_reviews",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "delivery_attempt_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_attempts.id"
+          ]
+        },
+        {
+          "name": "reviewer_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "reviewer_name",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "outcome",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "note",
+          "type": "VARCHAR(4000)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "verified_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(delivery_attempt_id)",
+        "ForeignKeyConstraint(reviewer_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "outcome IN ('REMOTE_COMMIT_OBSERVED', 'REMOTE_NOT_COMMITTED_OBSERVED', 'INCONCLUSIVE')"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_reviews_delivery_attempt_id",
+          "unique": false,
+          "columns": [
+            "delivery_attempt_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_reviews_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_reviews_reviewer_id",
+          "unique": false,
+          "columns": [
+            "reviewer_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_reviews_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_target_decisions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "guard_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_target_guards.id"
+          ]
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "review_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_reviews.id"
+          ]
+        },
+        {
+          "name": "actor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "note",
+          "type": "VARCHAR(2000)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(actor_id)",
+        "ForeignKeyConstraint(guard_id)",
+        "ForeignKeyConstraint(review_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(run_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_target_decisions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_target_guards",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "target_fingerprint",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active_run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "unknown_run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(active_run_id)",
+        "ForeignKeyConstraint(unknown_run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,target_fingerprint)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_target_guards_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "delivery_target_policies",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "destination_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "delivery_destinations.id"
+          ]
+        },
+        {
+          "name": "target_fingerprint",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sink_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "host_snapshot",
+          "type": "VARCHAR(253)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "port",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "database",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "schema_name",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "table_name",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "audit_columns_required",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled_by_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "enabled_by_username",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "materialized_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(destination_id)",
+        "ForeignKeyConstraint(enabled_by_user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,target_fingerprint)",
+        "audit_columns_required = true"
+      ],
+      "indexes": [
+        {
+          "name": "ix_delivery_target_policies_destination_id",
+          "unique": false,
+          "columns": [
+            "destination_id"
+          ]
+        },
+        {
+          "name": "ix_delivery_target_policies_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "event_consumptions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "outbox_events.id"
+          ]
+        },
+        {
+          "name": "consumer",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "attempts",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "available_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "lease_owner",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "lease_until",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "completed_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(event_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(event_id,consumer)",
+        "attempts >= 0 AND attempts <= 5"
+      ],
+      "indexes": [
+        {
+          "name": "ix_event_consumer_pending",
+          "unique": false,
+          "columns": [
+            "consumer",
+            "status",
+            "available_at"
+          ]
+        },
+        {
+          "name": "ix_event_consumptions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "exception_attachments",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "exception_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "exceptions.id"
+          ]
+        },
+        {
+          "name": "artifact_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "artifacts.id"
+          ]
+        },
+        {
+          "name": "uploaded_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(500)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(artifact_id)",
+        "ForeignKeyConstraint(exception_id)",
+        "ForeignKeyConstraint(uploaded_by_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(artifact_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_exception_attachments_exception_id",
+          "unique": false,
+          "columns": [
+            "exception_id"
+          ]
+        },
+        {
+          "name": "ix_exception_attachments_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "exceptions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "display_id",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "finding_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "findings.id"
+          ]
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "configuration_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "validation_run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "module",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "severity",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "state",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "owner",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "assigned_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "priority",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sla_hours",
+          "type": "INTEGER",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "due_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reopened_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "auto_resolve_enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "root_cause",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "resolution",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "administrative_reason",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "validation_evidence",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "validated_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "events",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(assigned_user_id)",
+        "ForeignKeyConstraint(configuration_id)",
+        "ForeignKeyConstraint(finding_id)",
+        "ForeignKeyConstraint(run_id)",
+        "ForeignKeyConstraint(validation_run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(display_id)",
+        "UniqueConstraint(finding_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_exceptions_assigned_user_id",
+          "unique": false,
+          "columns": [
+            "assigned_user_id"
+          ]
+        },
+        {
+          "name": "ix_exceptions_configuration_id",
+          "unique": false,
+          "columns": [
+            "configuration_id"
+          ]
+        },
+        {
+          "name": "ix_exceptions_due_at",
+          "unique": false,
+          "columns": [
+            "due_at"
+          ]
+        },
+        {
+          "name": "ix_exceptions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_exceptions_state",
+          "unique": false,
+          "columns": [
+            "state"
+          ]
+        },
+        {
+          "name": "ix_exceptions_validation_run_id",
+          "unique": false,
+          "columns": [
+            "validation_run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "external_connection_versions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "connection_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "external_connections.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "host",
+          "type": "VARCHAR(253)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "port",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "database",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "username",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "options",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "secret_reference",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "config_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(connection_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(connection_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_external_connection_versions_connection_id",
+          "unique": false,
+          "columns": [
+            "connection_id"
+          ]
+        },
+        {
+          "name": "ix_external_connection_versions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "external_connections",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "source_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_test_message",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_external_connections_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "external_identities",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "provider",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "issuer",
+          "type": "VARCHAR(400)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "subject",
+          "type": "VARCHAR(255)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "email_at_link",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "linked_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_login_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(provider,issuer,subject)",
+        "UniqueConstraint(user_id,provider)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_external_identities_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_external_identities_user_id",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "findings",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(240)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "code",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "severity",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "fingerprint",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "details",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(run_id,fingerprint)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_findings_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_findings_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "glossary_associations",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "term_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "glossary_terms.id"
+          ]
+        },
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "column_name",
+          "type": "VARCHAR(240)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(dataset_id)",
+        "ForeignKeyConstraint(dataset_version_id)",
+        "ForeignKeyConstraint(term_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(term_id,dataset_id,dataset_version_id,column_name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_glossary_associations_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_glossary_associations_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_glossary_associations_term_id",
+          "unique": false,
+          "columns": [
+            "term_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "glossary_terms",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "definition",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,normalized_name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_glossary_terms_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "governance_history",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dataset_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "datasets.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "snapshot",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reason",
+          "type": "VARCHAR(500)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(actor_id)",
+        "ForeignKeyConstraint(dataset_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(dataset_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_governance_history_dataset_id",
+          "unique": false,
+          "columns": [
+            "dataset_id"
+          ]
+        },
+        {
+          "name": "ix_governance_history_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "governance_people",
+      "evolution": "NEW",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reference",
+          "type": "VARCHAR(320)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_reference",
+          "type": "VARCHAR(320)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(200)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_email",
+          "type": "VARCHAR(200)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,normalized_email)",
+        "UniqueConstraint(organization_id,normalized_reference)",
+        "UniqueConstraint(organization_id,user_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_governance_people_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "idempotency_keys",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "route",
+          "type": "VARCHAR(180)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "key",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "request_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,route,key)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_idempotency_keys_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "internal_notifications",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "outbox_events.id"
+          ]
+        },
+        {
+          "name": "recipient_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "module",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "origin",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "decision",
+          "type": "VARCHAR(40)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(500)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "resource_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "resource_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "detail_url",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "read_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(event_id)",
+        "ForeignKeyConstraint(recipient_user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(event_id,recipient_user_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_internal_notifications_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_notification_inbox",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "recipient_user_id",
+            "read_at",
+            "created_at"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "jobs",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "acquisition_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "acquisition_runs.id"
+          ]
+        },
+        {
+          "name": "report_execution_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "report_executions.id"
+          ]
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "lane",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "attempts",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "lease_owner",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "lease_until",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "(run_id IS NOT NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND report_execution_id IS NULL AND lane = 'ACQUISITION') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NOT NULL AND lane = 'REPORT')",
+        "ForeignKeyConstraint(acquisition_id)",
+        "ForeignKeyConstraint(report_execution_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(acquisition_id)",
+        "UniqueConstraint(report_execution_id)",
+        "UniqueConstraint(run_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_jobs_lane",
+          "unique": false,
+          "columns": [
+            "lane"
+          ]
+        },
+        {
+          "name": "ix_jobs_lane_status_created_at",
+          "unique": false,
+          "columns": [
+            "lane",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "ix_jobs_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_jobs_status",
+          "unique": false,
+          "columns": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "macro_domains",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,normalized_name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_macro_domains_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "metric_history",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "monitor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "metric_key",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "dimensions",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "dimension_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "numeric_value",
+          "type": "JSON",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "method",
+          "type": "VARCHAR(60)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "metric_definition_version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "observed_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(monitor_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(run_id,metric_key,dimension_hash)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_metric_history_metric_key",
+          "unique": false,
+          "columns": [
+            "metric_key"
+          ]
+        },
+        {
+          "name": "ix_metric_history_monitor_id",
+          "unique": false,
+          "columns": [
+            "monitor_id"
+          ]
+        },
+        {
+          "name": "ix_metric_history_observed_at",
+          "unique": false,
+          "columns": [
+            "observed_at"
+          ]
+        },
+        {
+          "name": "ix_metric_history_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_metric_history_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "monitor_occurrences",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "schedule_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "monitor_schedules.id"
+          ]
+        },
+        {
+          "name": "schedule_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "monitor_schedule_versions.id"
+          ]
+        },
+        {
+          "name": "monitor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "planned_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "dispatched_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "reason_code",
+          "type": "VARCHAR(60)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "coalesced_intervals",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(dataset_version_id)",
+        "ForeignKeyConstraint(monitor_id)",
+        "ForeignKeyConstraint(run_id)",
+        "ForeignKeyConstraint(schedule_id)",
+        "ForeignKeyConstraint(schedule_version_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(run_id)",
+        "UniqueConstraint(schedule_id,planned_at)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_monitor_occurrences_monitor_id",
+          "unique": false,
+          "columns": [
+            "monitor_id"
+          ]
+        },
+        {
+          "name": "ix_monitor_occurrences_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_monitor_occurrences_schedule_id",
+          "unique": false,
+          "columns": [
+            "schedule_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "monitor_schedule_versions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "schedule_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "monitor_schedules.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "interval_seconds",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "starts_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "actor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "responsible_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(responsible_user_id)",
+        "ForeignKeyConstraint(schedule_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(schedule_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_monitor_schedule_versions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_monitor_schedule_versions_schedule_id",
+          "unique": false,
+          "columns": [
+            "schedule_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "monitor_schedules",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "monitor_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "next_run_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "legacy_enabled_before_identity",
+          "type": "BOOLEAN",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(monitor_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(monitor_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_monitor_schedules_next_run_at",
+          "unique": false,
+          "columns": [
+            "next_run_at"
+          ]
+        },
+        {
+          "name": "ix_monitor_schedules_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "notification_deliveries",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "event_type",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "template_key",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "channel",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "recipient_type",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "recipient_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "recipient_email_snapshot",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "provider_key",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "attempt_number",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "sent_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "failed_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(recipient_user_id)",
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_notification_deliveries_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_notification_deliveries_recipient_user_id",
+          "unique": false,
+          "columns": [
+            "recipient_user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "oidc_login_attempts",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "state_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "provider",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "browser_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "nonce",
+          "type": "VARCHAR(100)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "code_verifier",
+          "type": "VARCHAR(128)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "consumed_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(state_hash)"
+      ],
+      "indexes": []
+    },
+    {
+      "table": "outbox_events",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "dedupe_key",
+          "type": "VARCHAR(220)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "event_type",
+          "type": "VARCHAR(60)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "aggregate_type",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "aggregate_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "module",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "payload",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,dedupe_key)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_outbox_events_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "report_contexts",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "revision_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "report_revisions.id"
+          ]
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "snapshot",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "integrity_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(revision_id)",
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_report_contexts_expires_at",
+          "unique": false,
+          "columns": [
+            "expires_at"
+          ]
+        },
+        {
+          "name": "ix_report_contexts_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_report_contexts_user_id",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "report_definitions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "owner_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(owner_user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,name)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_report_definitions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_report_definitions_owner_user_id",
+          "unique": false,
+          "columns": [
+            "owner_user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "report_executions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "context_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "report_contexts.id"
+          ]
+        },
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "profile",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "generation_status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "transmission_status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "idempotency_key",
+          "type": "VARCHAR(100)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "request_hash",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "publication",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "metrics",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "progress_stage",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "progress_percent",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "cancel_requested",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "output_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "error_code",
+          "type": "VARCHAR(80)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error_message",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(context_id)",
+        "ForeignKeyConstraint(output_version_id)",
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,user_id,idempotency_key)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_report_executions_context_id",
+          "unique": false,
+          "columns": [
+            "context_id"
+          ]
+        },
+        {
+          "name": "ix_report_executions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_report_executions_status",
+          "unique": false,
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "ix_report_executions_user_id",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "report_revisions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "definition_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "report_definitions.id"
+          ]
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "draft",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "query_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_by_user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(created_by_user_id)",
+        "ForeignKeyConstraint(definition_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(definition_id,version)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_report_revisions_definition_id",
+          "unique": false,
+          "columns": [
+            "definition_id"
+          ]
+        },
+        {
+          "name": "ix_report_revisions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "role_permissions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "role_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": [
+            "roles.id"
+          ]
+        },
+        {
+          "name": "permission_code",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(role_id)",
+        "PrimaryKeyConstraint(role_id,permission_code)"
+      ],
+      "indexes": []
+    },
+    {
+      "table": "roles",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "normalized_name",
+          "type": "VARCHAR(120)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(2000)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "system_key",
+          "type": "VARCHAR(40)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(organization_id,normalized_name)",
+        "UniqueConstraint(organization_id,system_key)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_roles_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "runs",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "module",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(160)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "decision",
+          "type": "VARCHAR(40)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "config_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "dataset_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "target_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "initiated_by",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "initiated_by_type",
+          "type": "VARCHAR(20)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "initiated_by_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "initiated_by_legacy",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "progress_stage",
+          "type": "VARCHAR(50)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "progress_percent",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "metrics",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "execution_plan",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "result_path",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "evidence_path",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "output_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "cancel_requested",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "started_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "finished_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(config_id)",
+        "ForeignKeyConstraint(dataset_version_id)",
+        "ForeignKeyConstraint(target_version_id)",
+        "PrimaryKeyConstraint(id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_runs_module",
+          "unique": false,
+          "columns": [
+            "module"
+          ]
+        },
+        {
+          "name": "ix_runs_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_runs_status",
+          "unique": false,
+          "columns": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "sessions",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "token_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "user_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "users.id"
+          ]
+        },
+        {
+          "name": "csrf_token",
+          "type": "VARCHAR(100)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "expires_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "authentication_method",
+          "type": "VARCHAR(30)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(user_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(token_hash)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_sessions_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "strict_approvals",
+      "evolution": "MODIFIED",
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "runs.id"
+          ]
+        },
+        {
+          "name": "input_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "output_version_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "dataset_versions.id"
+          ]
+        },
+        {
+          "name": "contract_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "contract_revision_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "configurations.id"
+          ]
+        },
+        {
+          "name": "evidence_hash",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "criterion_version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "governance_snapshot",
+          "type": "JSON",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(contract_id)",
+        "ForeignKeyConstraint(contract_revision_id)",
+        "ForeignKeyConstraint(input_version_id)",
+        "ForeignKeyConstraint(output_version_id)",
+        "ForeignKeyConstraint(run_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(output_version_id)",
+        "UniqueConstraint(run_id)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_strict_approvals_contract_id",
+          "unique": false,
+          "columns": [
+            "contract_id"
+          ]
+        },
+        {
+          "name": "ix_strict_approvals_input_version_id",
+          "unique": false,
+          "columns": [
+            "input_version_id"
+          ]
+        },
+        {
+          "name": "ix_strict_approvals_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_strict_approvals_run_id",
+          "unique": false,
+          "columns": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "table": "users",
+      "evolution": "PRESERVED",
+      "columns": [
+        {
+          "name": "name",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(200)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "role",
+          "type": "VARCHAR(40)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "role_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": [
+            "roles.id"
+          ]
+        },
+        {
+          "name": "username",
+          "type": "VARCHAR(80)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "first_name",
+          "type": "VARCHAR(100)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_name",
+          "type": "VARCHAR(100)",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "password_hash",
+          "type": "TEXT",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "active",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "deleted_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "must_change_password",
+          "type": "BOOLEAN",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "temporary_password_expires_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "last_login_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "updated_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "password_changed_at",
+          "type": "DATETIME",
+          "nullable": true,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": true,
+          "references": []
+        },
+        {
+          "name": "organization_id",
+          "type": "VARCHAR(64)",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        },
+        {
+          "name": "created_at",
+          "type": "DATETIME",
+          "nullable": false,
+          "primary_key": false,
+          "references": []
+        }
+      ],
+      "constraints": [
+        "ForeignKeyConstraint(role_id)",
+        "PrimaryKeyConstraint(id)",
+        "UniqueConstraint(email)",
+        "UniqueConstraint(username)"
+      ],
+      "indexes": [
+        {
+          "name": "ix_users_organization_id",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "ix_users_role_id",
+          "unique": false,
+          "columns": [
+            "role_id"
+          ]
+        }
+      ]
+    }
+  ]
+}

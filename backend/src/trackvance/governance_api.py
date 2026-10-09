@@ -73,6 +73,9 @@ class GovernancePatch(Input):
     business_owner_id: str | None = Field(default=None, max_length=64)
     steward_id: str | None = Field(default=None, max_length=64)
     technical_custodian_id: str | None = Field(default=None, max_length=64)
+    business_owner_person_id: str | None = Field(default=None, max_length=64)
+    steward_person_id: str | None = Field(default=None, max_length=64)
+    technical_custodian_person_id: str | None = Field(default=None, max_length=64)
     information_classification: Literal["UNKNOWN", "PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] | None = None
     criticality: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = None
 
