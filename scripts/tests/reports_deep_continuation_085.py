@@ -325,7 +325,10 @@ def main(arguments=None):
         run_scopes(directory, summary, dict(os.environ), began + args.timeout, args.port, args.main_project)
         summary["status"] = "PASS"
     except (Exception, KeyboardInterrupt) as error:  # noqa: BLE001 - private diagnostics and complete final cleanup.
-        summary.update(status="FAIL", error_type=type(error).__name__)
+        pending_capacity = isinstance(error, ValueError) and str(error).startswith("PENDING_CAPACITY")
+        summary.update(status="PENDING_CAPACITY" if pending_capacity else "FAIL", error_type=type(error).__name__)
+        if pending_capacity:
+            summary["error_code"] = "PENDING_CAPACITY"
         (directory / "failure.private.log").write_text(traceback.format_exc(), encoding="utf-8")
     finally:
         if monitor:
