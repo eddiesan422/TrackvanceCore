@@ -98,6 +98,59 @@ def test_browser_requires_actual_cases_and_zero_skip_or_flakiness():
         browser({"status": "PASS", "expected": 1, "skipped": 0, "unexpected": 0, "flaky": 1})
 
 
+def typed_delivery_documents(destinations):
+    """Synthetic validator fixtures are not claimed as native chain evidence."""
+    names = ["record_id", "customer_name", "amount", "quantity", "happened_on", "updated_at", "is_active", "optional_note", "all_null_int"]
+    types = ["STRING", "STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN", "STRING", "INT64"]
+    cases = []
+    for engine in ("POLARS", "PYSPARK"):
+        phases = [{"status": "PASS", "phase": phase, "version_id": engine + str(index), "dataset_id": engine + "dataset",
+                   "canonical_artifact_id": engine + "artifact" + str(index), "canonical_sha256": "b" * 64,
+                   "sha256": "b" * 64, "schema_hash": "c" * 64, "logical_values_sha256": "a" * 64,
+                   "rows": 3, "columns": 9, "all_null_int_rows": 3,
+                   "schema": [{"name": "preserved_note" if name == "optional_note" and index >= 2 else name,
+                               "logical_type": kind, "semantic_tag": "IDENTIFIER" if position == 0 else None}
+                              for position, (name, kind) in enumerate(zip(names, types, strict=True))]}
+                  for index, phase in enumerate(("UPLOAD", "INTAKE_1", "REPORT_DATASET", "INTAKE_2"))]
+        runtime = {"engine": "PYSPARK", "engine_version": "4.0.3", "master": "local[1]", "deployment_mode": "LOCAL",
+                   "application_id": "local-real-application", "effective_parameters": {
+                       "spark.driver.memory": "768m", "spark.executor.memory": "768m", "spark.executor.cores": "1",
+                       "spark.cores.max": "1", "spark.sql.shuffle.partitions": "1", "spark.default.parallelism": "1"}}
+        intakes = []
+        for index in range(2):
+            source, output = phases[index * 2:index * 2 + 2]
+            run_id = engine + "run" + str(index)
+            output.update(parent_version_id=source["version_id"], source_run_id=run_id)
+            intakes.append({"status": "PASS", "phase": f"INTAKE_{index + 1}", "engine": engine, "decision": "APPROVED",
+                            "coverage_rows": 3, "run_id": run_id, "input_version_id": source["version_id"],
+                            "spark_memory_budget_bytes": 2048 * 1024**2 if engine == "PYSPARK" else None,
+                            "output_version_id": output["version_id"], "runtime": runtime if engine == "PYSPARK" else {}})
+        case = {"status": "PASS", "engine": engine, "phases": phases, "intakes": intakes,
+                "logical_values_sha256": "a" * 64, "report_input_version_id": phases[0]["version_id"],
+                "report_source_version_id": phases[1]["version_id"], "report_version_id": phases[2]["version_id"],
+                "final_version_id": phases[3]["version_id"], "context_id": engine + "context",
+                "report_execution_id": engine + "report", "source_versions_unchanged": True,
+                "generated_approval_inherited": False, "renamed_columns": {"optional_note": "preserved_note"}}
+        cases.append(case)
+        for destination in destinations:
+            destination.setdefault("typed_chain", {"status": "PASS", "cases": []})["cases"].append({
+                "status": "PASS", "engine": engine, "sink_type": destination["sink_type"],
+                "input_version_id": case["final_version_id"], "rows": 3, "columns": 9, "values_compared": 27,
+                "backing_indexes": 1, "primary_key_columns": ["record_id"], "logical_values_sha256": "a" * 64,
+                "run": {"status": "COMMITTED", "dataset_version_id": phases[3]["version_id"],
+                        "source_sha256": phases[3]["sha256"], "canonical_artifact_id": phases[3]["canonical_artifact_id"],
+                        "canonical_sha256": phases[3]["canonical_sha256"]}, "native_schema": [
+                    {"name": name, "logical_type": kind, "nullable": index in {2, 7, 8},
+                     "precision": 18 if index == 2 else None, "scale": 2 if index == 2 else None,
+                     "datetime_precision": 6 if index == 5 else None}
+                    for index, (name, kind) in enumerate(zip(names, types, strict=True))],
+                "source_mapping": [{"source_name": "preserved_note" if name == "optional_note" else name,
+                                    "target_name": name} for name in names]})
+    return {"status": "PASS", "requirement": "R085-03", "scope": "REAL_ALL_TYPES_UPLOAD_INTAKE_REPORT_DATASET_INTAKE_DELIVERY",
+            "rows": 3, "columns": 9, "cases": cases, "worker_cgroup": {"service": "worker",
+                "memory_limit_bytes": 2048 * 1024**2, "nano_cpus": 10**9, "pids_limit": 512}}
+
+
 def delivery_documents():
     cases = [{"status": "PASS", "table": table, "primary_key_columns": keys, "rows": 3,
               "backing_indexes": 1, "not_null": True, "existing_strategies_preserve_pk": True}
@@ -106,7 +159,7 @@ def delivery_documents():
     cases += [{"case": case, "status": "REJECTED_PREFLIGHT"}
               for case in ("NULL_BEYOND_PREVIEW", "REPEATED_POPULATION", "NATIVE_KEY_BYTES", "COLLATION")]
     cases.append({"case": "EXPLICIT_NONE", "status": "PASS", "primary_key_mode": "NONE"})
-    return {"documents": {"browser": {"status": "PASS", "expected": 2, "skipped": 0,
+    result = {"documents": {"browser": {"status": "PASS", "expected": 2, "skipped": 0,
                                          "unexpected": 0, "flaky": 0}, "result": {
         "status": "PASS", "destinations": [{"status": "PASS", "sink_type": sink,
             "runs": [1, 2, 3, 4], "audit_columns": {"status": "PASS"},
@@ -117,6 +170,11 @@ def delivery_documents():
             "excel": {"crc": "PASS"}, "delivery": {"decision": "COMMITTED"}}},
         "controlled_ack_loss": {"status": "PASS", "automatic_replay": False},
         "playwright": "PASS", "postgres_metrics_matrix": {"status": "PASS"}}}}
+    value = result["documents"]["result"]
+    value["typed_chain"] = typed_delivery_documents(value["destinations"])
+    value["resource_profile"] = {"status": "PASS", "memory_bytes": 9728 * 1024**2, "cpus": 2.8,
+                                 "intake_worker_memory_mib": 2048, "intake_worker_cpus": 1}
+    return result
 
 
 @pytest.mark.parametrize("damage,code", [
@@ -170,6 +228,60 @@ def test_delivery_gate_requires_native_pk_and_entire_integral(damage, code):
         value["integral"]["browser"]["delivery"]["decision"] = "UNKNOWN"
     else:
         result["documents"]["browser"]["skipped"] = 1
+    with pytest.raises(EvidenceError, match=code):
+        validate_content(spec, result)
+
+
+@pytest.mark.parametrize("damage,code", [
+    ("missing", "DELIVERY_TYPED_CHAIN_MISSING"), ("engine", "DELIVERY_TYPED_CHAIN_ENGINES"),
+    ("worker_memory", "DELIVERY_TYPED_CHAIN_RESOURCES"), ("worker_cpu", "DELIVERY_TYPED_CHAIN_RESOURCES"),
+    ("phase_missing", "DELIVERY_TYPED_CHAIN_PHASES"), ("source_changed", "DELIVERY_TYPED_CHAIN_PHASES"),
+    ("null_type", "DELIVERY_TYPED_CHAIN_SCHEMA_OR_VALUES"), ("null_count", "DELIVERY_TYPED_CHAIN_SCHEMA_OR_VALUES"),
+    ("phase_values", "DELIVERY_TYPED_CHAIN_SCHEMA_OR_VALUES"), ("wrong_input", "DELIVERY_TYPED_CHAIN_APPROVAL"),
+    ("spark_fake", "DELIVERY_TYPED_CHAIN_REAL_SPARK"), ("spark_unbounded", "DELIVERY_TYPED_CHAIN_REAL_SPARK"),
+    ("sql_missing", "DELIVERY_TYPED_CHAIN_DESTINATIONS"), ("sql_values", "DELIVERY_TYPED_CHAIN_SQL_ORACLE"),
+    ("sql_wrong_source", "DELIVERY_TYPED_CHAIN_SQL_ORACLE"), ("sql_wrong_type", "DELIVERY_TYPED_CHAIN_SQL_ORACLE"),
+])
+def test_delivery_gate_rejects_incomplete_or_misbound_real_all_types_chain(damage, code):
+    result = delivery_documents()
+    spec = {"validator": "delivery"}
+    validate_content(spec, result)
+    value = result["documents"]["result"]
+    chain = value["typed_chain"]
+    case = chain["cases"][1]
+    delivery = value["destinations"][1]["typed_chain"]["cases"][1]
+    if damage == "missing":
+        value.pop("typed_chain")
+    elif damage == "engine":
+        case["engine"] = "POLARS"
+    elif damage == "worker_memory":
+        chain["worker_cgroup"]["memory_limit_bytes"] = 512 * 1024**2
+    elif damage == "worker_cpu":
+        chain["worker_cgroup"]["nano_cpus"] = 200000000
+    elif damage == "phase_missing":
+        case["phases"].pop()
+    elif damage == "source_changed":
+        case["source_versions_unchanged"] = False
+    elif damage == "null_type":
+        case["phases"][2]["schema"][-1]["logical_type"] = "STRING"
+    elif damage == "null_count":
+        case["phases"][2]["all_null_int_rows"] = 2
+    elif damage == "phase_values":
+        case["phases"][2]["logical_values_sha256"] = "d" * 64
+    elif damage == "wrong_input":
+        case["intakes"][1]["input_version_id"] = case["report_input_version_id"]
+    elif damage == "spark_fake":
+        case["intakes"][1]["runtime"].pop("application_id")
+    elif damage == "spark_unbounded":
+        case["intakes"][1]["runtime"]["effective_parameters"]["spark.cores.max"] = "16"
+    elif damage == "sql_missing":
+        value["destinations"][1]["typed_chain"]["cases"].pop()
+    elif damage == "sql_values":
+        delivery["logical_values_sha256"] = "d" * 64
+    elif damage == "sql_wrong_source":
+        delivery["input_version_id"] = case["report_input_version_id"]
+    else:
+        delivery["native_schema"][-1]["logical_type"] = "STRING"
     with pytest.raises(EvidenceError, match=code):
         validate_content(spec, result)
 

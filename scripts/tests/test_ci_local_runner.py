@@ -59,9 +59,9 @@ def test_unexecuted_capacity_cannot_be_mistaken_for_smaller_historical_fixture()
     assert set(profile_groups(manifest, "deep")) - set(profile_groups(manifest, "functional"))
 
 
-def test_catalog_reserves_docker_three_plus_host_one_without_expanding_delivery():
+def test_catalog_and_delivery_reserve_their_distinct_finite_profiles():
     assert capacity("catalog-reports") == {"memory_bytes": 8 * 1024**3, "cpus": 4, "disk_bytes": 20 * 1024**3}
-    assert capacity("delivery")["cpus"] == 2
+    assert capacity("delivery") == {"memory_bytes": 10 * 1024**3, "cpus": 3, "disk_bytes": 20 * 1024**3}
 
 
 def test_small_cancel_requires_real_controlled_observation_and_no_partial_version():

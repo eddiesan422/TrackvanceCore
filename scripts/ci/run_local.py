@@ -1,7 +1,7 @@
 """Run selected deep certification groups serially in owned disposable stacks.
 
 Example: python scripts/ci/run_local.py --groups benchmark-smoke --build-images
-Full closure: python scripts/ci/run_local.py --all --max-memory-gib 8 --max-cpus 4.5
+Full closure: python scripts/ci/run_local.py --all --max-memory-gib 10 --max-cpus 4.5
 Use --plan for the exact historical sizes and capacity reservations without Docker.
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ def capacity(group):
     if group == "catalog-reports":
         return {"memory_bytes": 8 * GIB, "cpus": 4, "disk_bytes": 20 * GIB}
     if group == "delivery":
-        return {"memory_bytes": 8 * GIB, "cpus": 2, "disk_bytes": 20 * GIB}
+        return {"memory_bytes": 10 * GIB, "cpus": 3, "disk_bytes": 20 * GIB}
     if group.startswith("async-volume-"):
         tier = int(group.rsplit("-", 1)[1])
         return {"memory_bytes": 6 * GIB, "cpus": 2, "disk_bytes": tier * 1024**2 * 12 + 10 * GIB}

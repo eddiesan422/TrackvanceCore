@@ -80,6 +80,94 @@ def passing(value: Any, code: str = "CONTENT_NOT_PASS") -> None:
     require(isinstance(value, dict) and value.get("status") == "PASS", code)
 
 
+def delivery_typed_chain(value: dict, destinations: list[dict]) -> None:
+    """Require both actual Intake engines across all immutable typed boundaries."""
+    chain = value.get("typed_chain", {})
+    passing(chain, "DELIVERY_TYPED_CHAIN_MISSING")
+    resources, worker = value.get("resource_profile", {}), chain.get("worker_cgroup", {})
+    require(chain.get("requirement") == "R085-03" and chain.get("rows") == 3 and chain.get("columns") == 9
+            and chain.get("scope") == "REAL_ALL_TYPES_UPLOAD_INTAKE_REPORT_DATASET_INTAKE_DELIVERY"
+            and worker.get("service") == "worker" and worker.get("memory_limit_bytes") == 2048 * 1024**2
+            and worker.get("nano_cpus") == 10**9 and isinstance(worker.get("pids_limit"), int) and worker["pids_limit"] > 0
+            and resources.get("status") == "PASS" and resources.get("memory_bytes") == 9728 * 1024**2
+            and resources.get("cpus") == 2.8 and resources.get("intake_worker_memory_mib") == 2048
+            and resources.get("intake_worker_cpus") == 1, "DELIVERY_TYPED_CHAIN_RESOURCES")
+    cases = chain.get("cases", [])
+    require(len(cases) == 2 and {case.get("engine") for case in cases} == {"POLARS", "PYSPARK"}, "DELIVERY_TYPED_CHAIN_ENGINES")
+    names = ["record_id", "customer_name", "amount", "quantity", "happened_on", "updated_at", "is_active", "optional_note", "all_null_int"]
+    types = ["STRING", "STRING", "DECIMAL", "INT64", "DATE", "TIMESTAMP", "BOOLEAN", "STRING", "INT64"]
+    for case in cases:
+        passing(case, "DELIVERY_TYPED_CHAIN_PHASES")
+        phases, intakes = case.get("phases", []), case.get("intakes", [])
+        digest(case.get("logical_values_sha256"))
+        require(len(phases) == 4 and len(intakes) == 2
+                and [phase.get("phase") for phase in phases] == ["UPLOAD", "INTAKE_1", "REPORT_DATASET", "INTAKE_2"]
+                and len({phase.get("version_id") for phase in phases}) == 4
+                and all(phase.get("version_id") and phase.get("dataset_id") and phase.get("canonical_artifact_id") for phase in phases)
+                and case.get("generated_approval_inherited") is False and case.get("source_versions_unchanged") is True
+                and case.get("renamed_columns") == {"optional_note": "preserved_note"}
+                and case.get("report_input_version_id") == phases[0]["version_id"]
+                and case.get("report_source_version_id") == phases[1]["version_id"]
+                and case.get("report_version_id") == phases[2]["version_id"]
+                and case.get("final_version_id") == phases[3]["version_id"]
+                and bool(case.get("context_id")) and bool(case.get("report_execution_id")), "DELIVERY_TYPED_CHAIN_PHASES")
+        for index, phase in enumerate(phases):
+            passing(phase, "DELIVERY_TYPED_CHAIN_PHASES")
+            for field in ("sha256", "schema_hash", "canonical_sha256"):
+                digest(phase.get(field))
+            expected_names = ["preserved_note" if name == "optional_note" and index >= 2 else name for name in names]
+            require(phase.get("rows") == 3 and phase.get("columns") == 9 and phase.get("all_null_int_rows") == 3
+                    and phase.get("logical_values_sha256") == case["logical_values_sha256"]
+                    and phase.get("schema") == [{"name": name, "logical_type": kind,
+                        "semantic_tag": "IDENTIFIER" if position == 0 else None}
+                        for position, (name, kind) in enumerate(zip(expected_names, types, strict=True))], "DELIVERY_TYPED_CHAIN_SCHEMA_OR_VALUES")
+        for index, intake in enumerate(intakes):
+            passing(intake, "DELIVERY_TYPED_CHAIN_APPROVAL")
+            source, output = phases[index * 2:index * 2 + 2]
+            require(intake.get("engine") == case["engine"] and intake.get("decision") == "APPROVED"
+                    and intake.get("phase") == f"INTAKE_{index + 1}" and intake.get("coverage_rows") == 3
+                    and intake.get("input_version_id") == source["version_id"]
+                    and intake.get("output_version_id") == output["version_id"]
+                    and output.get("parent_version_id") == source["version_id"]
+                    and output.get("source_run_id") == intake.get("run_id") and bool(intake.get("run_id")), "DELIVERY_TYPED_CHAIN_APPROVAL")
+            if case["engine"] == "PYSPARK":
+                runtime = intake.get("runtime", {})
+                require(runtime.get("engine") == "PYSPARK" and runtime.get("engine_version") == "4.0.3"
+                        and intake.get("spark_memory_budget_bytes") == 2048 * 1024**2
+                        and runtime.get("master") == "local[1]" and runtime.get("deployment_mode") == "LOCAL"
+                        and str(runtime.get("application_id", "")).startswith("local-")
+                        and all(runtime.get("effective_parameters", {}).get(key) == expected for key, expected in {
+                            "spark.driver.memory": "768m", "spark.executor.memory": "768m", "spark.executor.cores": "1",
+                            "spark.cores.max": "1", "spark.sql.shuffle.partitions": "1", "spark.default.parallelism": "1"}.items()),
+                        "DELIVERY_TYPED_CHAIN_REAL_SPARK")
+        for destination in destinations:
+            deliveries = destination.get("typed_chain", {})
+            passing(deliveries, "DELIVERY_TYPED_CHAIN_DESTINATIONS")
+            require(len(deliveries.get("cases", [])) == 2, "DELIVERY_TYPED_CHAIN_DESTINATIONS")
+            matching = [row for row in deliveries["cases"] if row.get("engine") == case["engine"]]
+            require(len(matching) == 1, "DELIVERY_TYPED_CHAIN_DESTINATIONS")
+            delivery = matching[0]
+            schema, mapping = delivery.get("native_schema", []), delivery.get("source_mapping", [])
+            require(delivery.get("status") == "PASS" and delivery.get("sink_type") == destination["sink_type"]
+                    and delivery.get("input_version_id") == case["final_version_id"]
+                    and delivery.get("rows") == 3 and delivery.get("columns") == 9 and delivery.get("values_compared") == 27
+                    and delivery.get("backing_indexes") == 1 and delivery.get("primary_key_columns") == ["record_id"]
+                    and delivery.get("logical_values_sha256") == case["logical_values_sha256"]
+                    and delivery.get("run", {}).get("status") == "COMMITTED"
+                    and delivery.get("run", {}).get("dataset_version_id") == phases[3]["version_id"]
+                    and delivery.get("run", {}).get("source_sha256") == phases[3]["sha256"]
+                    and delivery.get("run", {}).get("canonical_artifact_id") == phases[3]["canonical_artifact_id"]
+                    and delivery.get("run", {}).get("canonical_sha256") == phases[3]["canonical_sha256"]
+                    and [column.get("name") for column in schema] == names
+                    and [column.get("logical_type") for column in schema] == types
+                    and [column.get("nullable") for column in schema] == [False, False, True, False, False, False, False, True, True]
+                    and schema[2].get("precision") == 18 and schema[2].get("scale") == 2
+                    and schema[5].get("datetime_precision") == 6
+                    and [column.get("source_name") for column in mapping] == ["preserved_note" if name == "optional_note" else name for name in names]
+                    and [column.get("target_name") for column in mapping] == names,
+                    "DELIVERY_TYPED_CHAIN_SQL_ORACLE")
+
+
 def digest(value: Any) -> None:
     require(isinstance(value, str) and bool(DIGEST.fullmatch(value)), "MISSING_POPULATION_HASH")
 
@@ -570,6 +658,7 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
         browser(documents.get("browser", {}))
         destinations = value.get("destinations", [])
         require(len(destinations) == 2 and {d.get("sink_type") for d in destinations} == {"POSTGRESQL", "SQLSERVER"}, "DELIVERY_ENGINE_COVERAGE")
+        delivery_typed_chain(value, destinations)
         for destination in destinations:
             passing(destination)
             require(len(destination.get("runs", [])) >= 4 and destination.get("audit_columns", {}).get("status") == "PASS",

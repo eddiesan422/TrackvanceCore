@@ -17,10 +17,10 @@ def topology():
                          for name in runner.PRIVATE_RESOURCES}}
 
 
-def local_budget(monkeypatch, memory_mib=8192):
+def local_budget(monkeypatch, memory_mib=10240):
     monkeypatch.setenv("TRACKVANCE_LOCAL_EXECUTION_ID", "local-" + "a" * 32)
     monkeypatch.setenv("TRACKVANCE_LOCAL_MAX_MEMORY_BYTES", str(memory_mib * 1024**2))
-    monkeypatch.setenv("TRACKVANCE_LOCAL_MAX_CPUS", "2")
+    monkeypatch.setenv("TRACKVANCE_LOCAL_MAX_CPUS", "3")
     monkeypatch.delenv("TRACKVANCE_LOCAL_PROJECT_REGISTRY", raising=False)
     monkeypatch.delenv("TRACKVANCE_LOCAL_GROUP", raising=False)
 
@@ -29,8 +29,8 @@ def test_full_fourteen_service_profile_keeps_sqlserver_headroom_and_exact_aggreg
     local_budget(monkeypatch)
     profile = topology()
     receipt = runner.configure_private_resources(profile, "trackvance-delivery-e2e-123456789abc")
-    assert receipt["memory_bytes"] == 8192 * 1024**2 == 8 * 1024**3
-    assert receipt["cpus"] == 2 and len(profile["services"]) == 14
+    assert receipt["memory_bytes"] == 9728 * 1024**2
+    assert receipt["cpus"] == 2.8 and len(profile["services"]) == 14
     assert profile["services"]["acquisition-worker"]["cpus"] == .20
     assert profile["services"]["delivery-worker"]["cpus"] == .20
     for name, (mib, _) in runner.PRIVATE_RESOURCES.items():
@@ -41,15 +41,18 @@ def test_full_fourteen_service_profile_keeps_sqlserver_headroom_and_exact_aggreg
     assert receipt["report_process_virtual_memory_mib"] == 2048
     assert all(not service.get("profiles") for service in profile["services"].values())
     assert receipt["active_services"] == sorted(runner.PRIVATE_RESOURCES)
+    assert profile["services"]["worker"]["mem_limit"] == 2048 * 1024**2
+    assert profile["services"]["worker"]["cpus"] == 1
+    assert all(profile["services"]["worker"]["environment"][key] == value for key, value in runner.PRIVATE_SPARK_ENV.items())
 
 
 def test_insufficient_capacity_never_approves_scaled_down_sqlserver(monkeypatch):
-    local_budget(monkeypatch, 6144)
+    local_budget(monkeypatch, 8192)
     with pytest.raises(ValueError, match="PENDING_CAPACITY"):
         runner.configure_private_resources(topology(), "trackvance-delivery-e2e-123456789abc")
 
 
-@pytest.mark.parametrize("mutation", ["sql_engine", "report_engine", "report_process", "service_disabled", "extra", "missing", "cpu", "sql_cgroup"])
+@pytest.mark.parametrize("mutation", ["sql_engine", "report_engine", "report_process", "service_disabled", "extra", "missing", "cpu", "sql_cgroup", "worker_reduced_cpu", "spark_unbounded", "spark_absent"])
 def test_effective_configuration_mismatch_fails_closed(monkeypatch, mutation):
     local_budget(monkeypatch)
     profile = topology()
@@ -68,6 +71,12 @@ def test_effective_configuration_mismatch_fails_closed(monkeypatch, mutation):
         changed["services"].pop("destination-postgres18")
     elif mutation == "cpu":
         changed["services"]["api"]["cpus"] = float("inf")
+    elif mutation == "worker_reduced_cpu":
+        changed["services"]["worker"]["cpus"] = .2
+    elif mutation == "spark_unbounded":
+        changed["services"]["worker"]["environment"]["TRACKVANCE_SPARK_MASTER"] = "local[*]"
+    elif mutation == "spark_absent":
+        changed["services"]["worker"]["environment"].pop("TRACKVANCE_SPARK_DRIVER_MEMORY_MB")
     else:
         changed["services"]["destination-sqlserver"]["mem_limit"] = "2048m"
     with pytest.raises(ValueError):
@@ -80,15 +89,15 @@ def test_optional_connector_overlay_is_expanded_with_explicit_known_limits(monke
     for name in ("report-worker", "destination-postgres", "destination-postgres18", "destination-sqlserver"):
         profile["services"].pop(name)
     receipt = runner.configure_private_resources(profile, "trackvance-delivery-e2e-123456789abc")
-    assert receipt["memory_bytes"] == 8192 * 1024**2
+    assert receipt["memory_bytes"] == 9728 * 1024**2
     assert set(profile["services"]) == set(runner.PRIVATE_RESOURCES)
 
 
-@pytest.mark.parametrize("group,cpus", [("delivery", 2), ("catalog-reports", 4)])
-def test_local_capacity_gate_matches_full_private_stack_requirement(group, cpus):
+@pytest.mark.parametrize("group,cpus,memory_gib", [("delivery", 3, 10), ("catalog-reports", 4, 8)])
+def test_local_capacity_gate_matches_full_private_stack_requirement(group, cpus, memory_gib):
     from ci.run_local import capacity
 
-    assert capacity(group)["memory_bytes"] == 8 * 1024**3
+    assert capacity(group)["memory_bytes"] == memory_gib * 1024**3
     assert capacity(group)["cpus"] == cpus
 
 
@@ -126,7 +135,7 @@ def test_private_probe_deadlines_preserve_every_real_command_and_original_compos
     assert profile["services"]["mock-oidc"]["cpus"] == .05
     assert profile["services"]["mock-oidc"]["healthcheck"]["timeout"] == "15s"
     receipt = runner.validate_private_resources(profile)
-    assert receipt["cpus"] == 2 and receipt["memory_bytes"] == 8 * 1024**3
+    assert receipt["cpus"] == 2.8 and receipt["memory_bytes"] == 9728 * 1024**2
     assert [path.read_bytes() for path in paths] == originals
 
 

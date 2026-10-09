@@ -23,6 +23,7 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -38,15 +39,23 @@ from isolation_profile import (
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "trackvance-delivery-e2e-"
 FIXTURES = Path(__file__).with_name("fixtures")
-# Acquisition's measured status probe at 0.10 CPU exceeded Doctor's 15-second
-# deadline. Transfer CPU from Delivery while preserving the aggregate budget.
+# Both real Intake engines run sequentially in the DEFAULT worker. Spark has
+# explicit JVM/thread headroom; every other private service keeps its budget.
 PRIVATE_RESOURCES = {
-    "postgres": (512, 0.10), "api": (768, 0.30), "worker": (512, 0.20),
+    "postgres": (512, 0.10), "api": (768, 0.30), "worker": (2048, 1.00),
     "acquisition-worker": (512, 0.20), "delivery-worker": (512, 0.20),
     "report-worker": (768, 0.20), "web": (128, 0.05), "mock-oidc": (128, 0.05),
     "destination-postgres": (256, 0.10), "destination-postgres18": (256, 0.10),
     "destination-sqlserver": (3072, 0.41), "scheduler": (256, 0.03),
     "events-notifications": (256, 0.03), "events-chaining": (256, 0.03),
+}
+PRIVATE_SPARK_ENV = {
+    "TRACKVANCE_SPARK_MASTER": "local[1]",
+    "TRACKVANCE_SPARK_DRIVER_MEMORY_MB": "768",
+    "TRACKVANCE_SPARK_EXECUTOR_MEMORY_MB": "768",
+    "TRACKVANCE_SPARK_EXECUTOR_CORES": "1", "TRACKVANCE_SPARK_TOTAL_CORES": "1",
+    "TRACKVANCE_SPARK_PARTITIONS": "1", "POLARS_MAX_THREADS": "1", "OMP_NUM_THREADS": "1",
+    "TRACKVANCE_SPARK_MEMORY_BUDGET_BYTES": str(2048 * 1024**2),
 }
 # Python startup shares the service's very small cgroup quota. The measured
 # 0.05-CPU OIDC fixture timed out every inherited three-second probe.
@@ -122,14 +131,17 @@ def validate_private_resources(profile: dict) -> dict:
         row = services[name]
         allocated, cpu = memory_bytes(row["mem_limit"]), float(row["cpus"])
         if (allocated != mib * 1024**2 or not math.isfinite(cpu)
-                or cpu <= 0 or cpu > cpu_ceiling + 0.000001):
-            raise ValueError("PENDING_CAPACITY: DELIVERY_PRIVATE_PROFILE_REQUIRES_8192_MIB")
+                or abs(cpu - cpu_ceiling) > 0.000001):
+            raise ValueError("PENDING_CAPACITY: DELIVERY_PRIVATE_PROFILE_REQUIRES_9728_MIB_2_8_CPUS")
         if row.get("profiles"):
             raise ValueError("DELIVERY_ALL_FOURTEEN_SERVICES_REQUIRED")
         memory += allocated
         cpus += cpu
-    if memory > 8 * 1024**3 or cpus > 2.000001:
+    if memory != 9728 * 1024**2 or abs(cpus - 2.8) > 0.000001:
         raise ValueError("DELIVERY_PRIVATE_AGGREGATE_BUDGET")
+    worker_env = services["worker"].get("environment", {})
+    if any(str(worker_env.get(name)) != value for name, value in PRIVATE_SPARK_ENV.items()):
+        raise ValueError("DELIVERY_PRIVATE_SPARK_BUDGET_MISMATCH")
     healthcheck_timings = validate_private_healthchecks(services)
     sql = services["destination-sqlserver"]
     pool = int(sql.get("environment", {}).get("MSSQL_MEMORY_LIMIT_MB", "0"))
@@ -142,8 +154,10 @@ def validate_private_resources(profile: dict) -> dict:
         if engine != 512 or process != 2048 or engine * 1024**2 >= memory_bytes(services[name]["mem_limit"]):
             raise ValueError("DELIVERY_REPORT_ENGINE_CGROUP_MISMATCH")
     return {"status": "PASS", "scope": "OWNED_SMALL_DELIVERY_085_ONLY",
-            "memory_bytes": memory, "memory_ceiling_bytes": 8 * 1024**3,
-            "cpus": round(cpus, 6), "cpu_ceiling": 2,
+            "memory_bytes": memory, "memory_ceiling_bytes": 10 * 1024**3,
+            "cpus": round(cpus, 6), "cpu_ceiling": 3,
+            "intake_worker_memory_mib": 2048, "intake_worker_cpus": 1,
+            "spark": dict(PRIVATE_SPARK_ENV),
             "sqlserver_engine_memory_mib": pool, "sqlserver_cgroup_memory_mib": 3072,
             "report_engine_memory_mib": 512, "report_process_virtual_memory_mib": 2048,
             "active_services": sorted(PRIVATE_RESOURCES),
@@ -168,6 +182,7 @@ def configure_private_resources(profile: dict, project: str) -> dict:
         timeout, start_period = PRIVATE_HEALTHCHECKS[name]
         row.setdefault("healthcheck", {}).update(timeout=f"{timeout}s", start_period=f"{start_period}s")
     services["destination-sqlserver"].setdefault("environment", {}).setdefault("MSSQL_MEMORY_LIMIT_MB", "2048")
+    services["worker"].setdefault("environment", {}).update(PRIVATE_SPARK_ENV)
     validate_private_resources(profile)
     apply_limits(profile, project)
     return validate_private_resources(profile)  # A reduced SQL cgroup never passes.
@@ -344,6 +359,7 @@ def delivery_draft(
     strategy: str,
     create_schema: bool = False,
     primary_key_columns: list[str] | None = None,
+    source_names: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1 if primary_key_columns is None else 2,
@@ -356,7 +372,8 @@ def delivery_draft(
             "table_name": table_name,
             "create_schema": create_schema,
         },
-        "columns": COLUMN_MAPPING,
+        "columns": [{**column, "source_name": (source_names or {}).get(column["source_name"], column["source_name"])}
+                    for column in COLUMN_MAPPING],
         "write_strategy": strategy,
         "upsert_keys": ["record_id"] if strategy == "UPSERT" else [],
         **({"primary_key_mode": "DEFINE" if primary_key_columns else "NONE",
@@ -400,12 +417,13 @@ def publish_and_run(
     draft: dict[str, Any],
     label: str,
     credentials: list[str],
+    *, expected_columns: int = len(DATASET_COLUMNS),
 ) -> dict[str, Any]:
     preview = api.post("/api/v1/delivery/preview", draft, expected=(200,))
     expected_names = [column["target_name"] for column in sorted(draft["columns"], key=lambda column: column["ordinal"])]
     checks.verify(
         preview["sampled_rows"] == len(DATASET_ROWS)
-        and len(expected_names) == len(DATASET_COLUMNS)
+        and len(expected_names) == expected_columns
         and [item["target_name"] for item in preview["columns"]] == expected_names,
         f"{label}: preview acotada respeta selección, orden y nombres",
     )
@@ -456,6 +474,7 @@ def publish_and_run(
     checks.verify(
         receipt["kind"] == "DELIVERY_RECEIPT"
         and receipt["run_id"] == completed["id"]
+        and receipt["dataset_version_id"] == draft["dataset_version_id"]
         and receipt["destination_version_id"] == draft["destination_version_id"]
         and receipt["write_strategy"] == draft["write_strategy"]
         and receipt["result"] == "COMMITTED",
@@ -479,6 +498,10 @@ def publish_and_run(
         "Una credencial apareció en respuesta, receipt o manifest de Delivery.",
     )
     return {
+        "dataset_version_id": receipt["dataset_version_id"],
+        "source_sha256": receipt["source_sha256"],
+        "canonical_artifact_id": receipt["canonical_artifact_id"],
+        "canonical_sha256": receipt["canonical_sha256"],
         "configuration_id": configuration["id"],
         "run_id": completed["id"],
         "attempt_id": attempts["items"][0]["id"],
@@ -616,7 +639,7 @@ def certify_sqlserver_collation_guard(
 
 
 def target_command(
-    engine: str, sql: str, *, use_delivery_database: bool = True
+    engine: str, sql: str, *, use_delivery_database: bool = True, json_oracle: bool = False
 ) -> tuple[list[str], str]:
     if engine == "POSTGRESQL":
         return (
@@ -645,7 +668,8 @@ def target_command(
             "-c",
             (
                 'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd '
-                "-S localhost -U sa -C -b -h -1 -W -f 65001"
+                "-S localhost -U sa -C -b -h -1 -f 65001 "
+                + ("-y 4096 -w 4096" if json_oracle else "-W")
             ),
         ],
         "SET NOCOUNT ON;\n" + database_prefix + sql + "\nGO\n",
@@ -659,9 +683,10 @@ def target_sql(
     *,
     capture: bool = False,
     use_delivery_database: bool = True,
+    json_oracle: bool = False,
 ) -> str:
     command, payload = target_command(
-        engine, sql, use_delivery_database=use_delivery_database
+        engine, sql, use_delivery_database=use_delivery_database, json_oracle=json_oracle
     )
     return run(command, input_text=payload, capture=capture)
 
@@ -785,8 +810,9 @@ def mock_sso_delivery_client(admin, checks, provider, credentials):
     return client, username
 
 
-def certify_audit_columns(api, checks, engine, version_id, destination, password, credentials, run):
+def certify_audit_columns(api, checks, engine, version_id, destination, password, credentials, run, *, source_names=None):
     """Real transactional DDL/DML, permanent policy, compatible adoption and drift."""
+    make_draft = partial(delivery_draft, source_names=source_names)
     pg = engine == "POSTGRESQL"
     schema = "existing_delivery"
     quote = (lambda value: '"' + value + '"') if pg else (lambda value: "[" + value + "]")
@@ -802,7 +828,7 @@ def certify_audit_columns(api, checks, engine, version_id, destination, password
             sql += f" ALTER TABLE {target} OWNER TO tv_delivery_writer;"
         target_sql(run, engine, sql)
     def draft(name, strategy="APPEND", mode="EXISTING_TABLE"):
-        return {**delivery_draft(version_id, destination, mode=mode,
+        return {**make_draft(version_id, destination, mode=mode,
                                 schema_name=schema, table_name=name, strategy=strategy),
                 "audit_columns_enabled": True}
     def policy(name):
@@ -969,7 +995,9 @@ def certify_engine(
     password: str,
     credentials: list[str],
     run,
+    *, source_names=None, typed_chain=None,
 ) -> dict[str, Any]:
+    make_draft = partial(delivery_draft, source_names=source_names)
     body = destination_body(engine, password)
     tested = api.post("/api/v1/delivery/destinations/test", body, expected=(200,))
     checks.verify(tested["status"] == "SUCCESS", f"{engine}: prueba credencial real de escritura")
@@ -1002,7 +1030,7 @@ def certify_engine(
         publish_and_run(
             api,
             checks,
-            delivery_draft(
+            make_draft(
                 dataset_version_id,
                 destination,
                 mode="CREATE_TABLE",
@@ -1039,7 +1067,7 @@ def certify_engine(
                 existing_target_count(run, engine) == len(DATASET_ROWS) - 1,
                 f"{engine}: fixture update/insert preparado antes de UPSERT",
             )
-        draft = delivery_draft(
+        draft = make_draft(
             dataset_version_id,
             destination,
             mode="EXISTING_TABLE",
@@ -1067,7 +1095,7 @@ def certify_engine(
         f"{engine}: UPSERT actualiza coincidencias y recupera valores Unicode",
     )
 
-    missing = delivery_draft(
+    missing = make_draft(
         dataset_version_id,
         destination,
         mode="EXISTING_TABLE",
@@ -1082,7 +1110,7 @@ def certify_engine(
         missing_error["error"]["code"] == "FAILED_PRECONDITION",
         f"{engine}: preflight rechaza target inexistente sin modificarlo",
     )
-    forbidden = delivery_draft(
+    forbidden = make_draft(
         dataset_version_id,
         destination,
         mode="CREATE_TABLE",
@@ -1100,7 +1128,7 @@ def certify_engine(
     failure = failed_attempt(
         api,
         checks,
-        delivery_draft(
+        make_draft(
             dataset_version_id,
             destination,
             mode="EXISTING_TABLE",
@@ -1116,9 +1144,13 @@ def certify_engine(
         if engine == "SQLSERVER"
         else None
     )
-    primary_keys = certify_primary_keys(api, checks, engine, dataset_version_id, destination, credentials, run)
-    audit_columns = certify_audit_columns(api, checks, engine, dataset_version_id, destination, password, credentials, run)
+    primary_keys = certify_primary_keys(api, checks, engine, dataset_version_id, destination, credentials, run, source_names=source_names)
+    audit_columns = certify_audit_columns(api, checks, engine, dataset_version_id, destination, password, credentials, run, source_names=source_names)
+    from delivery_typed_chain import certify_destination
+
+    typed_delivery = certify_destination(sys.modules[__name__], api, checks, engine, destination, typed_chain, credentials, run) if typed_chain else None
     return {
+        "typed_chain": typed_delivery,
         "primary_keys": primary_keys,
         "audit_columns": audit_columns,
         "sink_type": engine,
@@ -1131,11 +1163,12 @@ def certify_engine(
     }
 
 
-def certify_primary_keys(api, checks, engine, version_id, destination, credentials, run):
+def certify_primary_keys(api, checks, engine, version_id, destination, credentials, run, *, source_names=None):
     """R085-02 oracle: real SQL constraints, one backing index and all source rows."""
+    make_draft = partial(delivery_draft, source_names=source_names)
     cases = []
     for table, keys in (("pk_simple_085", ["quantity"]), ("pk_composite_085", ["transaction_code", "quantity"])):
-        draft = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+        draft = make_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
                                table_name=table, strategy="CREATE_AND_LOAD", primary_key_columns=keys)
         draft["columns"] = [dict(column) for column in draft["columns"]]
         if table == "pk_composite_085":
@@ -1177,7 +1210,7 @@ def certify_primary_keys(api, checks, engine, version_id, destination, credentia
         cases.append({"status": "PASS", "table": table, "primary_key_columns": keys, "rows": count,
                       "backing_indexes": indexes, "not_null": True, "existing_strategies_preserve_pk": True,
                       "run": delivered, "append_failure": append_failure, "overwrite": overwritten, "upsert": upserted})
-    none = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+    none = make_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
                           table_name="pk_none_085", strategy="CREATE_AND_LOAD", primary_key_columns=[])
     publish_and_run(api, checks, none, f"R085-02 {engine} sin PK explícita", credentials)
     metadata = api.get(f"/api/v1/delivery/destinations/{destination['id']}/table-metadata?" + urlencode(
@@ -1185,7 +1218,7 @@ def certify_primary_keys(api, checks, engine, version_id, destination, credentia
     checks.verify(not any(item["type"] == "PRIMARY_KEY" for item in metadata["constraints"]),
                   f"R085-02 {engine}: NONE explícito crea sin inferir una PK")
     cases.append({"case": "EXPLICIT_NONE", "status": "PASS", "primary_key_mode": "NONE"})
-    repeated = delivery_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
+    repeated = make_draft(version_id, destination, mode="CREATE_TABLE", schema_name="existing_delivery",
                               table_name="pk_repeated_rejected_085", strategy="CREATE_AND_LOAD", primary_key_columns=["is_active"])
     error = api.request("POST", "/api/v1/delivery/preflight", repeated, expected=(412,)).json()
     checks.verify(any(item["code"] == "PRIMARY_KEY_SOURCE_KEYS" and item["status"] == "FAIL"
@@ -1362,9 +1395,16 @@ def main() -> int:
             version["row_count"] == len(DATASET_ROWS),
             "DatasetVersion inmutable de entrada contiene las filas certificadas",
         )
+        from delivery_typed_chain import SOURCE_NAMES, certify_sources
+
+        worker_cgroup = next(item for item in healthchecks["services"] if item["service"] == "worker")
+        typed_chain = certify_sources(sys.modules[__name__], api, checks,
+            {key: worker_cgroup[key] for key in ("service", "memory_limit_bytes", "nano_cpus", "pids_limit")})
+        final_version_id = typed_chain["cases"][-1]["final_version_id"]
         results = [
             certify_engine(
-                api, checks, engine, version["id"], writer_password, credentials, run
+                api, checks, engine, final_version_id, writer_password, credentials, run,
+                source_names=SOURCE_NAMES, typed_chain=typed_chain,
             )
             for engine in ("POSTGRESQL", "SQLSERVER")
         ]
@@ -1458,6 +1498,8 @@ def main() -> int:
             "version": application_version,
             "project": project,
             "dataset_version_id": version["id"],
+            "typed_chain": typed_chain,
+            "resource_profile": resource_profile,
             "destinations": results,
             "checks": checks.completed,
             "playwright": playwright,
