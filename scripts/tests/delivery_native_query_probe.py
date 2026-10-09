@@ -248,9 +248,9 @@ def host(args) -> int:
         identifier = owned_cleanup.docker("create", "--name", project,
             "--label", "com.docker.compose.project=" + project, "--network", "none",
             "--read-only", "--cpus", "2", "--memory", "4g", "--memory-swap", "4g", "--pids-limit", "128",
-            "--mount", f"type=bind,src={ROOT / 'scripts' / 'tests'},dst=/probe,readonly",
+            "--mount", f"type=bind,src={ROOT / 'scripts' / 'tests'},dst=/probe/scripts/tests,readonly",
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-            "--entrypoint", "python", image_id, "/probe/delivery_native_query_probe.py", "--native").strip()
+            "--entrypoint", "python", image_id, "/probe/scripts/tests/delivery_native_query_probe.py", "--native").strip()
         receipt["container_id"] = identifier
         save()
         status, stdout, stderr = bounded_process(["docker", "start", "--attach", identifier], timeout=300)
