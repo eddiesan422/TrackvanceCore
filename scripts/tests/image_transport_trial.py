@@ -170,7 +170,7 @@ class Trial:
     def protected(self):
         return {row["Id"]: {"image": row["Image"], "state": row["State"]["Status"],
                 "config": canonical_hash(row["Config"]), "host": canonical_hash(row["HostConfig"]),
-                "mounts": canonical_hash(row["Mounts"])} for row in self.rows()
+                "mounts": canonical_hash(sorted(row["Mounts"], key=canonical_hash))} for row in self.rows()
                 if not PROJECT.fullmatch((row.get("Config", {}).get("Labels") or {}).get(LABEL, ""))}
 
     def guard(self):
