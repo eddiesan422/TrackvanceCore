@@ -67,9 +67,10 @@ def test_changed_source_profile_rejects_before_removal(damage):
         trial.source_profile(row, PROJECT_ID, HELPER_ID, cleanup=True)
 
 
-def test_stopped_owned_source_can_be_cleaned_without_a_live_port():
+@pytest.mark.parametrize("running", [False, True])
+def test_owned_source_can_be_cleaned_without_a_live_port(running):
     row = source()
-    row["State"]["Running"] = False
+    row["State"]["Running"] = running
     row["NetworkSettings"]["Ports"] = {}
     assert trial.source_profile(row, PROJECT_ID, HELPER_ID, cleanup=True) is None
     with pytest.raises(ValueError):
