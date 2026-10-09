@@ -220,6 +220,79 @@ def test_every_compose_receipt_binds_the_verified_image_bundle_and_both_roles(ga
         evaluate(**args)
 
 
+@pytest.mark.parametrize("modern", [False, True])
+@pytest.mark.parametrize("damage", [None, "missing", "tree", "source-hash", "runtime-id", "mapping-hash"])
+def test_gate_verifies_cross_store_mapping_tree_against_original_ci_without_docker(
+        gate_case, tmp_path, monkeypatch, modern, damage):
+    from ci import image_bundle
+    from ci.image_content import archive_identity
+    from image_transport_fixtures import image_archive
+
+    args, receipt = gate_case
+    spec = json.loads(args["manifest_path"].read_text())
+    spec["groups"][0].update(id="fixture-heavy", job_key="suite-fixture-heavy")
+    for profile in spec["profiles"].values():
+        profile["groups"] = ["fixture-heavy"]
+    save(args["manifest_path"], spec)
+    selection = json.loads(args["selection_path"].read_text())
+    selection.update(groups=["fixture-heavy"], manifest_sha256=sha256(args["manifest_path"]))
+    save(args["selection_path"], selection)
+    images = {"schema_version": 1, "status": "PASS", "source_sha": SHA,
+              "digest_kind": "DOCKER_ENGINE_IMAGE_ID" if modern else "DOCKER_CONFIGURATION_SHA256", "images": {}}
+    mapping = {"schema_version": 1, "kind": "HOST_IMAGE_MAPPING", "status": "PASS", "source_sha": SHA, "images": {}}
+    runtime = {}
+    for role in ("backend", "web"):
+        archive = tmp_path / (role + ".tar")
+        source = image_archive(archive, SHA, role)
+        source_proof = archive_identity(archive, source["engine_id"], SHA)
+        host_archive = tmp_path / ("host-" + role + ".tar")
+        host = image_archive(host_archive, SHA, role, kind="index", compressed=True)
+        host_proof = archive_identity(host_archive, host["engine_id"], SHA)
+        descriptor = {"image_id": source["engine_id"], "archive": archive.name,
+                      "archive_sha256": sha256(archive), "archive_bytes": archive.stat().st_size}
+        if modern:
+            descriptor.update({key: source_proof[key] for key in ("image_id_kind", "configuration_digest", "rootfs_diff_ids")})
+        images["images"][role] = descriptor
+        mapping["images"][role] = {"source_image_id": source["engine_id"], "host_image_id": host["engine_id"],
+            "archive_sha256": descriptor["archive_sha256"], "archive_bytes": descriptor["archive_bytes"],
+            "source_identity": source_proof, "host_identity": host_proof}
+        runtime[role] = host["engine_id"]
+        assert source["engine_id"] != host["engine_id"]
+    save(args["image_manifest_path"], images)
+    mapping["source_manifest_sha256"] = sha256(args["image_manifest_path"])
+    if damage == "tree":
+        mapping["images"]["backend"]["host_identity"]["chain"][0]["payload_base64"] = "e30="
+    elif damage == "source-hash":
+        mapping["source_manifest_sha256"] = "b" * 64
+    mapped_file = save(receipt.parent / "host-images.json", mapping)
+    record = json.loads(receipt.read_text())
+    record.update(group="fixture-heavy", ci={"run_id": "123", "run_attempt": "1", "job_id": "suite-fixture-heavy"},
+                  resources={"profile": "functional", "image_bundle_sha256": sha256(args["image_manifest_path"]),
+                             "runtime_images": runtime})
+    if damage != "missing":
+        record["resources"]["host_image_mapping_sha256"] = sha256(mapped_file)
+        record["evidence"].append({"kind": "source-image_host_mapping", "path": mapped_file.name, "sha256": sha256(mapped_file)})
+        record["result"]["documents"]["image_host_mapping"] = mapping
+    if damage == "runtime-id":
+        record["resources"]["runtime_images"]["backend"] = "sha256:" + "b" * 64
+    elif damage == "mapping-hash":
+        record["resources"]["host_image_mapping_sha256"] = "b" * 64
+    result_ref = next(entry for entry in record["evidence"] if entry["kind"] == "result")
+    result_file = receipt.parent / result_ref["path"]
+    save(result_file, record["result"])
+    result_ref["sha256"] = sha256(result_file)
+    save(receipt, record)
+    monkeypatch.setattr(image_bundle, "docker", lambda *_: pytest.fail("Gate cannot consult an Engine"))
+    if damage is None:
+        gate = evaluate(**args)
+        assert gate["status"] == "PASS"
+        assert gate["source_images"] == {role: value["image_id"] for role, value in images["images"].items()}
+        assert gate["runtime_images"] == runtime and gate["runtime_images_by_group"] == {"fixture-heavy": runtime}
+    else:
+        with pytest.raises(EvidenceError, match="SCENARIO_(HOST_MAPPING|IMAGE_BUNDLE)"):
+            evaluate(**args)
+
+
 def test_downloaded_artifact_subdirectories_keep_receipt_relative_attachment_paths(gate_case):
     args, _ = gate_case
     base = args["evidence_dir"].parent / "downloaded"

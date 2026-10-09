@@ -49,7 +49,8 @@ except ImportError:
 def validate_images(path: Path, source_sha: str) -> dict[str, str]:
     data = load_json(path)
     require(data.get("schema_version") == 1 and data.get("source_sha") == source_sha
-            and data.get("status") == "PASS" and data.get("digest_kind") == "DOCKER_CONFIGURATION_SHA256",
+            and data.get("status") == "PASS" and data.get("digest_kind") in {
+                "DOCKER_CONFIGURATION_SHA256", "DOCKER_ENGINE_IMAGE_ID"},
             "IMAGE_MANIFEST_SHA_OR_STATUS")
     require(set(data.get("images", {})) == {"backend", "web"}, "INCOMPLETE_IMAGE_ROLES")
     roles = {}
@@ -58,6 +59,13 @@ def validate_images(path: Path, source_sha: str) -> dict[str, str]:
         require(descriptor.get("archive") == role + ".tar" and DIGEST.fullmatch(descriptor.get("archive_sha256", ""))
                 and type(descriptor.get("archive_bytes")) is int and 0 < descriptor["archive_bytes"] <= 8 * 1024**3,
                 "INVALID_IMAGE_ARCHIVE_DESCRIPTOR")
+        if data["digest_kind"] == "DOCKER_ENGINE_IMAGE_ID":
+            require(descriptor.get("image_id_kind") in {"CONFIGURATION_SHA256", "OCI_TARGET_SHA256"}
+                    and re.fullmatch(r"sha256:[a-f0-9]{64}", descriptor.get("configuration_digest", ""))
+                    and isinstance(descriptor.get("rootfs_diff_ids"), list)
+                    and len(descriptor["rootfs_diff_ids"]) <= 256
+                    and all(isinstance(value, str) and re.fullmatch(r"sha256:[a-f0-9]{64}", value)
+                            for value in descriptor["rootfs_diff_ids"]), "INVALID_IMAGE_CONTENT_IDENTITY")
         roles[role] = descriptor["image_id"]
     return roles
 
@@ -180,6 +188,8 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
     validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt)
     roles = validate_images(image_manifest_path, source_sha)
     image_hash = sha256(image_manifest_path)
+    image_document = load_json(image_manifest_path)
+    host_roles_by_group = {}
     expected: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for group in manifest["groups"]:
         if group["id"] in groups:
@@ -211,10 +221,27 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
         validate_timing(record)
         resources = record.get("resources")
         require(isinstance(resources, dict) and resources.get("profile") == "functional", "SCENARIO_PROFILE_METADATA_MISMATCH")
-        if group["id"] not in {"backend", "frontend"}:
-            require(resources.get("image_bundle_sha256") == image_hash and resources.get("runtime_images") == roles,
-                    "SCENARIO_IMAGE_BUNDLE_MISMATCH")
         attachments = validate_attachments(record, path)
+        if group["id"] not in {"backend", "frontend"}:
+            require(resources.get("image_bundle_sha256") == image_hash, "SCENARIO_IMAGE_BUNDLE_MISMATCH")
+            mapping_refs = [entry for entry in record["evidence"] if entry["kind"] == "source-image_host_mapping"]
+            if mapping_refs:
+                require(len(mapping_refs) == 1 and resources.get("host_image_mapping_sha256") == mapping_refs[0]["sha256"],
+                        "SCENARIO_HOST_MAPPING_HASH_MISMATCH")
+                try:
+                    from ci.image_bundle import mapping_images
+
+                    mapped = mapping_images(image_document, image_hash, source_sha,
+                        load_json(relative_file(path.parent, mapping_refs[0]["path"])))
+                except (ValueError, KeyError, TypeError, AttributeError) as error:
+                    raise EvidenceError("SCENARIO_HOST_MAPPING_CONTENT_MISMATCH") from error
+            else:
+                require(image_document["digest_kind"] == "DOCKER_CONFIGURATION_SHA256"
+                        and not resources.get("host_image_mapping_sha256"), "SCENARIO_HOST_MAPPING_MISSING")
+                mapped = roles
+            require(resources.get("runtime_images") == mapped, "SCENARIO_IMAGE_BUNDLE_MISMATCH")
+            previous = host_roles_by_group.setdefault(group["id"], mapped)
+            require(previous == mapped, "SCENARIO_HOST_IMAGE_DRIFT")
         validate_content(spec, record["result"], execution_profile="functional")
         found[scenario_id] = record
         receipts.append({"scenario_id": scenario_id, "group": group["id"], "path": path.relative_to(evidence_dir).as_posix(),
@@ -227,7 +254,11 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
             "run_id": run_id, "run_attempt": run_attempt, "manifest_sha256": manifest_hash,
             "executable_fingerprint": fingerprint, "current_functional_executed": True,
             "inherited_executable_approved": False,
-            "image_manifest_sha256": image_hash, "runtime_images": roles, "groups": groups,
+            "image_manifest_sha256": image_hash, "source_images": roles,
+            "runtime_images": (next(iter(host_roles_by_group.values())) if host_roles_by_group
+                and len({tuple(sorted(value.items())) for value in host_roles_by_group.values()}) == 1
+                else roles if not host_roles_by_group else None),
+            "runtime_images_by_group": host_roles_by_group, "groups": groups,
             "scenario_count": len(found), "module_coverage": manifest["profiles"]["functional"]["module_coverage"], "receipts": receipts}
 
 
