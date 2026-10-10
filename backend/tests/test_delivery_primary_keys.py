@@ -109,6 +109,65 @@ def test_preflight_native_collation_failure_is_diagnosed(database, delivery_case
     assert check_by_code(result, "PRIMARY_KEY_NATIVE")[0]["status"] == "FAIL"
 
 
+@pytest.mark.parametrize("mode", ["DEFINE", "NONE", None])
+def test_http_preflight_preserves_versioned_primary_key_details(
+    authenticated, database, delivery_case, mode
+):
+    value = primary_draft(delivery_case.draft, ["external_id", "tenant_id"])
+    if mode == "NONE":
+        value.update(primary_key_mode="NONE", primary_key_columns=[])
+    elif mode is None:
+        value = {**deepcopy(delivery_case.draft), "schema_version": 2}
+    draft = DeliveryDraft.model_validate(value)
+    snapshot = draft.snapshot()
+    sealed_hash = configuration_hash(snapshot)
+    with database() as db:
+        expected = delivery_service.preflight_delivery(
+            db, delivery_case.source["organization_id"], draft
+        )
+
+    response = authenticated.post("/api/v1/delivery/preflight", json=snapshot)
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result == expected
+    assert result["primary_key"]["mode"] == mode
+    assert result["primary_key"]["columns"] == draft.primary_key_columns
+    if mode == "DEFINE":
+        validation = result["primary_key"]["validation"]
+        assert validation["rows_validated"] == result["source"]["row_count"] == 2
+        assert validation["columns"] == ["external_id", "tenant_id"]
+        assert check_by_code(result, "PRIMARY_KEY_NATIVE")[0]["status"] == "PASS"
+    else:
+        assert result["primary_key"]["validation"] is None
+    assert draft.snapshot() == snapshot
+    assert configuration_hash(draft.snapshot()) == sealed_hash
+    assert not any(call[0] == "deliver" for call in delivery_case.runtime.calls)
+
+
+def test_http_preflight_preserves_legacy_response_and_sealed_configuration(
+    authenticated, database, delivery_case
+):
+    draft = DeliveryDraft.model_validate(delivery_case.draft)
+    snapshot = draft.snapshot()
+    sealed_hash = configuration_hash(snapshot)
+    with database() as db:
+        expected = delivery_service.preflight_delivery(
+            db, delivery_case.source["organization_id"], draft
+        )
+
+    response = authenticated.post("/api/v1/delivery/preflight", json=snapshot)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert "primary_key" not in response.json()
+    assert "primary_key_mode" not in draft.snapshot()
+    assert "primary_key_columns" not in draft.snapshot()
+    assert draft.snapshot() == snapshot
+    assert configuration_hash(draft.snapshot()) == sealed_hash
+    assert not any(call[0] == "deliver" for call in delivery_case.runtime.calls)
+
+
 def test_null_outside_preview_fails_complete_pk(authenticated, database, delivery_runtime, tmp_path):
     source = make_dataset(database, tmp_path, rows=[f"T1,A-{i:03},1.00,note" for i in range(12)] + ["T1,,1.00,note"], name="PK null beyond sample")
     destination = create_destination(authenticated)

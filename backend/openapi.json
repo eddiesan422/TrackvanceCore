@@ -15070,6 +15070,16 @@
             "additionalProperties": true,
             "type": "object",
             "title": "System Audit"
+          },
+          "primary_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryPrimaryKeyPreflightResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -15126,6 +15136,99 @@
           "sampled_rows"
         ],
         "title": "DeliveryPreviewResponse"
+      },
+      "DeliveryPrimaryKeyPreflightResponse": {
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "DEFINE",
+                  "NONE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryPrimaryKeyValidationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "columns",
+          "validation"
+        ],
+        "title": "DeliveryPrimaryKeyPreflightResponse"
+      },
+      "DeliveryPrimaryKeyValidationResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "rows_validated": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Rows Validated"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "persistent_changes": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent Changes"
+          },
+          "collation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "rows_validated",
+          "method"
+        ],
+        "title": "DeliveryPrimaryKeyValidationResponse"
       },
       "DeliveryRepairResponse": {
         "properties": {

@@ -218,6 +218,22 @@ class DeliveryPreviewResponse(BaseModel):
     sampled_rows: int
 
 
+class DeliveryPrimaryKeyValidationResponse(BaseModel):
+    columns: list[str]
+    rows_validated: int = Field(ge=0)
+    method: str
+    persistent_changes: Literal[False] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    collation: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class DeliveryPrimaryKeyPreflightResponse(BaseModel):
+    mode: Literal["DEFINE", "NONE"] | None
+    columns: list[str]
+    validation: DeliveryPrimaryKeyValidationResponse | None
+
+
 class DeliveryPreflightResponse(BaseModel):
     status: Literal["PASS"]
     checks: list[dict[str, Any]]
@@ -225,6 +241,10 @@ class DeliveryPreflightResponse(BaseModel):
     destination: dict[str, Any]
     target: dict[str, Any]
     system_audit: dict[str, Any] = Field(default_factory=dict)
+    # Legacy preflight responses retain their exact field set.
+    primary_key: DeliveryPrimaryKeyPreflightResponse | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class DeliveryTargetPolicyResponse(BaseModel):
