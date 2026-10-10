@@ -307,6 +307,15 @@ def validate_comparison_scope(rows: list[int], limit: int, with_browser: bool):
     require(rows == [1000000] and limit == 1000000 and with_browser, "PREVIEW_COMPARISON_EXACT_DEEP_SCOPE")
 
 
+def refresh_context(client: ProxyClient, draft: dict, frozen: dict) -> dict:
+    """Renew only the TTL; reject any newly selected source or changed query."""
+    current = client.call("/reports/resolve", {"draft": draft})
+    require(current["context_id"] != frozen["context_id"], "REPORT_CONTEXT_NOT_REFRESHED")
+    require(current["query_hash"] == frozen["query_hash"] and current["sources"] == frozen["sources"],
+            "REPORT_CONTEXT_POPULATION_DRIFT")
+    return current
+
+
 def csv_population(path: Path):
     with path.open("r", encoding="utf-8", newline="") as source:
         reader = csv.reader(source)
@@ -588,8 +597,9 @@ def certify(directory: Path, context: dict, sizes: list[int], limit: int, source
             require(passing and baseline["execution_id"] != observation["execution_id"], "PREVIEW_DOWNLOAD_PHASE_FAILED")
         for size in sizes:
             phase("RESOLVE_" + str(size))
-            frozen = comparison_context if comparison_context and size == 1000000 else client.call("/reports/resolve", {"draft": query(sources, size)})
-            summary.setdefault("contexts", []).append({"rows": size, "context_id": frozen["context_id"], "query_hash": frozen["query_hash"], "sources": frozen["sources"]})
+            draft = query(sources, size)
+            frozen = refresh_context(client, draft, comparison_context) if comparison_context and size == 1000000 else client.call("/reports/resolve", {"draft": draft})
+            summary.setdefault("contexts", []).append({"rows": size, "format": "PREVIEW", **frozen})
             preview = client.call("/reports/preview", {"context_id": frozen["context_id"]})
             require(len(preview["rows"]) == min(10, size) and preview["status"] == "SUCCESS", "PREVIEW_RESULT")
             require([[row[name] for name in HEADERS] for row in preview["rows"]] == list(expected_rows(min(10, size), customers)), "PREVIEW_VALUE_ORACLE")
@@ -598,11 +608,19 @@ def certify(directory: Path, context: dict, sizes: list[int], limit: int, source
             summary.setdefault("oracles", {})[str(size)] = expected
             for format_name in ("CSV", "XLSX"):
                 phase("DOWNLOAD_" + format_name + "_" + str(size))
-                summary["downloads"].append(download(client, frozen["context_id"], format_name,
+                format_context = refresh_context(client, draft, frozen)
+                summary["contexts"].append({"rows": size, "format": format_name, **format_context})
+                phase("DOWNLOAD_" + format_name + "_CONTEXT_REFRESHED_" + str(size))
+                summary["downloads"].append(download(client, format_context["context_id"], format_name,
                     client_dir / f"result-{size}.{format_name.lower()}", expected, resources))
         phase("EXCESS_FINAL_RESULT")
-        excess = client.call("/reports/resolve", {"draft": query(sources, limit + 1)})
-        summary["excess"] = [rejected_download(client, excess["context_id"], format_name, resources) for format_name in ("CSV", "XLSX")]
+        excess_draft = query(sources, limit + 1)
+        excess = client.call("/reports/resolve", {"draft": excess_draft})
+        summary["excess"] = []
+        for format_name in ("CSV", "XLSX"):
+            format_context = refresh_context(client, excess_draft, excess)
+            summary["contexts"].append({"rows": limit + 1, "format": format_name + "_EXCESS", **format_context})
+            summary["excess"].append(rejected_download(client, format_context["context_id"], format_name, resources))
         # This query's join has limit+1 rows but FINAL LIMIT is admitted and exact.
         phase("FINAL_LIMIT_AFTER_JOIN")
         bounded = client.call("/reports/resolve", {"draft": query(sources, sizes[0], variant="LIMIT")})

@@ -151,7 +151,7 @@ def test_download_phase_preserves_memory_and_product_caps_within_whole_budget(tm
         profile.validate(data)
 
 
-@pytest.mark.parametrize("mutation", [None, "foreign", "wrong_image", "active_jobs"])
+@pytest.mark.parametrize("mutation", [None, "foreign", "wrong_image", "active_jobs", "api_replaced", "network_changed", "memory_changed"])
 def test_download_transition_stops_only_verified_idle_ids_and_journals_before_mutation(tmp_path, monkeypatch, mutation):
     import certification_v080 as guard
 
@@ -165,7 +165,9 @@ def test_download_transition_stops_only_verified_idle_ids_and_journals_before_mu
                 for index, alias in enumerate(("t", "c"), 1)]
     rows = {name: {"Id": f"{index:064x}", "Image": context["image"],
         "Config": {"Labels": {"com.docker.compose.project": context["project"], "com.docker.compose.service": name}},
-        "State": {"Running": True}, "HostConfig": {"Memory": profile.PROFILE[name][0] * 1024**2,
+        "State": {"Running": True, "Pid": 1000 + index, "StartedAt": "original"},
+        "NetworkSettings": {"Networks": {"private": {"IPAddress": f"172.30.0.{index}"}}},
+        "HostConfig": {"Memory": profile.PROFILE[name][0] * 1024**2,
         "NanoCpus": round(profile.PROFILE[name][1] * 10**9)}}
         for index, name in enumerate(("api", "postgres", "web", "worker", "acquisition-worker"), 1)}
     if mutation == "foreign":
@@ -196,18 +198,28 @@ def test_download_transition_stops_only_verified_idle_ids_and_journals_before_mu
             assert row["Config"]["Labels"]["com.docker.compose.service"] in profile.IDLE_WORKERS
             row["State"]["Running"] = False
         else:
-            assert args[1] == "compose" and args[-1] == "api" and "--no-deps" in args and "--no-build" in args
-            rows["api"]["Id"] = "d" * 64
+            assert args == ["docker", "update", "--cpus", "2", rows["api"]["Id"]]
+            assert journal["api_update_intent"] == {"id": rows["api"]["Id"], "cpus": 2, "status": "CPU_UPDATE_INTENT"}
+            assert json.loads((tmp_path / "compose.json").read_text())["services"]["api"]["cpus"] == 2
             rows["api"]["HostConfig"]["NanoCpus"] = 2000000000
+            if mutation == "api_replaced":
+                rows["api"]["Id"] = "d" * 64
+            elif mutation == "network_changed":
+                rows["api"]["NetworkSettings"]["Networks"]["private"]["IPAddress"] = "172.30.0.99"
+            elif mutation == "memory_changed":
+                rows["api"]["HostConfig"]["Memory"] = 1024 * 1024**2
         return ""
     monkeypatch.setattr(guard, "command", command)
     if mutation:
         with pytest.raises(ValueError, match="OWNED_REPORT"):
             profile.enter_download_phase(tmp_path, context, 1000000, fixtures)
-        assert mutations == []
+        assert len(mutations) == (3 if mutation in {"api_replaced", "network_changed", "memory_changed"} else 0)
     else:
         receipt = profile.enter_download_phase(tmp_path, context, 1000000, fixtures)
         assert receipt["status"] == "PASS" and receipt["before_cgroups"]["services"]["api"]["cpus"] == .84
         assert receipt["after_cgroups"]["services"]["api"]["cpus"] == 2
         assert receipt["worker_intents"]["report-worker"]["status"] == "ABSENT_NOT_STARTED"
+        assert receipt["api_after_id"] == receipt["api_before_id"] == rows["api"]["Id"]
+        assert receipt["api_identity_before_sha256"] == receipt["api_identity_after_sha256"]
+        assert receipt["api_update_intent"]["status"] == "CPU_UPDATED_IDENTITY_PRESERVED"
         assert len(mutations) == 3 and rows["postgres"]["State"]["Running"] and rows["web"]["State"]["Running"]

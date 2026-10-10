@@ -1,4 +1,5 @@
 """Independent client readers reject partial exports and compare every typed row."""
+import copy
 import importlib.util
 import json
 import sys
@@ -116,3 +117,80 @@ def test_comparison_actual_http_contract_retains_failed_baseline_and_request_cou
     assert receipt["counter_deltas"]["cpu.stat"]["usage_usec"] == 400
     assert receipt["error_code"] == code and receipt["status"] == ("PASS" if status == 200 else "FAIL")
     assert receipt["expected_baseline_timeout"] is (baseline and code == "REPORT_TIMEOUT")
+
+
+@pytest.mark.parametrize("mutation", [None, "version", "artifact_hash", "query", "context_id"])
+def test_context_ttl_renewal_rejects_population_or_query_drift(mutation):
+    original = {"context_id": "expired-preview", "query_hash": "q" * 64,
+                "sources": [{"output_version_id": "frozen-version", "sha256": "frozen-artifact"}]}
+    current = {**copy.deepcopy(original), "context_id": "fresh-format", "expires_at": "fresh-deadline"}
+    if mutation == "version":
+        current["sources"][0]["output_version_id"] = "new-version"
+    elif mutation == "artifact_hash":
+        current["sources"][0]["sha256"] = "new-artifact"
+    elif mutation == "query":
+        current["query_hash"] = "changed-query"
+    elif mutation == "context_id":
+        current["context_id"] = original["context_id"]
+    observed = []
+    class Client:
+        def call(self, path, body):
+            observed.append((path, body))
+            return current
+    draft = {"sources": [{"policy": "LATEST_APPROVED"}], "sql": "unchanged-query"}
+    if mutation:
+        with pytest.raises(runner.CheckFailed, match="REPORT_CONTEXT"):
+            runner.refresh_context(Client(), draft, original)
+    else:
+        assert runner.refresh_context(Client(), draft, original) == current
+    assert observed == [("/reports/resolve", {"draft": draft})]
+
+
+def test_certification_resolves_each_format_after_previous_download_can_exceed_context_ttl(tmp_path, monkeypatch):
+    # Unit orchestration: a slow CSV advances the synthetic clock past the
+    # preview/CSV TTL. XLSX must resolve a fresh context for the same population.
+    clock, contexts, downloads = [0], {}, []
+    class Client:
+        def __init__(self, *_):
+            pass
+
+        def call(self, path, body=None, **_):
+            if path == "/reports/limits":
+                return {"profiles": {"DOWNLOAD": {"max_rows": 12}, "XLSX": {"max_rows": 12},
+                    "PREVIEW": {"max_rows": 10, "timeout_seconds": 60, "memory_bytes": 512 * 1024**2,
+                    "process_memory_bytes": 2 * 1024**3, "threads": 2, "concurrency": 1}}}
+            if path == "/reports/resolve":
+                identity = "context-" + str(len(contexts))
+                frozen = {"context_id": identity, "query_hash": json.dumps(body["draft"], sort_keys=True),
+                          "sources": [{"output_version_id": "immutable-source", "sha256": "same-hash"}],
+                          "expires_at": clock[0] + 900}
+                contexts[identity] = frozen
+                return frozen
+            if path == "/reports/preview":
+                return {"status": "SUCCESS", "rows": [dict(zip(runner.HEADERS, row, strict=True))
+                        for row in runner.expected_rows(10, 1)]}
+            return {"id": "fixture"}
+    class Resources:
+        available = True
+
+        def check(self):
+            pass
+
+        def metrics(self):
+            return {"status": "UNIT_ONLY"}
+    def download(_client, identity, format_name, _path, expected, _resources):
+        assert clock[0] < contexts[identity]["expires_at"]
+        downloads.append((format_name, identity))
+        clock[0] += 901
+        return {"format": format_name, "status": "UNIT_ONLY", "rows": expected["rows"]}
+    monkeypatch.setattr(runner, "ProxyClient", Client)
+    monkeypatch.setattr(runner, "fixture", lambda *_: None)
+    monkeypatch.setattr(runner, "acquire", lambda _c, _p, alias, *_: ({"alias": alias}, {"alias": alias}))
+    monkeypatch.setattr(runner, "enter_download_phase", lambda *_: {"status": "UNIT_ONLY"})
+    monkeypatch.setattr(runner, "download", download)
+    monkeypatch.setattr(runner, "rejected_download", lambda *_: {"status": "UNIT_ONLY"})
+    result = runner.certify(tmp_path, {"port": 0, "project": "unit-only"}, [12], 12, "a" * 40, Resources())
+    assert result["status"] == "PASS"
+    assert downloads[:2] == [("CSV", "context-1"), ("XLSX", "context-2")]
+    assert contexts[downloads[0][1]]["query_hash"] == contexts[downloads[1][1]]["query_hash"]
+    assert contexts[downloads[0][1]]["sources"] == contexts[downloads[1][1]]["sources"]

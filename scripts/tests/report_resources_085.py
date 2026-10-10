@@ -1,6 +1,7 @@
 """Finite profile for owned Catalog/Report download tests only."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -204,8 +205,31 @@ def idle_metadata(context: dict, fixtures: list[dict], *, command=None) -> dict:
     return value
 
 
+def _transition_write(path: Path, receipt: dict) -> None:
+    temporary = path.with_suffix(".partial")
+    with temporary.open("w", encoding="utf-8") as stream:
+        stream.write(json.dumps(receipt, indent=2) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+    if os.name != "nt":
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def _api_identity(row: dict) -> str:
+    """Hash unchanged config/mounts/network/process without publishing env values."""
+    host = {key: value for key, value in row["HostConfig"].items() if key != "NanoCpus"}
+    preserved = {key: row.get(key) for key in ("Id", "Image", "Config", "Mounts", "NetworkSettings", "RestartCount")}
+    preserved.update(HostConfig=host, State={key: row["State"].get(key) for key in ("Running", "Pid", "StartedAt")})
+    return hashlib.sha256(json.dumps(preserved, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def enter_download_phase(directory: Path, context: dict, limit: int, fixtures: list[dict]) -> dict:
-    """Journal intent before exact-ID stops and a bounded same-image API recreation."""
+    """Journal exact-ID stops and a CPU-only update preserving API process/IP."""
     import certification_v080 as guard
     from ci.local_resources import register_project
 
@@ -226,6 +250,8 @@ def enter_download_phase(directory: Path, context: dict, limit: int, fixtures: l
     receipt = {"status": "PLANNED", "project": context["project"], "phase": "DOWNLOAD",
                "idle_metadata": idle, "before_cgroups": before_cgroups,
                "api_before_id": rows["api"]["Id"], "image": context["image"],
+               "api_identity_before_sha256": _api_identity(rows["api"]),
+               "api_update_intent": {"id": rows["api"]["Id"], "cpus": 2, "status": "CPU_UPDATE_INTENT"},
                "worker_intents": {name: {"id": rows[name]["Id"], "status": "STOP_INTENT"}
                                   if name in rows else {"status": "ABSENT_NOT_STARTED"}
                                   for name in sorted(IDLE_WORKERS)}}
@@ -233,7 +259,7 @@ def enter_download_phase(directory: Path, context: dict, limit: int, fixtures: l
     if path.exists():
         raise ValueError("OWNED_REPORT_TRANSITION_ALREADY_EXISTS")
     register_project(context["project"])
-    path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    _transition_write(path, receipt)
     for name in sorted(IDLE_WORKERS):
         if name not in rows:
             continue
@@ -247,22 +273,27 @@ def enter_download_phase(directory: Path, context: dict, limit: int, fixtures: l
         if not stopped or stopped["Id"] != current["Id"] or stopped.get("State", {}).get("Running"):
             raise ValueError("OWNED_REPORT_WORKER_STOP_FAILED")
         receipt["worker_intents"][name]["status"] = "STOPPED_VERIFIED"
-        path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+        _transition_write(path, receipt)
     if idle_metadata(context, fixtures) != idle:
         raise ValueError("OWNED_REPORT_WORK_AFTER_STOP")
     receipt["configured_profile"] = configure(directory, context, limit, phase="DOWNLOAD")
     guard.preflight(directory, context)
-    guard.command([*guard.compose_args(directory, context), "up", "--no-build", "--pull", "never",
-                   "--no-deps", "--force-recreate", "--detach", "--wait", "--wait-timeout", "180", "api"], timeout=240)
+    current = owned_containers(context)["api"]
+    if _api_identity(current) != receipt["api_identity_before_sha256"]:
+        raise ValueError("OWNED_REPORT_API_IDENTITY_DRIFT")
+    _transition_write(path, receipt)
+    guard.command(["docker", "update", "--cpus", "2", current["Id"]], timeout=60)
     after = owned_containers(context)
-    if after["api"]["Image"] != context["image"] or after["api"]["Id"] == receipt["api_before_id"]:
-        raise ValueError("OWNED_REPORT_API_RECREATION")
+    receipt["api_identity_after_sha256"] = _api_identity(after["api"])
+    if receipt["api_identity_after_sha256"] != receipt["api_identity_before_sha256"]:
+        raise ValueError("OWNED_REPORT_API_IDENTITY_DRIFT")
     receipt["api_after_id"] = after["api"]["Id"]
+    receipt["api_update_intent"]["status"] = "CPU_UPDATED_IDENTITY_PRESERVED"
     receipt["after_cgroups"] = effective_cgroups(json.loads((directory / "compose.json").read_text()),
         context["project"], {"postgres", "api", "web"}, phase="DOWNLOAD")
     guard.preflight(directory, context)
     receipt["status"] = "PASS"
-    path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    _transition_write(path, receipt)
     return receipt
 
 
