@@ -1,7 +1,11 @@
 """Selective cleanup on disposable metadata/files, including rollback and drift."""
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tarfile
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text
@@ -195,6 +199,71 @@ def test_uncertain_external_or_shared_consumers_protect_entire_dataset_branch(po
         plan = create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)
     assert all(not ids for ids in plan["scope"]["delete"].values()), {name: ids for name, ids in plan["scope"]["delete"].items() if ids}
     assert plan["scope"]["exceptions"] and all(path.exists() for path in paths)
+
+
+def add_unknown_consumers(database, org):
+    with database() as db:
+        db.add_all([Run(id=identity, name="Protected unknown", module="sentinel", config_id="test-config",
+            dataset_version_id="test-version", initiated_by="Test User", status="UNKNOWN", organization_id=org)
+            for identity in ("unknown-a", "unknown-b")])
+        db.commit()
+
+
+def test_cleanup_scope_is_identical_across_hash_seeds_and_fresh_processes(population_fixture):
+    database, storage, paths, org = population_fixture
+    add_unknown_consumers(database, org)
+    with database() as db:
+        scope = create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)["scope"]
+    assert scope["exceptions"] and all(not ids for ids in scope["delete"].values())
+    assert all(path.exists() for path in paths)
+    script = '''
+import json, sys
+from pathlib import Path
+from trackvance.db import SessionLocal, engine
+from trackvance.operational_cleanup import compute
+with SessionLocal() as db:
+    scope = compute(db, "trackvance-cleanup-test", sys.argv[1], ["test-dataset"], Path(sys.argv[2]))
+print(json.dumps(scope, sort_keys=True, separators=(",", ":")))
+engine.dispose()
+'''
+    expected = json.dumps(scope, sort_keys=True, separators=(",", ":"))
+    for seed in ("0", "1", "2", "3", "7", "19", "42", "123") * 2:
+        result = subprocess.run([sys.executable, "-c", script, org, str(storage)],
+            cwd=Path(__file__).resolve().parents[1], env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True, text=True, timeout=30, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == expected, f"Scope changed with PYTHONHASHSEED={seed}"
+
+
+def test_real_protected_consumer_change_still_blocks_cleanup(population_fixture, tmp_path):
+    database, storage, paths, org = population_fixture
+    add_unknown_consumers(database, org)
+    plan, backup, verifier = plan_and_backup(population_fixture, tmp_path)
+    with database() as db:
+        db.get(Run, "unknown-a").status = "SUCCESS"
+        db.commit()
+    with database() as db:
+        changed = create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)["scope"]
+    assert changed["exceptions"] != plan["scope"]["exceptions"]
+    assert changed["delete"] == plan["scope"]["delete"]
+    with pytest.raises(OperationError) as caught:
+        apply(database, plan, storage, backup, verifier, tmp_path / "quarantine")
+    assert caught.value.code == "CLEANUP_PLAN_DRIFT"
+    assert all(path.exists() for path in paths)
+    with database() as db:
+        assert db.get(Dataset, "test-dataset") and db.get(Run, "unknown-b").status == "UNKNOWN"
+
+
+def test_exceptions_remain_part_of_sealed_plan_hash(population_fixture, tmp_path):
+    database, storage, paths, org = population_fixture
+    add_unknown_consumers(database, org)
+    plan, backup, verifier = plan_and_backup(population_fixture, tmp_path)
+    assert plan["scope"]["exceptions"]
+    plan["scope"]["exceptions"][0]["consumer_id"] = "different-consumer"
+    with pytest.raises(OperationError) as caught:
+        apply(database, plan, storage, backup, verifier, tmp_path / "quarantine")
+    assert caught.value.code == "CLEANUP_PLAN_INVALID"
+    assert all(path.exists() for path in paths) and not (tmp_path / "quarantine").exists()
 
 
 def test_abrupt_precommit_file_move_has_controlled_recovery(population_fixture, tmp_path):

@@ -287,6 +287,9 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
     if not project.startswith("trackvance-") or not dataset_ids or len(set(dataset_ids)) != len(dataset_ids):
         error("CLEANUP_SCOPE_INVALID", "Indica un proyecto Trackvance y los IDs explícitos de datasets de prueba.")
     rows, schema, edges = population(db)
+    # Protection records the first surviving consumer. Use the same traversal
+    # for every process so an unchanged population produces the same sealed scope.
+    ordered_edges = sorted(edges)
     for identity in dataset_ids:
         dataset = rows["datasets"].get(identity)
         if not dataset or dataset["organization_id"] != organization_id:
@@ -328,7 +331,7 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
     changed = True
     while changed:
         previous = set(selected)
-        for child, parent in edges:
+        for child, parent in ordered_edges:
             if parent in selected and child not in selected:
                 if allowed(child[0], rows[child[0]][child[1]]):
                     selected.add(child)
@@ -336,7 +339,7 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
                     uncertain.add(child)
         # Remove orphaned acquisition uploads and artifact identities only when
         # explicitly referenced by selected records; generic parents are protected.
-        for child, parent in edges:
+        for child, parent in ordered_edges:
             if child in selected and parent[0] in {"artifacts", "acquisition_uploads"} and allowed(parent[0], rows[parent[0]][parent[1]]):
                 selected.add(parent)
         for identity, item in rows["artifacts"].items():
@@ -378,7 +381,7 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
     changed = True
     while changed:
         previous = set(selected)
-        for child, parent in edges:
+        for child, parent in ordered_edges:
             if parent in selected and child not in selected:
                 selected.remove(parent)
                 exceptions.append({"table": parent[0], "id": parent[1], "consumer_table": child[0], "consumer_id": child[1]})
@@ -388,7 +391,7 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
     changed = True
     while changed:
         previous = set(selected)
-        for child, parent in edges:
+        for child, parent in ordered_edges:
             if child in selected and parent in original_selected and parent not in selected:
                 selected.remove(child)
         for parent_table, child_table, column in (("delivery_automations", "delivery_automation_versions", "automation_id"),
