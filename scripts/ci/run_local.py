@@ -189,8 +189,10 @@ class ResourceMonitor:
 
 def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend_tests=False, environment=None):
     from ci.local_resources import (
+        begin_builder_observation,
         begin_image_build,
         initialize_image_registry,
+        observe_builder_image,
         observe_image_builds,
     )
     execution = (environment or os.environ).get("TRACKVANCE_LOCAL_EXECUTION_ID", directory.name)
@@ -218,11 +220,10 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                 if not builder_created:
                     if builder in command("docker", "buildx", "ls", "--format", "{{.Name}}").split():
                         raise ValueError("The owned builder namespace is not fresh")
-                    registry_path = (environment or os.environ).get("TRACKVANCE_LOCAL_BUILDER_REGISTRY")
-                    if registry_path:
-                        registry = Path(registry_path)
-                        names = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else []
-                        write(registry, [*names, builder])
+                    registry = Path((environment or os.environ).get("TRACKVANCE_LOCAL_BUILDER_REGISTRY", directory / "owned-builders.json"))
+                    names = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else []
+                    write(registry, [*names, builder])
+                    begin_builder_observation(registry, execution, builder, sha, image_command)
                     builder_created = True  # Attempt may partially create state before failing.
                     execute(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container",
                         "--buildkitd-config", str(config), "--driver-opt", "memory=" + str(min(3 * GIB, max_memory_bytes)),
@@ -251,8 +252,11 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
             try:
                 if builder_created:
                     # The builder name is unique to this execution.
-                    execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
-                            environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
+                    try:
+                        observe_builder_image(registry, builder, image_command)
+                    finally:
+                        execute(["docker", "buildx", "rm", builder], directory, "build-builder-cleanup", 180,
+                                environment={k: v for k, v in (environment or os.environ).items() if k != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"})
             finally:
                 pending_error = sys.exception()
                 try:
@@ -275,30 +279,8 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
 
 
 def cleanup_builder_images(directory):
-    before_path = directory / "builder-images.before.json"
-    if not before_path.is_file():
-        return {"status": "PASS", "removed": [], "skipped": []}
-    before = set(json.loads(before_path.read_text(encoding="utf-8")))
-    tag = "moby/buildkit:buildx-stable-1"
-    identifiers = list(dict.fromkeys(command("docker", "image", "ls", "-q", "--no-trunc", tag).split()))
-    removed, skipped = [], []
-    for identifier in identifiers:
-        if identifier in before:
-            skipped.append({"image_id": identifier, "reason": "PREEXISTING_NOT_OWNED"})
-            continue
-        row = json.loads(command("docker", "image", "inspect", identifier))[0]
-        if row.get("Id") != identifier or row.get("RepoTags") != [tag]:
-            skipped.append({"image_id": identifier, "reason": "REFERENCES_UNCERTAIN"})
-            continue
-        if command("docker", "ps", "-aq", "--filter", "ancestor=" + identifier).strip():
-            skipped.append({"image_id": identifier, "reason": "CONTAINER_CONSUMER"})
-            continue
-        check = json.loads(command("docker", "image", "inspect", identifier))[0]
-        if check.get("Id") != identifier or check.get("RepoTags") != [tag]:
-            raise ValueError("Builder image references changed before scoped removal")
-        command("docker", "image", "rm", tag)
-        removed.append({"image_id": identifier, "tags": [tag]})
-    return {"status": "PASS", "removed": removed, "skipped": skipped, "purpose": "Newly pulled infrastructure for this owned builder only"}
+    from ci.local_resources import cleanup_builder_image_registry
+    return cleanup_builder_image_registry(directory, lambda *arguments: command("docker", *arguments))
 
 
 def cleanup_fixture_images(source_sha, retain_for_seconds=0, *, registry=None, execution_id=None):
@@ -619,6 +601,8 @@ def main(arguments=None):
             summary.update(status="FAIL", builder_cleanup_error=type(error).__name__)
         try:
             summary["builder_image_cleanup"] = cleanup_builder_images(directory)
+            if summary["builder_image_cleanup"]["status"] != "PASS":
+                summary["status"] = "FAIL"
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             summary.update(status="FAIL", builder_image_cleanup_error=type(error).__name__)
         if before is not None:

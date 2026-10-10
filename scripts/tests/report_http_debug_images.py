@@ -25,10 +25,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from ci.image_bundle import inspect_image
 from ci.local_resources import (
+    begin_builder_observation,
     begin_image_build,
     cleanup_registered_images,
     docker_output,
     initialize_image_registry,
+    observe_builder_image,
     observe_image_builds,
 )
 from ci.run_suite import execute
@@ -417,6 +419,7 @@ def build(directory: Path, context: dict, *, environment: dict[str, str] | None 
         builder_registry = Path(proof["builder_registry"])
         names = json.loads(builder_registry.read_text(encoding="utf-8")) if builder_registry.exists() else []
         builder_registry.write_text(json.dumps([*names, builder]) + "\n", encoding="utf-8")
+        begin_builder_observation(builder_registry, execution, builder, sha, docker_output)
         (directory / "builder-images.before.json").write_text(json.dumps(docker_output("image", "ls", "-aq", "--no-trunc").split()), encoding="utf-8")
         builder_started = True
         execute(["docker", "buildx", "create", "--name", builder, "--driver", "docker-container",
@@ -450,8 +453,11 @@ def build(directory: Path, context: dict, *, environment: dict[str, str] | None 
         finally:
             if builder_started:
                 cleanup_environment = {key: value for key, value in values.items() if key != "TRACKVANCE_LOCAL_PROTECTED_INVENTORY"}
-                execute(["docker", "buildx", "rm", builder], directory, "http-debug-builder-cleanup", 180,
-                        environment=cleanup_environment)
+                try:
+                    observe_builder_image(builder_registry, builder, docker_output)
+                finally:
+                    execute(["docker", "buildx", "rm", builder], directory, "http-debug-builder-cleanup", 180,
+                            environment=cleanup_environment)
     return proof
 
 
@@ -464,7 +470,9 @@ def cleanup(directory: Path) -> dict:
     else:
         result = {"status": "PASS", "removed": [], "reason": "NO_DIAGNOSTIC_BUILD_STARTED"}
     from ci.run_local import cleanup_builder_images
-    result["builder_images"] = cleanup_builder_images(directory)
+    result["builder_images"] = cleanup_builder_images(Path(proof["builder_registry"]).parent)
+    if result["builder_images"]["status"] != "PASS":
+        result["status"] = "FAIL"
     _write(directory / "report-http-debug-image-cleanup.json", result)
     return result
 

@@ -23,6 +23,8 @@ HISTORICAL_SOURCES = {
     "0.7.0": "d9b6856e757a2a1fcab3913209146f3b7b79d70c",
     "0.8.0": "4eaaeb774878bca62d7d6f758157107f0557512e",
 }
+BUILDER_NAME = re.compile(r"tv-local-(?:legacy-[a-f0-9]{24}|build-[a-f0-9]{12})")
+BUILDKIT_TAG = "moby/buildkit:buildx-stable-1"
 
 
 def canonical_hash(value) -> str:
@@ -92,6 +94,150 @@ def save_image_registry(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def _save_builder_registry(path: Path, value: dict) -> None:
+    """Persist the creation intent and observations before builder retirement."""
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as output:
+        json.dump(value, output, indent=2)
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+    temporary.replace(path)
+    if os.name != "nt":
+        descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def begin_builder_observation(registry: Path, execution: str, name: str, source_sha: str,
+                              command=docker_output) -> None:
+    if (not re.fullmatch(r"local-[a-f0-9]{32}", execution) or not BUILDER_NAME.fullmatch(name)
+            or not re.fullmatch(r"[a-f0-9]{40}", source_sha)):
+        raise ValueError("Builder observation needs explicit execution, name and source")
+    names = json.loads(registry.read_text(encoding="utf-8"))
+    container_name = "buildx_buildkit_" + name + "0"
+    if (name not in names or name in command("buildx", "ls", "--format", "{{.Name}}").split()
+            or command("ps", "-aq", "--no-trunc", "--filter", "name=^/" + container_name + "$").strip()):
+        raise ValueError("Builder/container namespace must be registered and fresh")
+    path = registry.parent / "owned-builder-images.json"
+    value = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {
+        "schema_version": 1, "execution_id": execution, "builder_registry": str(registry.resolve()), "builders": []}
+    if (value.get("schema_version") != 1 or value.get("execution_id") != execution
+            or value.get("builder_registry") != str(registry.resolve())
+            or any(row["name"] == name for row in value["builders"])):
+        raise ValueError("Builder intent cannot adopt another execution or an existing name")
+    value["builders"].append({"name": name, "execution_id": execution, "source_sha": source_sha,
+        "container_name": container_name, "baseline_image_ids": command("image", "ls", "-aq", "--no-trunc").split(),
+        "status": "CREATE_PENDING", "container_id": None, "image": None})
+    _save_builder_registry(path, value)
+
+
+def observe_builder_image(registry: Path, name: str, command=docker_output) -> None:
+    path = registry.parent / "owned-builder-images.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    records = [row for row in value["builders"] if row["name"] == name]
+    if len(records) != 1 or name not in json.loads(registry.read_text(encoding="utf-8")):
+        raise ValueError("Builder observation has no unique registered intent")
+    record = records[0]
+    ids = command("ps", "-aq", "--no-trunc", "--filter", "name=^/" + record["container_name"] + "$").split()
+    if not ids:
+        if record["status"] == "CREATE_PENDING":
+            record["status"] = "NOT_CREATED"
+            _save_builder_registry(path, value)
+        return
+    if len(ids) != 1 or not re.fullmatch(r"[a-f0-9]{64}", ids[0]):
+        raise ValueError("Builder container identity is ambiguous")
+    rows = json.loads(command("inspect", ids[0]))
+    if (len(rows) != 1 or rows[0].get("Id") != ids[0]
+            or rows[0].get("Name") != "/" + record["container_name"]
+            or rows[0].get("Config", {}).get("Image") != BUILDKIT_TAG
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", rows[0].get("Image", ""))):
+        raise ValueError("Builder container does not match its fresh creation intent")
+    images = json.loads(command("image", "inspect", rows[0]["Image"]))
+    if len(images) != 1 or images[0].get("Id") != rows[0]["Image"]:
+        raise ValueError("Builder image immutable ID changed during observation")
+    image = {key: images[0].get(key) or [] for key in ("Id", "RepoTags", "RepoDigests")}
+    if record["image"] and (record["container_id"] != ids[0] or record["image"]["Id"] != image["Id"]):
+        raise ValueError("Builder observation cannot replace an existing identity")
+    image = record["image"] or image  # Re-observation never broadens the original allowed references.
+    record.update(container_id=ids[0], image=image,
+        status="PREEXISTING_NOT_OWNED" if image["Id"] in record["baseline_image_ids"] else "OWNED")
+    if record["status"] == "OWNED" and set(image["RepoTags"]) - {BUILDKIT_TAG}:
+        record["status"] = "REFERENCES_UNCERTAIN"
+    _save_builder_registry(path, value)
+
+
+def cleanup_builder_image_registry(directory: Path, command=docker_output) -> dict:
+    """Remove only infrastructure observed on our durably registered builders."""
+    path = directory / "owned-builder-images.json"
+    records = []
+    if path.exists():
+        value = json.loads(path.read_text(encoding="utf-8"))
+        registry = Path(value.get("builder_registry", directory / "owned-builders.json"))
+        if (value.get("schema_version") != 1 or not re.fullmatch(r"local-[a-f0-9]{32}", value.get("execution_id", ""))
+                or registry.resolve().parent != directory.resolve()):
+            raise ValueError("Infrastructure registry has ambiguous execution ownership")
+        names = json.loads(registry.read_text(encoding="utf-8"))
+        records = value["builders"]
+        for row in records:
+            if (not BUILDER_NAME.fullmatch(row["name"]) or row["name"] not in names
+                    or row["execution_id"] != value["execution_id"]
+                    or row["container_name"] != "buildx_buildkit_" + row["name"] + "0"
+                    or not re.fullmatch(r"[a-f0-9]{40}", row["source_sha"])):
+                raise ValueError("Infrastructure record does not match a registered builder")
+            if row["status"] not in {"CREATE_PENDING", "NOT_CREATED", "OWNED", "PREEXISTING_NOT_OWNED", "REFERENCES_UNCERTAIN"}:
+                raise ValueError("Infrastructure observation status is invalid")
+    current = set(command("image", "ls", "-aq", "--no-trunc").split())
+    tagged = set(command("image", "ls", "-q", "--no-trunc", BUILDKIT_TAG).split())
+    candidates = {}
+    for row in records:
+        if row["image"]:
+            identifier = row["image"]["Id"]
+            previous = candidates.get(identifier)
+            if previous is None or (previous["status"] != "OWNED" and row["status"] == "OWNED"):
+                candidates[identifier] = row
+    removed, skipped = [], []
+    status = "PASS"
+    for record in records:
+        if record["status"] in {"CREATE_PENDING", "REFERENCES_UNCERTAIN"}:
+            status = "FAIL"
+            skipped.append({"builder": record["name"], "reason": "OWNERSHIP_UNVERIFIED", "ownership": "OWNED_INTENT"})
+    for identifier in sorted(tagged - candidates.keys()):
+        skipped.append({"image_id": identifier, "reason": "NOT_OWNED_EXTERNAL", "ownership": "NONE"})
+    for identifier, record in candidates.items():
+        if record["status"] == "REFERENCES_UNCERTAIN":
+            continue
+        if record["status"] != "OWNED" or identifier in record["baseline_image_ids"]:
+            skipped.append({"image_id": identifier, "reason": "PREEXISTING_NOT_OWNED", "ownership": "NONE"})
+            continue
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", identifier) or not re.fullmatch(r"[a-f0-9]{64}", record["container_id"] or ""):
+            raise ValueError("Infrastructure has no observed immutable builder/image IDs")
+        if identifier not in current:
+            continue
+        def matching_references(identifier=identifier, record=record):
+            rows = json.loads(command("image", "inspect", identifier))
+            return (len(rows) == 1 and rows[0].get("Id") == identifier
+                and set(rows[0].get("RepoTags") or []) <= set(record["image"]["RepoTags"])
+                and set(rows[0].get("RepoDigests") or []) <= set(record["image"]["RepoDigests"]))
+        reason = None
+        if not matching_references():
+            reason = "OWNED_REFERENCES_CHANGED"
+        elif command("ps", "-aq", "--filter", "ancestor=" + identifier).strip():
+            reason = "OWNED_IMAGE_CONSUMER"
+        elif not matching_references() or command("ps", "-aq", "--filter", "ancestor=" + identifier).strip():
+            reason = "OWNED_REFERENCES_CHANGED"
+        if reason:
+            status = "FAIL"
+            skipped.append({"image_id": identifier, "reason": reason, "ownership": "OWNED"})
+            continue
+        command("image", "rm", identifier)
+        removed.append({"image_id": identifier})
+    return {"status": status, "removed": removed, "skipped": skipped,
+        "purpose": "Exact infrastructure IDs observed on our registered builder containers; preserve external images"}
 
 
 def image_identity(row: dict) -> dict:
@@ -388,6 +534,7 @@ def build_legacy(compose: list[str], directory: Path, project: str, environment:
     names = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else []
     names.append(name)
     registry.write_text(json.dumps(names) + "\n", encoding="utf-8")
+    begin_builder_observation(registry, execution, name, source_sha)
     config = directory / "local-buildkit.toml"
     config.write_text('[worker.oci]\n max-parallelism = 1\n', encoding="utf-8")
     memory = min(3 * 1024**3, max_memory // 2)
@@ -406,5 +553,8 @@ def build_legacy(compose: list[str], directory: Path, project: str, environment:
         try:
             observe_image_builds(image_registry, execution)
         finally:
-            with (directory / "local-builder-cleanup.private.log").open("w", encoding="utf-8") as output:
-                subprocess.run(["docker", "buildx", "rm", name], stdout=output, stderr=subprocess.STDOUT, check=False, timeout=180)
+            try:
+                observe_builder_image(registry, name)
+            finally:
+                with (directory / "local-builder-cleanup.private.log").open("w", encoding="utf-8") as output:
+                    subprocess.run(["docker", "buildx", "rm", name], stdout=output, stderr=subprocess.STDOUT, check=False, timeout=180)
