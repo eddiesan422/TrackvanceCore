@@ -66,6 +66,22 @@ def test_target_commands_never_embed_passwords():
     assert "SELECT 1" in postgres_input and "SELECT 1" in sqlserver_input
 
 
+@pytest.mark.parametrize("delivery_database", [False, True])
+@pytest.mark.parametrize("json_oracle", [False, True])
+def test_sqlserver_database_selected_before_query_keeps_json_stdout_pure(delivery_database, json_oracle):
+    query = "SELECT N'Unicode 東京' AS preserved_text FOR JSON PATH,INCLUDE_NULL_VALUES;"
+    command, payload = delivery_cycle.target_command(
+        "SQLSERVER", query, use_delivery_database=delivery_database, json_oracle=json_oracle
+    )
+    assert (" -d trackvance_delivery" in command[-1]) is delivery_database
+    assert "USE trackvance_delivery;" not in payload
+    assert payload == "SET NOCOUNT ON;\n" + query + "\nGO\n"
+    assert "-C -b -h -1 -f 65001" in command[-1]
+    assert ("-y 4096 -w 4096" in command[-1]) is json_oracle
+    assert ("-W" in command[-1]) is not json_oracle
+    assert "$MSSQL_SA_PASSWORD" in command[-1]
+
+
 @pytest.mark.parametrize("damage", [None, "source_names", "order", "rows", "preview_columns", "mapping_columns"])
 def test_publication_preview_checks_renamed_final_mapping_and_exact_population(damage):
     """Exercise only the harness assertion; this is not remote SQL evidence."""

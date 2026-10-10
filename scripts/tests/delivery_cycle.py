@@ -658,7 +658,7 @@ def target_command(
             ],
             sql,
         )
-    database_prefix = "USE trackvance_delivery;\n" if use_delivery_database else ""
+    database_option = " -d trackvance_delivery" if use_delivery_database else ""
     return (
         [
             "exec",
@@ -670,9 +670,10 @@ def target_command(
                 'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd '
                 "-S localhost -U sa -C -b -h -1 -f 65001 "
                 + ("-y 4096 -w 4096" if json_oracle else "-W")
+                + database_option
             ),
         ],
-        "SET NOCOUNT ON;\n" + database_prefix + sql + "\nGO\n",
+        "SET NOCOUNT ON;\n" + sql + "\nGO\n",
     )
 
 
