@@ -3,7 +3,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from trackvance import credential_store, delivery_credential_store
 from trackvance.config import STORAGE_DIR
@@ -45,6 +45,26 @@ def test_fixture_populates_complete_referential_graph_without_remote_io(authenti
         db.execute(text("UPDATE alembic_version SET version_num='0019_governance_people'"))
         db.commit()
         rows, _schema, _edges = population(db)
+        from trackvance.models import ArtifactLink, DatasetVersion, Run
+        from trackvance.services import backfill_artifacts
+
+        completed = db.scalar(select(Run).where(Run.module == "intake", Run.output_version_id.is_not(None)))
+        output = db.get(DatasetVersion, completed.output_version_id)
+        links = {
+            (link.relation, link.source_type, link.source_id, link.target_type, link.target_id)
+            for link in db.scalars(select(ArtifactLink).where(ArtifactLink.source_id == completed.id))
+        }
+        assert links == {
+            ("RUN_INPUT", "RUN", completed.id, "DATASET_VERSION", completed.dataset_version_id),
+            ("RUN_OUTPUT", "RUN", completed.id, "DATASET_VERSION", output.id),
+            ("RUN_OUTPUT", "RUN", completed.id, "ARTIFACT", output.canonical_artifact_id),
+        }
+        # The API runs this repair at startup. A backup of the fixture must
+        # already contain those links, so its second restore changes no rows.
+        backfill_artifacts(db)
+        db.commit()
+        restored_startup_rows, _schema, _edges = population(db)
+        assert restored_startup_rows == rows
         from trackvance.db import Base
         fks = [(name, fk.parent.name, fk.column.table.name, fk.column.name)
             for name, table in Base.metadata.tables.items() for fk in table.foreign_keys]
