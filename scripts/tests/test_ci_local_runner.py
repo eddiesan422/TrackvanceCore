@@ -701,7 +701,7 @@ def test_builder_infrastructure_image_removal_requires_new_identity_and_zero_con
     removed = []
     def command(*args):
         if args[:3] == ("docker", "image", "ls"):
-            return identifier
+            return identifier if identifier not in removed else ""
         if args[:3] == ("docker", "image", "inspect"):
             return json.dumps([{"Id": identifier, "RepoTags": [tag]}])
         if args[:2] == ("docker", "ps"):
