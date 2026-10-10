@@ -75,6 +75,20 @@ def assert_files(result, count, *, moved):
         raise ValueError("Selected live/quarantine file hashes or absence do not match the plan.")
 
 
+def verify_abrupt_recovery(call, files, before):
+    """Recover precommit moves before verifying all live artifact bytes and rows."""
+    count = len(files)
+    assert_files(call("inspect_files", folder="abrupt", files=files), count, moved=True)
+    recovered = call("recover", folder="abrupt")
+    if recovered.get("status") != "ROLLED_BACK" or recovered.get("files_restored") != count:
+        raise ValueError("Fresh-session native recovery did not restore all sealed files.")
+    assert_files(call("inspect_files", folder="abrupt", files=files), count, moved=False)
+    # The unchanged metadata action also verifies every live artifact's bytes.
+    # After a crash these files must first return from their sealed quarantine.
+    if call("metadata", folder="abrupt")["tables"] != before["tables"]:
+        raise ValueError("The database did not roll back after its helper exited abruptly.")
+
+
 def archived_file_hashes(path):
     """Hash private encrypted/key archive contents without exporting their bytes."""
     docker_state.inspect_archive(path)
@@ -178,13 +192,7 @@ def trial(harness, directory, context, environment, evidence):
             raise
     else:
         raise ValueError("The synthetic abrupt crash was not reached.")
-    if call("metadata", folder="abrupt")["tables"] != before["tables"]:
-        raise ValueError("The database did not roll back after its helper exited abruptly.")
-    assert_files(call("inspect_files", folder="abrupt", files=plan["scope"]["files"]), count, moved=True)
-    recovered = call("recover", folder="abrupt")
-    if recovered.get("status") != "ROLLED_BACK" or recovered.get("files_restored") != count:
-        raise ValueError("Fresh-session native recovery did not restore all sealed files.")
-    assert_files(call("inspect_files", folder="abrupt", files=plan["scope"]["files"]), count, moved=False)
+    verify_abrupt_recovery(call, plan["scope"]["files"], before)
     applied = call("apply", folder="success", **apply_values)
     after = call("metadata", folder="success", audit_nonce=plan["nonce"])
     assert_transition(before, after, plan)

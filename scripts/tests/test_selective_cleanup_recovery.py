@@ -1,4 +1,5 @@
 """Native trial proof checks with isolated synthetic evidence; no Docker calls."""
+import hashlib
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -120,3 +121,57 @@ def test_bind_access_is_confined_by_private_outer_host_directory(tmp_path):
     outside.mkdir()
     with pytest.raises(ValueError, match="fresh children"):
         trial.prepare_private_mounts(evidence, outside, parent)
+
+
+@pytest.mark.parametrize("mutation", [None, "quarantine_bytes", "incomplete_recovery", "live_bytes", "metadata"])
+def test_abrupt_verification_recovers_before_full_metadata_without_losing_guards(tmp_path, mutation):
+    """Exercise the harness ordering with real files; native SQL remains an E2E gate."""
+    storage, quarantine = tmp_path / "storage", tmp_path / "quarantine"
+    storage.mkdir()
+    quarantine.mkdir()
+    payload = b"isolated abrupt-checkpoint fixture\n"
+    selected = {"path": "fixture.csv", "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+    saved, live = quarantine / selected["path"], storage / selected["path"]
+    saved.write_bytes(payload)
+    before = {"tables": {name: {"synthetic-id": "immutable-row-hash"} for name in trial.docker_state.CURRENT_STATE_TABLES}}
+    calls = []
+    if mutation == "quarantine_bytes":
+        saved.write_bytes(b"corrupt")
+
+    def inspect_files():
+        result = {"status": "PASS"}
+        for label, path in (("originals", live), ("quarantine", saved)):
+            intact = path.is_file() and path.read_bytes() == payload
+            result.update({label + "_intact": int(intact), label + "_absent": int(not path.exists()),
+                           label + "_mismatched": int(path.exists() and not intact)})
+        return result
+
+    def call(action, *, folder, **values):
+        assert folder == "abrupt"
+        calls.append(action)
+        if action == "inspect_files":
+            assert values == {"files": [selected]}
+            return inspect_files()
+        if action == "recover":
+            saved.replace(live)
+            if mutation == "live_bytes":
+                live.write_bytes(b"corrupt")
+            return {"status": "ROLLED_BACK", "files_restored": 0 if mutation == "incomplete_recovery" else 1}
+        assert action == "metadata" and not values
+        # Full metadata verification legitimately rejects missing live artifacts.
+        if not live.is_file():
+            raise ValueError("CLEANUP_FILE_UNVERIFIED")
+        after = deepcopy(before)
+        if mutation == "metadata":
+            after["tables"]["users"]["synthetic-id"] = "changed-row-hash"
+        return after
+
+    if mutation is None:
+        trial.verify_abrupt_recovery(call, [selected], before)
+        assert calls == ["inspect_files", "recover", "inspect_files", "metadata"]
+        assert live.read_bytes() == payload and not saved.exists()
+    else:
+        with pytest.raises(ValueError):
+            trial.verify_abrupt_recovery(call, [selected], before)
+        assert ("recover" in calls) is (mutation != "quarantine_bytes")
+        assert ("metadata" in calls) is (mutation == "metadata")
