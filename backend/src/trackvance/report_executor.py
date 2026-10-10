@@ -18,6 +18,40 @@ _slots = threading.BoundedSemaphore(ReportLimits.configured().concurrency)
 logger = logging.getLogger(__name__)
 
 
+class _ExecutorProcessOwner:
+    """Keep the Linux parent thread alive until its child has been reaped."""
+    def __init__(self, command, **options):
+        self.process = None
+        self.error: BaseException | None = None
+        self.ready = threading.Event()
+        self.reaped = threading.Event()
+
+        def create():
+            try:
+                self.process = subprocess.Popen(command, **options)
+            except Exception as error:  # noqa: BLE001 - propagate creator failures to the caller
+                self.error = error
+            finally:
+                self.ready.set()
+            if self.process is not None:
+                # PR_SET_PDEATHSIG follows the thread that creates the child.
+                # Streaming generators may move between temporary AnyIO workers.
+                self.reaped.wait()
+
+        self.thread = threading.Thread(target=create, name="report-process-owner", daemon=True)
+        self.thread.start()
+
+    def get(self):
+        self.ready.wait()
+        if self.error is not None:
+            raise self.error
+        return self.process
+
+    def release(self):
+        self.reaped.set()
+        self.thread.join(timeout=5)
+
+
 def _channel_diagnostic(error: ValueError | OSError, line: bytes | None,
                         profile: str, returncode: int | None, *, stop_requested: bool) -> dict:
     """Private, bounded metadata only; never log rejected bytes or exceptions."""
@@ -46,7 +80,7 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         raise OperationError(503, "REPORT_SANDBOX_UNAVAILABLE", "Reportes requiere el ejecutor Linux con Landlock y seccomp.")
     if not _slots.acquire(blocking=False):
         raise OperationError(429, "REPORT_CONCURRENCY_LIMIT", "El ejecutor está ocupado; intenta nuevamente.")
-    process = None
+    process = owner = None
     stop = threading.Event()
     failure_metadata: dict | None = None
     try:
@@ -64,9 +98,10 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
         runtime_library = Path(sys.base_prefix) / "lib"
         if runtime_library.is_dir():
             environment["LD_LIBRARY_PATH"] = str(runtime_library.resolve())
-        process = subprocess.Popen([sys.executable, "-I", "-B", str(script)], env=environment,
-                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL, close_fds=True, bufsize=65536)
+        owner = _ExecutorProcessOwner([sys.executable, "-I", "-B", str(script)], env=environment,
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL, close_fds=True, bufsize=65536)
+        process = owner.get()
         payload = {"sources": sources, "plan": plan, "limits": limits.dto(), "profile": profile,
                    "staging": str(staging) if staging else None, "probe": probe}
         content = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
@@ -138,6 +173,10 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
             raise OperationError(422, "REPORT_EXECUTOR_FAILED", "El ejecutor terminó con fallo.")
     finally:
         stop.set()
+        if owner and process is None:
+            # Creation can finish after the caller is interrupted while waiting.
+            owner.ready.wait()
+            process = owner.process
         if process:
             coordinator_killed = process.poll() is None
             if coordinator_killed:
@@ -149,4 +188,6 @@ def execute_messages(sources: list[dict], plan: dict, profile: str, *,
                                          "coordinator_killed": coordinator_killed})
             if process.stdout:
                 process.stdout.close()
+        if owner:
+            owner.release()
         _slots.release()
