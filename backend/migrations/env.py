@@ -11,7 +11,7 @@ from trackvance.db import Base
 
 config = context.config
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # ConfigParser requires percent escaping, including URL-encoded passwords.
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))

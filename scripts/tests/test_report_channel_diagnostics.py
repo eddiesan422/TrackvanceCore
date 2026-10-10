@@ -139,3 +139,56 @@ def test_diagnostic_write_failure_preserves_original_tier_failure(monkeypatch, t
         runner.report_tier(tmp_path, {"project": PROJECT}, 1000000, summary)
     assert summary["channel_diagnostics"] == {"status": "UNAVAILABLE", "error_type": "OSError"}
     assert PRIVATE not in json.dumps(summary)
+
+
+@pytest.mark.parametrize("context", [None, {}, {"project": None}, {"project": []},
+    {"project": "trackvance-certification"}, {"project": "foreign-project"}])
+def test_invalid_diagnostic_context_never_reads_another_project_or_masks_failure(monkeypatch, tmp_path, context):
+    import catalog_reports_cycle as runner
+
+    original = RuntimeError("Original tier failure")
+    captures = []
+    compose_calls = []
+
+    def run(*args):
+        raise original
+
+    def compose(directory, value):
+        compose_calls.append(value)
+        return ["fixture-compose"]
+
+    monkeypatch.setattr(runner, "run", run)
+    monkeypatch.setattr(runner.guard, "compose_args", compose)
+    monkeypatch.setattr(runner, "capture_api_diagnostics", lambda *args: captures.append(args))
+    summary = {}
+    with pytest.raises(RuntimeError) as caught:
+        runner.report_tier(tmp_path, context, 1000000, summary)
+    assert caught.value is original and captures == []
+    assert len(compose_calls) == 2  # Fixture and checkpoint copy; no diagnostic query.
+    assert summary["channel_diagnostics"] == {"status": "UNAVAILABLE", "error_type": "ValueError"}
+    assert summary["failed_stage"] == "reports-1000000"
+
+
+@pytest.mark.parametrize("capture_error", [KeyError(PRIVATE), TypeError(PRIVATE),
+    RuntimeError(PRIVATE), AssertionError(PRIVATE), OSError(PRIVATE), ValueError(PRIVATE)])
+def test_optional_capture_exception_never_replaces_original_failure(monkeypatch, tmp_path, capture_error):
+    import catalog_reports_cycle as runner
+
+    original = RuntimeError("Original tier failure")
+
+    def run(*args):
+        raise original
+
+    def capture(*args):
+        raise capture_error
+
+    monkeypatch.setattr(runner, "run", run)
+    monkeypatch.setattr(runner.guard, "compose_args", lambda *args: ["fixture-compose"])
+    monkeypatch.setattr(runner, "capture_api_diagnostics", capture)
+    summary = {}
+    with pytest.raises(RuntimeError) as caught:
+        runner.report_tier(tmp_path, {"project": PROJECT}, 1000000, summary)
+    assert caught.value is original
+    assert summary["channel_diagnostics"] == {"status": "UNAVAILABLE", "error_type": type(capture_error).__name__}
+    assert summary["failed_stage"] == "reports-1000000"
+    assert PRIVATE not in json.dumps(summary)

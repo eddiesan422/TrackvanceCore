@@ -41,10 +41,15 @@ def report_tier(directory, context, rows, summary):
         failure = error
     def channel_diagnostics():
         try:
+            project = context.get("project") if isinstance(context, dict) else None
+            if not isinstance(project, str) or not guard.PROJECT.fullmatch(project):
+                raise ValueError("Owned certification project identity required.")
             summary["channel_diagnostics"] = capture_api_diagnostics(
-                guard.compose_args(directory, context), context["project"],
+                guard.compose_args(directory, context), project,
                 directory / (stage + "-channel-diagnostics.private.json"))
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
+        except Exception as error:  # noqa: BLE001 - best-effort diagnostics cannot replace the original failure
+            # Optional capture must preserve the tier/checkpoint failure, even if
+            # its own context or diagnostic implementation is unavailable.
             summary["channel_diagnostics"] = {"status": "UNAVAILABLE", "error_type": type(error).__name__}
     if failure is not None:
         channel_diagnostics()
