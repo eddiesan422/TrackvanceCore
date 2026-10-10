@@ -60,7 +60,7 @@ def build(project: str) -> dict:
         ReportExecution,
         ReportRevision,
     )
-    from trackvance.services import create_version
+    from trackvance.services import backfill_artifacts, create_version
 
     label = "Synthetic cleanup085 " + uuid4().hex[:10]
     with SessionLocal() as db, TemporaryDirectory(prefix="cleanup-fixture-") as temp:
@@ -154,6 +154,10 @@ def build(project: str) -> dict:
                 detail_url="/runs/"+run.id,**common))
         db.add(AuditEvent(event_type="SYNTHETIC_CLEANUP_FIXTURE_CREATED",actor="Isolated fixture",actor_type="USER",actor_id=admin.id,
             subject_type="synthetic_cleanup_fixture",subject_id=clean.id,message="Synthetic local metadata; no external I/O",**common))
+        # Direct synthetic Run construction must persist the same additive
+        # artifact graph as normal runtime creation before sealing its backup.
+        # Otherwise API startup repairs missing links during the second restore.
+        backfill_artifacts(db)
         db.commit()
         return {"project":project,"organization_id":org,"actor_id":admin.id,"dataset_ids":[clean.id,output_dataset.id,guarded.id],
             "removable_dataset_ids":[clean.id,output_dataset.id],"protected_dataset_id":guarded.id,"unknown_run_id":unknown.id,
