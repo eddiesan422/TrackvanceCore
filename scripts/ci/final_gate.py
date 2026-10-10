@@ -27,6 +27,7 @@ try:
         sha256,
     )
     from .executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
+    from .image_bundle import mapping_images
     from .validators import junit_document, validate_content
 except ImportError:
     from common import (
@@ -43,6 +44,7 @@ except ImportError:
         sha256,
     )
     from executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
+    from image_bundle import mapping_images
     from validators import junit_document, validate_content
 
 
@@ -229,8 +231,6 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
                 require(len(mapping_refs) == 1 and resources.get("host_image_mapping_sha256") == mapping_refs[0]["sha256"],
                         "SCENARIO_HOST_MAPPING_HASH_MISMATCH")
                 try:
-                    from ci.image_bundle import mapping_images
-
                     mapped = mapping_images(image_document, image_hash, source_sha,
                         load_json(relative_file(path.parent, mapping_refs[0]["path"])))
                 except (ValueError, KeyError, TypeError, AttributeError) as error:
