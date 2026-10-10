@@ -38,7 +38,12 @@ from ci.host_resources import limit_cpu_affinity, sample_process_tree, set_cpu_a
 from ci.owned_cleanup import cleanup as cleanup_owned
 from ci.owned_cleanup import snapshot as docker_snapshot
 from ci_images import verified_images
-from report_resources_085 import HOST_CLIENT_CPUS, effective_cgroups
+from report_resources_085 import (
+    HOST_CLIENT_CPUS,
+    api_counters,
+    effective_cgroups,
+    enter_download_phase,
+)
 from report_resources_085 import configure as configure_resources
 from report_resources_085 import validate as validate_resources
 
@@ -252,6 +257,56 @@ def query(sources: list[dict], count: int, *, variant: str = "WHERE"):
             "columns": [], "source_filters": {}, "order_by": [], "expected_schemas": {}}
 
 
+def measured_preview(client: ProxyClient, context: dict, frozen: dict, customers: int, *, baseline: bool):
+    """Two actual HTTP requests; no mock or relaxed product timeout substitutes."""
+    before = api_counters(context)
+    began = time.monotonic()
+    request = urllib.request.Request(client.base + "/reports/preview",
+        data=json.dumps({"context_id": frozen["context_id"]}).encode(),
+        headers={"X-CSRF-Token": client.csrf, "Content-Type": "application/json"})
+    try:
+        response = client.opener.open(request, timeout=client.timeout)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        status = response.code
+        payload = response.read(8 * 1024**2 + 1)
+    elapsed = time.monotonic() - began
+    require(len(payload) <= 8 * 1024**2, "PREVIEW_COMPARISON_RESPONSE_BOUND")
+    value = json.loads(payload)
+    after = api_counters(context)
+    require(before["container_id"] == after["container_id"], "PREVIEW_COMPARISON_CONTAINER_DRIFT")
+    error = value.get("error") or {}
+    code = error.get("code") if status != 200 else None
+    details = error.get("details") or {}
+    execution_id = value.get("execution_id") or details.get("execution_id")
+    allowed = status == 200 or baseline and status == 422 and code == "REPORT_TIMEOUT"
+    allowed = allowed and bool(execution_id)
+    if status == 200:
+        require(value.get("status") == "SUCCESS" and len(value.get("rows", [])) == 10, "PREVIEW_RESULT")
+        require([[row[name] for name in HEADERS] for row in value["rows"]]
+                == list(expected_rows(10, customers)), "PREVIEW_VALUE_ORACLE")
+    metrics = {name: {key: after[name][key] - original for key, original in before[name].items()}
+               for name in ("cpu.stat", "memory.events")}
+    require(all(delta >= 0 for group in metrics.values() for delta in group.values()), "PREVIEW_COUNTER_DRIFT")
+    oom = metrics["memory.events"].get("oom") != 0 or metrics["memory.events"].get("oom_kill") != 0
+    allowed = allowed and not oom
+    return {"status": "PASS" if status == 200 else "FAIL", "http_status": status, "error_code": code,
+            "expected_baseline_timeout": bool(baseline and status == 422 and code == "REPORT_TIMEOUT"),
+            "allowed_observation": allowed, "elapsed_seconds": round(elapsed, 6),
+            "execution_id": execution_id,
+            "context_id": frozen["context_id"], "query_hash": frozen["query_hash"],
+            "sources": frozen["sources"], "api_container_id": before["container_id"],
+            "scope": "API_CGROUP_ALL_PROCESSES_REQUEST_INTERVAL", "counter_deltas": metrics,
+            "oom_observed": oom,
+            "memory_lifetime_peak_bytes": after["memory.peak"], "value_oracle": "PASS" if status == 200 else "NOT_PRODUCED"}
+
+
+def validate_comparison_scope(rows: list[int], limit: int, with_browser: bool):
+    require(not os.getenv("GITHUB_ACTIONS"), "PREVIEW_COMPARISON_LOCAL_ONLY")
+    require(rows == [1000000] and limit == 1000000 and with_browser, "PREVIEW_COMPARISON_EXACT_DEEP_SCOPE")
+
+
 def csv_population(path: Path):
     with path.open("r", encoding="utf-8", newline="") as source:
         reader = csv.reader(source)
@@ -461,7 +516,9 @@ def browser_download(client: ProxyClient, context: dict, sources: list[dict], su
 
 
 def certify(directory: Path, context: dict, sizes: list[int], limit: int, source_sha: str, resources: Resources,
-            *, with_browser: bool = False):
+            *, with_browser: bool = False, preview_cpu_comparison: bool = False):
+    if preview_cpu_comparison:
+        validate_comparison_scope(sizes, limit, with_browser)
     attempt = uuid4().hex
     client_dir = directory / ("client-download-085-" + attempt[:12])
     client_dir.mkdir(exist_ok=False)
@@ -501,9 +558,37 @@ def certify(directory: Path, context: dict, sizes: list[int], limit: int, source
             source, proof = acquire(client, path, alias, count, macro["id"], domain["id"], resources)
             sources.append(source)
             summary["sources"].append(proof)
+        comparison_context = None
+        if preview_cpu_comparison:
+            phase("PREVIEW_CPU_BASELINE_084")
+            comparison_context = client.call("/reports/resolve", {"draft": query(sources, 1000000)})
+            baseline = measured_preview(client, context, comparison_context, customers, baseline=True)
+            summary["preview_cpu_comparison"] = {"status": "RUNNING", "baseline": baseline,
+                "timeout_seconds": 60, "baseline_cpus": .84, "download_cpus": 2,
+                "limitations": "Second request may benefit from cache; observations do not prove CPU as sole cause."}
+            phase("DOWNLOAD_RESOURCE_TRANSITION")
+            require(baseline["allowed_observation"], "PREVIEW_BASELINE_UNEXPECTED_FAILURE")
+        else:
+            phase("DOWNLOAD_RESOURCE_TRANSITION")
+        summary["download_resource_transition"] = enter_download_phase(directory, context, limit, summary["sources"])
+        phase("DOWNLOAD_PROFILE_ACTIVE")
+        current = client.call("/reports/limits")["profiles"]["PREVIEW"]
+        require(current["timeout_seconds"] == 60 and current["max_rows"] == 10
+                and current["memory_bytes"] == 512 * 1024**2 and current["process_memory_bytes"] == 2 * 1024**3
+                and current["threads"] == 2 and current["concurrency"] == 1, "UNCHANGED_PREVIEW_PRODUCT_BUDGET")
+        if comparison_context:
+            phase("PREVIEW_CPU_DOWNLOAD_2")
+            observation = measured_preview(client, context, comparison_context, customers, baseline=False)
+            passing = observation["status"] == "PASS" and observation["allowed_observation"]
+            summary["preview_cpu_comparison"].update(download=observation,
+                status="PASS" if passing else "FAIL",
+                outcome=("BOTH_PASS" if baseline["status"] == "PASS" else "BASELINE_TIMEOUT_DOWNLOAD_PASS")
+                if passing else "DOWNLOAD_FAILED")
+            phase("PREVIEW_CPU_COMPARISON_RECORDED")
+            require(passing and baseline["execution_id"] != observation["execution_id"], "PREVIEW_DOWNLOAD_PHASE_FAILED")
         for size in sizes:
             phase("RESOLVE_" + str(size))
-            frozen = client.call("/reports/resolve", {"draft": query(sources, size)})
+            frozen = comparison_context if comparison_context and size == 1000000 else client.call("/reports/resolve", {"draft": query(sources, size)})
             summary.setdefault("contexts", []).append({"rows": size, "context_id": frozen["context_id"], "query_hash": frozen["query_hash"], "sources": frozen["sources"]})
             preview = client.call("/reports/preview", {"context_id": frozen["context_id"]})
             require(len(preview["rows"]) == min(10, size) and preview["status"] == "SUCCESS", "PREVIEW_RESULT")
@@ -570,6 +655,7 @@ def main():
     parser.add_argument("--start", action="store_true", help="Start absent owned services of an existing context")
     parser.add_argument("--keep", action="store_true", help="Retain new owned resources for another explicitly planned test")
     parser.add_argument("--with-browser", action="store_true", help="Require real UI streaming to an OPFS FileSystemFileHandle")
+    parser.add_argument("--preview-cpu-comparison", action="store_true", help="Local actual same-context .84/2CPU preview comparison; product deadline remains60 seconds")
     parser.add_argument("--client-memory-mib", type=int)
     parser.add_argument("--client-cpus", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=7200)
@@ -579,6 +665,8 @@ def main():
     require(all(value <= args.limit for value in args.rows) and len(set(args.rows)) == len(args.rows), "RESULT_SIZES")
     require(not any(value > 120 for value in args.rows) or args.with_browser, "DEEP_REAL_BROWSER_REQUIRED")
     require(not os.getenv("GITHUB_ACTIONS") or args.rows == [120] and args.limit == 120, "DEEP_VOLUME_FORBIDDEN_IN_ACTIONS")
+    if args.preview_cpu_comparison:
+        validate_comparison_scope(args.rows, args.limit, args.with_browser)
     require(128 <= args.client_memory_mib <= 2048 and 1 <= args.client_cpus <= 4 and 60 <= args.timeout <= 10800, "FINITE_CLIENT_BUDGET")
     require(args.client_cpus == HOST_CLIENT_CPUS, "OWNED_HOST_CLIENT_CPU_BUDGET")
     images = verify_code(args.source_sha)
@@ -599,7 +687,8 @@ def main():
         actual_cgroups = effective_cgroups(json.loads((directory / "compose.json").read_text(encoding="utf-8")),
                                           context["project"], set(SCOPES))
         with Resources(args.client_memory_mib * 1024**2, time.monotonic() + args.timeout) as resources:
-            summary = certify(directory, context, args.rows, args.limit, args.source_sha, resources, with_browser=args.with_browser)
+            summary = certify(directory, context, args.rows, args.limit, args.source_sha, resources,
+                              with_browser=args.with_browser, preview_cpu_comparison=args.preview_cpu_comparison)
     finally:
         summary.update(duration_seconds=round(time.monotonic() - began, 3), client_affinity=affinity,
                        effective_cgroups=actual_cgroups,
@@ -622,6 +711,13 @@ def main():
             retained = json.loads(evidence.read_text(encoding="utf-8"))
             if retained.get("status") == "FAIL":
                 summary = {**retained, **summary}
+        summary["initial_effective_cgroups"] = actual_cgroups
+        summary["initial_resource_profile"] = resource_profile
+        transition = summary.get("download_resource_transition", {})
+        if transition.get("status") == "PASS":
+            summary["effective_cgroups"] = transition["after_cgroups"]
+            summary["private_resource_profile"] = transition["configured_profile"]
+            summary["effective_cgroups_observation"] = "AFTER_TRANSITION_BEFORE_DOWNLOAD_QUERIES"
         write_json(evidence, summary)
         if summary.get("attempt_id"):
             write_json(directory / ("reports-download-085-" + summary["attempt_id"] + ".json"), summary)

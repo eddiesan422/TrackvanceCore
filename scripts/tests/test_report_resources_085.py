@@ -130,3 +130,84 @@ def test_actual_owned_cgroups_match_exact_config_and_reject_drift(tmp_path, monk
         assert receipt["status"] == "PASS" and set(receipt["services"]) == selected
         assert receipt["docker_plus_client_cpu_budget"] == 4
         assert len(commands) == 4
+
+
+def test_download_phase_preserves_memory_and_product_caps_within_whole_budget(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRACKVANCE_LOCAL_EXECUTION_ID", raising=False)
+    (tmp_path / "compose.json").write_text(json.dumps(topology()))
+    context = {"project": "trackvance-v080-test-dl-123456789abc", "main_project": "usual"}
+    original = profile.configure(tmp_path, context, 1000000)
+    result = profile.configure(tmp_path, context, 1000000, phase="DOWNLOAD")
+    data = json.loads((tmp_path / "compose.json").read_text())
+    assert result["phase"] == "DOWNLOAD" and result["memory_bytes"] == original["memory_bytes"] == 8128 * 1024**2
+    assert data["services"]["api"]["cpus"] == 2 and result["cpus"] == 2.39
+    assert result["cpus"] <= profile.CPU_BUDGET
+    assert all(data["services"][name]["cpus"] == .01 for name in profile.IDLE_WORKERS)
+    assert data["services"]["api"]["environment"].get("REPORT_PREVIEW_TIMEOUT_SECONDS", "60") == "60"
+    with pytest.raises(ValueError, match="RESOURCE_PHASE"):
+        profile.validate(data, phase="CATALOG")
+    data["services"]["api"]["environment"]["REPORT_PREVIEW_TIMEOUT_SECONDS"] = "180"
+    with pytest.raises(ValueError, match="PREVIEW_DEADLINE"):
+        profile.validate(data)
+
+
+@pytest.mark.parametrize("mutation", [None, "foreign", "wrong_image", "active_jobs"])
+def test_download_transition_stops_only_verified_idle_ids_and_journals_before_mutation(tmp_path, monkeypatch, mutation):
+    import certification_v080 as guard
+
+    monkeypatch.delenv("TRACKVANCE_LOCAL_EXECUTION_ID", raising=False)
+    monkeypatch.delenv("TRACKVANCE_LOCAL_PROJECT_REGISTRY", raising=False)
+    (tmp_path / "compose.json").write_text(json.dumps(topology()))
+    context = {"project": "trackvance-v080-test-dl-123456789abc", "main_project": "usual", "image": "sha256:" + "f" * 64}
+    profile.configure(tmp_path, context, 1000000)
+    fixtures = [{"alias": alias, "acquisition_id": f"00000000-0000-0000-0000-{index:012d}",
+                 "approval_id": f"00000000-0000-0000-0000-{index + 2:012d}"}
+                for index, alias in enumerate(("t", "c"), 1)]
+    rows = {name: {"Id": f"{index:064x}", "Image": context["image"],
+        "Config": {"Labels": {"com.docker.compose.project": context["project"], "com.docker.compose.service": name}},
+        "State": {"Running": True}, "HostConfig": {"Memory": profile.PROFILE[name][0] * 1024**2,
+        "NanoCpus": round(profile.PROFILE[name][1] * 10**9)}}
+        for index, name in enumerate(("api", "postgres", "web", "worker", "acquisition-worker"), 1)}
+    if mutation == "foreign":
+        rows["worker"]["Config"]["Labels"]["com.docker.compose.project"] = "usual"
+    elif mutation == "wrong_image":
+        rows["worker"]["Image"] = "sha256:" + "e" * 64
+    if mutation == "active_jobs":
+        monkeypatch.setattr(profile.time, "monotonic", iter((0, 31)).__next__)
+    monkeypatch.setattr(guard, "preflight", lambda *_: None)
+    monkeypatch.setattr(guard, "compose_args", lambda *_: ["docker", "compose", "--project-name", context["project"]])
+    mutations = []
+    def command(args, **_):
+        if args[1] == "ps":
+            return " ".join(row["Id"] for row in rows.values() if args[2] == "-aq" or row["State"]["Running"])
+        if args[1] == "inspect":
+            return json.dumps([row for row in rows.values() if row["Id"] in args[2:]])
+        if args[1] == "exec" and args[3] == "sh":
+            assert "BEGIN READ ONLY" in args[-1] and all(item["approval_id"] in args[-1] for item in fixtures)
+            return json.dumps({"active": int(mutation == "active_jobs"), "leased": 0, "completed_subjects": 4})
+        if args[1] == "exec":
+            row = next(row for row in rows.values() if row["Id"] == args[2])
+            return f"{row['HostConfig']['NanoCpus'] // 10000} 100000\n{row['HostConfig']['Memory']}"
+        journal = json.loads((tmp_path / "report-download-transition-085.json").read_text())
+        assert journal["project"] == context["project"] and journal["status"] == "PLANNED"
+        mutations.append(args)
+        if args[1] == "stop":
+            row = next(row for row in rows.values() if row["Id"] == args[-1])
+            assert row["Config"]["Labels"]["com.docker.compose.service"] in profile.IDLE_WORKERS
+            row["State"]["Running"] = False
+        else:
+            assert args[1] == "compose" and args[-1] == "api" and "--no-deps" in args and "--no-build" in args
+            rows["api"]["Id"] = "d" * 64
+            rows["api"]["HostConfig"]["NanoCpus"] = 2000000000
+        return ""
+    monkeypatch.setattr(guard, "command", command)
+    if mutation:
+        with pytest.raises(ValueError, match="OWNED_REPORT"):
+            profile.enter_download_phase(tmp_path, context, 1000000, fixtures)
+        assert mutations == []
+    else:
+        receipt = profile.enter_download_phase(tmp_path, context, 1000000, fixtures)
+        assert receipt["status"] == "PASS" and receipt["before_cgroups"]["services"]["api"]["cpus"] == .84
+        assert receipt["after_cgroups"]["services"]["api"]["cpus"] == 2
+        assert receipt["worker_intents"]["report-worker"]["status"] == "ABSENT_NOT_STARTED"
+        assert len(mutations) == 3 and rows["postgres"]["State"]["Running"] and rows["web"]["State"]["Running"]
