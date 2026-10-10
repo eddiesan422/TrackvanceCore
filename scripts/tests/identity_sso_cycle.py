@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     compose = isolate_compose(compose, environment, evidence, project)
     started = False
     began = time.monotonic()
-    result: dict = {"version": "0.8.0", "project": project, "status": "FAIL",
+    result: dict = {"version": "0.8.5", "project": project, "status": "FAIL",
                     "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS", "mock_provider": True}
     main_before, outcome = None, 1
 
@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
              "-d", "--wait", "--wait-timeout", "300"])
         with urllib.request.urlopen(base_url + "/api/v1/health", timeout=10) as response:
             health = json.load(response)
-        if health.get("version") != "0.8.0":
+        if health.get("version") != "0.8.5":
             raise RuntimeError("La API no ejecuta la versión objetivo.")
         run([sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project])
         pnpm = shutil.which("pnpm")

@@ -127,7 +127,7 @@ def main() -> int:
     started = False
     began = time.monotonic()
     outcome = 1
-    result = {"version": "0.8.0", "status": "FAIL", "project": project, "port": port,
+    result = {"version": "0.8.5", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
     inventory_run = lambda arguments: execute(arguments, environment=environment, capture=True)
     main_before = None
@@ -159,7 +159,7 @@ def main() -> int:
         started = True
         execute(up, environment=environment)
         execute([*compose, 'exec', '-T', 'api', 'python', '-c',
-                 "import trackvance; assert trackvance.__version__ == '0.8.0'"], environment=environment)
+                 "import trackvance; assert trackvance.__version__ == '0.8.5'"], environment=environment)
         execute(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],
             environment=environment,
