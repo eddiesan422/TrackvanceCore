@@ -223,3 +223,33 @@ def test_download_transition_stops_only_verified_idle_ids_and_journals_before_mu
         assert receipt["api_identity_before_sha256"] == receipt["api_identity_after_sha256"]
         assert receipt["api_update_intent"]["status"] == "CPU_UPDATED_IDENTITY_PRESERVED"
         assert len(mutations) == 3 and rows["postgres"]["State"]["Running"] and rows["web"]["State"]["Running"]
+
+
+@pytest.mark.parametrize("mutation", ["order", "source", "destination", "read_only", "duplicate", "image", "pid", "network"])
+def test_api_identity_canonicalizes_only_mount_order_and_rejects_real_drift(mutation):
+    original = {"Id": "a" * 64, "Image": "sha256:" + "f" * 64,
+        "Config": {"Labels": {"org.opencontainers.image.revision": "c" * 40}},
+        "HostConfig": {"NanoCpus": 840000000, "Memory": 2048 * 1024**2},
+        "State": {"Running": True, "Pid": 1001, "StartedAt": "original"},
+        "NetworkSettings": {"Networks": {"private": {"IPAddress": "172.30.0.2"}}},
+        "Mounts": [{"Type": "volume", "Name": name, "Source": "/vol/" + name,
+                    "Destination": "/" + name, "RW": True, "Propagation": ""}
+                   for name in ("storage", "postgres", "scratch")]}
+    observed = copy.deepcopy(original)
+    observed["HostConfig"]["NanoCpus"] = 2000000000
+    observed["Mounts"].reverse()
+    if mutation == "source":
+        observed["Mounts"][0]["Source"] = "/foreign"
+    elif mutation == "destination":
+        observed["Mounts"][0]["Destination"] = "/other"
+    elif mutation == "read_only":
+        observed["Mounts"][0]["RW"] = False
+    elif mutation == "duplicate":
+        observed["Mounts"].append(copy.deepcopy(observed["Mounts"][0]))
+    elif mutation == "image":
+        observed["Image"] = "sha256:" + "e" * 64
+    elif mutation == "pid":
+        observed["State"]["Pid"] += 1
+    elif mutation == "network":
+        observed["NetworkSettings"]["Networks"]["private"]["IPAddress"] = "172.30.0.99"
+    assert (profile._api_identity(original) == profile._api_identity(observed)) is (mutation == "order")

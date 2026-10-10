@@ -224,6 +224,11 @@ def _api_identity(row: dict) -> str:
     """Hash unchanged config/mounts/network/process without publishing env values."""
     host = {key: value for key, value in row["HostConfig"].items() if key != "NanoCpus"}
     preserved = {key: row.get(key) for key in ("Id", "Image", "Config", "Mounts", "NetworkSettings", "RestartCount")}
+    if isinstance(preserved["Mounts"], list):
+        # Engine inspect iterates a mount map; order is not container identity.
+        # Sort entire descriptors so no mount field or multiplicity is omitted.
+        preserved["Mounts"] = sorted(preserved["Mounts"],
+            key=lambda mount: json.dumps(mount, sort_keys=True, separators=(",", ":")))
     preserved.update(HostConfig=host, State={key: row["State"].get(key) for key in ("Running", "Pid", "StartedAt")})
     return hashlib.sha256(json.dumps(preserved, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
