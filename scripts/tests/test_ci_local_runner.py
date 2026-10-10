@@ -329,6 +329,14 @@ def test_local_build_is_bounded_unique_and_labels_the_version_before_verificatio
     monkeypatch.setattr(run_local, "command", lambda *_a: "")
     def execute(command, *_a, **_k):
         observed.append(command)
+        if command[:3] == ["docker", "buildx", "create"]:
+            intent = json.loads((directory / "owned-builder-images.json").read_text())["builders"][0]
+            assert intent["status"] == "CREATE_PENDING" and intent["image"] is None
+            assert intent["name"] == command[command.index("--name") + 1]
+            assert intent["execution_id"] == directory.name and intent["source_sha"] == "c" * 40
+        if command[:3] == ["docker", "buildx", "rm"]:
+            intent = json.loads((directory / "owned-builder-images.json").read_text())["builders"][0]
+            assert intent["status"] == "NOT_CREATED"  # This simulation never creates a daemon container.
         return {"status": "PASS"}
     monkeypatch.setattr(run_local, "execute", execute)
     def inspect(reference, _sha):
@@ -681,6 +689,15 @@ def test_builder_infrastructure_image_removal_requires_new_identity_and_zero_con
     identifier = "sha256:" + "a" * 64
     tag = "moby/buildkit:buildx-stable-1"
     (tmp_path / "builder-images.before.json").write_text(json.dumps([identifier] if preexisting else []))
+    builder = "tv-local-build-" + "b" * 12
+    execution = "local-" + "c" * 32
+    (tmp_path / "owned-builders.json").write_text(json.dumps([builder]))
+    (tmp_path / "owned-builder-images.json").write_text(json.dumps({"schema_version": 1,
+        "execution_id": execution, "builders": [{"name": builder, "execution_id": execution,
+            "source_sha": "d" * 40, "container_name": "buildx_buildkit_" + builder + "0",
+            "baseline_image_ids": [identifier] if preexisting else [],
+            "status": "PREEXISTING_NOT_OWNED" if preexisting else "OWNED", "container_id": "e" * 64,
+            "image": {"Id": identifier, "RepoTags": [tag], "RepoDigests": []}}]}))
     removed = []
     def command(*args):
         if args[:3] == ("docker", "image", "ls"):
@@ -689,11 +706,12 @@ def test_builder_infrastructure_image_removal_requires_new_identity_and_zero_con
             return json.dumps([{"Id": identifier, "RepoTags": [tag]}])
         if args[:2] == ("docker", "ps"):
             return "foreign-builder" if consumer else ""
-        assert args == ("docker", "image", "rm", tag)
-        removed.append(tag)
+        assert args == ("docker", "image", "rm", identifier)
+        removed.append(identifier)
         return ""
     monkeypatch.setattr(run_local, "command", command)
     result = run_local.cleanup_builder_images(tmp_path)
     assert bool(removed) is (not preexisting and not consumer)
     if preexisting or consumer:
-        assert result["skipped"][0]["reason"] == ("PREEXISTING_NOT_OWNED" if preexisting else "CONTAINER_CONSUMER")
+        assert result["skipped"][0]["reason"] == ("PREEXISTING_NOT_OWNED" if preexisting else "OWNED_IMAGE_CONSUMER")
+    assert result["status"] == ("FAIL" if consumer else "PASS")

@@ -71,6 +71,9 @@ def test_bounded_historical_build_records_both_oci_intents_before_builder_and_cl
             assert labels["io.trackvance.local-project"] == PROJECT
             assert labels["io.trackvance.local-role"] == role
         if phase == "local-builder-create":
+            infrastructure = json.loads((tmp_path / "owned-builder-images.json").read_text())["builders"][0]
+            assert infrastructure["status"] == "CREATE_PENDING" and infrastructure["image"] is None
+            assert infrastructure["source_sha"] == source and infrastructure["execution_id"] == EXECUTION
             assert "memory=3221225472" in arguments and "memory-swap=3221225472" in arguments
             assert "cpu-quota=100000" in arguments and "cpu-period=100000" in arguments
             assert "restart-policy=no" in arguments and "docker-container" in arguments

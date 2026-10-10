@@ -176,7 +176,9 @@ def cleanup(directory, execution, before, baseline_builders):
     def builder_images():
         proof = run_local.cleanup_builder_images(directory)
         result["builder_images"] = proof
-        require(all(item.get("reason") == "PREEXISTING_NOT_OWNED" for item in proof.get("skipped", [])),
+        require(proof.get("status") == "PASS" and all(item.get("ownership") == "NONE"
+                and item.get("reason") in {"PREEXISTING_NOT_OWNED", "NOT_OWNED_EXTERNAL"}
+                for item in proof.get("skipped", [])),
                 "CONTINUATION_NEW_INFRASTRUCTURE_IMAGE_REMAINS")
         return proof
 

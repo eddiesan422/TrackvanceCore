@@ -251,6 +251,9 @@ def diagnostic_build_fixture(prepared, monkeypatch, *, fail=False):
             shutil.copyfile(inputs / (role + ".tar"), command[-1])
         elif command[:3] == ["docker", "buildx", "create"]:
             assert proof["builder"] in json.loads(Path(proof["builder_registry"]).read_text())
+            infrastructure = json.loads((Path(proof["builder_registry"]).parent / "owned-builder-images.json").read_text())["builders"][0]
+            assert infrastructure["name"] == proof["builder"] and infrastructure["source_sha"] == proof["source_sha"]
+            assert infrastructure["status"] == "CREATE_PENDING" and infrastructure["image"] is None
         elif command[:3] == ["docker", "buildx", "build"]:
             pending = json.loads(Path(proof["registry"]).read_text())["builds"][-1]
             assert pending["status"] == "BUILD_PENDING" and pending["image"] is None

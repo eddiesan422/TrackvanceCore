@@ -151,6 +151,21 @@ def test_uncertain_owned_image_is_preserved_and_cleanup_cannot_claim_pass(tmp_pa
     assert result["images"]["skipped"] == [retained]
 
 
+@pytest.mark.parametrize("owned", [False, True])
+def test_builder_cleanup_preserves_external_consumers_but_owned_residue_prevents_approval(tmp_path, monkeypatch, owned):
+    registries(tmp_path, [])
+    monkeypatch.setattr(runner.owned_cleanup, "cleanup", lambda *args, **kwargs: {"status": "PASS"})
+    monkeypatch.setattr(runner.guard, "command", lambda *args, **kwargs: "")
+    monkeypatch.setattr(runner, "cleanup_registered_images", lambda *args, **kwargs: {"status": "PASS"})
+    record = {"image_id": "sha256:" + "d" * 64,
+        "reason": "OWNED_IMAGE_CONSUMER" if owned else "NOT_OWNED_EXTERNAL", "ownership": "OWNED" if owned else "NONE"}
+    monkeypatch.setattr(runner.run_local, "cleanup_builder_images", lambda directory: {
+        "status": "FAIL" if owned else "PASS", "skipped": [record]})
+    result = runner.cleanup(tmp_path, "local-" + "c" * 32, {}, set())
+    assert result["status"] == ("FAIL" if owned else "PASS")
+    assert result["builder_images"]["skipped"] == [record]
+
+
 def test_existing_http_prepare_builder_is_supported_without_adopting_preexisting_names(tmp_path, monkeypatch):
     images = {"backend": "sha256:" + "a" * 64, "web": "sha256:" + "b" * 64}
     monkeypatch.setattr(runner.observation.debug_images, "verified_images", lambda values: images)
