@@ -163,6 +163,7 @@ def test_existing_http_prepare_builder_is_supported_without_adopting_preexisting
 
 
 def test_capacity_pending_receipt_is_explicit_and_no_ownership_mutation_is_started(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     directory = parent_receipts(tmp_path / "parent")
     code_root = tmp_path / "code"
     manifest = tmp_path / "image-proof.json"
@@ -216,6 +217,7 @@ def test_mass_failure_preserves_failed_receipt_and_pending_later_scopes(tmp_path
 
 
 def test_plan_does_not_inspect_docker_or_claim_full_catalog(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     directory = parent_receipts(tmp_path)
     monkeypatch.setattr(runner.guard, "command", lambda *args, **kwargs: pytest.fail("plan must not call Docker/git"))
     assert runner.main(["--original-context", str(directory), "--original-source-sha", SHA,
@@ -225,6 +227,20 @@ def test_plan_does_not_inspect_docker_or_claim_full_catalog(tmp_path, monkeypatc
     assert value["full_catalog_approved"] is False and value["automatic_approval_inheritance"] is False
     assert [item["status"] for item in value["stages"]] == ["PENDING"] * 4
     assert value["candidate_images_built"] is False
+
+
+def test_actions_cannot_start_local_continuation_before_any_resource_or_source_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(runner, "original_tiers", lambda *args: pytest.fail("CI must stop before reading prior evidence"))
+    monkeypatch.setattr(runner.guard, "command", lambda *args, **kwargs: pytest.fail("CI must stop before Docker or Git"))
+    monkeypatch.setattr(runner, "capacity", lambda: pytest.fail("CI must stop before capacity inspection"))
+    monkeypatch.setattr(runner.downloads, "verify_code", lambda *args: pytest.fail("CI must stop before source inspection"))
+    before = dict(runner.os.environ)
+    with pytest.raises(ValueError, match="^CONTINUATION_LOCAL_FINITE_SCOPE$"):
+        runner.main(["--original-context", str(tmp_path / "unread"), "--original-source-sha", SHA,
+            "--source-sha", "b" * 40, "--image-manifest", str(tmp_path / "unread-images.json"),
+            "--main-project", "trackvance-certification"])
+    assert dict(runner.os.environ) == before
 
 
 def test_serial_scopes_release_population_before_trace_and_reuse_all_recovery_gates(tmp_path, monkeypatch):
