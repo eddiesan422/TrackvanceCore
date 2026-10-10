@@ -235,6 +235,8 @@ def cleanup_builder_image_registry(directory: Path, command=docker_output) -> di
             skipped.append({"image_id": identifier, "reason": reason, "ownership": "OWNED"})
             continue
         command("image", "rm", identifier)
+        if identifier in command("image", "ls", "-aq", "--no-trunc").split():
+            raise ValueError("Owned builder image still exists after removal")
         removed.append({"image_id": identifier})
     return {"status": status, "removed": removed, "skipped": skipped,
         "purpose": "Exact infrastructure IDs observed on our registered builder containers; preserve external images"}

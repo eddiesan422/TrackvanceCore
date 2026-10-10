@@ -24,12 +24,13 @@ def registry(directory, *, owned=False):
 
 
 class Docker:
-    def __init__(self, *, owned=False, consumer=False, drift=False):
+    def __init__(self, *, owned=False, consumer=False, drift=False, acknowledge_only=False):
         self.images = {EXTERNAL: {"Id": EXTERNAL, "RepoTags": [TAG], "RepoDigests": []}}
         if owned:
             self.images[OWNED] = {"Id": OWNED, "RepoTags": [],
                 "RepoDigests": ["moby/buildkit@sha256:" + "f" * 64]}
         self.consumer, self.drift, self.removed = consumer, drift, []
+        self.acknowledge_only = acknowledge_only
         self.inspections = 0
 
     def __call__(self, *args):
@@ -45,7 +46,7 @@ class Docker:
             return "foreign-container" if self.consumer else ""
         if args[:3] == ("docker", "image", "rm"):
             self.removed.append(args[-1])
-            if args[-1] in self.images:
+            if args[-1] in self.images and not self.acknowledge_only:
                 self.images.pop(args[-1])
             return ""
         raise AssertionError(args)
@@ -163,3 +164,15 @@ def test_later_owned_builder_reusing_image_does_not_hide_initial_ownership(tmp_p
     monkeypatch.setattr(run_local, "command", docker)
     result = run_local.cleanup_builder_images(tmp_path)
     assert result["status"] == "PASS" and docker.removed == [OWNED] and EXTERNAL in docker.images
+
+
+def test_remove_acknowledgement_with_image_still_present_cannot_claim_cleanup(tmp_path, monkeypatch):
+    registry(tmp_path, owned=True)
+    docker = Docker(owned=True, acknowledge_only=True)
+    monkeypatch.setattr(run_local, "command", docker)
+    previous = tmp_path / "builder-image-cleanup.json"
+    previous.write_bytes(b'{"status":"PREVIOUS_PROOF"}\n')
+    with pytest.raises(ValueError, match="still exists after removal"):
+        run_local.cleanup_builder_images(tmp_path)
+    assert docker.removed == [OWNED] and OWNED in docker.images and EXTERNAL in docker.images
+    assert previous.read_bytes() == b'{"status":"PREVIOUS_PROOF"}\n'
