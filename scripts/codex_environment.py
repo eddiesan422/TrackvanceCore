@@ -146,7 +146,7 @@ def source_identity():
 def process_environment(values):
     # Shell values must never win over the explicit generated env-file.
     environment = {key: value for key, value in os.environ.items()
-        if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT"}}
+        if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT"}}
     environment.update(values)
     environment["COMPOSE_DISABLE_ENV_FILE"] = "1"
     return environment
