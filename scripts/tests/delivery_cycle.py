@@ -1335,6 +1335,12 @@ def main() -> int:
     inventory_reader = lambda arguments: command(arguments, capture=True)
     docker_context = command(["docker", "context", "show"], capture=True).strip()
     main_before = main_inventory(inventory_reader)
+    from ci.failure_diagnostics import delivery_diagnostic_context, write_delivery_failure
+    diagnostic_context = None
+    try:
+        diagnostic_context = delivery_diagnostic_context(evidence, project, environment)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass  # Optional diagnostics must not prevent the existing case from running.
 
     started = False
     checks = smoke.Checks()
@@ -1522,6 +1528,10 @@ def main() -> int:
         print(f"OK: {len(checks.completed)} comprobaciones Data Delivery reales.", flush=True)
         return 0
     except (OSError, RuntimeError, KeyError, ValueError, smoke.SmokeFailure) as error:
+        try:
+            write_delivery_failure(error, diagnostic_context)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass  # Diagnostic failure cannot replace the original failed case.
         print("ERROR: " + redact(str(error), credentials), file=sys.stderr, flush=True)
         result = {
             "status": "FAIL",

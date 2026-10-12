@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -184,3 +186,51 @@ def test_successful_process_still_requires_pass_checkpoint(tmp_path, monkeypatch
         with pytest.raises(RuntimeError, match="no terminó PASS"):
             cycle.report_tier(tmp_path, {}, 1000000, summary)
         assert summary["failed_tier"]["status"] == "FAIL" and summary["status"] == "FAIL"
+
+
+@pytest.mark.parametrize("expected,skipped,unexpected,flaky,passes", [
+    (2, 0, 0, 0, True),
+    (1, 0, 0, 0, False),
+    (3, 0, 0, 0, False),
+    (2, 1, 0, 0, False),
+    (2, 0, 1, 0, False),
+    (2, 0, 0, 1, False),
+])
+def test_catalog_browser_gate_requires_both_exact_cases_and_zero_failures(
+    tmp_path, monkeypatch, expected, skipped, unexpected, flaky, passes,
+):
+    project = "trackvance-v080-test-catalog-reports-0123456789ab"
+    raw = tmp_path / ".codex-local/browser-results" / project
+    raw.mkdir(parents=True)
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    def chunk(kind, data):
+        return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data))
+
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", 1, 1, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\xff")) + chunk(b"IEND", b""))
+    names = ("catalog-quality.png", "report-preview.png", "report-lineage.png")
+    for name in names:
+        (raw / name).write_bytes(png)
+    monkeypatch.setattr(cycle, "ROOT", tmp_path)
+    monkeypatch.setattr(cycle.shutil, "which", lambda _name: "synthetic-pnpm")
+    calls = []
+
+    def browser(_pnpm, arguments, **kwargs):
+        calls.append((arguments, kwargs["project"], kwargs["environment"]["TV_E2E_PRIVATE_ARTIFACTS"]))
+        return {"status": "PASS", "expected": expected, "skipped": skipped,
+                "unexpected": unexpected, "flaky": flaky, "artifact_credentials_scan": "PASS"}
+
+    monkeypatch.setattr(cycle, "run_browser", browser)
+    if passes:
+        result = cycle.browser_gate(evidence, {"project": project, "port": 32082})
+        assert result["expected"] == 2 and result["artifact_credentials_scan"] == "PASS"
+        assert {entry["name"] for entry in result["screenshots"]} == set(names)
+        assert all((evidence / "browser-screenshots" / name).read_bytes() == png for name in names)
+        assert result["raw_artifacts_published"] is False
+    else:
+        with pytest.raises(RuntimeError, match="no terminó completo"):
+            cycle.browser_gate(evidence, {"project": project, "port": 32082})
+        assert not (evidence / "browser-screenshots").exists()
+    assert calls == [(["tests-e2e/catalog-reports.spec.ts"], project, "1")]

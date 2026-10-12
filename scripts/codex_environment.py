@@ -15,11 +15,11 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tomllib
 import urllib.request
 from pathlib import Path
 from uuid import uuid4
 
-import tomllib
 from ci.local_resources import (
     OWNER_LABEL,
     PERMANENT_LABEL,

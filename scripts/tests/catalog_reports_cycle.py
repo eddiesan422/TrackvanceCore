@@ -85,7 +85,7 @@ def browser_gate(directory, context):
                    "TV_E2E_PRIVATE_ARTIFACTS": "1"}
     result = run_browser(pnpm, ["tests-e2e/catalog-reports.spec.ts"], root=ROOT,
                          project=context["project"], environment=environment, evidence=directory)
-    if result.get("skipped", 0) or result.get("unexpected", 0) or result.get("flaky", 0) or result.get("expected") != 1:
+    if result.get("skipped", 0) or result.get("unexpected", 0) or result.get("flaky", 0) or result.get("expected") != 2:
         raise RuntimeError("El recorrido obligatorio de navegador no terminó completo sin reintentos.")
     raw = ROOT / ".codex-local" / "browser-results" / context["project"]
     captures = directory / "browser-screenshots"

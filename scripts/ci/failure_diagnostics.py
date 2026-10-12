@@ -6,6 +6,7 @@ import json
 import math
 import re
 import subprocess
+import traceback
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -232,6 +233,8 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
              "backup-basic": "backup-restore", "catalog-reports-functional": "catalog-reports"}.get(group, group)
     if group == 'corrections-browser':
         return collect_corrections_browser_failure(before, root=root, sources=sources, source_sha=source_sha, ci=ci)
+    if group == 'delivery':
+        return collect_delivery_failure(before, root=root, sources=sources, source_sha=source_sha, ci=ci)
     if group == 'backup-restore':
         return collect_recovery_failure(before, root=root)
     if group == 'corrections-recovery':
@@ -295,6 +298,128 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
 def fresh_catalog_file(path, before, *, bounded=True):
     return (path.is_file() and not path.is_symlink() and not getattr(path, 'is_junction', lambda: False)()
             and path.resolve() not in before and (not bounded or path.stat().st_size <= MAX_BYTES))
+
+
+def delivery_diagnostic_context(evidence, project, environment):
+    """Bind diagnostics to the existing private profile; copy no configuration."""
+    sha = environment.get('CI_SOURCE_SHA', environment.get('GITHUB_SHA', ''))
+    ci = {'run_id': environment.get('GITHUB_RUN_ID', ''), 'run_attempt': environment.get('GITHUB_RUN_ATTEMPT', ''),
+          'job_id': environment.get('CI_JOB_ID', environment.get('GITHUB_JOB', ''))}
+    if (not SHA.fullmatch(sha) or ci['job_id'] != 'suite-delivery'
+            or not all(isinstance(ci[key], str) and ci[key].isdigit() and int(ci[key]) > 0 for key in ('run_id', 'run_attempt'))
+            or not re.fullmatch(r'trackvance-delivery-e2e-[a-f0-9]{12}', project)
+            or evidence.resolve() != (ROOT / '.codex-local/delivery-e2e' / project).resolve()
+            or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (evidence, *evidence.parents))):
+        return None
+    actual = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True,
+                            text=True, check=True, timeout=15).stdout.strip()
+    if actual != sha:
+        return None
+    references = {}
+    for name in ('private-compose.json', 'private.empty.env'):
+        path = evidence / name
+        if not fresh_catalog_file(path, set()) or (name == 'private.empty.env' and path.stat().st_size != 0):
+            return None
+        references[name] = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'bytes': path.stat().st_size}
+    path = evidence / 'delivery-diagnostic-context.json'
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump({'schema_version': 1, 'kind': 'DELIVERY_DIAGNOSTIC_CONTEXT', 'project': project,
+                   'source_sha': sha, 'ci': ci, 'diagnostic_id': uuid4().hex, 'isolation': references}, stream)
+    return path
+
+
+def write_delivery_failure(error, context):
+    """Retain trusted traceback locations and source hashes, never exception text."""
+    if context is None or not fresh_catalog_file(context, set()):
+        return
+    sources = trusted_sources()
+    frames = []
+    for frame in traceback.extract_tb(error.__traceback__)[-20:]:
+        source = Path(frame.filename)
+        if (not source.is_absolute() or not source.is_relative_to(ROOT)
+                or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (source, *source.parents))):
+            continue
+        name = source.relative_to(ROOT).as_posix()
+        if name not in sources or not source.is_file():
+            continue
+        raw = source.read_bytes()
+        if (not 1 <= frame.lineno <= len(raw.decode('utf-8').splitlines())
+                or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*|<module>', frame.name)):
+            continue
+        frames.append({'file': name, 'line': frame.lineno, 'function': frame.name,
+                       'source_sha256': hashlib.sha256(raw).hexdigest()})
+    path = context.parent / 'delivery-failure-safe.json'
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump({'schema_version': 1, 'kind': 'DELIVERY_FAILURE_SAFE', 'status': 'FAIL',
+                   'context_sha256': hashlib.sha256(context.read_bytes()).hexdigest(),
+                   'error_type': type(error).__name__ if type(error).__name__ in ERROR_TYPES else 'RuntimeError',
+                   'frames': frames}, stream)
+
+
+def collect_delivery_failure(before, *, root=ROOT, sources=None, source_sha=None, ci=None):
+    """Read only fresh UUID-owned safe receipts, not Delivery's raw result/log."""
+    if (not isinstance(source_sha, str) or not SHA.fullmatch(source_sha) or not isinstance(ci, dict)
+            or set(ci) != {'run_id', 'run_attempt', 'job_id'} or ci.get('job_id') != 'suite-delivery'
+            or not all(isinstance(ci[key], str) and ci[key].isdigit() and int(ci[key]) > 0 for key in ('run_id', 'run_attempt'))):
+        return []
+    sources = trusted_sources() if sources is None else sources
+    base = root / '.codex-local/delivery-e2e'
+    if not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (base, *base.parents)):
+        return []
+    observations = []
+    for directory in sorted(base.iterdir()):
+        if (not re.fullmatch(r'trackvance-delivery-e2e-[a-f0-9]{12}', directory.name) or not directory.is_dir()
+                or directory.is_symlink() or getattr(directory, 'is_junction', lambda: False)()):
+            continue
+        paths = [directory / name for name in ('delivery-diagnostic-context.json', 'delivery-failure-safe.json', 'private-compose.json', 'private.empty.env')]
+        if not all(fresh_catalog_file(path, before) for path in paths):
+            continue
+        try:
+            context, receipt, profile = (json.loads(path.read_text(encoding='utf-8')) for path in paths[:3])
+            if (not isinstance(context, dict) or set(context) != {'schema_version', 'kind', 'project', 'source_sha', 'ci', 'diagnostic_id', 'isolation'}
+                    or type(context['schema_version']) is not int or context['schema_version'] != 1 or context['kind'] != 'DELIVERY_DIAGNOSTIC_CONTEXT'
+                    or context['project'] != directory.name or context['source_sha'] != source_sha or context['ci'] != ci
+                    or not isinstance(context['diagnostic_id'], str) or not re.fullmatch(r'[a-f0-9]{32}', context['diagnostic_id'])
+                    or not isinstance(context['isolation'], dict) or set(context['isolation']) != {'private-compose.json', 'private.empty.env'}
+                    or not isinstance(receipt, dict) or set(receipt) != {'schema_version', 'kind', 'status', 'context_sha256', 'error_type', 'frames'}
+                    or type(receipt['schema_version']) is not int or receipt['schema_version'] != 1 or receipt['kind'] != 'DELIVERY_FAILURE_SAFE'
+                    or receipt['status'] != 'FAIL' or receipt['context_sha256'] != hashlib.sha256(paths[0].read_bytes()).hexdigest()
+                    or not allowed(receipt['error_type'], ERROR_TYPES) or not isinstance(receipt['frames'], list) or len(receipt['frames']) > 20
+                    or not isinstance(profile, dict) or not isinstance(profile.get('services'), dict)):
+                continue
+            if any(context['isolation'][path.name] != {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'bytes': path.stat().st_size} for path in paths[2:]) or paths[3].stat().st_size != 0:
+                continue
+            if any(not isinstance(profile['services'].get(role), dict)
+                   or not isinstance(profile['services'][role].get('environment'), dict)
+                   or profile['services'][role]['environment'].get('TRACKVANCE_CERTIFICATION_PROJECT') != directory.name
+                   for role in ('api', 'worker', 'delivery-worker')):
+                continue
+            frames = []
+            for frame in receipt['frames']:
+                if (not isinstance(frame, dict) or set(frame) != {'file', 'line', 'function', 'source_sha256'}
+                        or not isinstance(frame['file'], str) or frame['file'] not in sources
+                        or '\\' in frame['file'] or '..' in frame['file'].split('/') or Path(frame['file']).is_absolute()
+                        or type(frame['line']) is not int or not isinstance(frame['function'], str)
+                        or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*|<module>', frame['function'])):
+                    raise ValueError('UNTRUSTED_DELIVERY_FRAME')
+                source = root / frame['file']
+                if (not source.is_file() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (source, *source.parents))):
+                    raise ValueError('UNTRUSTED_DELIVERY_SOURCE')
+                raw = source.read_bytes()
+                if (hashlib.sha256(raw).hexdigest() != frame['source_sha256'] or not 1 <= frame['line'] <= len(raw.decode('utf-8').splitlines())
+                        or frame['function'] != '<module>' and not re.search(r'\bdef\s+' + re.escape(frame['function']) + r'\b', raw.decode('utf-8'))):
+                    raise ValueError('UNTRUSTED_DELIVERY_SOURCE_HASH_OR_LOCATION')
+                frames.append(dict(frame))
+            observation = {'kind': 'DELIVERY_FAILURE_SAFE', 'error_type': receipt['error_type'], 'frames': frames}
+            browser = directory / 'browser-summary.json'
+            if fresh_catalog_file(browser, before):
+                value = json.loads(browser.read_text(encoding='utf-8'))
+                if isinstance(value, dict) and (value.get('status') == 'FAIL' or type(value.get('unexpected')) is int and value['unexpected'] > 0):
+                    observation['browser'] = sanitize_browser_failure(value, sources)
+            observations.append(observation)
+        except (OSError, ValueError, TypeError, RecursionError):
+            continue
+    return observations[:4]
 
 
 def sanitize_browser_failure(value, sources):
