@@ -1,9 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api, ApiError, download, post } from '../../api/client'
 import { renderApp } from '../../test/render'
 import { ReportBuilder } from './Reports'
+import { DatasetDetail } from '../datasets/Datasets'
 import { draftError, emptyDraft, executableDraft, mapFilterSources } from './types'
 import type { ReportDraft } from './types'
 
@@ -12,6 +14,7 @@ const draft: ReportDraft = { ...emptyDraft(), sources: [{ alias: 'base', input_d
 const context = { context_id: 'frozen', expires_at: '2099-01-01T00:00:00Z', sources: [{ alias: 'base', input_version_id: 'v-input', output_version_id: 'v-output', contract_id: 'contract', contract_revision_id: 'revision', approval_run_id: 'approval' }], warnings: ['Existe una entrada posterior pendiente.'], query_hash: 'query' }
 const preview = { execution_id: 'preview-run', status: 'SUCCESS', rows: [{ identifier: '001234567', amount: '1234567890123456.78' }], columns: [{ name: 'identifier', type: 'VARCHAR' }, { name: 'amount', type: 'DECIMAL(38,2)' }], cardinality: [], warnings: [] }
 const permissions = ['reports:read', 'reports:write', 'reports:preview', 'reports:download', 'reports:generate', 'datasets:read']
+const candidate = { input_dataset_id: 'input', input_version_id: 'v-input', name: 'Fuente aprobada', contract_id: 'contract', contract_name: 'Calidad', contract_revision_ids: ['revision'], versions: [{ id: 'v-input', version: 1 }], output_dataset_id: 'approved-output', output_version_id: 'approved-version', approval_run_id: 'approval', schema: [{ name: 'customer_id', logical_type: 'STRING' }], eligibility: { eligible: true, reasons: [] } }
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api).mockImplementation(async path => path === '/reports/limits' ? { profiles: { PREVIEW: { max_sources: 8, max_rows: 10 } } } : { items: [], total: 0 })
@@ -26,6 +29,43 @@ async function resolveAndPreview() {
   await screen.findByText('001234567')
   return user
 }
+
+it('opens the approved source output and exact version while preserving origin and Intake links', async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (path.startsWith('/reports/sources')) return { items: [candidate], total: 1 }
+    if (path === '/reports/limits') return { profiles: { PREVIEW: { max_sources: 8 } } }
+    if (path === '/datasets/approved-output') return { id: 'approved-output', name: 'Salida aprobada', versions: [{ id: 'newer-version', version: 2 }, { id: 'approved-version', version: 1 }] }
+    if (path === '/dataset-versions/approved-version/profile') return { id: 'approved-version', row_count: 3, column_count: 1, profile: { columns: [{ name: 'customer_id', logical_type: 'STRING' }] }, sample: [{ customer_id: '001' }] }
+    if (path === '/dataset-versions/newer-version/profile') throw new Error('The newer version must not be selected')
+    return { items: [], total: 0 }
+  })
+  renderApp(<Routes><Route path="/reports/new" element={<ReportBuilder/>}/><Route path="/datasets/:id" element={<DatasetDetail/>}/></Routes>, { permissions, path: '/reports/new' })
+  const primary = await screen.findByRole('link', { name: candidate.name })
+  expect(primary).toHaveAttribute('href', '/datasets/approved-output?version=approved-version')
+  expect(screen.getByRole('link', { name: 'Ver dataset de origen' })).toHaveAttribute('href', '/catalog/datasets/input?version_id=v-input')
+  expect(screen.getByRole('link', { name: 'Ver validación Intake' })).toHaveAttribute('href', '/runs/approval')
+  await userEvent.setup().click(primary)
+  expect(await screen.findByRole('combobox', { name: 'Seleccionar versión' })).toHaveValue('approved-version')
+  expect(await screen.findByRole('cell', { name: 'customer_id' })).toBeVisible()
+  expect(api).toHaveBeenCalledWith('/dataset-versions/approved-version/profile')
+  expect(api).not.toHaveBeenCalledWith('/dataset-versions/newer-version/profile')
+})
+
+it('encodes both approved output identifiers in the primary source link', async () => {
+  vi.mocked(api).mockImplementation(async path => path.startsWith('/reports/sources') ? { items: [{ ...candidate, output_dataset_id: 'output /?', output_version_id: 'version &/#' }], total: 1 } : { items: [], total: 0 })
+  renderApp(<ReportBuilder/>, { permissions })
+  expect(await screen.findByRole('link', { name: candidate.name })).toHaveAttribute('href', '/datasets/output%20%2F%3F?version=version%20%26%2F%23')
+})
+
+it.each([{ output_dataset_id: undefined }, { output_version_id: undefined }])('keeps only secondary provenance links when approved output identity is incomplete (%j)', async missing => {
+  vi.mocked(api).mockImplementation(async path => path.startsWith('/reports/sources') ? { items: [{ ...candidate, ...missing, eligibility: { eligible: false, reasons: ['Sin salida aprobada'] } }], total: 1 } : { items: [], total: 0 })
+  renderApp(<ReportBuilder/>, { permissions })
+  expect(await screen.findByText(candidate.name, { exact: true })).toBeVisible()
+  expect(screen.queryByRole('link', { name: candidate.name })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Ver dataset de origen' })).toHaveAttribute('href', '/catalog/datasets/input?version_id=v-input')
+  expect(screen.getByRole('link', { name: 'Ver validación Intake' })).toHaveAttribute('href', '/runs/approval')
+  expect(screen.getByRole('button', { name: 'Añadir fuente' })).toBeDisabled()
+})
 
 it('uses frozen approved outputs for separate preview and download actions while preserving exact text', async () => {
   renderApp(<ReportBuilder initial={draft}/>, { permissions })

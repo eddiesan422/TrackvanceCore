@@ -1,6 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
 import fs from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 
 test.setTimeout(240_000)
 
@@ -66,6 +68,125 @@ async function strictIntake(page: Page, datasetId: string, name: string, require
   expect(run.decision).toBe('APPROVED')
   return { contract, run }
 }
+
+test('C085-03: el enlace principal abre la salida aprobada exacta aunque exista una versión posterior', async ({ page }, testInfo) => {
+  type Fixture = { schema_version: 1; status: 'PASS'; project: string; api_origin: string; organization_id: string; implementation_version: string; name: string; input_dataset_id: string; input_version_id: string; contract_id: string; contract_version: number; contract_config: Record<string, unknown>; approval_run_id: string; output_dataset_id: string; output_version_id: string; later_version_id: string; versions: Record<'input' | 'approved' | 'later', Record<string, unknown>> }
+  const manifestPath = process.env.TV_C08503_FIXTURE_MANIFEST
+  let fixture: Fixture | undefined
+  if (manifestPath) {
+    expect(isAbsolute(manifestPath), 'El manifiesto persistente debe ser privado y absoluto').toBe(true)
+    expect(process.env.COMPOSE_PROJECT_NAME).toBe('trackvance-codex')
+    try { fixture = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Fixture }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    if (fixture) {
+      expect(fixture).toMatchObject({ schema_version: 1, status: 'PASS', project: 'trackvance-codex', implementation_version: '0.8.5' })
+      for (const key of ['name', 'api_origin', 'organization_id', 'input_dataset_id', 'input_version_id', 'contract_id', 'approval_run_id', 'output_dataset_id', 'output_version_id', 'later_version_id'] as const) expect(typeof fixture[key] === 'string' && fixture[key].length > 0).toBe(true)
+    }
+  }
+  const reused = !!fixture
+  const browserErrors: string[] = []; page.on('pageerror', error => browserErrors.push(error.message))
+  await page.goto('/'); await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  const me = await (await page.request.get('/api/v1/me')).json(), headers = { 'X-CSRF-Token': me.csrf_token as string }, origin = new URL(page.url()).origin
+  const health = await (await page.request.get('/api/v1/health')).json()
+  expect(health.version).toBe('0.8.5')
+  const config = { schema_version: 2, required_columns: ['customer_id'], unique_columns: ['customer_id'], max_error_rate: 0, transforms: [{ type: 'trim', column: 'customer_id', parameters: {} }] }
+  let name: string, input: string, inputVersion: string, contractId: string, approvalId: string, output: string, outputVersion: string, laterId: string
+  if (fixture) {
+    expect(fixture.api_origin).toBe(origin)
+    expect(fixture.organization_id).toBe(me.organization.id)
+    ;({ name, input_dataset_id: input, input_version_id: inputVersion, contract_id: contractId, approval_run_id: approvalId, output_dataset_id: output, output_version_id: outputVersion, later_version_id: laterId } = fixture)
+  } else {
+    name = `C085-03 salida exacta ${Date.now()}`
+    if (manifestPath) {
+      // A failed provisioning attempt keeps its intent. It never silently creates
+      // another fixture on the persistent stack; the operator diagnoses it first.
+      const intent = await fs.open(`${manifestPath}.creation-intent.json`, 'wx', 0o600)
+      try { await intent.writeFile(JSON.stringify({ scope: 'C085-03', status: 'INTENT', project: 'trackvance-codex', api_origin: origin, organization_id: me.organization.id, name }) + '\n'); await intent.sync() }
+      finally { await intent.close() }
+    }
+    const macro = await post(page, '/governance/macrodomains', { name }, headers)
+    const domain = await post(page, '/governance/domains', { name: 'Clientes', macro_domain_id: macro.id }, headers)
+    input = await upload(page, name, 'customer_id\n 001 \n 002 \n 003 \n')
+    await classify(page, input, macro.id, domain.id)
+    const dataset = await (await page.request.get(`/api/v1/datasets/${input}`)).json()
+    inputVersion = dataset.versions[0].id as string
+    // Strict approval forbids discarded rows. A declared transform makes the
+    // approved content visibly different without weakening that guarantee.
+    const contract = await post(page, '/intake/contracts', { name, dataset_id: input, config }, headers)
+    contractId = contract.id as string
+    const queued = await post(page, '/intake/runs', { contract_id: contractId, dataset_version_id: inputVersion }, headers)
+    approvalId = queued.id as string
+    await expect.poll(async () => (await (await page.request.get(`/api/v1/runs/${approvalId}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
+    const available = await (await page.request.get(`/api/v1/reports/sources?search=${encodeURIComponent(name)}`)).json()
+    const source = available.items.find((item: { input_dataset_id: string; contract_id: string }) => item.input_dataset_id === input && item.contract_id === contractId)
+    expect(source.eligibility.eligible).toBe(true)
+    output = source.output_dataset_id as string; outputVersion = source.output_version_id as string
+    const later = await page.request.post(`/api/v1/datasets/${output}/versions/upload`, { headers, multipart: { file: { name: 'later-unapproved.csv', mimeType: 'text/csv', buffer: Buffer.from('customer_id\nLATEST_ONLY\n') } } })
+    expect(later.status(), await later.text()).toBe(201)
+    laterId = (await later.json()).id as string
+  }
+  // Fresh and reused fixtures pass the same complete identity/content checks.
+  const approval = await (await page.request.get(`/api/v1/runs/${approvalId}`)).json()
+  expect(approval).toMatchObject({ id: approvalId, status: 'SUCCESS', decision: 'APPROVED', dataset_version_id: inputVersion, output_version_id: outputVersion, config_id: contractId })
+  const contracts = await (await page.request.get('/api/v1/intake/contracts')).json()
+  const contract = contracts.items.find((item: { id: string }) => item.id === contractId)
+  expect(contract).toMatchObject({ id: contractId, dataset_id: input, config })
+  const available = await (await page.request.get(`/api/v1/reports/sources?search=${encodeURIComponent(name)}`)).json()
+  const source = available.items.find((item: { input_dataset_id: string; contract_id: string }) => item.input_dataset_id === input && item.contract_id === contractId)
+  expect(source).toMatchObject({ name, input_dataset_id: input, input_version_id: inputVersion, output_dataset_id: output, output_version_id: outputVersion, approval_run_id: approvalId, eligibility: { eligible: true } })
+  expect(output).not.toBe(input); expect(outputVersion).not.toBe(inputVersion)
+  const inputDataset = await (await page.request.get(`/api/v1/datasets/${input}`)).json()
+  const outputDataset = await (await page.request.get(`/api/v1/datasets/${output}`)).json()
+  expect(inputDataset.name).toBe(name)
+  expect(inputDataset.versions.map((item: { id: string }) => item.id)).toEqual([inputVersion])
+  expect(outputDataset.versions.map((item: { id: string }) => item.id)).toEqual([laterId, outputVersion])
+  const inputProfile = await (await page.request.get(`/api/v1/dataset-versions/${inputVersion}/profile`)).json()
+  const approvedProfile = await (await page.request.get(`/api/v1/dataset-versions/${outputVersion}/profile`)).json()
+  const laterProfile = await (await page.request.get(`/api/v1/dataset-versions/${laterId}/profile`)).json()
+  expect(inputProfile).toMatchObject({ id: inputVersion, dataset_id: input, row_count: 3 })
+  expect(approvedProfile).toMatchObject({ id: outputVersion, dataset_id: output, source_type: 'INTAKE_OUTPUT', parent_version_id: inputVersion, source_run_id: approvalId, row_count: 3 })
+  expect(laterProfile).toMatchObject({ id: laterId, dataset_id: output, row_count: 1 })
+  expect(laterProfile.version).toBeGreaterThan(approvedProfile.version)
+  for (const profile of [inputProfile, approvedProfile, laterProfile]) expect(profile.schema.map((column: { name: string }) => column.name)).toEqual(['customer_id'])
+  expect(source.schema).toEqual(approvedProfile.schema)
+  expect(inputProfile.sample.map((row: { customer_id: string }) => row.customer_id)).toEqual([' 001 ', ' 002 ', ' 003 '])
+  expect(approvedProfile.sample.map((row: { customer_id: string }) => row.customer_id)).toEqual(['001', '002', '003'])
+  expect(laterProfile.sample.map((row: { customer_id: string }) => row.customer_id)).toEqual(['LATEST_ONLY'])
+  const versionIdentity = (profile: Record<string, unknown>) => Object.fromEntries(['id', 'dataset_id', 'version', 'source_type', 'sha256', 'schema_hash', 'row_count', 'schema', 'parent_version_id', 'source_run_id'].map(key => [key, profile[key]]))
+  const versions = { input: versionIdentity(inputProfile), approved: versionIdentity(approvedProfile), later: versionIdentity(laterProfile) }
+  if (fixture) {
+    expect(versions).toEqual(fixture.versions)
+    expect(contract.config).toEqual(fixture.contract_config)
+    expect(contract.version).toBe(fixture.contract_version)
+  } else if (manifestPath) {
+    fixture = { schema_version: 1, status: 'PASS', project: 'trackvance-codex', api_origin: origin, organization_id: me.organization.id, implementation_version: health.version, name, input_dataset_id: input, input_version_id: inputVersion, contract_id: contractId, contract_version: contract.version, contract_config: contract.config, approval_run_id: approvalId, output_dataset_id: output, output_version_id: outputVersion, later_version_id: laterId, versions }
+    const manifest = await fs.open(manifestPath, 'wx', 0o600)
+    try { await manifest.writeFile(JSON.stringify(fixture, null, 2) + '\n'); await manifest.sync() }
+    finally { await manifest.close() }
+  }
+  const fixtureEvidence = manifestPath ? { path: manifestPath, sha256: createHash('sha256').update(await fs.readFile(manifestPath)).digest('hex'), reused } : { mode: 'FRESH_CI_FIXTURE' }
+  await page.goto('/reports/new')
+  await page.getByLabel('Buscar datasets y contratos…').fill(name)
+  const candidate = page.locator('.report-source-candidate').filter({ has: page.getByRole('link', { name, exact: true }) })
+  const primary = candidate.getByRole('link', { name, exact: true })
+  await expect(primary).toHaveAttribute('href', `/datasets/${output}?version=${outputVersion}`)
+  await expect(candidate.getByRole('link', { name: 'Ver dataset de origen', exact: true })).toHaveAttribute('href', `/catalog/datasets/${input}?version_id=${inputVersion}`)
+  await expect(candidate.getByRole('link', { name: 'Ver validación Intake', exact: true })).toHaveAttribute('href', `/runs/${approvalId}`)
+  const selectedProfile = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/dataset-versions/${outputVersion}/profile`)
+  await primary.click()
+  await expect(page).toHaveURL(new RegExp(`/datasets/${output}\\?version=${outputVersion}$`))
+  const profileResponse = await selectedProfile
+  expect(profileResponse.ok(), await profileResponse.text()).toBeTruthy()
+  expect((await profileResponse.json()).id).toBe(outputVersion)
+  await expect(page.getByLabel('Seleccionar versión', { exact: true })).toHaveValue(outputVersion)
+  await expect(page.locator('.profile-stats > div').filter({ hasText: 'Filas' }).locator('strong')).toHaveText('3')
+  await page.getByRole('button', { name: 'Muestra de datos', exact: true }).click()
+  for (const value of ['001', '002', '003']) await expect(page.getByRole('cell', { name: value, exact: true })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'LATEST_ONLY', exact: true })).toHaveCount(0)
+  expect(browserErrors).toEqual([])
+  await fs.writeFile(testInfo.outputPath('c085-03-approved-source-link.json'), JSON.stringify({ scope: 'C085-03', fixture: fixtureEvidence, input_dataset_id: input, input_version_id: inputVersion, approved_output_dataset_id: output, approved_output_version_id: outputVersion, later_version_id: laterId, approval_run_id: approvalId, selected_rows: 3, selected_values: ['001', '002', '003'], primary_route: new URL(page.url()).pathname + new URL(page.url()).search, browser_errors: browserErrors }, null, 2))
+})
 
 async function deliverApprovedOutput(page: Page, destinationId: string, source: { output_dataset_id: string; output_version_id: string }, stamp: number) {
   expect(destinationId, 'El gate integral exige un destino PostgreSQL sintético provisionado por el runner').toBeTruthy()
