@@ -208,7 +208,8 @@ def validate_resolved(config, values, protected):
         for name, entry in config[kind].items():
             require(entry["name"] == PROJECT + "_" + name and entry["name"] not in reserved
                 and not entry.get("external") and not entry.get("driver_opts") and labels_owned(entry.get("labels", {})), "SHARED_OR_UNOWNED_CODEX_RESOURCE")
-    require(config["networks"]["default"].get("internal") is True, "SYNTHETIC_PRIVATE_NETWORK_REQUIRED")
+    require(config["networks"]["default"].get("internal") is False
+        and config["networks"]["default"].get("driver", "bridge") == "bridge", "ISOLATED_CODEX_BRIDGE_REQUIRED")
     cpu = memory = 0
     for name, service in config["services"].items():
         role = "postgres" if name in {"postgres", "test-postgres"} else "web" if name == "web" else "backend"
@@ -254,8 +255,10 @@ def validate_owned(existing, config, value, *, unchanged_roles=None):
         actual_env = row["Config"].get("Env") or []
         require(len(actual_env) == len({entry.split("=", 1)[0] for entry in actual_env})
             and dict(entry.split("=", 1) for entry in actual_env) == expected_env, "CODEX_RUNTIME_ENVIRONMENT_DRIFT")
-        require(row["Config"].get("Cmd") == service.get("command", defaults.get("Cmd")), "CODEX_RUNTIME_COMMAND_DRIFT")
-        require(row["Config"].get("Entrypoint") == service.get("entrypoint", defaults.get("Entrypoint"))
+        expected_command = service.get("command") if service.get("command") is not None else defaults.get("Cmd")
+        expected_entrypoint = service.get("entrypoint") if service.get("entrypoint") is not None else defaults.get("Entrypoint")
+        require(row["Config"].get("Cmd") == expected_command, "CODEX_RUNTIME_COMMAND_DRIFT")
+        require(row["Config"].get("Entrypoint") == expected_entrypoint
             and row["Config"].get("User", "") == str(service.get("user", defaults.get("User", ""))), "CODEX_RUNTIME_PROCESS_IDENTITY_DRIFT")
         expected_mounts = {entry["target"]: (config["volumes"][entry["source"]]["name"], not entry.get("read_only", False)) for entry in service.get("volumes", [])}
         require(len(row["Mounts"]) == len(expected_mounts) and {m["Destination"]: (m.get("Name"), m.get("RW")) for m in row["Mounts"]} == expected_mounts
@@ -278,6 +281,8 @@ def validate_owned(existing, config, value, *, unchanged_roles=None):
     for kind in ("volumes", "networks"):
         for row in existing[kind]:
             require(labels_owned(row.get("Labels") or {}) and row["Name"] in {entry["name"] for entry in config[kind].values()}, "FOREIGN_CODEX_RESOURCE_IDENTITY")
+            if kind == "networks":
+                require(row.get("Driver") == "bridge" and row.get("Internal") is False, "CODEX_RUNTIME_NETWORK_MODE_DRIFT")
     if value.get("resources"):
         stable = stable_inventory(existing)
         require(stable["volumes"] == value["resources"]["volumes"]

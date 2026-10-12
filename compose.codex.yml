@@ -150,5 +150,5 @@ volumes:
 networks:
   default:
     name: trackvance-codex_default
-    internal: true
+    internal: false
     labels: *codex-labels

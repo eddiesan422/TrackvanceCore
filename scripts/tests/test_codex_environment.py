@@ -72,7 +72,7 @@ def fixture(tmp_path, monkeypatch):
 
 def resources(config):
     return {"containers": [], "volumes": [{"Name": item["name"], "Driver": "local", "Labels": item["labels"], "CreatedAt": "frozen", "Mountpoint": "/owned/" + name} for name, item in config["volumes"].items()],
-        "networks": [{"Id": "network-owned-id", "Name": "trackvance-codex_default", "Driver": "bridge", "Internal": True, "Labels": config["networks"]["default"]["labels"], "IPAM": {}}]}
+        "networks": [{"Id": "network-owned-id", "Name": "trackvance-codex_default", "Driver": "bridge", "Internal": config["networks"]["default"]["internal"], "Labels": config["networks"]["default"]["labels"], "IPAM": {}}]}
 
 
 def runtime(config, defaults, names=codex.ACTIVE):
@@ -108,7 +108,7 @@ def test_fresh_config_never_inherits_user_or_shell_credentials(fixture, monkeypa
     assert "DOCKER_AUTH_CONFIG" not in env and codex.load(directory)[1] == values
 
 
-def test_overlay_caps_all_roles_and_has_separate_closed_destination(fixture):
+def test_overlay_caps_all_roles_and_has_separate_destination_on_standard_bridge(fixture):
     _directory, _value, values, _defaults = fixture
     config = resolved(values)
     budget = codex.validate_resolved(config, values, {"containers": [], "volumes": [], "networks": []})
@@ -118,6 +118,7 @@ def test_overlay_caps_all_roles_and_has_separate_closed_destination(fixture):
     assert config["services"]["worker"]["environment"]["TRACKVANCE_SPARK_DRIVER_MEMORY_MB"] == "512"
     assert config["services"]["worker"]["environment"]["TRACKVANCE_SPARK_EXECUTOR_MEMORY_MB"] == "512"
     assert values["TRACKVANCE_WEB_ORIGIN"] == "http://127.0.0.1:3205"
+    assert config["networks"]["default"]["internal"] is False
 
 
 def test_compose_reset_tag_is_explicit_on_every_backend_service():
@@ -131,7 +132,35 @@ def test_compose_reset_tag_is_explicit_on_every_backend_service():
         assert reset.tag == "!reset" and reset.value == "null"
 
 
-@pytest.mark.parametrize("change", ["env", "memory", "port", "mount", "privileged", "network", "baseline-config", "recreated-volume"])
+@pytest.mark.parametrize("compose_key, runtime_key, code", [
+    ("command", "Cmd", "CODEX_RUNTIME_COMMAND_DRIFT"),
+    ("entrypoint", "Entrypoint", "CODEX_RUNTIME_PROCESS_IDENTITY_DRIFT"),
+])
+def test_normalized_null_process_fields_inherit_image_defaults_but_empty_override_is_explicit(fixture, compose_key, runtime_key, code):
+    _directory, value, values, defaults = fixture
+    config = resolved(values)
+    defaults["web"]["Entrypoint"] = ["/docker-entrypoint.sh"]
+    defaults["postgres"]["Entrypoint"] = ["docker-entrypoint.sh"]
+    for name in ("web", "postgres"):
+        config["services"][name]["command"] = None
+        config["services"][name]["entrypoint"] = None
+    existing = runtime(config, defaults)
+    for row in existing["containers"]:
+        name = row["Config"]["Labels"]["com.docker.compose.service"]
+        if name in {"web", "postgres"}:
+            role = "web" if name == "web" else "postgres"
+            row["Config"]["Cmd"] = defaults[role]["Cmd"]
+            row["Config"]["Entrypoint"] = defaults[role]["Entrypoint"]
+    codex.validate_owned(existing, config, value)
+    config["services"]["web"][compose_key] = []
+    with pytest.raises(ValueError, match=code):
+        codex.validate_owned(existing, config, value)
+    web = next(row for row in existing["containers"] if row["Config"]["Labels"]["com.docker.compose.service"] == "web")
+    web["Config"][runtime_key] = []
+    codex.validate_owned(existing, config, value)
+
+
+@pytest.mark.parametrize("change", ["env", "memory", "port", "mount", "privileged", "network", "internal-network", "baseline-config", "recreated-volume"])
 def test_actual_runtime_drift_never_adopted(fixture, change):
     _directory, value, values, defaults = fixture
     config = resolved(values); existing = runtime(config, defaults)
@@ -145,6 +174,7 @@ def test_actual_runtime_drift_never_adopted(fixture, change):
     elif change == "mount":row["Mounts"][0]["Name"] = "trackvance-certification_trackvance_data"
     elif change == "privileged":row["HostConfig"]["Privileged"] = True
     elif change == "network":row["NetworkSettings"]["Networks"]["foreign-network"] = {}
+    elif change == "internal-network":existing["networks"][0]["Internal"] = True
     elif change == "baseline-config":row["Config"]["UnknownFutureField"] = "changed"
     else:existing["volumes"][0]["CreatedAt"] = "recreated"
     with pytest.raises(ValueError):codex.validate_owned(existing, config, value)
