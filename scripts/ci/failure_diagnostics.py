@@ -71,6 +71,11 @@ SAFE_FAILURE_RUNNERS = {
 IDENTITY_FAILURE_PHASES = {'SCOPE', 'STARTUP', 'HEALTH', 'DOCTOR', 'BROWSER', 'TEMPORARY_CREDENTIALS',
                            'CREDENTIAL_PRIVACY', 'STORAGE_BEFORE', 'NO_EMAIL_RECORDS', 'RESTART',
                            'RESTART_READINESS', 'STORAGE_AFTER', 'STATE_PRESERVATION'}
+DOCTOR_HEALTH_LABELS = {'API', 'Base de datos', 'Almacenamiento', 'Migraciones Alembic'}
+DOCTOR_HEALTH_UNAVAILABLE = {'API / base de datos / almacenamiento / migraciones'}
+DOCTOR_COMMAND_LABELS = {'Docker Linux disponible', 'Configuración Compose', 'Worker Compose DEFAULT',
+                         'Worker Compose DELIVERY', 'Worker Compose ACQUISITION', 'Worker Compose REPORT',
+                         'Componente Compose scheduler', 'Componente Compose events-notifications', 'Componente Compose events-chaining'}
 
 
 def number(value):
@@ -395,6 +400,60 @@ def collect_identity_failure(before, *, root=ROOT, sources=None, source_sha=None
     return _collect_runner_failure('identity-sso', before, root=root, sources=sources, source_sha=source_sha, ci=ci)
 
 
+def safe_doctor_result(value, exit_code):
+    """Accept only the existing Doctor --docker --json fixed, message-free schema."""
+    if (not isinstance(value, dict) or set(value) != {'checks', 'ok', 'command_diagnostics'}
+            or type(exit_code) is not int or exit_code not in {0, 1} or type(value['ok']) is not bool
+            or not isinstance(value['checks'], dict) or not isinstance(value['command_diagnostics'], dict)
+            or set(value['command_diagnostics']) != DOCTOR_COMMAND_LABELS
+            or set(value['checks']) not in (DOCTOR_HEALTH_LABELS | DOCTOR_COMMAND_LABELS, DOCTOR_HEALTH_UNAVAILABLE | DOCTOR_COMMAND_LABELS)
+            or any(type(item) is not bool for item in value['checks'].values())
+            or DOCTOR_HEALTH_UNAVAILABLE <= set(value['checks']) and any(value['checks'][label] for label in DOCTOR_HEALTH_UNAVAILABLE)
+            or value['ok'] != all(value['checks'].values()) or exit_code != int(not value['ok'])):
+        return None
+    for label, diagnostic in value['command_diagnostics'].items():
+        if (not isinstance(diagnostic, dict) or set(diagnostic) != {'reason', 'duration_seconds', 'timeout_seconds', 'exit_code'}
+                or not allowed(diagnostic['reason'], {'OK', 'EXIT_CODE', 'EXECUTABLE_NOT_FOUND', 'TIMEOUT'})
+                or not number(diagnostic['duration_seconds']) or not number(diagnostic['timeout_seconds'])
+                or diagnostic['timeout_seconds'] != 15 or value['checks'][label] != (diagnostic['reason'] == 'OK')
+                or diagnostic['reason'] in {'TIMEOUT', 'EXECUTABLE_NOT_FOUND'} and diagnostic['exit_code'] is not None
+                or diagnostic['reason'] == 'OK' and (type(diagnostic['exit_code']) is not int or diagnostic['exit_code'] != 0)
+                or diagnostic['reason'] == 'EXIT_CODE' and (type(diagnostic['exit_code']) is not int or not -255 <= diagnostic['exit_code'] <= 255 or diagnostic['exit_code'] == 0)):
+            return None
+    return value
+
+
+def write_delivery_doctor_result(stdout, exit_code, context):
+    if context is None or not isinstance(stdout, str) or len(stdout.encode('utf-8')) > MAX_BYTES or not fresh_catalog_file(context, set()):
+        return
+    value = safe_doctor_result(json.loads(stdout), exit_code)
+    source = ROOT / 'scripts/doctor.py'
+    if value is None or not source.is_file() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (source, *source.parents)):
+        return
+    with (context.parent / 'delivery-doctor-safe.json').open('x', encoding='utf-8') as stream:
+        json.dump({'schema_version': 1, 'kind': 'DELIVERY_DOCTOR_SAFE',
+                   'context_sha256': hashlib.sha256(context.read_bytes()).hexdigest(),
+                   'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'exit_code': exit_code, 'result': value}, stream)
+
+
+def collect_delivery_doctor(path, context_hash, before, root, sources):
+    if not fresh_catalog_file(path, before):
+        return None
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+        source = root / 'scripts/doctor.py'
+        if (isinstance(value, dict) and set(value) == {'schema_version', 'kind', 'context_sha256', 'source_sha256', 'exit_code', 'result'}
+                and type(value['schema_version']) is int and value['schema_version'] == 1 and value['kind'] == 'DELIVERY_DOCTOR_SAFE'
+                and value['context_sha256'] == context_hash and 'scripts/doctor.py' in sources
+                and source.is_file() and not any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (source, *source.parents))
+                and value['source_sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
+                and (result := safe_doctor_result(value['result'], value['exit_code'])) is not None):
+            return {'exit_code': value['exit_code'], 'source_sha256': value['source_sha256'], **result}
+    except (OSError, ValueError, TypeError, RecursionError, OverflowError):
+        pass  # Optional Doctor details cannot suppress the actual failure frames.
+    return None
+
+
 def _collect_runner_failure(runner, before, *, root=ROOT, sources=None, source_sha=None, ci=None):
     """Read only fresh UUID-owned safe receipts, not Delivery's raw result/log."""
     if runner not in SAFE_FAILURE_RUNNERS:
@@ -455,6 +514,10 @@ def _collect_runner_failure(runner, before, *, root=ROOT, sources=None, source_s
                 frames.append(dict(frame))
             observation = {'kind': prefix + '_FAILURE_SAFE', 'error_type': receipt['error_type'], 'frames': frames,
                            **({'phase': receipt['phase']} if runner == 'identity-sso' else {})}
+            if runner == 'delivery':
+                doctor = collect_delivery_doctor(directory / 'delivery-doctor-safe.json', receipt['context_sha256'], before, root, sources)
+                if doctor is not None:
+                    observation['doctor'] = doctor
             browser = directory / 'browser-summary.json'
             if fresh_catalog_file(browser, before):
                 value = json.loads(browser.read_text(encoding='utf-8'))

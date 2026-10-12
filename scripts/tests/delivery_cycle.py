@@ -305,6 +305,7 @@ def execute(
     cwd: Path = ROOT,
     input_text: str | None = None,
     capture: bool = False,
+    doctor_context: Path | None = None,
 ) -> str:
     print("+ " + redact(" ".join(arguments), credentials), flush=True)
     result = subprocess.run(
@@ -318,6 +319,12 @@ def execute(
         capture_output=True,
         check=False,
     )
+    if doctor_context is not None and arguments == [sys.executable, 'scripts/doctor.py', '--base-url', environment.get('TV_E2E_URL'), '--docker', '--project', doctor_context.parent.name, '--json']:
+        try:
+            from ci.failure_diagnostics import write_delivery_doctor_result
+            write_delivery_doctor_result(result.stdout, result.returncode, doctor_context)
+        except (OSError, ValueError, TypeError, RecursionError, OverflowError):
+            pass  # Keep this one command's original output and exit semantics.
     if result.returncode:
         raise RuntimeError(redact(result.stdout + result.stderr, credentials)[-8000:])
     if not capture:
@@ -1380,7 +1387,7 @@ def main() -> int:
         run(["exec", "-T", "api", "alembic", "check"])
         command(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url,
-             "--docker", "--project", project]
+             "--docker", "--project", project, "--json"], doctor_context=diagnostic_context
         )
         api = smoke.Api(base_url, timeout=60)
         application_version = api.get("/api/v1/health")["version"]
