@@ -502,7 +502,7 @@ def fixture_destination(directory, value, values):
         return result
     api("/auth/demo", {})
     actor = api("/me")
-    require(actor["organization"]["id"] == "org-trackvance-demo" and "destinations:manage" in actor["permissions"], "CODEX_SYNTHETIC_DESTINATION_ACTOR_REQUIRED")
+    require(actor["organization"]["id"] == "org-trackvance-demo" and "destinations:manage" in actor["user"]["permissions"], "CODEX_SYNTHETIC_DESTINATION_ACTOR_REQUIRED")
     expected = {"name": "codex_test_postgres", "sink_type": "POSTGRESQL", "host": "test-postgres", "port": 5432,
         "database": "tv_codex_destination", "username": "tv_codex_destination"}
     if path.exists():

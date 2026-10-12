@@ -120,6 +120,17 @@ def test_overlay_caps_all_roles_and_has_separate_closed_destination(fixture):
     assert values["TRACKVANCE_WEB_ORIGIN"] == "http://127.0.0.1:3205"
 
 
+def test_compose_reset_tag_is_explicit_on_every_backend_service():
+    # Compose's reset processing needs the tag on the service mapping itself;
+    # a tag inherited only through YAML's merge anchor retains the base build.
+    document = yaml.compose((codex.ROOT / "compose.codex.yml").read_text())
+    services = next(value for key, value in document.value if key.value == "services")
+    nodes = {key.value: value for key, value in services.value}
+    for role in codex.BACKEND:
+        reset = next(value for key, value in nodes[role].value if key.value == "build")
+        assert reset.tag == "!reset" and reset.value == "null"
+
+
 @pytest.mark.parametrize("change", ["env", "memory", "port", "mount", "privileged", "network", "baseline-config", "recreated-volume"])
 def test_actual_runtime_drift_never_adopted(fixture, change):
     _directory, value, values, defaults = fixture
@@ -263,7 +274,7 @@ def test_destination_fixture_uses_real_me_route_and_existing_exact_target(fixtur
             assert timeout == 30
             relative = request.full_url.removeprefix(values["TRACKVANCE_WEB_ORIGIN"] + "/api/v1")
             calls.append((relative, request.get_method()))
-            result = {"/auth/demo": {"csrf_token": "private-session-token"}, "/me": {"organization": {"id": "org-trackvance-demo"}, "permissions": ["destinations:manage"]}, "/delivery/destinations/owned-destination": target, "/delivery/destinations/owned-destination/test": {"status": "SUCCESS"}}[relative]
+            result = {"/auth/demo": {"csrf_token": "private-session-token"}, "/me": {"organization": {"id": "org-trackvance-demo"}, "user": {"id": "user-demo-admin", "permissions": ["destinations:manage"]}}, "/delivery/destinations/owned-destination": target, "/delivery/destinations/owned-destination/test": {"status": "SUCCESS"}}[relative]
             return Response(request.full_url, result)
     monkeypatch.setattr(codex.urllib.request, "build_opener", lambda *_args: Opener())
     result = codex.fixture_destination(directory, value, values)

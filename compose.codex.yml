@@ -44,6 +44,7 @@ services:
     ports: !reset []
   api:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.625
     mem_limit: 640m
     ports:
@@ -60,31 +61,38 @@ services:
       TRACKVANCE_SSO_GOOGLE_TRUSTED_TENANTS: ""
   worker:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.5
     mem_limit: 1536m
   acquisition-worker:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.5
     mem_limit: 640m
   delivery-worker:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.5
     mem_limit: 512m
   report-worker:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.5
     mem_limit: 1536m
   events-notifications:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.25
     mem_limit: 128m
   scheduler:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.0625
     mem_limit: 128m
     profiles: [codex-automatic]
   events-chaining:
     <<: *codex-backend
+    build: !reset null
     cpus: 0.0625
     mem_limit: 128m
     profiles: [codex-automatic]
