@@ -64,6 +64,13 @@ COMPOSE_FAILURES = {'CONTAINER_UNHEALTHY', 'BUILD_FAILED', 'PORT_BIND_FAILED', '
 RUNTIME_SERVICES = {'postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
                     'report-worker', 'scheduler', 'events-notifications', 'events-chaining',
                     'web', 'mock-oidc', 'source-postgres', 'source-sqlserver'}
+SAFE_FAILURE_RUNNERS = {
+    'delivery': ('suite-delivery', 'delivery-e2e', r'trackvance-delivery-e2e-[a-f0-9]{12}', 'DELIVERY'),
+    'identity-sso': ('suite-identity-sso', 'v070', r'trackvance-v070-test-identity-[a-f0-9]{12}', 'IDENTITY'),
+}
+IDENTITY_FAILURE_PHASES = {'SCOPE', 'STARTUP', 'HEALTH', 'DOCTOR', 'BROWSER', 'TEMPORARY_CREDENTIALS',
+                           'CREDENTIAL_PRIVACY', 'STORAGE_BEFORE', 'NO_EMAIL_RECORDS', 'RESTART',
+                           'RESTART_READINESS', 'STORAGE_AFTER', 'STATE_PRESERVATION'}
 
 
 def number(value):
@@ -242,7 +249,10 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
     if group in {'async-volume-100', 'async-volume-500', 'async-volume-1024'}:
         return collect_async_failure(group, before, root=root)
     if group in {'compose-critical', 'identity-sso', 'connections'}:
-        return collect_compose_failure(group, before, root=root, sources=sources)
+        observations = collect_compose_failure(group, before, root=root, sources=sources)
+        if group == 'identity-sso':
+            observations.extend(collect_identity_failure(before, root=root, sources=sources, source_sha=source_sha, ci=ci))
+        return observations[:4]
     if group != 'catalog-reports':
         return []
     sources = trusted_sources() if sources is None else sources
@@ -301,14 +311,25 @@ def fresh_catalog_file(path, before, *, bounded=True):
 
 
 def delivery_diagnostic_context(evidence, project, environment):
+    return _runner_diagnostic_context('delivery', evidence, project, environment)
+
+
+def identity_diagnostic_context(evidence, project, environment):
+    return _runner_diagnostic_context('identity-sso', evidence, project, environment)
+
+
+def _runner_diagnostic_context(runner, evidence, project, environment):
     """Bind diagnostics to the existing private profile; copy no configuration."""
+    if runner not in SAFE_FAILURE_RUNNERS:
+        return None
+    job, folder, pattern, prefix = SAFE_FAILURE_RUNNERS[runner]
     sha = environment.get('CI_SOURCE_SHA', environment.get('GITHUB_SHA', ''))
     ci = {'run_id': environment.get('GITHUB_RUN_ID', ''), 'run_attempt': environment.get('GITHUB_RUN_ATTEMPT', ''),
           'job_id': environment.get('CI_JOB_ID', environment.get('GITHUB_JOB', ''))}
-    if (not SHA.fullmatch(sha) or ci['job_id'] != 'suite-delivery'
+    if (not SHA.fullmatch(sha) or ci['job_id'] != job
             or not all(isinstance(ci[key], str) and ci[key].isdigit() and int(ci[key]) > 0 for key in ('run_id', 'run_attempt'))
-            or not re.fullmatch(r'trackvance-delivery-e2e-[a-f0-9]{12}', project)
-            or evidence.resolve() != (ROOT / '.codex-local/delivery-e2e' / project).resolve()
+            or not re.fullmatch(pattern, project)
+            or evidence.resolve() != (ROOT / '.codex-local' / folder / project).resolve()
             or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (evidence, *evidence.parents))):
         return None
     actual = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True,
@@ -321,17 +342,27 @@ def delivery_diagnostic_context(evidence, project, environment):
         if not fresh_catalog_file(path, set()) or (name == 'private.empty.env' and path.stat().st_size != 0):
             return None
         references[name] = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'bytes': path.stat().st_size}
-    path = evidence / 'delivery-diagnostic-context.json'
+    path = evidence / (prefix.lower() + '-diagnostic-context.json')
     with path.open('x', encoding='utf-8') as stream:
-        json.dump({'schema_version': 1, 'kind': 'DELIVERY_DIAGNOSTIC_CONTEXT', 'project': project,
+        json.dump({'schema_version': 1, 'kind': prefix + '_DIAGNOSTIC_CONTEXT', 'project': project,
                    'source_sha': sha, 'ci': ci, 'diagnostic_id': uuid4().hex, 'isolation': references}, stream)
     return path
 
 
 def write_delivery_failure(error, context):
+    return _write_runner_failure('delivery', error, context)
+
+
+def write_identity_failure(error, context, phase):
+    return _write_runner_failure('identity-sso', error, context, phase=phase)
+
+
+def _write_runner_failure(runner, error, context, *, phase=None):
     """Retain trusted traceback locations and source hashes, never exception text."""
-    if context is None or not fresh_catalog_file(context, set()):
+    if (runner not in SAFE_FAILURE_RUNNERS or context is None or not fresh_catalog_file(context, set())
+            or runner == 'identity-sso' and not allowed(phase, IDENTITY_FAILURE_PHASES)):
         return
+    prefix = SAFE_FAILURE_RUNNERS[runner][3]
     sources = trusted_sources()
     frames = []
     for frame in traceback.extract_tb(error.__traceback__)[-20:]:
@@ -348,41 +379,53 @@ def write_delivery_failure(error, context):
             continue
         frames.append({'file': name, 'line': frame.lineno, 'function': frame.name,
                        'source_sha256': hashlib.sha256(raw).hexdigest()})
-    path = context.parent / 'delivery-failure-safe.json'
+    path = context.parent / (prefix.lower() + '-failure-safe.json')
     with path.open('x', encoding='utf-8') as stream:
-        json.dump({'schema_version': 1, 'kind': 'DELIVERY_FAILURE_SAFE', 'status': 'FAIL',
+        json.dump({'schema_version': 1, 'kind': prefix + '_FAILURE_SAFE', 'status': 'FAIL',
                    'context_sha256': hashlib.sha256(context.read_bytes()).hexdigest(),
                    'error_type': type(error).__name__ if type(error).__name__ in ERROR_TYPES else 'RuntimeError',
-                   'frames': frames}, stream)
+                   'frames': frames, **({'phase': phase} if runner == 'identity-sso' else {})}, stream)
 
 
 def collect_delivery_failure(before, *, root=ROOT, sources=None, source_sha=None, ci=None):
+    return _collect_runner_failure('delivery', before, root=root, sources=sources, source_sha=source_sha, ci=ci)
+
+
+def collect_identity_failure(before, *, root=ROOT, sources=None, source_sha=None, ci=None):
+    return _collect_runner_failure('identity-sso', before, root=root, sources=sources, source_sha=source_sha, ci=ci)
+
+
+def _collect_runner_failure(runner, before, *, root=ROOT, sources=None, source_sha=None, ci=None):
     """Read only fresh UUID-owned safe receipts, not Delivery's raw result/log."""
+    if runner not in SAFE_FAILURE_RUNNERS:
+        return []
+    job, folder, pattern, prefix = SAFE_FAILURE_RUNNERS[runner]
     if (not isinstance(source_sha, str) or not SHA.fullmatch(source_sha) or not isinstance(ci, dict)
-            or set(ci) != {'run_id', 'run_attempt', 'job_id'} or ci.get('job_id') != 'suite-delivery'
+            or set(ci) != {'run_id', 'run_attempt', 'job_id'} or ci.get('job_id') != job
             or not all(isinstance(ci[key], str) and ci[key].isdigit() and int(ci[key]) > 0 for key in ('run_id', 'run_attempt'))):
         return []
     sources = trusted_sources() if sources is None else sources
-    base = root / '.codex-local/delivery-e2e'
+    base = root / '.codex-local' / folder
     if not base.is_dir() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (base, *base.parents)):
         return []
     observations = []
     for directory in sorted(base.iterdir()):
-        if (not re.fullmatch(r'trackvance-delivery-e2e-[a-f0-9]{12}', directory.name) or not directory.is_dir()
+        if (not re.fullmatch(pattern, directory.name) or not directory.is_dir()
                 or directory.is_symlink() or getattr(directory, 'is_junction', lambda: False)()):
             continue
-        paths = [directory / name for name in ('delivery-diagnostic-context.json', 'delivery-failure-safe.json', 'private-compose.json', 'private.empty.env')]
+        paths = [directory / name for name in (prefix.lower() + '-diagnostic-context.json', prefix.lower() + '-failure-safe.json', 'private-compose.json', 'private.empty.env')]
         if not all(fresh_catalog_file(path, before) for path in paths):
             continue
         try:
             context, receipt, profile = (json.loads(path.read_text(encoding='utf-8')) for path in paths[:3])
             if (not isinstance(context, dict) or set(context) != {'schema_version', 'kind', 'project', 'source_sha', 'ci', 'diagnostic_id', 'isolation'}
-                    or type(context['schema_version']) is not int or context['schema_version'] != 1 or context['kind'] != 'DELIVERY_DIAGNOSTIC_CONTEXT'
+                    or type(context['schema_version']) is not int or context['schema_version'] != 1 or context['kind'] != prefix + '_DIAGNOSTIC_CONTEXT'
                     or context['project'] != directory.name or context['source_sha'] != source_sha or context['ci'] != ci
                     or not isinstance(context['diagnostic_id'], str) or not re.fullmatch(r'[a-f0-9]{32}', context['diagnostic_id'])
                     or not isinstance(context['isolation'], dict) or set(context['isolation']) != {'private-compose.json', 'private.empty.env'}
-                    or not isinstance(receipt, dict) or set(receipt) != {'schema_version', 'kind', 'status', 'context_sha256', 'error_type', 'frames'}
-                    or type(receipt['schema_version']) is not int or receipt['schema_version'] != 1 or receipt['kind'] != 'DELIVERY_FAILURE_SAFE'
+                    or not isinstance(receipt, dict) or set(receipt) != {'schema_version', 'kind', 'status', 'context_sha256', 'error_type', 'frames'} | ({'phase'} if runner == 'identity-sso' else set())
+                    or type(receipt['schema_version']) is not int or receipt['schema_version'] != 1 or receipt['kind'] != prefix + '_FAILURE_SAFE'
+                    or runner == 'identity-sso' and not allowed(receipt['phase'], IDENTITY_FAILURE_PHASES)
                     or receipt['status'] != 'FAIL' or receipt['context_sha256'] != hashlib.sha256(paths[0].read_bytes()).hexdigest()
                     or not allowed(receipt['error_type'], ERROR_TYPES) or not isinstance(receipt['frames'], list) or len(receipt['frames']) > 20
                     or not isinstance(profile, dict) or not isinstance(profile.get('services'), dict)):
@@ -410,7 +453,8 @@ def collect_delivery_failure(before, *, root=ROOT, sources=None, source_sha=None
                         or frame['function'] != '<module>' and not re.search(r'\bdef\s+' + re.escape(frame['function']) + r'\b', raw.decode('utf-8'))):
                     raise ValueError('UNTRUSTED_DELIVERY_SOURCE_HASH_OR_LOCATION')
                 frames.append(dict(frame))
-            observation = {'kind': 'DELIVERY_FAILURE_SAFE', 'error_type': receipt['error_type'], 'frames': frames}
+            observation = {'kind': prefix + '_FAILURE_SAFE', 'error_type': receipt['error_type'], 'frames': frames,
+                           **({'phase': receipt['phase']} if runner == 'identity-sso' else {})}
             browser = directory / 'browser-summary.json'
             if fresh_catalog_file(browser, before):
                 value = json.loads(browser.read_text(encoding='utf-8'))

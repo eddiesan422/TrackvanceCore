@@ -88,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
     result: dict = {"version": "0.8.5", "project": project, "status": "FAIL",
                     "real_providers": "NOT_RUN_EXTERNAL_CREDENTIALS", "mock_provider": True}
     main_before, outcome = None, 1
+    from ci.failure_diagnostics import identity_diagnostic_context, write_identity_failure
+    diagnostic_context = None
+    try:
+        diagnostic_context = identity_diagnostic_context(evidence, project, environment)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass  # Optional diagnostics must not prevent the original case from running.
+    diagnostic_phase = "SCOPE"
 
     def run(arguments, *, cwd=ROOT, capture=False, input_text=None, stage=None):
         completed = subprocess.run(arguments, cwd=cwd, env=environment, text=True,
@@ -145,13 +152,17 @@ def main(argv: list[str] | None = None) -> int:
             if existing.strip():
                 raise RuntimeError("El proyecto de prueba ya contiene recursos.")
         started = True
+        diagnostic_phase = "STARTUP"
         run([*compose, "up", "--no-build" if options.skip_build else "--build",
              "-d", "--wait", "--wait-timeout", "300"])
+        diagnostic_phase = "HEALTH"
         with urllib.request.urlopen(base_url + "/api/v1/health", timeout=10) as response:
             health = json.load(response)
         if health.get("version") != "0.8.5":
             raise RuntimeError("La API no ejecuta la versión objetivo.")
+        diagnostic_phase = "DOCTOR"
         run([sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project])
+        diagnostic_phase = "BROWSER"
         pnpm = shutil.which("pnpm")
         if not pnpm:
             raise RuntimeError("pnpm no está disponible.")
@@ -160,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         if browser.get("unexpected", 0) or not browser.get("expected", 0) or browser.get("skipped", 0):
             raise RuntimeError("La suite Identity/SSO no quedó completamente ejecutada y aprobada.")
         result["playwright"] = browser
+        diagnostic_phase = "TEMPORARY_CREDENTIALS"
         admin_http = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
         def api_request(method, path, body=None, *, csrf=None, authenticated=True):
@@ -222,21 +234,32 @@ def main(argv: list[str] | None = None) -> int:
         if status != 200 or not restricted["user"]["must_change_password"]:
             raise RuntimeError("La nueva temporal no produce una sesión de primer acceso.")
         result["one_time_issue_and_regeneration"] = "PASS"
+        diagnostic_phase = "CREDENTIAL_PRIVACY"
         result["credential_privacy"] = scan_credentials(project, sensitive)
         result["plaintext_database_and_log_scan"] = "PASS"
+        diagnostic_phase = "STORAGE_BEFORE"
         before = storage_snapshot(run, compose)
+        diagnostic_phase = "NO_EMAIL_RECORDS"
         if before["tables"].get("notification_deliveries"):
             raise RuntimeError("El alta o regeneración creó registros de entrega de email.")
         result["no_notification_records_created"] = "PASS"
+        diagnostic_phase = "RESTART"
         run([*compose, "restart"])
+        diagnostic_phase = "RESTART_READINESS"
         run([*compose, "up", "-d", "--wait", "--wait-timeout", "120"], stage="restart_readiness")
+        diagnostic_phase = "STORAGE_AFTER"
         after = storage_snapshot(run, compose)
+        diagnostic_phase = "STATE_PRESERVATION"
         if before != after:
             raise RuntimeError("El reinicio modificó el estado persistente de identidad.")
         result.update(status="PASS", restart="PASS", migration=after["migration"],
                       tables={name: len(rows) for name, rows in after["tables"].items()})
         outcome = 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        try:
+            write_identity_failure(error, diagnostic_context, diagnostic_phase)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass  # Keep the actual failed case even if diagnostics cannot be saved.
         result["error_type"] = type(error).__name__
         if started:
             def diagnostic_run(arguments):
