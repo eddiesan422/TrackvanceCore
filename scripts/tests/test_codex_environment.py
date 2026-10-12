@@ -113,6 +113,10 @@ def test_overlay_caps_all_roles_and_has_separate_destination_on_standard_bridge(
     config = resolved(values)
     budget = codex.validate_resolved(config, values, {"containers": [], "volumes": [], "networks": []})
     assert budget == {"all_services_cpus": 4, "all_services_memory_bytes": 6 * 1024**3}
+    # Compose omits its false/default network flag in normalized JSON.
+    normalized = copy.deepcopy(config)
+    normalized["networks"]["default"].pop("internal")
+    assert codex.validate_resolved(normalized, values, {"containers": [], "volumes": [], "networks": []}) == budget
     assert set(config["volumes"]) == set(codex.APP_VOLUMES) | {"test_destination_data"}
     assert all(config["services"][name]["profiles"] == ["codex-automatic"] for name in codex.OPTIONAL)
     assert config["services"]["worker"]["environment"]["TRACKVANCE_SPARK_DRIVER_MEMORY_MB"] == "512"

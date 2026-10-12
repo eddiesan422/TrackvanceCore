@@ -208,7 +208,7 @@ def validate_resolved(config, values, protected):
         for name, entry in config[kind].items():
             require(entry["name"] == PROJECT + "_" + name and entry["name"] not in reserved
                 and not entry.get("external") and not entry.get("driver_opts") and labels_owned(entry.get("labels", {})), "SHARED_OR_UNOWNED_CODEX_RESOURCE")
-    require(config["networks"]["default"].get("internal") is False
+    require(config["networks"]["default"].get("internal", False) is False
         and config["networks"]["default"].get("driver", "bridge") == "bridge", "ISOLATED_CODEX_BRIDGE_REQUIRED")
     cpu = memory = 0
     for name, service in config["services"].items():
