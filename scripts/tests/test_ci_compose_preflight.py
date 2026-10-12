@@ -410,7 +410,31 @@ def test_opt_in_preflight_reads_only_resolved_config_and_inventories(resolved, m
     guard.preflight(compose, {}, project=PROJECT, directory=directory, run=lambda _: pytest.fail("No CI opt-in"))
     guard.preflight(compose, {"TRACKVANCE_CI_IMAGE_MANIFEST": "manifest.json"}, project=PROJECT, directory=directory, run=run)
     assert calls[0] == [*compose, "config", "--format", "json"]
-    assert len(calls) == 7 and all(not set(call) & {"up", "down", "build", "exec", "run", "rm"} for call in calls)
+    assert len(calls) == 13 and all(not set(call) & {"up", "down", "build", "exec", "run", "rm"} for call in calls)
+    assert {call[-1] for call in calls if call[:3] == ["docker", "ps", "-aq"]} == {
+        "label=com.docker.compose.project=bikerwash", "label=com.docker.compose.project=trackvance-certification",
+        "label=com.docker.compose.project=trackvance-codex", "name=" + PROJECT}
+
+
+@pytest.mark.parametrize("marker", [{"io.trackvance.permanent": "false"}, {"io.trackvance.owner": "trackvance-codex"}])
+@pytest.mark.parametrize("location", ["service", "volume", "network", "existing-container", "existing-volume", "existing-network"])
+def test_permanent_markers_cannot_be_adopted_as_disposable(resolved, marker, location):
+    config = resolved[0]
+    existing = None
+    if location == "service":
+        config["services"]["api"]["labels"] = marker
+    elif location in {"volume", "network"}:
+        config[location + "s"]["data" if location == "volume" else "default"]["labels"] = marker
+    elif location == "existing-container":
+        existing = {"containers": [{"Name": "/" + PROJECT + "-api-1", "Config": {
+            "Labels": {"com.docker.compose.project": PROJECT, "com.docker.compose.service": "api", **marker},
+            "Env": [key + "=" + str(value) for key, value in config["services"]["api"]["environment"].items()]},
+            "Mounts": [], "NetworkSettings": {"Networks": {}}}]}
+    else:
+        kind = location.removeprefix("existing-")
+        existing = {kind + "s": [{"Name": PROJECT + "_" + kind, "Labels": {"com.docker.compose.project": PROJECT, **marker}}]}
+    with pytest.raises(guard.ComposePreflightError):
+        validate(resolved, existing=existing)
 
 
 def test_preflight_rejects_private_env_escape_before_docker(resolved):

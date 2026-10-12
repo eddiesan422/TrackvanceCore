@@ -294,7 +294,7 @@ def isolated_main(monkeypatch, root, *, setup_failure=False):
 def test_retention_failure_persists_final_fail_keeps_prior_error_and_prints_receipt(tmp_path, monkeypatch, capsys, setup_failure):
     runner = isolated_main(monkeypatch, tmp_path, setup_failure=setup_failure)
     monkeypatch.setattr(runner, "retain_reports", lambda *_a: (_ for _ in ()).throw(PermissionError("retention ACL denied")))
-    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10"]) == 1
+    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10", "--allow-disposable-fixtures", "--disposable-reason", "destructive-isolation"]) == 1
     summary_path = next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json"))
     summary = json.loads(summary_path.read_text())
     assert summary["status"] == "FAIL" and summary["closure"] == "PARTIAL_DEEP_EXECUTION"
@@ -315,7 +315,7 @@ def test_final_write_failure_still_prints_fail_and_preserves_attempted_original_
             raise PermissionError("summary ACL denies write")
         actual_write(path, value)
     monkeypatch.setattr(runner, "write", write)
-    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10"]) == 1
+    assert runner.main(["--groups", "delivery", "--max-cpus", "4", "--max-memory-gib", "10", "--allow-disposable-fixtures", "--disposable-reason", "destructive-isolation"]) == 1
     assert attempted[0]["error_type"] == "PhaseFailed" and attempted[0]["retention_reports_error"] == "ValueError"
     printed = json.loads(capsys.readouterr().out)
     assert printed["status"] == "FAIL" and printed["summary_write_error"] == "PermissionError"
@@ -381,7 +381,7 @@ def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_sta
         assert kwargs["environment"]["NODE_OPTIONS"] == "--max-old-space-size=384"
         return {"status": "PASS"}
     monkeypatch.setattr(run_local, "execute", execute)
-    assert run_local.main(["--all", "--max-cpus", "1", "--max-memory-gib", "1"]) == 1
+    assert run_local.main(["--all", "--max-cpus", "1", "--max-memory-gib", "1", "--allow-disposable-fixtures", "--disposable-reason", "destructive-isolation"]) == 1
     assert len(executed) == 1 and executed[0][executed[0].index("--group") + 1] == "frontend"
     summary = json.loads(next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json")).read_text())
     assert summary["status"] == ("FAIL" if changed else "INCOMPLETE") and summary["closure"] == "PARTIAL_DEEP_EXECUTION"
@@ -399,7 +399,7 @@ def test_one_cpu_one_gib_representative_runs_frontend_only_without_images_or_sta
 def test_protected_inventory_canonicalizes_mount_order_and_hashes_private_configuration(monkeypatch):
     from ci import run_local
     row = {"Id": "protected-container", "Image": "protected-image", "State": {"Status": "running", "StartedAt": "initial"},
-        "Config": {"Env": ["PASSWORD=PRIVATE_VALUE"], "Labels": {}}, "HostConfig": {"Memory": 1024},
+        "Config": {"Env": ["PASSWORD=PRIVATE_VALUE"], "Labels": {"com.docker.compose.project": "trackvance-certification"}}, "HostConfig": {"Memory": 1024},
         "Mounts": [{"Type": "volume", "Source": "second", "Destination": "/second"},
             {"Type": "bind", "Source": "first", "Destination": "/first"}]}
     inspected = []
@@ -408,6 +408,8 @@ def test_protected_inventory_canonicalizes_mount_order_and_hashes_private_config
             return json.dumps([{"Name": "trackvance-certification"}])
         if args[:2] == ("docker", "ps"):
             return "protected-container" if args[-1].endswith("trackvance-certification") else ""
+        if args[:3] in (("docker", "volume", "ls"), ("docker", "network", "ls")):
+            return ""
         inspected.append(True)
         return json.dumps([row | {"Mounts": row["Mounts"] if len(inspected) == 1 else list(reversed(row["Mounts"]))}])
     monkeypatch.setattr(run_local, "command", command)
@@ -416,6 +418,34 @@ def test_protected_inventory_canonicalizes_mount_order_and_hashes_private_config
     assert "PRIVATE_VALUE" not in json.dumps(before)
     after["trackvance-certification"][0]["image"] = "changed-image"
     assert run_local.inventory_differences(before, after)[0]["field"] == "image"
+
+
+def test_uuid_marked_permanent_resources_are_in_protected_inventory(monkeypatch):
+    from ci import run_local
+    project = "trackvance-v080-test-marked-0123456789ab"
+    labels = {"com.docker.compose.project": project, "io.trackvance.permanent": "false"}
+    container = {"Id": "marked-container", "Image": "image", "State": {"Status": "exited"},
+        "Config": {"Labels": labels}, "HostConfig": {"Memory": 128}, "Mounts": []}
+    def command(*args):
+        if args[:3] == ("docker", "compose", "ls"):return json.dumps([{"Name": project}])
+        if args[:2] == ("docker", "ps"):
+            return "marked-container" if args[-1] in {"label=io.trackvance.permanent", "label=com.docker.compose.project=" + project} else ""
+        if args[:2] == ("docker", "inspect"):return json.dumps([container])
+        if args[2] == "ls":return "resource" if args[-1] == "label=io.trackvance.permanent" else ""
+        assert args[2] == "inspect"
+        return json.dumps([{"Name": "resource", "Driver": "local", "Labels": labels}])
+    monkeypatch.setattr(run_local, "command", command)
+    result = run_local.protected_inventory()
+    assert {row["id"] for row in result[project]} == {"marked-container", "volume:resource", "network:resource"}
+    assert run_local.active_memory_reservation(result, 1024, 8192) == 1024
+
+
+def test_ordinary_local_work_requires_permanent_runner_before_any_process(monkeypatch):
+    from ci import run_local
+    monkeypatch.setattr(run_local, "command", lambda *_args: pytest.fail("No Git/Docker before explicit disposable authorization"))
+    with pytest.raises(SystemExit) as error:
+        run_local.main(["--groups", "backend"])
+    assert error.value.code == 2
 
 
 def test_host_cpu_affinity_floors_fractional_budget_and_verifies_applied_processors(monkeypatch):
@@ -598,7 +628,7 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
     monkeypatch.setattr(run_local, "cleanup_builder_images", lambda *_args: {"status": "PASS"})
     monkeypatch.setattr(run_local, "cleanup_fixture_images", lambda *_args, **_kwargs:
         image_cleanup.append(True) or {"status": "PASS", "removed": [], "skipped": []})
-    result = main(["--groups", "backup-restore", "--historical-source-version", "0.6.1",
+    result = main(["--groups", "backup-restore", "--historical-source-version", "0.6.1", "--allow-disposable-fixtures", "--disposable-reason", "historical-matrix",
         "--max-cpus", "4", "--max-memory-gib", "8", "--exercise-failure-cleanup"])
     summary = json.loads(next((tmp_path / ".codex-local/local-deep").glob("*/local-summary.json")).read_text())
     assert result == int(builder_failure) and summary["status"] == ("FAIL" if builder_failure else "PASS")

@@ -1,0 +1,146 @@
+# Permanent Codex environment. Use only scripts/codex_environment.py so an
+# explicit fresh private env-file and immutable image IDs are always supplied.
+name: trackvance-codex
+
+x-codex-labels: &codex-labels
+  io.trackvance.owner: trackvance-codex
+  io.trackvance.permanent: "true"
+  io.trackvance.environment: codex
+  io.trackvance.synthetic-only: "true"
+
+x-codex-environment: &codex-environment
+  TRACKVANCE_CERTIFICATION_PROJECT: trackvance-codex
+  DEMO_ACCESS_ENABLED: "true"
+  DEMO_SEED_ENABLED: "false"
+  TRACKVANCE_SMTP_ENABLED: "false"
+  TRACKVANCE_SPARK_MASTER: local[1]
+  TRACKVANCE_SPARK_DRIVER_MEMORY_MB: "512"
+  TRACKVANCE_SPARK_EXECUTOR_MEMORY_MB: "512"
+  TRACKVANCE_SPARK_TOTAL_CORES: "1"
+  TRACKVANCE_SPARK_PARTITIONS: "2"
+  TRACKVANCE_SPARK_MEMORY_BUDGET_BYTES: "1610612736"
+  REPORT_THREADS: "1"
+  REPORT_CONCURRENCY: "1"
+  REPORT_MEMORY_MB: "128"
+  REPORT_PROCESS_MEMORY_MB: "512"
+  TRACKVANCE_ADMIN_EMAIL: codex@trackvance.invalid
+  TRACKVANCE_ADMIN_PASSWORD: ${CODEX_ADMIN_PASSWORD:?Run codex_environment.py init}
+
+x-codex-backend: &codex-backend
+  image: ${CODEX_BACKEND_IMAGE:?Run codex_environment.py init}
+  build: !reset null
+  labels: *codex-labels
+  pids_limit: 128
+  restart: "no"
+  environment: *codex-environment
+
+services:
+  postgres:
+    image: ${CODEX_POSTGRES_IMAGE:?Run codex_environment.py init}
+    labels: *codex-labels
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    ports: !reset []
+  api:
+    <<: *codex-backend
+    cpus: 0.625
+    mem_limit: 640m
+    ports:
+      - "127.0.0.1:${CODEX_API_PORT:-3206}:8000"
+    environment:
+      <<: *codex-environment
+      TRACKVANCE_SSO_MICROSOFT_ENABLED: "false"
+      TRACKVANCE_SSO_MICROSOFT_CLIENT_ID: ""
+      TRACKVANCE_SSO_MICROSOFT_CLIENT_SECRET: ""
+      TRACKVANCE_SSO_MICROSOFT_TRUSTED_TENANTS: ""
+      TRACKVANCE_SSO_GOOGLE_ENABLED: "false"
+      TRACKVANCE_SSO_GOOGLE_CLIENT_ID: ""
+      TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET: ""
+      TRACKVANCE_SSO_GOOGLE_TRUSTED_TENANTS: ""
+  worker:
+    <<: *codex-backend
+    cpus: 0.5
+    mem_limit: 1536m
+  acquisition-worker:
+    <<: *codex-backend
+    cpus: 0.5
+    mem_limit: 640m
+  delivery-worker:
+    <<: *codex-backend
+    cpus: 0.5
+    mem_limit: 512m
+  report-worker:
+    <<: *codex-backend
+    cpus: 0.5
+    mem_limit: 1536m
+  events-notifications:
+    <<: *codex-backend
+    cpus: 0.25
+    mem_limit: 128m
+  scheduler:
+    <<: *codex-backend
+    cpus: 0.0625
+    mem_limit: 128m
+    profiles: [codex-automatic]
+  events-chaining:
+    <<: *codex-backend
+    cpus: 0.0625
+    mem_limit: 128m
+    profiles: [codex-automatic]
+  web:
+    image: ${CODEX_WEB_IMAGE:?Run codex_environment.py init}
+    build: !reset null
+    labels: *codex-labels
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 128
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-3205}:80"
+  test-postgres:
+    image: ${CODEX_POSTGRES_IMAGE:?Run codex_environment.py init}
+    labels: *codex-labels
+    cpus: 0.25
+    mem_limit: 256m
+    pids_limit: 128
+    restart: "no"
+    environment:
+      POSTGRES_USER: tv_codex_destination
+      POSTGRES_DB: tv_codex_destination
+      POSTGRES_PASSWORD: ${CODEX_DESTINATION_PASSWORD:?Run codex_environment.py init}
+    volumes:
+      - test_destination_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres_data:
+    name: trackvance-codex_postgres_data
+    labels: *codex-labels
+  trackvance_data:
+    name: trackvance-codex_trackvance_data
+    labels: *codex-labels
+  connection_credentials:
+    name: trackvance-codex_connection_credentials
+    labels: *codex-labels
+  connection_keys:
+    name: trackvance-codex_connection_keys
+    labels: *codex-labels
+  delivery_credentials:
+    name: trackvance-codex_delivery_credentials
+    labels: *codex-labels
+  delivery_keys:
+    name: trackvance-codex_delivery_keys
+    labels: *codex-labels
+  test_destination_data:
+    name: trackvance-codex_test_destination_data
+    labels: *codex-labels
+
+networks:
+  default:
+    name: trackvance-codex_default
+    internal: true
+    labels: *codex-labels

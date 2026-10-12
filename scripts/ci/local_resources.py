@@ -9,13 +9,26 @@ import os
 import re
 import subprocess
 import time
-import tomllib
 import zipfile
 from pathlib import Path, PurePosixPath
+
+import tomllib
 
 IMAGE_LABELS = ("io.trackvance.local-proof", "io.trackvance.local-execution",
     "io.trackvance.local-project", "io.trackvance.local-role",
     "org.opencontainers.image.revision", "org.opencontainers.image.version")
+PERMANENT_PROJECTS = frozenset({"trackvance-certification", "trackvance-codex", "bikerwash"})
+PERMANENT_LABEL = "io.trackvance.permanent"
+OWNER_LABEL = "io.trackvance.owner"
+
+
+def protected_project(project: str | None, labels: dict | None = None) -> bool:
+    """Permanent or uncertain permanence is never disposable runner ownership."""
+    labels = labels or {}
+    return (project in PERMANENT_PROJECTS or PERMANENT_LABEL in labels
+            or labels.get(OWNER_LABEL) in PERMANENT_PROJECTS)
+
+
 HISTORICAL_SOURCES = {
     "0.5.1": "4519ed354202ea8f220682758da234e07b6df3ed",
     "0.6.0": "587909bc4462683e87e403dd2ea29a1d6d4afe08",
@@ -101,7 +114,7 @@ def image_identity(row: dict) -> dict:
     labels = row.get("Config", {}).get("Labels") or {}
     return {"image_id": identifier, "tags": sorted(row.get("RepoTags") or []),
         "digests": sorted(row.get("RepoDigests") or []),
-        "labels": {key: labels[key] for key in IMAGE_LABELS if key in labels},
+        "labels": {key: labels[key] for key in (*IMAGE_LABELS, PERMANENT_LABEL, OWNER_LABEL) if key in labels},
         "config_sha256": canonical_hash(row.get("Config")),
         "rootfs_sha256": canonical_hash(row.get("RootFS")),
         "size_bytes": row.get("Size"), "created": row.get("Created")}
@@ -157,6 +170,8 @@ def inspect_owned_identity(record: dict, command=docker_output) -> dict | None:
 
 def begin_image_build(path: Path, execution: str, project: str, source_sha: str,
                       version: str, role: str, reference: str, command=docker_output, *, source_proof=None) -> dict:
+    if protected_project(project):
+        raise ValueError("Permanent environments cannot be owned by a disposable image runner")
     value = initialize_image_registry(path, execution, command)
     if (not re.fullmatch(r"trackvance-[a-z0-9-]+-[a-f0-9]{12}", project)
             or not re.fullmatch(r"[a-f0-9]{40}", source_sha)
@@ -236,7 +251,9 @@ def cleanup_registered_images(path: Path, execution: str, *, projects=None,
         reason = None
         if record["status"] in {"REMOVED", "NOT_LOADED", "ALREADY_ABSENT"}:
             continue
-        if record["status"] != "OWNED" or image["image_id"] in baseline_ids:
+        if protected_project(record["project"], image.get("labels") if image else None):
+            reason = "PERMANENT_PROJECT"
+        elif record["status"] != "OWNED" or image["image_id"] in baseline_ids:
             reason = record["status"]
         elif (set(image["tags"]) - {record["reference"]}
                 or set(image["digests"]) - set(record.get("registered_digests", []))
@@ -280,6 +297,8 @@ def cleanup_registered_images(path: Path, execution: str, *, projects=None,
 
 
 def register_project(project: str, environment=None) -> None:
+    if protected_project(project):
+        raise ValueError("Permanent environments cannot enter a disposable resource registry")
     registry = (environment or os.environ).get("TRACKVANCE_LOCAL_PROJECT_REGISTRY")
     if not registry:
         return

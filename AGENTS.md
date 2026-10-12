@@ -17,7 +17,20 @@ y hashes comprobados. No inventar fechas, SHA, resultados ni origen de archivos.
 - Proteger sus datos, PostgreSQL, claves, credenciales, imágenes, redes y volúmenes
   `postgres`/`trackvance_data`; proteger también `bikerwash` y recursos cuyo dueño
   o finalidad no estén comprobados.
-- Cada prueba crea un proyecto Compose propio, puertos localhost y almacenamiento
+- `trackvance-codex` es el único entorno habitual permanente de Codex. Usar
+  `compose.codex.yml` y `scripts/codex_environment.py`; conservar su DB y seis
+  volúmenes entre trabajos, con credenciales generadas en
+  `<git-common-dir>/../.codex-local/codex-permanent/` (compartido por worktrees) y puertos,
+  red, identidades y rutas independientes. No copiar `.env` ni datos de la
+  instalación del usuario. Sólo identidades, fixtures y destinos sintéticos de
+  prueba; seed de datasets apagado. Scheduler/chaining requieren arranque explícito.
+  El destino PostgreSQL sintético tiene DB/usuario/clave y séptimo volumen propios,
+  sin publicar puerto ni usar tablas de la DB de metadata como destino.
+- Proteger ambos entornos habituales incluso detenidos. Los runners y limpiezas
+  desechables rechazan sus identidades exactas y cualquier marca
+  `io.trackvance.permanent`; no adoptar esa marca como propiedad de una prueba.
+- Las pruebas que requieren fallo destructivo o restore crean un proyecto propio,
+  puertos localhost y almacenamiento
   independientes, CPU/RAM/PIDs acotados y concurrencia limitada. Conservar primero
   los reportes útiles y limpiar únicamente recursos de esa identidad, incluso si
   falla. No ejecutar limpieza global ni `down -v` de la instalación habitual.
@@ -26,6 +39,11 @@ y hashes comprobados. No inventar fechas, SHA, resultados ni origen de archivos.
   e imágenes de pruebas después de conservar la evidencia, también ante fallos.
   La retención excepcional debe indicar propósito, tamaño y vencimiento acotado;
   por defecto las imágenes locales de pruebas no se retienen.
+- El entorno permanente reutiliza una imagen cuyo contenido ejecutable,
+  dependencias y build inputs por componente siguen idénticos, registrando el SHA
+  OCI original y la prueba de equivalencia; nunca reetiquetar un SHA. Su actualización
+  reconstruye sólo componentes cambiados, con el builder existente, preservando
+  volúmenes/configuración y comprobando aislamiento, consumidores y presupuesto.
 - La protección de identidad y datos incluye los servicios detenidos. Reservar
   CPU/RAM por los servicios activos y una reserva mínima; comprobar cambios de
   estado e identidad durante la ejecución y abortar sólo los recursos propios.

@@ -5,6 +5,8 @@ import json
 import re
 import subprocess
 
+from ci.local_resources import protected_project
+
 PROJECT = re.compile(r"trackvance-(?:v0[78]0-test-[a-z0-9-]+|bench|delivery-bench|e2e|identity-e2e|connections-e2e|delivery-e2e)-[a-f0-9]{12}")
 SPARK_OWNER = "io.trackvance.spark-proof-owner"
 
@@ -26,6 +28,8 @@ def snapshot() -> dict[str, set[str]]:
 def owner(labels: dict | None) -> str | None:
     labels = labels or {}
     project = labels.get("com.docker.compose.project") or labels.get(SPARK_OWNER)
+    if protected_project(project, labels):
+        return None
     return project if isinstance(project, str) and PROJECT.fullmatch(project) else None
 
 

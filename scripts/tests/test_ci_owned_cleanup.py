@@ -16,6 +16,11 @@ def test_foreign_or_incomplete_ownership_is_rejected(labels):
     assert owned_cleanup.owner(labels) is None
 
 
+@pytest.mark.parametrize("marker", [{"io.trackvance.permanent": "false"}, {"io.trackvance.owner": "trackvance-codex"}])
+def test_permanent_marker_overrides_disposable_namespace(marker):
+    assert owned_cleanup.owner({"com.docker.compose.project": "trackvance-v080-test-owned-0123456789ab", **marker}) is None
+
+
 def test_cleanup_skips_existing_and_foreign_new_containers(monkeypatch):
     before = {"containers": {"existing"}, "volumes": set(), "networks": set()}
     after = {**before, "containers": {"existing", "foreign"}}

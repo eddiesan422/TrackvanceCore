@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from ci.local_resources import PERMANENT_PROJECTS, protected_project
+
 ROOT = Path(__file__).resolve().parents[2]
 MAIN_PROJECT = "trackvance-certification"
 PROJECT = re.compile(
@@ -201,6 +203,7 @@ def validate_resolved(config: dict, *, project: str, directory: Path, main_inven
             require(name.startswith(project + "_") and name not in protected and name not in seen
                     and not descriptor.get("external") and not descriptor.get("driver_opts"), "SHARED_" + kind.upper())
             require(descriptor.get("labels", {}).get("com.docker.compose.project", project) == project, "RESOURCE_LABEL")
+            require(not protected_project(project, descriptor.get("labels")), "RESOURCE_LABEL")
             if kind == "networks":
                 require(descriptor.get("driver") in {None, "bridge"}, "HOST_NETWORK_DRIVER")
             seen.add(name)
@@ -235,6 +238,7 @@ def validate_resolved(config: dict, *, project: str, directory: Path, main_inven
         require(all(_bounded(service.get(key)) for key in ("cpus", "mem_limit", "pids_limit")), "UNBOUNDED_SERVICE")
         require(not service.get("container_name") or service["container_name"].startswith(project + "-"), "CONTAINER_NAMESPACE")
         require(service.get("labels", {}).get("com.docker.compose.project", project) == project, "SERVICE_LABEL")
+        require(not protected_project(project, service.get("labels")), "SERVICE_LABEL")
         require(not service.get("env_file"), "AMBIENT_ENV_FILE")
         require(set(service.get("networks", {})) <= set(config.get("networks", {})), "UNKNOWN_NETWORK")
         for port in service.get("ports", []):
@@ -256,10 +260,12 @@ def validate_resolved(config: dict, *, project: str, directory: Path, main_inven
         _environment(name, service.get("environment", {}), project, protected_secrets, mock=mock)
     for kind in ("volumes", "networks"):
         for resource in (existing or {}).get(kind, []):
+            require(not protected_project(project, resource.get("Labels")), "EXISTING_RESOURCE_NOT_OWNED")
             require(resource.get("Labels", {}).get("com.docker.compose.project") == project
                     and resource.get("Name", "").startswith(project + "_"), "EXISTING_RESOURCE_NOT_OWNED")
     for container in (existing or {}).get("containers", []):
         labels = container.get("Config", {}).get("Labels", {})
+        require(not protected_project(project, labels), "EXISTING_CONTAINER_NOT_OWNED")
         require(labels.get("com.docker.compose.project") == project
                 and container.get("Name", "").lstrip("/").startswith(project + "-"), "EXISTING_CONTAINER_NOT_OWNED")
         require(labels.get("com.docker.compose.service") in services, "EXISTING_SERVICE_NOT_OWNED")
@@ -303,7 +309,11 @@ def preflight(compose: list[str], environment: dict[str, str] | None = None, *, 
 
     try:
         config = json.loads(invoke([*compose, "config", "--format", "json"]))
-        baseline = _inventory(invoke, MAIN_PROJECT, existing=False)
+        baseline = {"containers": [], "volumes": [], "networks": []}
+        for protected_project in sorted(PERMANENT_PROJECTS):
+            protected = _inventory(invoke, protected_project, existing=False)
+            for kind, rows in baseline.items():
+                rows.extend(protected[kind])
         owned = _inventory(invoke, project, existing=True)
         validate_resolved(config, project=project, directory=directory, main_inventory=baseline,
                           existing=owned, allow_mock_oidc=allow_mock_oidc, root=ROOT)

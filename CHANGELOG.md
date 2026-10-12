@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.5 - 2026-10-11 - Reportes, preservación y desarrollo aislado
+
+- Criterio estricto de aprobación v2 y catálogo de personas de gobierno, con
+  migraciones aditivas 0018/0019, 56 tablas y backup nativo state 9.
+- Descargas CSV/XLSX incrementales de hasta 1.000.000 de filas de datos, parámetros
+  internos reservados, TIMESTAMP con offset y precisión comprobada, filtros de
+  texto literales y tipos/etiquetas conservados en proyecciones directas.
+- Conserva el thread que crea el proceso SQL hasta wait/reaping para mantener
+  PDEATHSIG/Landlock/seccomp, límites, cancelación y cleanup entre callers.
+- Plan selectivo determinista que conserva consumidores y exceptions en el hash;
+  rollback/crash/recover, restauración y preservación conservan sus guards.
+- C085-03: el acceso principal de una fuente de Reportes apunta al dataset OUTPUT
+  y la versión exacta de la aprobación; origen INPUT e Intake siguen separados.
+- C085-01/C085-05/C085-07: entorno habitual Codex permanente e independiente, fixtures
+  sintéticos reutilizados, presupuesto finito, actualización sólo por componentes
+  cambiados y ensayos destructivos sobre copias propias; usuario y Codex protegidos.
+- Publicación del source de feat/local-prototype separada de cualquier promoción
+  runtime: validar primero en Codex y obtener confirmación final del usuario si
+  su instalación debe interrumpirse. No se rediseña CI en C085-04.
+- C085-06 queda eximido por decisión del usuario y no bloqueante; la matriz
+  histórica 0.7.0 y sus resultados se conservan sin convertirlos en PASS.
+
+El gate funcional B8 y los cierres locales previos conservan SHA, alcance,
+FAIL y artefactos originales. Esta entrada describe código/política; no
+certifica anticipadamente CI del nuevo candidato ni una promoción pendiente.
+La especificación mantiene v1.1 e implementación 0.8.5; la evidencia nueva se
+publica por separado.
+
+
 ## 0.8.0 — 2026-10-05 — Catálogo de gobierno y Reportes
 
 - Macrodominios/dominios con identidad, actividad y control de versión; clasificación

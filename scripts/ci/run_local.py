@@ -28,7 +28,12 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from ci.common import load_manifest, profile_groups
 from ci.host_resources import limit_cpu_affinity, set_cpu_affinity
 from ci.image_bundle import inspect_image
-from ci.local_resources import memory_bytes
+from ci.local_resources import (
+    OWNER_LABEL,
+    PERMANENT_LABEL,
+    PERMANENT_PROJECTS,
+    memory_bytes,
+)
 from ci.run_suite import execute
 
 GIB = 1024**3
@@ -91,10 +96,32 @@ def protected_inventory():
     from ci.owned_cleanup import PROJECT
     result = {}
     projects = json.loads(command("docker", "compose", "ls", "--all", "--format", "json"))
-    protected = {"trackvance-certification", "bikerwash"} | {row["Name"] for row in projects if not PROJECT.fullmatch(row["Name"])}
+    protected = set(PERMANENT_PROJECTS) | {row["Name"] for row in projects if not PROJECT.fullmatch(row["Name"])}
+    marked = set(command("docker", "ps", "-aq", "--no-trunc", "--filter", "label=" + PERMANENT_LABEL).split())
+    for owner in sorted(PERMANENT_PROJECTS):
+        marked.update(command("docker", "ps", "-aq", "--no-trunc", "--filter", "label=" + OWNER_LABEL + "=" + owner).split())
+    rows = json.loads(command("docker", "inspect", *sorted(marked))) if marked else []
+    def permanent_group(labels):
+        return labels.get("com.docker.compose.project") or labels.get(OWNER_LABEL) or "__permanent_unassigned__"
+    protected.update(permanent_group(row["Config"].get("Labels") or {}) for row in rows)
+    standalone = [row for row in rows if not (row["Config"].get("Labels") or {}).get("com.docker.compose.project")]
+    marked_resources = []
+    for kind in ("volume", "network"):
+        identifiers = set(command("docker", kind, "ls", "-q", "--filter", "label=" + PERMANENT_LABEL).split())
+        for owner in sorted(PERMANENT_PROJECTS):
+            identifiers.update(command("docker", kind, "ls", "-q", "--filter", "label=" + OWNER_LABEL + "=" + owner).split())
+        resources = json.loads(command("docker", kind, "inspect", *sorted(identifiers))) if identifiers else []
+        for resource in resources:
+            project = permanent_group(resource.get("Labels") or {})
+            if project:
+                protected.add(project)
+                stable = {key: resource.get(key) for key in ("Name", "Driver", "Labels", "Options", "Scope", "CreatedAt", "Mountpoint", "Internal", "IPAM", "EnableIPv6", "Attachable", "Ingress")}
+                marked_resources.append((project, {"id": kind + ":" + resource["Name"], "resource_kind": kind,
+                    "resource_identity_sha256": hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}))
     for project in sorted(protected):
         ids = command("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=" + project).split()
         rows = json.loads(command("docker", "inspect", *ids)) if ids else []
+        rows.extend(row for row in standalone if permanent_group(row["Config"].get("Labels") or {}) == project)
         result[project] = sorted([{"id": r["Id"], "image": r["Image"], "status": r["State"]["Status"],
             "started_at": r["State"].get("StartedAt"),
             "config_sha256": hashlib.sha256(json.dumps(r["Config"], sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
@@ -102,6 +129,9 @@ def protected_inventory():
             "mounts": sorted([{"type": m["Type"], "source": m["Source"], "target": m["Destination"]} for m in r["Mounts"]],
                 key=lambda m: (m["type"], m["source"], m["target"])),
             "memory_limit_bytes": r["HostConfig"].get("Memory", 0)} for r in rows], key=lambda r: r["id"])
+    for project, row in marked_resources:
+        result[project].append(row)
+        result[project].sort(key=lambda item: item["id"])
     return result
 
 
@@ -454,6 +484,10 @@ def main(arguments=None):
     parser.add_argument("--groups", nargs="+", help="Any explicit deep profile group IDs")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--plan", action="store_true")
+    parser.add_argument("--allow-disposable-fixtures", action="store_true",
+        help="Explicitly authorize destructive/recovery/historical deep fixtures; ordinary local work uses permanent Codex")
+    parser.add_argument("--disposable-reason", choices=["crash-recovery", "backup-restore", "destructive-isolation", "historical-matrix"],
+        help="Required audited reason for an explicit disposable local deep run")
     parser.add_argument("--max-cpus", type=float, default=2)
     parser.add_argument("--max-memory-gib", type=float, default=4)
     parser.add_argument("--reserve-memory-gib", type=float, default=2)
@@ -478,6 +512,8 @@ def main(arguments=None):
         print(json.dumps({"profile": "deep", "origin": "local", "groups": selected,
             "concurrency": 1, "max_cpus": args.max_cpus, "max_memory_gib": args.max_memory_gib}, indent=2))
         return 0
+    if not args.allow_disposable_fixtures or not args.disposable_reason:
+        parser.error("Ordinary local tests reuse trackvance-codex through scripts/codex_environment.py; disposable deep fixtures require --allow-disposable-fixtures and --disposable-reason")
     sha = command("git", "rev-parse", "HEAD").strip()
     if command("git", "status", "--porcelain", "--untracked-files=all").strip():
         parser.error("Commit the tracked implementation first; deep evidence must describe a reproducible SHA")
@@ -492,6 +528,7 @@ def main(arguments=None):
     write(builder_registry, [])
     summary = {"schema_version": 1, "kind": "LOCAL_DEEP_EXECUTION", "profile": "deep", "origin": "local",
         "execution_id": execution, "source_sha": sha, "started_at": stamp(), "status": "RUNNING",
+        "disposable_fixture_authorization": {"explicit": True, "reason": args.disposable_reason},
         "environment": {"platform": platform.platform(), "python": platform.python_version(), "host_cpu_count": os.cpu_count()},
         "limits": {"max_cpus": args.max_cpus, "max_memory_bytes": int(args.max_memory_gib * GIB),
             "concurrency": 1, "reserve_memory_bytes": int(args.reserve_memory_gib * GIB)},
