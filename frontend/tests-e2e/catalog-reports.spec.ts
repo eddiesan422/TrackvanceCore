@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
+import frontendPackage from '../package.json' with { type: 'json' }
 
 test.setTimeout(240_000)
 
@@ -79,7 +80,10 @@ test('C085-03: el enlace principal abre la salida aprobada exacta aunque exista 
     try { fixture = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Fixture }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     if (fixture) {
-      expect(fixture).toMatchObject({ schema_version: 1, status: 'PASS', project: 'trackvance-codex', implementation_version: '0.8.5' })
+      expect(fixture).toMatchObject({ schema_version: 1, status: 'PASS', project: 'trackvance-codex' })
+      // Provenance stays historical for 0.8.5 fixtures. Fresh fixtures record
+      // this runtime's version; both pass the same identity/content oracles.
+      expect(['0.8.5', frontendPackage.version]).toContain(fixture.implementation_version)
       for (const key of ['name', 'api_origin', 'organization_id', 'input_dataset_id', 'input_version_id', 'contract_id', 'approval_run_id', 'output_dataset_id', 'output_version_id', 'later_version_id'] as const) expect(typeof fixture[key] === 'string' && fixture[key].length > 0).toBe(true)
     }
   }
@@ -89,7 +93,7 @@ test('C085-03: el enlace principal abre la salida aprobada exacta aunque exista 
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
   const me = await (await page.request.get('/api/v1/me')).json(), headers = { 'X-CSRF-Token': me.csrf_token as string }, origin = new URL(page.url()).origin
   const health = await (await page.request.get('/api/v1/health')).json()
-  expect(health.version).toBe('0.8.5')
+  expect(health.version).toBe(frontendPackage.version)
   const config = { schema_version: 2, required_columns: ['customer_id'], unique_columns: ['customer_id'], max_error_rate: 0, transforms: [{ type: 'trim', column: 'customer_id', parameters: {} }] }
   let name: string, input: string, inputVersion: string, contractId: string, approvalId: string, output: string, outputVersion: string, laterId: string
   if (fixture) {
@@ -362,7 +366,24 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   await expect(page.getByText('1 partes', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Gobierno y linaje', exact: true }).click()
   await expect(page.getByRole('heading', { name: generatedName, exact: true })).toBeVisible()
-  await page.getByRole('tab', { name: 'Linaje', exact: true }).click(); await expect(page.locator('.catalog-lineage li').first()).toBeVisible()
+  const lineageResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/catalog/datasets/${published.output_dataset_id}/lineage-graph`)
+  await page.getByRole('tab', { name: 'Linaje', exact: true }).click()
+  const lineage = await lineageResponse
+  expect(lineage.ok(), await lineage.text()).toBeTruthy()
+  const graph = await lineage.json()
+  const rootId = `DATASET_VERSION:${published.output_version_id}`, reportId = `REPORT_EXECUTION:${generation.id}`
+  expect(graph).toMatchObject({ root_id: rootId, version_id: published.output_version_id })
+  expect(graph.nodes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: rootId, resource_id: published.output_version_id, type: 'DATASET_VERSION' }),
+    expect.objectContaining({ id: reportId, resource_id: generation.id, type: 'REPORT_EXECUTION', href: `/reports/executions/${generation.id}` }),
+  ]))
+  expect(graph.edges.some((edge: { source: string; target: string }) => new Set([edge.source, edge.target]).has(rootId) && new Set([edge.source, edge.target]).has(reportId))).toBe(true)
+  await expect(page.getByLabel('Versión del linaje', { exact: true })).toHaveValue(published.output_version_id)
+  const lineageRoot = page.locator('.lineage-node.lineage-root')
+  await expect(lineageRoot).toBeVisible()
+  await expect(lineageRoot).toContainText(generatedName)
+  await lineageRoot.click()
+  await expect(page.getByRole('complementary', { name: 'Detalle del nodo', exact: true }).getByRole('link', { name: 'Ver detalle autorizado', exact: true })).toHaveAttribute('href', `/datasets/${published.output_dataset_id}?version=${published.output_version_id}`)
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: testInfo.outputPath('report-lineage.png'), fullPage: true })
   await page.goto(`/reports/executions/${generation.id}`); await page.getByRole('link', { name: 'Validar con Intake', exact: true }).click()

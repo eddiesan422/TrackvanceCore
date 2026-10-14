@@ -170,3 +170,35 @@ it('supports changing read status with the keyboard Space key', async () => {
   expect(post).toHaveBeenCalledWith('/notifications/inbox/keyboard/read')
   await waitFor(() => expect(checkbox).toBeChecked())
 })
+
+it('ignores a stale initial inbox and count response after read-all is confirmed', async () => {
+  const item = { id: 'initial', module: 'intake', origin: 'MANUAL', status: 'SUCCESS', decision: 'APPROVED', description: 'Validación completada.', created_at: '2030-01-01T09:00:00Z', read_at: null as string | null, detail_url: '/runs/approved' }
+  let inboxCalls = 0, countCalls = 0
+  let resolveInbox!: (value: { items: typeof item[]; total: number }) => void
+  let resolveCount!: (value: { unread_count: number }) => void
+  let confirm!: (value: unknown) => void
+  vi.mocked(api).mockImplementation(async path => {
+    if (path.includes('unread-count')) {
+      if (++countCalls === 1) return new Promise(done => { resolveCount = done })
+      return { unread_count: 0 }
+    }
+    if (++inboxCalls === 1) return new Promise(done => { resolveInbox = done })
+    return { items: [{ ...item, read_at: '2030-01-01T10:00:00Z' }], total: 1 }
+  })
+  vi.mocked(post).mockImplementationOnce(() => new Promise(done => { confirm = done }))
+  renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
+  const markAll = screen.getByRole('button', { name: 'Marcar todas como leídas' })
+  fireEvent.click(markAll)
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/notifications/inbox/read-all'))
+  expect(markAll).toBeDisabled()
+  await act(async () => { confirm({ updated: 1 }) })
+  await act(async () => {
+    resolveInbox({ items: [item], total: 1 })
+    resolveCount({ unread_count: 1 })
+  })
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeChecked())
+  expect(inboxCalls).toBe(2)
+  expect(countCalls).toBe(2)
+  expect(screen.queryByText('Sin leer ·')).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Ver notificaciones' })).toBeInTheDocument()
+})

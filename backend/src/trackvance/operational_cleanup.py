@@ -185,7 +185,7 @@ def population(db: Session) -> tuple[dict, dict, set[tuple]]:
     physical = inspect(db.connection())
     if set(physical.get_table_names()) != set(Base.metadata.tables) | {"alembic_version"}:
         error("CLEANUP_SCHEMA_DRIFT", "Las tablas físicas no corresponden al contrato de esta herramienta.")
-    schema = {name: {"columns": [(col.name, str(col.type), col.nullable) for col in table.columns],
+    schema: dict[str, dict[str, Any]] = {name: {"columns": [(col.name, str(col.type), col.nullable) for col in table.columns],
         "pk": [col.name for col in table.primary_key],
         "foreign_keys": sorted((fk.parent.name, fk.column.table.name, fk.column.name) for fk in table.foreign_keys)}
         for name, table in sorted(Base.metadata.tables.items())}

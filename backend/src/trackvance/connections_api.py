@@ -3,7 +3,15 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,6 +32,7 @@ from .connections_service import (
     current_version,
     owned_connection,
     require_password_for_endpoint_change,
+    require_source_selection,
     save_connection,
     saved_source,
     test_saved_connection,
@@ -68,6 +77,12 @@ class ConnectionBody(ConnectionInput):
     username: str = Field(default="REST", min_length=1, max_length=128)
     password: SecretStr | None = Field(default=None, max_length=1024)
     options: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def require_sql_endpoint(self):
+        if self.source_type != "REST" and {"host", "port", "database", "username"} - self.model_fields_set:
+            raise ValueError("Indica host, port, database y username de la conexión SQL.")
+        return self
 
 
 class ConnectionTestBody(ConnectionBody):
@@ -223,6 +238,7 @@ def register_source_dataset(connection_id: str, body: SourceDatasetBody,
     from .governance import validate_classification
     validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     connection = owned_connection(db, connection_id, user, lock=True)
+    require_source_selection(connection, body.model_fields_set)
     source, _ = saved_source(db, connection)
     selected = next((item for item in source.objects(body.schema_name) if item["name"] == body.object_name), None)
     if selected is None:

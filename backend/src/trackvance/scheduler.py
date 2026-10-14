@@ -92,7 +92,7 @@ def save_schedule(
         db.add(schedule)
         db.flush()
     else:
-        if expected_version != schedule.version:
+        if expected_version is None or expected_version != schedule.version:
             raise ScheduleError(409, "SCHEDULE_CONFLICT", "La programación cambió. Actualiza e intenta nuevamente.")
         result = db.execute(update(MonitorSchedule).where(
             MonitorSchedule.id == schedule.id, MonitorSchedule.version == expected_version,

@@ -33,6 +33,11 @@ class ConnectionOperationError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+def require_source_selection(connection: ExternalConnection, fields_set: set[str]) -> None:
+    if connection.source_type != "REST" and {"schema_name", "object_name"} - fields_set:
+        raise ConnectionOperationError(422, "VALIDATION_ERROR", "Indica schema_name y object_name de la fuente SQL.")
+
+
 def owned_connection(db: Session, connection_id: str, user: User, *, lock=False) -> ExternalConnection:
     query = select(ExternalConnection).where(
         ExternalConnection.id == connection_id,

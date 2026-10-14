@@ -249,7 +249,7 @@ def test_doctor_reports_safe_acquisition_failure_and_keeps_all_real_probes(
                            "scheduler", "events-notifications", "events-chaining"}
     for service, lane in (("worker", "DEFAULT"), ("delivery-worker", "DELIVERY"),
                           ("acquisition-worker", "ACQUISITION"), ("report-worker", "REPORT")):
-        assert probes[service] == ("from trackvance.worker import worker_status; "
+        assert probes[service] == ("from trackvance.component_health import worker_status; "
                                   f"raise SystemExit(0 if worker_status('{lane}')['status'] == 'RUNNING' else 1)")
     for component in ("scheduler", "events-notifications", "events-chaining"):
         assert probes[component] == ("from trackvance.component_health import component_status; "

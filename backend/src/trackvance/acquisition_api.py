@@ -32,7 +32,7 @@ from .acquisition_errors import AcquisitionReadError, processing_diagnostic
 from .acquisition_models import AcquisitionRun, AcquisitionUpload
 from .artifactstore import artifact_store, storage_provider
 from .batch_readers import inspect_file
-from .connections_service import owned_connection, saved_source
+from .connections_service import owned_connection, require_source_selection, saved_source
 from .dataset_readers import dataset_reader_registry
 from .db import get_db, utcnow
 from .models import Dataset, DatasetSourceBinding, User, uid
@@ -288,6 +288,8 @@ def acquire_source(connection_id: str, body: SourceAcquisitionBody, idempotency_
                    db: Session = Depends(get_db), user: User = Depends(current_user)):
     if "datasets:write" not in effective_permissions(db, user):
         raise AcquisitionOperationError(403, "FORBIDDEN", "Se requiere permiso para registrar el dataset de la fuente.")
+    if {"schema_name", "object_name"} - body.model_fields_set:
+        require_source_selection(owned_connection(db, connection_id, user), body.model_fields_set)
     request_identity = {"operation": "REGISTER_SOURCE", "connection_id": connection_id, **body.model_dump()}
     existing = _idempotent(db, user, idempotency_key, _request_hash(request_identity))
     if existing:

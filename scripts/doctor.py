@@ -270,7 +270,7 @@ def main() -> int:
                 "python",
                 "-c",
                 (
-                    "from trackvance.worker import worker_status; "
+                    "from trackvance.component_health import worker_status; "
                     "raise SystemExit(0 if worker_status('DEFAULT')['status'] == 'RUNNING' else 1)"
                 ),
             ]
@@ -284,15 +284,15 @@ def main() -> int:
                 "python",
                 "-c",
                 (
-                    "from trackvance.worker import worker_status; "
+                    "from trackvance.component_health import worker_status; "
                     "raise SystemExit(0 if worker_status('DELIVERY')['status'] == 'RUNNING' else 1)"
                 ),
             ]
         )
         checked("Worker Compose ACQUISITION", [*prefix, "exec", "-T", "acquisition-worker", "python", "-c",
-            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])
+            "from trackvance.component_health import worker_status; raise SystemExit(0 if worker_status('ACQUISITION')['status'] == 'RUNNING' else 1)"])
         checked("Worker Compose REPORT", [*prefix, "exec", "-T", "report-worker", "python", "-c",
-            "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"])
+            "from trackvance.component_health import worker_status; raise SystemExit(0 if worker_status('REPORT')['status'] == 'RUNNING' else 1)"])
         for component in ("scheduler", "events-notifications", "events-chaining"):
             checked(f"Componente Compose {component}", [*prefix, "exec", "-T", component, "python", "-c",
                 f"from trackvance.component_health import component_status; raise SystemExit(0 if component_status('{component}') == 'RUNNING' else 1)"])

@@ -8,6 +8,7 @@ from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
+from urllib.request import urlopen
 
 import pytest
 from sqlalchemy import select
@@ -150,6 +151,72 @@ def delivery(client, receiver, acquisition, *, batch_rows=2):
     assert result.status_code == 202, result.text
     assert process_once(lane="DELIVERY")
     return result.json()["id"], body
+
+
+@pytest.mark.parametrize("connector", ["connections", "delivery/destinations"])
+@pytest.mark.parametrize("kind", ["POSTGRESQL", "SQLSERVER"])
+@pytest.mark.parametrize("missing", ["host", "port", "database", "username"])
+def test_sql_endpoint_original_required_fields_never_default_to_rest(authenticated, monkeypatch, connector, kind, missing):
+    from trackvance.data_sinks import sink_registry
+    from trackvance.dataset_sources import source_registry
+
+    def forbidden_connection(*_args, **_kwargs):
+        raise AssertionError("An incomplete SQL endpoint must fail before any connection attempt.")
+
+    monkeypatch.setattr(source_registry, "create", forbidden_connection)
+    monkeypatch.setattr(sink_registry, "create", forbidden_connection)
+    body = {"name": "Incomplete SQL endpoint", "source_type" if connector == "connections" else "sink_type": kind,
+            "host": "database.example.invalid", "port": 5432 if kind == "POSTGRESQL" else 1433,
+            "database": "synthetic", "username": "synthetic", "password": "synthetic-only-password"}
+    body.pop(missing)
+    for suffix in ("", "/test"):
+        response = authenticated.post(f"/api/v1/{connector}{suffix}", json=body)
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_rest_none_endpoints_create_and_test_without_sql_fields_or_password(authenticated, receiver):
+    # NONE takes the one declared collection response. This fixture's endpoint
+    # returns two records when pagination parameters are absent.
+    with urlopen(receiver.url + "/source", timeout=5) as response:
+        expected_rows = [{"id": row["id"]} for row in json.load(response)["records"]]
+    options = {"url": receiver.url + "/source", "auth": "NONE", "collection": "records",
+               "fields": [{"name": "id", "logical_type": "STRING", "nullable": False}]}
+    for connector, type_field, url in (("connections", "source_type", "/source"),
+                                        ("delivery/destinations", "sink_type", "/write")):
+        body = {"name": "REST without SQL credentials", type_field: "REST", "options": {**options, "url": receiver.url + url}}
+        if connector != "connections":
+            body["options"] = {"url": receiver.url + url, "auth": "NONE"}
+        assert authenticated.post(f"/api/v1/{connector}/test", json=body).status_code == 200
+        created = authenticated.post(f"/api/v1/{connector}", json=body)
+        assert created.status_code == 201, created.text
+        assert "password" not in created.json()
+        if connector == "connections":
+            acquired = authenticated.post(f"/api/v1/connections/{created.json()['id']}/acquisitions",
+                                          json={"name": "REST default collection selection"})
+            assert acquired.status_code == 202, acquired.text
+            from trackvance.acquisition_worker import process_once as acquire_once
+            assert acquire_once()
+            result = authenticated.get(f"/api/v1/acquisitions/{acquired.json()['acquisition']['id']}").json()
+            assert result["status"] == "SUCCESS" and result["published_rows"] == len(expected_rows)
+            snapshot = authenticated.get(f"/api/v1/dataset-versions/{result['output_version_id']}/profile").json()
+            assert snapshot["row_count"] == len(expected_rows) and snapshot["sample"] == expected_rows
+    assert not receiver.posts
+
+
+def test_source_sql_password_remains_optional_in_request_contract(authenticated, monkeypatch):
+    from trackvance.dataset_sources import source_registry
+
+    def forbidden_connection(*_args, **_kwargs):
+        raise AssertionError("A missing SQL password must fail before any connection attempt.")
+
+    monkeypatch.setattr(source_registry, "create", forbidden_connection)
+    body = {"name": "SQL optional request password", "source_type": "POSTGRESQL", "host": "database.example.invalid",
+            "port": 5432, "database": "synthetic", "username": "synthetic"}
+    for suffix in ("", "/test"):
+        response = authenticated.post(f"/api/v1/connections{suffix}", json=body)
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "PASSWORD_REQUIRED"
 
 
 def test_real_rest_acquisition_delivery_exact_complete(authenticated, receiver):

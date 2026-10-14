@@ -62,3 +62,57 @@ def test_probe_has_no_engine_imports_or_database_side_effects(tmp_path):
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("lane", sorted(component_health.WORKER_LANES))
+@pytest.mark.parametrize("age,status", [(0, "RUNNING"), (29.999, "RUNNING"), (30, "OFFLINE")])
+def test_worker_probe_preserves_exact_file_and_freshness_contract(tmp_path, monkeypatch, lane, age, status):
+    monkeypatch.setattr(component_health, "STORAGE_DIR", tmp_path)
+    last_seen = (NOW - timedelta(seconds=age)).isoformat()
+    (tmp_path / f"worker-heartbeat-{lane.lower()}.json").write_text(
+        json.dumps({"last_seen": last_seen, "lane": lane, "worker_id": "test-worker"}), encoding="utf-8")
+    assert component_health.worker_status(lane, now=NOW) == {"status": status, "last_seen": last_seen, "lane": lane}
+
+
+@pytest.mark.parametrize("data", ["not-json", "null", "{}", '{"last_seen":null}',
+                                 '{"last_seen":"2026-10-03T00:00:00"}'])
+def test_invalid_worker_heartbeat_fails_closed(tmp_path, monkeypatch, data):
+    monkeypatch.setattr(component_health, "STORAGE_DIR", tmp_path)
+    (tmp_path / "worker-heartbeat-delivery.json").write_text(data, encoding="utf-8")
+    assert component_health.worker_status("DELIVERY", now=NOW) == {"status": "OFFLINE", "last_seen": None, "lane": "DELIVERY"}
+
+
+def test_worker_lane_files_are_independent_and_unknown_lane_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(component_health, "STORAGE_DIR", tmp_path)
+    (tmp_path / "worker-heartbeat-default.json").write_text(json.dumps({"last_seen": NOW.isoformat()}), encoding="utf-8")
+    assert component_health.worker_status(" default ", now=NOW)["status"] == "RUNNING"
+    for lane in ("DELIVERY", "ACQUISITION", "REPORT"):
+        assert component_health.worker_status(lane, now=NOW)["status"] == "OFFLINE"
+    with pytest.raises(RuntimeError, match="TRACKVANCE_WORKER_LANE"):
+        component_health.worker_status("../default")
+
+
+def test_worker_public_wrapper_uses_identical_heartbeat_contract(tmp_path, monkeypatch):
+    from trackvance import worker
+
+    monkeypatch.setattr(component_health, "STORAGE_DIR", tmp_path)
+    monkeypatch.setattr(worker.artifact_store, "root", tmp_path)
+    for lane in component_health.WORKER_LANES:
+        for age in (0, 31):
+            last_seen = (datetime.now(UTC) - timedelta(seconds=age)).isoformat()
+            (tmp_path / f"worker-heartbeat-{lane.lower()}.json").write_text(json.dumps({"last_seen": last_seen, "lane": lane}), encoding="utf-8")
+            assert worker.worker_status(lane) == component_health.worker_status(lane)
+
+
+def test_worker_probe_has_no_worker_engine_imports_or_database_side_effects(tmp_path):
+    source = Path(component_health.__file__).resolve().parents[1]
+    environment = {**os.environ, "PYTHONPATH": str(source), "TRACKVANCE_STORAGE_DIR": str(tmp_path)}
+    program = ("import sys; from trackvance.component_health import worker_status; "
+               "assert all(worker_status(lane)['status'] == 'OFFLINE' for lane in ('DEFAULT','DELIVERY','ACQUISITION','REPORT')); "
+               "assert not any(name.split('.')[0] in {'sqlalchemy','polars','duckdb','pyarrow','pyspark'} "
+               "or name in {'trackvance.db','trackvance.models','trackvance.worker','trackvance.services',"
+               "'trackvance.artifactstore','trackvance.execution','trackvance.processing'} for name in sys.modules)")
+    result = subprocess.run([sys.executable, "-c", program], env=environment,
+                            capture_output=True, text=True, check=False, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert not list(tmp_path.iterdir())

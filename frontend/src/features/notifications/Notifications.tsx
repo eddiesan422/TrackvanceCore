@@ -43,7 +43,9 @@ export function NotificationsPage() {
       void refresh()
     },
   })
-  const all = useMutation({ mutationFn: () => post('/notifications/inbox/read-all'), onSuccess: refresh })
+  const all = useMutation({ mutationFn: () => post('/notifications/inbox/read-all'),
+    onMutate: () => Promise.all([cache.cancelQueries({ queryKey: ['notification-inbox'] }), cache.cancelQueries({ queryKey: ['notification-count'] })]),
+    onSuccess: refresh })
   const changing = readStateMutation.isPending || all.isPending
   function setRead(id: string, read: boolean, detailUrl?: string) {
     if (lock.current) return

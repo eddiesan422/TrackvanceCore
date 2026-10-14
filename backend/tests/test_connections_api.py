@@ -405,6 +405,20 @@ def test_bounds_and_selection_validation_precede_import(authenticated, external)
     assert external.reads == []
 
 
+@pytest.mark.parametrize("source_type", ["POSTGRESQL", "SQLSERVER"])
+@pytest.mark.parametrize("route", ["datasets", "acquisitions"])
+@pytest.mark.parametrize("missing", ["schema_name", "object_name"])
+def test_sql_registration_requires_explicit_original_selection(authenticated, external, source_type, route, missing):
+    connection = create(authenticated, source_type)
+    body = {"name": "Incomplete SQL selection", "schema_name": "sales", "object_name": "orders"}
+    body.pop(missing)
+    settings_before = len(external.settings)
+    response = authenticated.post(f"/api/v1/connections/{connection['id']}/{route}", json=body)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert len(external.settings) == settings_before and external.reads == []
+
+
 def test_quoted_source_names_are_not_silently_trimmed(authenticated, external):
     connection = create(authenticated)
     external.objects = [{"name": " orders ", "kind": "TABLE"}]

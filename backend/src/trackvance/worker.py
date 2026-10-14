@@ -5,7 +5,7 @@ import logging
 import os
 import signal
 import threading
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import cast
 
 from sqlalchemy import and_, or_, select, update
@@ -13,6 +13,8 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import OperationalError
 
 from .artifactstore import artifact_store
+from .component_health import WORKER_LANES
+from .component_health import worker_status as heartbeat_status
 from .db import SessionLocal, iso, require_record, utcnow
 from .execution import ExecutionEngine, execution_engine
 from .models import DeliveryAttempt, Job, Run, uid
@@ -21,7 +23,6 @@ from .services import _verify_lease, audit
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 90
-WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT"})
 DELIVERY_TERMINAL_STATUSES = frozenset(
     {"SUCCESS", "FAILED", "PARTIAL", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}
 )
@@ -41,17 +42,7 @@ def heartbeat_path(lane: str):
 
 
 def worker_status(lane: str = "DEFAULT"):
-    heartbeat_file = heartbeat_path(lane)
-    try:
-        data = json.loads(heartbeat_file.read_text(encoding="utf-8"))
-        age = (utcnow() - datetime.fromisoformat(data["last_seen"])).total_seconds()
-        return {
-            "status": "RUNNING" if age < 30 else "OFFLINE",
-            "last_seen": data["last_seen"],
-            "lane": configured_lane(lane),
-        }
-    except (OSError, ValueError, KeyError):
-        return {"status": "OFFLINE", "last_seen": None, "lane": configured_lane(lane)}
+    return heartbeat_status(configured_lane(lane), storage_dir=artifact_store.root)
 
 
 def heartbeat(owner, stop, active, lane="DEFAULT"):

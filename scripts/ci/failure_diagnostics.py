@@ -1,9 +1,11 @@
 """Publish bounded failure facts; never publish messages, data or raw logs."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import math
+import posixpath
 import re
 import subprocess
 import traceback
@@ -185,6 +187,32 @@ def trusted_sources():
     return {name for name in completed.stdout.decode('utf-8').split('\0') if name.endswith(('.py', '.ts'))}
 
 
+def trusted_test_source(raw: str, function: str, sources: set[str]) -> str | None:
+    """Resolve pytest's cwd-relative spelling only to one tracked declaration."""
+    if not function.startswith('test') or any(mark in raw for mark in (':', '\n', '\r', '\0', '?', '#')):
+        return None
+    relative = posixpath.normpath(raw.replace('\\', '/'))
+    while relative.startswith('../'):
+        relative = relative[3:]
+    if relative.startswith('/') or len(relative.split('/')) < 2 or not relative.endswith('.py'):
+        return None
+    matches = [source for source in sources if source == relative or source.endswith('/' + relative)]
+    if len(matches) != 1:
+        return None
+    source = ROOT / matches[0]
+    if not source.is_file() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                                   for part in (source, *source.parents)):
+        return None
+    try:
+        tree = ast.parse(source.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, SyntaxError):
+        return None
+    if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function
+               for node in ast.walk(tree)):
+        return None
+    return matches[0]
+
+
 def extract_log_facts(path: Path, sources: set[str]):
     """Read only a bounded tail. Source lines and exception messages are omitted."""
     if not path.is_file() or path.is_symlink():
@@ -206,14 +234,12 @@ def extract_log_facts(path: Path, sources: set[str]):
                 declared = function == '<module>' or re.search(r'\b(?:def|function)\s+' + re.escape(function) + r'\b', content)
                 if declared and frame not in frames:
                     frames.append(frame)
-        failure = re.match(r'^FAILED ([^ :]+)::([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\r\n]*\])?(?:\s+-.*)?$', line)
-        if failure and failure[1] in sources:
-            source_file = ROOT / failure[1]
-            if source_file.is_file() and re.search(r'\bdef\s+' + re.escape(failure[2]) + r'\b', source_file.read_text(encoding='utf-8')):
-                tests.add(failure[1] + '::' + failure[2])  # parameter values are never retained
+        failure = re.match(r'^\s*(?:FAILED|ERROR) ([^ :]+)::([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\r\n]*\])?(?:\s+-.*)?$', line)
+        if failure and (source := trusted_test_source(failure[1], failure[2], sources)):
+            tests.add(source + '::' + failure[2])  # parameter values are never retained
         # Python qualifies this trusted exception by its defining module. No
         # arbitrary module names, exception message or resolved values survive.
-        exception = re.match(r'^(?:(?:scripts\.)?ci\.compose_preflight\.)?([A-Za-z][A-Za-z0-9_]*)(?::|$)', line)
+        exception = re.match(r'^(?:E\s+)?(?:(?:scripts\.)?ci\.compose_preflight\.)?([A-Za-z][A-Za-z0-9_]*)(?::|$)', line)
         if exception and exception[1] in ERROR_TYPES:
             types.add(exception[1])
         if exception and exception[1] in ERROR_TYPES:
@@ -284,6 +310,17 @@ def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, s
         except (OSError, ValueError, RecursionError):
             summary = {'error': {'code': 'UNCLASSIFIED_CHILD_FAILURE'}}
         observations.append({'kind': 'CATALOG_PARTIAL_SUMMARY', 'result': summary})
+        browser = context / 'browser-summary.json'
+        if fresh_catalog_file(browser, before):
+            try:
+                value = json.loads(browser.read_text(encoding='utf-8'))
+                if isinstance(value, dict) and (value.get('status') == 'FAIL'
+                        or any(type(value.get(key)) is int and value[key] > 0 for key in ('unexpected', 'skipped', 'flaky'))
+                        or type(value.get('expected')) is int and value['expected'] != 2):
+                    observations.append({'kind': 'CATALOG_BROWSER_FAILURE',
+                                         'result': sanitize_browser_failure(value, sources)})
+            except (OSError, ValueError, RecursionError):
+                pass
         for rows in (120, 400000, 1000000):
             tier = path.parent / f'reports-{rows}.json'
             if fresh_catalog_file(tier, before):

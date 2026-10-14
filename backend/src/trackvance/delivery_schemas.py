@@ -32,6 +32,12 @@ class DestinationConnectionBody(StrictModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
+    def require_sql_endpoint(self):
+        if self.sink_type != "REST" and {"host", "port", "database", "username"} - self.model_fields_set:
+            raise ValueError("Indica host, port, database y username del destino SQL.")
+        return self
+
+    @model_validator(mode="after")
     def normalize_display_name(self):
         self.name = self.name.strip()
         if not self.name:

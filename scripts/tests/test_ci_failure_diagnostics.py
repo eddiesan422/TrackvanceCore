@@ -73,6 +73,52 @@ def test_unknown_or_fabricated_source_function_is_not_retained(tmp_path):
     assert not facts['frames'] and not facts['error_types'] and 'secret' not in json.dumps(facts)
 
 
+@pytest.mark.parametrize('raw,expected', [
+    ('tests/test_api.py', 'backend/tests/test_api.py'),
+    ('./tests/test_api.py', 'backend/tests/test_api.py'),
+    (r'tests\test_api.py', 'backend/tests/test_api.py'),
+    ('../scripts/tests/test_runner.py', 'scripts/tests/test_runner.py'),
+    ('./../scripts/tests/./test_runner.py', 'scripts/tests/test_runner.py'),
+    ('backend/tests/test_api.py', 'backend/tests/test_api.py'),
+])
+def test_pytest_relative_paths_retain_only_unique_tracked_declarations(tmp_path, monkeypatch, raw, expected):
+    sources = {'backend/tests/test_api.py', 'scripts/tests/test_runner.py'}
+    for name in sources:
+        source = tmp_path / name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('async def test_case():\n    pass\n', encoding='utf-8')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    log = tmp_path / 'private.log'
+    log.write_text(f'FAILED {raw}::test_case[PRIVATE_ROW] - SECRET_TOKEN\n'
+                   'E       AssertionError: REPORT_MEMORY_LIMIT value=PRIVATE_ROW token=SECRET_TOKEN\n'
+                   'E       SecretTokenError: SECRET_TOKEN\n', encoding='utf-8')
+    facts = diagnostics.extract_log_facts(log, sources)
+    assert facts['test_names'] == [expected + '::test_case']
+    assert facts['error_types'] == ['AssertionError'] and facts['error_codes'] == ['REPORT_MEMORY_LIMIT']
+    assert all(secret not in json.dumps(facts) for secret in ('PRIVATE_ROW', 'SECRET_TOKEN', 'SecretTokenError'))
+
+
+def test_pytest_path_ambiguity_and_undeclared_or_untracked_names_are_rejected(tmp_path, monkeypatch):
+    sources = {'backend/tests/test_shared.py', 'scripts/tests/test_shared.py'}
+    for name in sources:
+        source = tmp_path / name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('def test_case():\n    pass\n# def test_fabricated(): pass\n'
+                          'def fixture_secret():\n    pass\n', encoding='utf-8')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    log = tmp_path / 'private.log'
+    log.write_text('FAILED tests/test_shared.py::test_case[SECRET_TOKEN] - PRIVATE_ROW\n'
+                   'FAILED backend/tests/test_shared.py::test_fabricated - SECRET_TOKEN\n'
+                   'ERROR backend/tests/test_shared.py::fixture_secret - PRIVATE_ROW\n'
+                   'FAILED tests/test_untracked.py::test_case - SECRET_TOKEN\n', encoding='utf-8')
+    assert diagnostics.extract_log_facts(log, sources)['test_names'] == []
+    with log.open('a', encoding='utf-8') as stream:
+        stream.write('ERROR ../scripts/tests/test_shared.py::test_case[SECRET_TOKEN] - PRIVATE_ROW\n')
+    facts = diagnostics.extract_log_facts(log, sources)
+    assert facts['test_names'] == ['scripts/tests/test_shared.py::test_case']
+    assert all(secret not in json.dumps(facts) for secret in ('PRIVATE_ROW', 'SECRET_TOKEN', 'fixture_secret'))
+
+
 def test_preflight_codes_match_only_trusted_source_literals_and_closed_resource_kinds():
     source = Path(__file__).resolve().parents[1] / 'ci/compose_preflight.py'
     codes = set()
@@ -199,6 +245,56 @@ def test_partial_child_without_final_summary_preserves_facts_after_external_time
     assert result[1]['rows'] == 1000000 and result[1]['facts']['error_codes'] == ['REPORT_TIMEOUT']
     assert 'secret' not in json.dumps(result)
     assert diagnostics.collect_child_failure('catalog-reports', {(context / 'isolation.json').resolve()}, root=tmp_path, sources=set()) == []
+
+
+def catalog_browser_failure(root):
+    context = root / '.codex-local/v080/trackvance-v080-test-catalog-reports-012345abcdef'
+    context.mkdir(parents=True)
+    isolation = context / 'isolation.json'
+    isolation.write_text(json.dumps({'project': context.name, 'environment': 'SECRET_TOKEN'}))
+    source_name = 'frontend/tests-e2e/catalog-reports.spec.ts'
+    source = root / source_name
+    source.parent.mkdir(parents=True)
+    source.write_text("test('fixture', () => {});\n", encoding='utf-8')
+    browser = context / 'browser-summary.json'
+    browser.write_text(json.dumps({'status': 'FAIL', 'expected': 1, 'unexpected': 1, 'skipped': 0, 'flaky': 0,
+        'duration': 120, 'raw_trace': 'SECRET_TOKEN', 'failures': [{'status': 'failed', 'test': 'PRIVATE_ROW',
+        'message': 'SECRET_TOKEN', 'location': {'file': '/checkout/' + source_name, 'line': 1, 'column': 1}}]}))
+    return context, isolation, browser, source_name
+
+
+def test_catalog_failed_browser_keeps_fresh_owned_summary_before_root_result_exists(tmp_path, monkeypatch):
+    _context, _isolation, _browser, source = catalog_browser_failure(tmp_path)
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    records = diagnostics.collect_child_failure('catalog-reports-functional', set(), root=tmp_path, sources={source})
+    browser = next(row for row in records if row['kind'] == 'CATALOG_BROWSER_FAILURE')['result']
+    assert browser == {'status': 'FAIL', 'expected': 1, 'unexpected': 1, 'skipped': 0, 'flaky': 0, 'duration': 120,
+        'failures': [{'location_present': True, 'status': 'failed', 'location': {'file': source, 'line': 1, 'column': 1}}],
+        'failure_location_present': True}
+    assert records[0]['result'] == {'status': 'FAIL', 'summary_present': False}
+    assert all(secret not in json.dumps(records) for secret in ('PRIVATE_ROW', 'SECRET_TOKEN', 'raw_trace', 'message'))
+
+
+@pytest.mark.parametrize('unsafe', ['old-browser', 'old-isolation', 'linked-browser', 'oversized', 'malformed', 'foreign-owner', 'pass'])
+def test_catalog_browser_hook_rejects_stale_linked_foreign_unbounded_or_successful_evidence(tmp_path, monkeypatch, unsafe):
+    _context, isolation, browser, source = catalog_browser_failure(tmp_path)
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    before = set()
+    if unsafe in {'old-browser', 'old-isolation'}:
+        before.add((browser if unsafe == 'old-browser' else isolation).resolve())
+    elif unsafe == 'linked-browser':
+        original = Path.is_symlink
+        monkeypatch.setattr(Path, 'is_symlink', lambda self: self == browser or original(self))
+    elif unsafe == 'oversized':
+        browser.write_text('x' * (diagnostics.MAX_BYTES + 1))
+    elif unsafe == 'malformed':
+        browser.write_text('{invalid')
+    elif unsafe == 'foreign-owner':
+        isolation.write_text(json.dumps({'project': 'trackvance-certification'}))
+    else:
+        browser.write_text(json.dumps({'status': 'PASS', 'expected': 2, 'unexpected': 0, 'skipped': 0, 'flaky': 0}))
+    records = diagnostics.collect_child_failure('catalog-reports', before, root=tmp_path, sources={source})
+    assert not any(row['kind'] == 'CATALOG_BROWSER_FAILURE' for row in records)
 
 
 def test_published_child_attachments_are_normalized_hashed_and_cannot_count_as_pass(tmp_path, monkeypatch):
