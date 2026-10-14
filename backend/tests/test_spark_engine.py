@@ -422,7 +422,9 @@ def test_real_local_spark_storage_callbacks_remain_live_with_bounded_pools(real_
         return
     # Exercise the same pinned pools even if this test runner has >=512 PIDs;
     # this is a synthetic test application, not an assertion of its actual quota.
-    bound_local_driver_pools(engine.session)
+    initial_pools = bound_local_driver_pools(engine.session)
+    if runtime.metadata["thread_budget"]["local_storage_bound_applied"]:
+        assert all(value["largest_threads"] <= 4 for value in initial_pools.values())
     for offset in range(8):
         broadcast = context.broadcast(offset)
         records = context.parallelize(range(16), 2).map(lambda value, broadcast=broadcast: (
@@ -435,7 +437,11 @@ def test_real_local_spark_storage_callbacks_remain_live_with_bounded_pools(real_
             records.unpersist(blocking=True)
             broadcast.destroy(blocking=True)
     pools = bound_local_driver_pools(engine.session)
-    assert all(value["maximum_threads"] == 4 and value["largest_threads"] <= 4 for value in pools.values())
+    # This module-scoped test application may have earlier jobs when its real
+    # quota is >=512. LargestPoolSize is a lifetime counter, not a current size.
+    assert all(value["maximum_threads"] == 4
+               and value["largest_threads"] <= max(initial_pools[name]["largest_threads"], 4)
+               for name, value in pools.items())
     # Cleanup callback completion must leave a separate subsequent job live.
     assert context.parallelize([1, 2], 2).sum() == 3
 
