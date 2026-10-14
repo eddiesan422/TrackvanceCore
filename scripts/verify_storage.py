@@ -430,7 +430,7 @@ def project_core090_upgrade(rows, foreign_keys):
         # Databases encode timestamps differently; compare the actual instants.
         from datetime import UTC, datetime
         def instant(value):
-            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
             return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
         if instant(settings["next_review_at"]) != instant(automatic["next_review_at"]):
             raise ValueError("La cadencia automática contiene actividad posterior al alta.")
@@ -839,6 +839,7 @@ def _snapshot_inputs() -> tuple[
     import runpy
 
     from sqlalchemy import select, text
+
     from trackvance.artifactstore import artifact_store, storage_provider
     from trackvance.credential_store import secret_store
     from trackvance.db import Base, SessionLocal

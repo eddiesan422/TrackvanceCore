@@ -63,7 +63,7 @@ def ci_restore_target(monkeypatch, tmp_path, request):
         fixture["inspected"].append(image)
         return json.dumps([{"Id": image, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": {
             "org.opencontainers.image.revision": fixture.get("image_sha", sha),
-            "org.opencontainers.image.version": "0.8.5"}}}])
+            "org.opencontainers.image.version": "0.9.0"}}}])
 
     def execute(arguments, **_kwargs):
         fixture["readonly"].append(arguments)

@@ -266,7 +266,7 @@ def prepare_images(directory, sha, build, *, max_memory_bytes, max_cpus, backend
                     context = test_context(ROOT, directory, sha, execute, environment)
                 reference = f"trackvance-local-proof:{sha[:12]}-{directory.name[-12:]}-{role}"
                 labels = begin_image_build(image_registry, execution, owner_project, sha,
-                    "0.8.5", role, reference, image_command)
+                    "0.9.0", role, reference, image_command)
                 execute(["docker", "buildx", "build", "--builder", builder, "--load", "--platform", "linux/amd64",
                     *[argument for key, value in labels.items() for argument in ("--label", key + "=" + value)],
                     "-t", reference, "-f", dockerfile, "."],

@@ -20,6 +20,7 @@ def build(project: str) -> dict:
     if not re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", project) or os.getenv("TRACKVANCE_CERTIFICATION_PROJECT") != project:
         raise ValueError("Synthetic cleanup fixture requires the exact owned restored-copy environment.")
     from sqlalchemy import select
+
     from trackvance import models  # noqa: F401
     from trackvance.automation_models import (
         DeliveryTargetGuard,

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+
 from trackvance.db import Base
 from trackvance.models import Artifact, ArtifactLink, ExceptionCase
 

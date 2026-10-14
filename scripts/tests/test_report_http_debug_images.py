@@ -30,7 +30,7 @@ def archive_fixture(path, *, compressed=False, damage=None, engine_kind="legacy"
     layer_bytes = layer.getvalue()
     diff_id = "sha256:" + hashlib.sha256(layer_bytes).hexdigest()
     config = {"os": "linux", "architecture": "amd64", "config": {"Labels": {
-        "org.opencontainers.image.revision": SHA, "org.opencontainers.image.version": "0.8.5"}},
+        "org.opencontainers.image.revision": SHA, "org.opencontainers.image.version": "0.9.0"}},
         "rootfs": {"type": "layers", "diff_ids": [diff_id]}}
     if damage == "revision":
         config["config"]["Labels"]["org.opencontainers.image.revision"] = "f" * 40

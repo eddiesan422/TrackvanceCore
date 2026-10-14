@@ -334,7 +334,7 @@ def test_local_build_is_bounded_unique_and_labels_the_version_before_verificatio
     def inspect(reference, _sha):
         assert reference.startswith("trackvance-local-proof:")
         build = next(row for row in observed if reference in row)
-        assert "org.opencontainers.image.version=0.8.5" in build
+        assert "org.opencontainers.image.version=0.9.0" in build
         assert "--builder" in build and "--load" in build
         return {"Id": "sha256:" + "b" * 64}
     monkeypatch.setattr(run_local, "inspect_image", inspect)

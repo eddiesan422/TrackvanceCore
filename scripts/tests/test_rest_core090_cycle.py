@@ -99,3 +99,35 @@ def test_source_pagination_preserves_complete_population_and_empty_terminal_page
         assert len(rows) == [10, 10, 5, 0][page - 1]
         observed.extend(rows)
     assert observed == [cycle.synthetic_row(i) for i in range(1, 26)]
+
+
+def committed_batches(server):
+    result = []
+    for identity, first, last in (("z-first", 1, 11), ("a-last", 11, 26)):
+        records = [cycle.synthetic_row(i) for i in range(first, last)]
+        body = json.dumps({"batch_id": identity, "records": records}, separators=(",", ":")).encode()
+        status, confirmation = send(server, identity, records)
+        assert status == 200
+        result.append({"id": identity, "payload_sha256": confirmation["payload_sha256"],
+                       "rows": confirmation["rows"], "payload_bytes": len(body)})
+    return result
+
+
+def test_batch_metadata_matches_independent_durable_receiver_in_id_order(server):
+    batches = committed_batches(server)
+    state = receipt(server)
+    assert state["received_rows"] == state["confirmed_rows"] == 25
+    assert state["batches"] == 2 and state["payload_bytes"] == sum(batch["payload_bytes"] for batch in batches)
+    assert state["batch_metadata_sha256"] == cycle.batch_metadata_digest(batches)
+    assert state["batch_metadata_sha256"] == cycle.batch_metadata_digest(list(reversed(batches)))
+    assert state["population_sha256"] == state["expected_population_sha256"]
+
+
+@pytest.mark.parametrize(("field", "corrupt"), [("id", "other-batch"), ("payload_sha256", "0" * 64),
+                                               ("rows", 1), ("payload_bytes", 1)])
+def test_batch_metadata_oracle_detects_altered_api_evidence(server, field, corrupt):
+    batches = committed_batches(server)
+    batches[-1][field] = corrupt
+    state = receipt(server)
+    assert state["confirmed_rows"] == 25 and state["batches"] == 2
+    assert state["batch_metadata_sha256"] != cycle.batch_metadata_digest(batches)

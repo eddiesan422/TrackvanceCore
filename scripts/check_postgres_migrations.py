@@ -21,6 +21,7 @@ def seed_pre_corrections_baseline(connection) -> None:
     credential references. Its purpose is exact SQL preservation, not a live run.
     """
     import sqlalchemy as sa
+
     from trackvance.db import Base
 
     metadata = sa.MetaData()
@@ -127,6 +128,7 @@ def verify_corrections_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
+
     from trackvance.db import Base
 
     connection.rollback()
@@ -180,6 +182,7 @@ def verify_catalog_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
+
     from trackvance.db import Base
 
     connection.rollback()
@@ -226,6 +229,7 @@ def verify_people_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
+
     from trackvance.db import Base
 
     connection.rollback()
@@ -283,6 +287,7 @@ def verify_core090_preservation(connection, config) -> dict:
     from alembic import command
     from physical_schema_guard import validate_physical_schema
     from sqlalchemy.orm import Session
+
     from trackvance.db import Base
     from trackvance.sentinel_auto import backfill_automatic_monitors
 
@@ -366,6 +371,7 @@ def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     """Persist representative 0008 rows, not remote writes or credential files."""
     from sqlalchemy import MetaData
     from sqlalchemy.orm import Session, registry
+
     from trackvance import models
 
     # A migration fixture must use the actual old schema, not INSERT new ORM
@@ -501,6 +507,7 @@ def check() -> dict:
     from alembic.config import Config
     from alembic.migration import MigrationContext
     from sqlalchemy.engine import make_url
+
     from trackvance import models  # noqa: F401
     from trackvance.config import BACKEND_DIR, DATABASE_URL
     from trackvance.db import Base

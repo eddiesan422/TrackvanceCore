@@ -47,6 +47,43 @@ def expected_digest(count):
     return digest.hexdigest()
 
 
+def batch_metadata_digest(batches):
+    """Hash actual API evidence in ID order, independently from the receiver DB."""
+    digest = hashlib.sha256()
+    for batch in sorted(batches, key=lambda item: item["id"]):
+        digest.update(canonical_row({key: batch[key] for key in ("id", "payload_sha256", "rows", "payload_bytes")}))
+    return digest.hexdigest()
+
+
+def version_snapshot(version, rows):
+    """Persist exact metadata, without treating a sample as population proof."""
+    assert version["row_count"] == rows and version["column_count"] == len(FIELDS)
+    assert version["profile_status"] == "READY" and version["profile"]["row_count"] == rows
+    assert [(column["name"], column["logical_type"]) for column in version["schema"]] == [
+        (name, logical) for name, logical, _ in FIELDS]
+    profiles = {column["name"]: column for column in version["profile"]["columns"]}
+    assert profiles["optional"]["null_count"] == rows // 17
+    assert profiles["id"]["distinct_count"] == rows and profiles["ordinal"]["distinct_count"] == rows
+    assert all(profiles[name].get("parse_error_count", 0) == 0 for name, _, _ in FIELDS)
+    canonical = next(artifact for artifact in version["artifacts"] if artifact["artifact_id"] == version["canonical_artifact_id"])
+    assert len(canonical["sha256"]) == 64 and canonical["size_bytes"] > 0
+    assert len(version["schema_hash"]) == 64
+    return {key: version[key] for key in ("id", "dataset_id", "version", "source_type", "row_count", "column_count",
+        "schema_hash", "sha256", "size_bytes", "profile_status", "schema", "parent_version_id", "source_run_id",
+        "canonical_artifact_id")} | {"canonical_artifact": canonical,
+        "profile_columns": [{key: column[key] for key in ("name", "logical_type", "null_count", "distinct_count", "parse_error_count")
+                             if key in column} for column in version["profile"]["columns"]]}
+
+
+def run_timing(run):
+    started = datetime.fromisoformat(run["started_at"])
+    finished = datetime.fromisoformat(run["finished_at"])
+    seconds = (finished - started).total_seconds()
+    assert seconds >= 0
+    return {"created_at": run["created_at"], "started_at": run["started_at"], "finished_at": run["finished_at"],
+            "execution_seconds": seconds}
+
+
 def require_codex():
     if os.getenv("TRACKVANCE_CERTIFICATION_PROJECT") != "trackvance-codex":
         raise RuntimeError("Este runner exige el entorno sintético trackvance-codex.")
@@ -64,7 +101,9 @@ def receiver(rows, port, db_path, *, serve_forever=True):
     guard = threading.Lock()
     with sqlite3.connect(db_path) as db:
         db.execute("PRAGMA journal_mode=WAL")
-        db.execute("CREATE TABLE IF NOT EXISTS batches (id TEXT PRIMARY KEY, hash TEXT NOT NULL, count INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS batches (id TEXT PRIMARY KEY, hash TEXT NOT NULL, count INTEGER NOT NULL, payload_bytes INTEGER NOT NULL)")
+        if "payload_bytes" not in {column[1] for column in db.execute("PRAGMA table_info(batches)")}:
+            raise RuntimeError("El receptor anterior no conserva bytes; usa un archivo rest-core090-* nuevo para la evidencia completa.")
         db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, digest TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS identity (rows INTEGER NOT NULL)")
         prior = db.execute("SELECT rows FROM identity").fetchone()
@@ -110,6 +149,16 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                 with guard, sqlite3.connect(db_path) as db:
                     count = db.execute("SELECT count(*) FROM records").fetchone()[0]
                     batch_count = db.execute("SELECT count(*) FROM batches").fetchone()[0]
+                    metadata_digest = hashlib.sha256()
+                    confirmed_rows, payload_bytes = 0, 0
+                    # Build from the receiver's durable data rather than from
+                    # API evidence or the helper that hashes that evidence.
+                    for identity, digest, batch_rows, batch_bytes in db.execute("SELECT id,hash,count,payload_bytes FROM batches ORDER BY id"):
+                        encoded = json.dumps({"id": identity, "payload_sha256": digest, "rows": batch_rows, "payload_bytes": batch_bytes},
+                                             ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+                        metadata_digest.update(encoded)
+                        confirmed_rows += batch_rows
+                        payload_bytes += batch_bytes
                     # The receiver stores per-row digest and hashes the complete
                     # ordered population independently from source file hashes.
                     aggregate = hashlib.sha256()
@@ -122,6 +171,8 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                 usage = resource.getrusage(resource.RUSAGE_SELF)
                 self.respond(200, {"project": "trackvance-codex", "expected_rows": rows, "received_rows": count,
                     "batches": batch_count, "population_sha256": aggregate.hexdigest(),
+                    "batch_metadata_sha256": metadata_digest.hexdigest(), "confirmed_rows": confirmed_rows,
+                    "payload_bytes": payload_bytes, "batch_metadata_order": "ID_ASCENDING_UTF8_JSON_SORTED_KEYS_LF",
                     "expected_population_sha256": expected.hexdigest(), "expected_rows_serialized_sha256": oracle,
                     "oracle": "EVERY_RECEIVED_ROW_EXACT_AND_ORDERED_ID_SHA256", "duplicate_ids": 0,
                     "receiver_seconds": time.monotonic() - started, "max_rss_kib": usage.ru_maxrss,
@@ -158,13 +209,13 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                     verified.append((row["id"], hashlib.sha256(canonical_row(row)).hexdigest()))
                 with guard, sqlite3.connect(db_path) as db:
                     db.execute("BEGIN IMMEDIATE")
-                    prior = db.execute("SELECT hash,count FROM batches WHERE id=?", [identity]).fetchone()
+                    prior = db.execute("SELECT hash,count,payload_bytes FROM batches WHERE id=?", [identity]).fetchone()
                     if prior:
-                        if prior != (digest, len(records)):
+                        if prior != (digest, len(records), size):
                             raise ValueError()
                     else:
                         db.executemany("INSERT INTO records VALUES (?,?)", verified)
-                        db.execute("INSERT INTO batches VALUES (?,?,?)", [identity, digest, len(records)])
+                        db.execute("INSERT INTO batches VALUES (?,?,?,?)", [identity, digest, len(records), size])
                 self.respond(200, {"accepted": True, "rows": len(records), "batch_id": identity, "payload_sha256": digest})
             except (ValueError, KeyError, TypeError, sqlite3.IntegrityError):
                 # No received dataset values or credentials are returned/logged.
@@ -224,6 +275,7 @@ def wait_for(callback, predicate, *, timeout, label):
 def certify(api_url, receiver_url, rows, evidence, timeout):
     project = require_codex()
     started = time.monotonic()
+    cpu_started = resource.getrusage(resource.RUSAGE_SELF)
     nonce = uuid.uuid4().hex[:12]
     evidence_path = Path(evidence).resolve()
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,20 +327,33 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert acquisition["status"] == "SUCCESS", acquisition.get("error_code")
         assert acquisition["published_rows"] == rows
         source_id = acquisition["output_version_id"]
-        stages["acquisition"] = {"id": acquisition["id"], "version_id": source_id, "rows": rows, "duration_seconds": acquisition["duration_seconds"], "result": "PASS"}
+        source_version = next(version for version in client.call(f"/datasets/{dataset_id}")["versions"] if version["id"] == source_id)
+        assert source_version["source_type"] == "REST"
+        stages["acquisition"] = {"id": acquisition["id"], "version_id": source_id, "rows": rows,
+            "duration_seconds": acquisition["duration_seconds"], "version": version_snapshot(source_version, rows), "result": "PASS"}
         def intake_occurrence():
             items = client.call(f"/intake/contracts/{contract['id']}/occurrences")["items"]
             return next((item for item in items if item["dataset_version_id"] == source_id), {})
         occurrence = wait_for(intake_occurrence, lambda result: result.get("status") in TERMINAL, timeout=timeout, label="automatic-intake")
         intake = client.call(f"/runs/{occurrence['run_id']}")
         assert intake["status"] == "SUCCESS" and intake["decision"] == "APPROVED" and intake["output_version_id"]
+        intake_manifest = client.call(f"/runs/{intake['id']}/evidence")
+        output_identity = next(output for output in intake_manifest["outputs"] if output["dataset_version_id"] == intake["output_version_id"])
+        output_version = next(version for version in client.call(f"/datasets/{output_identity['dataset_id']}")["versions"]
+                              if version["id"] == intake["output_version_id"])
+        assert output_version["source_type"] == "INTAKE_OUTPUT" and output_version["parent_version_id"] == source_id
+        assert output_version["source_run_id"] == intake["id"]
+        output_snapshot = version_snapshot(output_version, rows)
+        assert output_snapshot["canonical_artifact"]["sha256"] == output_identity["canonical_sha256"]
         stages["intake"] = {"run_id": intake["id"], "configuration_id": contract["id"], "schedule_id": schedule["id"],
-            "output_version_id": intake["output_version_id"], "decision": intake["decision"], "result": "PASS"}
+            "output_version_id": intake["output_version_id"], "decision": intake["decision"], "timing": run_timing(intake),
+            "version": output_snapshot, "result": "PASS"}
         def sentinel_run():
             runs = client.call("/runs")["items"]
             return next((run for run in runs if run["module"] == "sentinel" and run["dataset_version_id"] == source_id), {})
         monitor_run = wait_for(sentinel_run, lambda result: result.get("status") in TERMINAL, timeout=timeout, label="automatic-sentinel")
         assert monitor_run["status"] == "SUCCESS"
+        monitor_run = client.call(f"/runs/{monitor_run['id']}")
         visual = client.call(f"/runs/{monitor_run['id']}/visual-summary")
         assert visual["dataset_version_id"] == source_id and visual["scans"] == 0 and visual["indicators"]["row_count"] == rows
         expected_nulls = rows // 17
@@ -296,14 +361,14 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert int(optional["null_count"]) == expected_nulls
         assert visual["indicators"]["duplicate_row_count"] == 0
         stages["sentinel"] = {"run_id": monitor_run["id"], "visual_version_id": visual["dataset_version_id"], "scans_when_opened": 0,
-                              "optional_nulls": expected_nulls, "duplicate_rows": 0, "result": "PASS"}
+                              "optional_nulls": expected_nulls, "duplicate_rows": 0, "timing": run_timing(monitor_run), "result": "PASS"}
         def delivery_occurrence():
             items = client.call(f"/delivery/automations/{automation['id']}/occurrences")["items"]
             return next((item for item in items if item["source_run_id"] == intake["id"]), {})
         chained = wait_for(delivery_occurrence, lambda result: result.get("status") in TERMINAL, timeout=timeout, label="chained-rest-delivery")
         delivery = client.call(f"/runs/{chained['run_id']}")
         assert delivery["status"] == "SUCCESS" and delivery["decision"] == "COMMITTED"
-        assert chained["dataset_version_id"] == intake["output_version_id"]
+        assert chained["dataset_version_id"] == delivery["dataset_version_id"] == intake["output_version_id"]
         batches = []
         while True:
             page = client.call(f"/delivery/runs/{delivery['id']}/rest-batches?limit=200&offset={len(batches)}")
@@ -314,12 +379,20 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert sum(batch["rows"] for batch in batches) == rows
         assert all(batch["status"] == "COMMITTED" and batch["attempts"] == 1 for batch in batches)
         assert len({batch["id"] for batch in batches}) == len(batches)
+        assert all(batch["run_id"] == delivery["id"] and batch["confirmed_payload_bytes"] == batch["payload_bytes"]
+                   and len(batch["payload_sha256"]) == 64 for batch in batches)
+        batch_digest = batch_metadata_digest(batches)
+        payload_bytes = sum(batch["payload_bytes"] for batch in batches)
         with urllib.request.urlopen(receiver_url + "/receipt", timeout=120) as response:
             receipt = json.load(response)
         assert receipt["received_rows"] == rows and receipt["population_sha256"] == receipt["expected_population_sha256"]
         assert receipt["batches"] == len(batches) and receipt["duplicate_ids"] == 0
+        assert receipt["batch_metadata_sha256"] == batch_digest
+        assert receipt["confirmed_rows"] == rows and receipt["payload_bytes"] == payload_bytes
         stages["delivery"] = {"run_id": delivery["id"], "automation_id": automation["id"], "rows": rows, "batch_count": len(batches),
-                              "receiver": receipt, "result": "PASS"}
+            "batch_metadata_sha256": batch_digest, "batch_metadata_order": receipt["batch_metadata_order"],
+            "payload_bytes": payload_bytes, "all_attempts": 1, "all_statuses": "COMMITTED", "timing": run_timing(delivery),
+            "receiver": receipt, "result": "PASS"}
         # Full lineage metadata is bounded and must identify an unfinished
         # traversal honestly; recursively expand only returned pending branches.
         lineage = client.call(f"/catalog/datasets/{dataset_id}/lineage-graph?version_id={source_id}&max_nodes=500&max_depth=8")
@@ -336,7 +409,9 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
     finally:
         report["duration_seconds"] = time.monotonic() - started
         report["finished_at"] = datetime.now(UTC).isoformat()
-        report["runner"] = {"identity": "rest_core090_cycle", "max_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        report["runner"] = {"identity": "rest_core090_cycle", "max_rss_kib": usage.ru_maxrss,
+            "cpu_seconds": usage.ru_utime + usage.ru_stime - cpu_started.ru_utime - cpu_started.ru_stime}
         evidence_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps({"result": report["result"], "rows": rows, "duration_seconds": report["duration_seconds"], "evidence": str(evidence_path)}), flush=True)
 

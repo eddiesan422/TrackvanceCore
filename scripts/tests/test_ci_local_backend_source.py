@@ -39,11 +39,11 @@ def source_repository(tmp_path, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(payload, encoding="utf-8")
     historical = {}
-    for version in (*VERSIONS, "0.8.5"):
+    for version in (*VERSIONS, "0.9.0"):
         (repository / "backend/pyproject.toml").write_text('[project]\nversion="' + version + '"\n', encoding="utf-8")
         git(repository, "add", ".")
         git(repository, "commit", "--quiet", "-m", "Source fixture " + version)
-        if version != "0.8.5":
+        if version != "0.9.0":
             historical[version] = git(repository, "rev-parse", "HEAD")
     (repository / ".env").write_text("PRIVATE_FIXTURE=must-not-be-copied\n", encoding="utf-8")
     private = repository / "backend/credentials"

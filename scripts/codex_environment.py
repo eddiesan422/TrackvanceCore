@@ -15,12 +15,12 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tomllib
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-import tomllib
 from ci.local_resources import (
     OWNER_LABEL,
     PERMANENT_LABEL,
@@ -393,7 +393,7 @@ def validate_schema_upgrade(args, value, sha, existing):
     manifest = docker_state.verify_backup(backup)
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        restored_at = datetime.fromisoformat(receipt["restored_at"].replace("Z", "+00:00"))
+        restored_at = datetime.fromisoformat(receipt["restored_at"])
     except (OSError, ValueError, KeyError, TypeError):
         raise ValueError("VERIFIED_SCHEMA_UPGRADE_RESTORE_RECEIPT_REQUIRED") from None
     require(receipt.get("status") == "STOPPED_VERIFIED" and receipt.get("restored_migration") == docker_state.CURRENT_MIGRATION

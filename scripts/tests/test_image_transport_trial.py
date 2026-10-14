@@ -216,7 +216,7 @@ def test_original_failure_is_persisted_even_when_cleanup_fails(tmp_path, monkeyp
 
 def test_same_owner_labels_cannot_adopt_different_image_configuration_for_cleanup(tmp_path, monkeypatch):
     tool = instance(tmp_path)
-    labels = {"org.opencontainers.image.revision": SHA, "org.opencontainers.image.version": "0.8.5", trial.OWNER: tool.project}
+    labels = {"org.opencontainers.image.revision": SHA, "org.opencontainers.image.version": "0.9.0", trial.OWNER: tool.project}
     expected = image_archive(tmp_path / "expected.tar", SHA, "backend", config_change={
         "config": {"Labels": labels, "Env": ["correct"]}})
     wrong = image_archive(tmp_path / "wrong.tar", SHA, "backend", config_change={

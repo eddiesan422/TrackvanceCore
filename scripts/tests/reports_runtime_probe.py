@@ -29,6 +29,7 @@ def diagnose(force_default_cpu_count: int | None = None, public_wrapper_baseline
         os.environ["DATABASE_URL"] = "sqlite:///:memory:"
         os.environ["TRACKVANCE_STORAGE_DIR"] = str(directory / "storage")
         import polars as pl
+
         from trackvance.report_config import ReportLimits
         from trackvance.report_query import compile_draft
 

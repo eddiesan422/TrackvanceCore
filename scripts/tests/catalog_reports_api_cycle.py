@@ -256,6 +256,7 @@ def draft(sources, kind="INNER", *, triple=False):
 
 def verify_materialized(execution, expected):
     import polars as pl
+
     from trackvance.artifactstore import storage_provider
     from trackvance.db import SessionLocal
     from trackvance.models import Artifact, DatasetVersion
