@@ -1,5 +1,6 @@
 """The real synthetic receiver rejects corrupt late values and atomic duplicates."""
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -131,3 +132,92 @@ def test_batch_metadata_oracle_detects_altered_api_evidence(server, field, corru
     state = receipt(server)
     assert state["confirmed_rows"] == 25 and state["batches"] == 2
     assert state["batch_metadata_sha256"] != cycle.batch_metadata_digest(batches)
+
+
+def partial_lineage_views():
+    def node(kind, identity, **fields):
+        return {"id": f"{kind}:{identity}", "resource_id": identity, "type": kind, **fields}
+    core_nodes = [node("DATASET_VERSION", "source", dataset_id="source-dataset"),
+                  node("DATASET_VERSION", "output", dataset_id="output-dataset"),
+                  node("RUN", "intake", status="SUCCESS", decision="APPROVED", module="intake"),
+                  node("RUN", "delivery", status="SUCCESS", decision="COMMITTED", module="DELIVERY")]
+    def edge(identity, relation, stored_source, stored_target, source, target, state="RECORDED"):
+        return {"id": identity, "stored_relation": relation, "stored_source": stored_source,
+                "stored_target": stored_target, "source": source, "target": target, "state": state}
+    core_edges = [edge("input", "RUN_INPUT", "RUN:intake", "DATASET_VERSION:source", "DATASET_VERSION:source", "RUN:intake"),
+                  edge("output", "RUN_OUTPUT", "RUN:intake", "DATASET_VERSION:output", "RUN:intake", "DATASET_VERSION:output"),
+                  edge("derived", "DERIVED_FROM", "DATASET_VERSION:output", "DATASET_VERSION:source", "DATASET_VERSION:source", "DATASET_VERSION:output"),
+                  edge("delivery", "DELIVERY_INPUT", "DATASET_VERSION:output", "RUN:delivery", "DATASET_VERSION:output", "RUN:delivery")]
+    source = {"root_id": "DATASET_VERSION:source", "version_id": "source", "nodes": core_nodes + [node("ARTIFACT", f"source-{i}") for i in range(496)],
+              "edges": core_edges, "complete": False, "pending_branches": ["RUN:delivery"], "limits": {"max_depth": 8, "max_nodes": 500}}
+    output = {"root_id": "DATASET_VERSION:output", "version_id": "output",
+              "nodes": core_nodes + [node("DELIVERY_DESTINATION_VERSION", "destination")] + [node("ARTIFACT", f"output-{i}") for i in range(495)],
+              "edges": core_edges + [edge("confirmed", "DELIVERED_TO", "RUN:delivery", "DELIVERY_DESTINATION_VERSION:destination",
+                                          "RUN:delivery", "DELIVERY_DESTINATION_VERSION:destination", "CONFIRMED")],
+              "complete": False, "pending_branches": ["ARTIFACT:output-0"], "limits": {"max_depth": 8, "max_nodes": 500}}
+    return source, output
+
+
+def prove_views(source, output):
+    class ReadOnlyClient:
+        def __init__(self):
+            self.calls = []
+        def call(self, path):
+            self.calls.append(path)
+            assert path in ["/catalog/datasets/source-dataset/lineage-graph?version_id=source&max_nodes=500&max_depth=8",
+                            "/catalog/datasets/output-dataset/lineage-graph?version_id=output&max_nodes=500&max_depth=8"]
+            return copy.deepcopy(source if "version_id=source&" in path else output)
+    client = ReadOnlyClient()
+    proof = cycle.lineage_proof(client, "source-dataset", "source", "output-dataset", "output", "intake", "delivery", "destination")
+    return proof, client.calls
+
+
+def test_lineage_combines_two_actual_bounded_views_without_claiming_full_traversal():
+    proof, calls = prove_views(*partial_lineage_views())
+    assert len(calls) == proof["view_count"] == 2
+    assert proof["result"] == "PASS" and proof["core_links_complete"] is True and proof["core_edge_count"] == 5
+    assert proof["complete"] is False and proof["pending_branches"] == ["ARTIFACT:output-0", "RUN:delivery"]
+    assert all(view["nodes"] == 500 and view["complete"] is False for view in proof["views"])
+    assert proof["missing_critical_node_ids"] == [] and len(proof["critical_node_ids"]) == 5
+    assert len(proof["metadata_sha256"]) == len(proof["core_edges_sha256"]) == 64
+
+
+@pytest.mark.parametrize("damage", ["missing-destination", "unconfirmed", "wrong-stored-id", "wrong-display-id"])
+def test_lineage_refuses_missing_or_uncertain_or_unrelated_delivery(damage):
+    source, output = partial_lineage_views()
+    if damage == "missing-destination":
+        output["nodes"] = [node for node in output["nodes"] if node["type"] != "DELIVERY_DESTINATION_VERSION"]
+        output["edges"] = output["edges"][:-1]
+    elif damage == "unconfirmed":
+        output["edges"][-1]["state"] = "UNCONFIRMED"
+    elif damage == "wrong-stored-id":
+        output["edges"][-1]["stored_target"] = "DELIVERY_DESTINATION_VERSION:foreign"
+    else:
+        output["edges"][-1]["target"] = "ARTIFACT:output-0"
+    proof, _ = prove_views(source, output)
+    assert proof["result"] == "FAIL" and proof["core_links_complete"] is False and proof["core_edge_count"] == 4
+
+
+def test_lineage_refuses_response_root_from_another_dataset():
+    source, output = partial_lineage_views()
+    output["nodes"][1]["dataset_id"] = "foreign"
+    with pytest.raises(AssertionError):
+        prove_views(source, output)
+
+
+def test_lineage_never_skips_authorization_when_selecting_approved_output():
+    source, _ = partial_lineage_views()
+    class DeniedClient:
+        def call(self, path):
+            if "version_id=output&" in path:
+                raise AssertionError("HTTP 403 expected 200")
+            return source
+    with pytest.raises(AssertionError, match="HTTP 403"):
+        cycle.lineage_proof(DeniedClient(), "source-dataset", "source", "output-dataset", "output", "intake", "delivery", "destination")
+
+
+def test_lineage_refuses_product_response_above_existing_node_limit():
+    source, output = partial_lineage_views()
+    source["nodes"].append({"id": "ARTIFACT:too-many", "type": "ARTIFACT", "resource_id": "too-many"})
+    with pytest.raises(AssertionError):
+        prove_views(source, output)

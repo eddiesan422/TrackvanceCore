@@ -272,6 +272,80 @@ def wait_for(callback, predicate, *, timeout, label):
     raise AssertionError(f"Timeout real esperando {label}.")
 
 
+def lineage_proof(client, source_dataset_id, source_version_id, output_dataset_id, output_version_id,
+                  intake_run_id, delivery_run_id, destination_version_id):
+    """Verify actual core relationships in bounded, authorized selected-version views.
+
+    The API has no branch cursor. Selecting the approved output is a second
+    supported graph root; an unfinished technical traversal remains unfinished.
+    """
+    source_key, output_key = f"DATASET_VERSION:{source_version_id}", f"DATASET_VERSION:{output_version_id}"
+    intake_key, delivery_key = f"RUN:{intake_run_id}", f"RUN:{delivery_run_id}"
+    destination_key = f"DELIVERY_DESTINATION_VERSION:{destination_version_id}"
+    critical = {source_key, output_key, intake_key, delivery_key, destination_key}
+    relationships = [
+        ("RUN_INPUT", intake_key, source_key, source_key, intake_key),
+        ("RUN_OUTPUT", intake_key, output_key, intake_key, output_key),
+        ("DERIVED_FROM", output_key, source_key, source_key, output_key),
+        ("DELIVERY_INPUT", output_key, delivery_key, output_key, delivery_key),
+        ("DELIVERED_TO", delivery_key, destination_key, delivery_key, destination_key),
+    ]
+    nodes, edges, pending, views = {}, {}, set(), []
+
+    def observed_core():
+        found = []
+        for relation, stored_source, stored_target, displayed_source, displayed_target in relationships:
+            edge = next((item for item in edges.values() if item["stored_relation"] == relation
+                         and item["stored_source"] == stored_source and item["stored_target"] == stored_target
+                         and item["source"] == displayed_source and item["target"] == displayed_target
+                         and item["state"] == ("CONFIRMED" if relation == "DELIVERED_TO" else "RECORDED")), None)
+            if edge:
+                found.append({key: edge[key] for key in ("id", "stored_relation", "stored_source", "stored_target", "source", "target", "state")})
+        return found
+
+    for role, dataset_id, version_id in [("SOURCE", source_dataset_id, source_version_id),
+                                         ("APPROVED_OUTPUT", output_dataset_id, output_version_id)]:
+        graph = client.call(f"/catalog/datasets/{dataset_id}/lineage-graph?version_id={version_id}&max_nodes=500&max_depth=8")
+        assert graph["root_id"] == f"DATASET_VERSION:{version_id}" and graph["version_id"] == version_id
+        assert graph["limits"] == {"max_depth": 8, "max_nodes": 500}
+        assert type(graph["complete"]) is bool and graph["complete"] == (not graph["pending_branches"])
+        identities = {node["id"] for node in graph["nodes"]}
+        assert len(identities) == len(graph["nodes"]) <= 500
+        root = next(node for node in graph["nodes"] if node["id"] == graph["root_id"])
+        assert root["type"] == "DATASET_VERSION" and root["resource_id"] == version_id and root["dataset_id"] == dataset_id
+        assert set(graph["pending_branches"]) <= identities
+        assert len({edge["id"] for edge in graph["edges"]}) == len(graph["edges"])
+        assert all(edge["source"] in identities and edge["target"] in identities for edge in graph["edges"])
+        for node in graph["nodes"]:
+            assert node["id"] == f"{node['type']}:{node['resource_id']}"
+            nodes[node["id"]] = node
+        for edge in graph["edges"]:
+            edges[edge["id"]] = edge
+        pending.update(graph["pending_branches"])
+        graph_hash = hashlib.sha256(json.dumps(graph, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        views.append({"role": role, "dataset_id": dataset_id, "root_id": graph["root_id"], "version_id": version_id,
+                      "nodes": len(graph["nodes"]), "edges": len(graph["edges"]), "complete": graph["complete"],
+                      "pending_branches": graph["pending_branches"], "limits": graph["limits"], "metadata_sha256": graph_hash})
+        if critical <= nodes.keys() and len(observed_core()) == len(relationships):
+            break
+    core = observed_core()
+    core_complete = critical <= nodes.keys() and len(core) == len(relationships)
+    if core_complete:
+        assert nodes[intake_key]["status"] == "SUCCESS" and nodes[intake_key]["decision"] == "APPROVED"
+        assert nodes[delivery_key]["status"] == "SUCCESS" and nodes[delivery_key]["decision"] == "COMMITTED"
+        assert nodes[intake_key]["module"] == "intake" and nodes[delivery_key]["module"] == "DELIVERY"
+        assert nodes[source_key]["dataset_id"] == source_dataset_id and nodes[output_key]["dataset_id"] == output_dataset_id
+    metadata = {"nodes": [nodes[key] for key in sorted(nodes)], "edges": [edges[key] for key in sorted(edges)]}
+    return {"proof_version": 2, "verification_scope": "CORE_REGISTERED_CHAIN_WITH_BOUNDED_VIEWS",
+            "nodes": len(nodes), "edges": len(edges), "complete": all(view["complete"] for view in views),
+            "pending_branches": sorted(pending), "views": views, "view_count": len(views),
+            "critical_node_ids": sorted(critical), "missing_critical_node_ids": sorted(critical - nodes.keys()),
+            "core_edges": core, "core_edge_count": len(core), "core_links_complete": core_complete,
+            "metadata_sha256": hashlib.sha256(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "core_edges_sha256": hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "result": "PASS" if core_complete else "FAIL"}
+
+
 def certify(api_url, receiver_url, rows, evidence, timeout):
     project = require_codex()
     started = time.monotonic()
@@ -390,18 +464,14 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert receipt["batch_metadata_sha256"] == batch_digest
         assert receipt["confirmed_rows"] == rows and receipt["payload_bytes"] == payload_bytes
         stages["delivery"] = {"run_id": delivery["id"], "automation_id": automation["id"], "rows": rows, "batch_count": len(batches),
+            "destination_version_id": destination["destination_version_id"],
             "batch_metadata_sha256": batch_digest, "batch_metadata_order": receipt["batch_metadata_order"],
             "payload_bytes": payload_bytes, "all_attempts": 1, "all_statuses": "COMMITTED", "timing": run_timing(delivery),
             "receiver": receipt, "result": "PASS"}
-        # Full lineage metadata is bounded and must identify an unfinished
-        # traversal honestly; recursively expand only returned pending branches.
-        lineage = client.call(f"/catalog/datasets/{dataset_id}/lineage-graph?version_id={source_id}&max_nodes=500&max_depth=8")
-        assert lineage["version_id"] == source_id
-        node_ids = {node["resource_id"] for node in lineage["nodes"]}
-        assert {source_id, intake["id"], intake["output_version_id"], delivery["id"], destination["destination_version_id"]} <= node_ids
-        assert any(edge["state"] == "CONFIRMED" for edge in lineage["edges"])
-        stages["lineage"] = {"nodes": len(lineage["nodes"]), "edges": len(lineage["edges"]),
-                             "complete": lineage["complete"], "pending_branches": lineage["pending_branches"], "result": "PASS"}
+        stages["lineage"] = lineage_proof(client, dataset_id, source_id, output_identity["dataset_id"],
+                                          intake["output_version_id"], intake["id"], delivery["id"],
+                                          destination["destination_version_id"])
+        assert stages["lineage"]["result"] == "PASS"
         report["result"] = "PASS"
     except Exception as error:
         report["result"], report["error_type"] = "FAIL", type(error).__name__
