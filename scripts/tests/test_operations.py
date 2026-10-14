@@ -5,7 +5,6 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-
 from trackvance.credential_store import EncryptedFileSecretStore
 
 SCRIPT = Path(__file__).resolve().parents[1] / "backup_local.py"

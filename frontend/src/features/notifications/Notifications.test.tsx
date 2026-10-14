@@ -1,5 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useLocation } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
 import { renderApp } from '../../test/render'
@@ -7,6 +8,8 @@ import { NotificationIndicator, NotificationsPage } from './Notifications'
 
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn() }))
 beforeEach(() => vi.resetAllMocks())
+
+function Location() { return <output aria-label="Ruta actual">{useLocation().pathname}</output> }
 
 it('does not fetch or expose the inbox without permission', () => {
   renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: [] })
@@ -23,7 +26,7 @@ it('separates technical SUCCESS from a rejected business result and marks only i
   expect(await screen.findByText('Completada', { selector: 'span' })).toBeInTheDocument()
   expect(screen.getByText('Rechazado')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute('href', '/runs/validated')
-  await user.click(screen.getByRole('button', { name: /^Marcar leída$/ }))
+  await user.click(screen.getByRole('checkbox', { name: /^Leída:/ }))
   expect(post).toHaveBeenCalledWith('/notifications/inbox/notification/read')
 })
 
@@ -53,7 +56,7 @@ it('preserves distinct detail destinations for omitted and committed chained not
   expect(within(blocked).getByRole('link', { name: 'Ver detalle' })).toHaveAttribute('href', '/delivery/automation/empty-output')
   const committed = screen.getByRole('row', { name: /Entrega confirmada en el destino\./ })
   expect(within(committed).getByText('Confirmado', { exact: true })).toBeInTheDocument()
-  expect(within(committed).getByText('DELIVERY · Encadenado', { exact: true })).toBeInTheDocument()
+  expect(within(committed).getByText('Data Delivery · Encadenado', { exact: true })).toBeInTheDocument()
   expect(within(committed).getByRole('link', { name: 'Ver detalle' })).toHaveAttribute('href', '/runs/exact-accepted')
 })
 
@@ -69,19 +72,19 @@ it('confirms read/unread changes in filtered lists and the counter without waiti
   vi.mocked(post).mockImplementation(async path => { readAt = path.endsWith('/unread') ? null : '2030-01-01T11:00:00Z'; return { ...item, read_at: readAt } })
   const user = userEvent.setup()
   const view = renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
-  await screen.findByRole('button', { name: 'Marcar como no leída' })
+  expect(await screen.findByRole('checkbox', { name: /^Leída:/ })).toBeChecked()
   await user.selectOptions(screen.getByLabelText('Lectura'), 'READ')
-  await user.click(await screen.findByRole('button', { name: 'Marcar como no leída' }))
+  await user.click(await screen.findByRole('checkbox', { name: /^Leída:/ }))
   expect(await screen.findByText('Sin notificaciones')).toBeInTheDocument()
   expect(await screen.findByRole('link', { name: 'Ver notificaciones, 1 sin leer' })).toBeInTheDocument()
   expect(post).toHaveBeenLastCalledWith('/notifications/inbox/personal/unread')
   await user.selectOptions(screen.getByLabelText('Lectura'), 'UNREAD')
-  await user.click(await screen.findByRole('button', { name: 'Marcar leída' }))
+  await user.click(await screen.findByRole('checkbox', { name: /^Leída:/ }))
   expect(await screen.findByText('Sin notificaciones')).toBeInTheDocument()
   await waitFor(() => expect(screen.getByRole('link', { name: 'Ver notificaciones' })).toBeInTheDocument())
   await user.selectOptions(screen.getByLabelText('Lectura'), 'ALL')
-  await user.click(await screen.findByRole('button', { name: 'Marcar como no leída' }))
-  expect(await screen.findByRole('button', { name: 'Marcar leída' })).toBeInTheDocument()
+  await user.click(await screen.findByRole('checkbox', { name: /^Leída:/ }))
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: /^Leída:/ })).not.toBeChecked())
   view.unmount()
   renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
   expect(await screen.findByText('Sin leer ·')).toBeInTheDocument()
@@ -93,11 +96,12 @@ it('keeps confirmed read state and counter unchanged when marking unread fails',
   vi.mocked(post).mockRejectedValue(new Error('No tienes permiso para modificar esta notificación.'))
   const user = userEvent.setup()
   renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
-  await user.click(await screen.findByRole('button', { name: 'Marcar como no leída' }))
+  await user.click(await screen.findByRole('checkbox', { name: /^Leída:/ }))
   expect(await screen.findByText('No tienes permiso para modificar esta notificación.')).toBeInTheDocument()
   expect(screen.queryByText('Sin leer ·')).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Ver notificaciones' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Marcar como no leída' })).toBeEnabled()
+  expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeEnabled()
+  expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeChecked()
 })
 
 it('shows the exact public acquisition diagnostic and leaves historical notifications uninterpreted', async () => {
@@ -111,4 +115,58 @@ it('shows the exact public acquisition diagnostic and leaves historical notifica
   expect(within(item).getByText(/ACQUISITION_ROW_LIMIT · Referencia: safe-reference/)).toBeInTheDocument()
   expect(within(item).getAllByText(message, { exact: false })).toHaveLength(1)
   expect(screen.getByRole('row', { name: /La adquisición histórica falló/ })).not.toHaveTextContent('ACQUISITION_ROW_LIMIT')
+})
+
+it('locks synchronous double clicks and preserves the confirmed checkbox when subsequent refresh fails', async () => {
+  const item = { id: 'locked', module: 'sentinel', origin: 'AUTOMATIC', status: 'SUCCESS', decision: 'HEALTHY', description: 'Monitor completado.', created_at: '2030-01-01T09:00:00Z', read_at: null, detail_url: '/runs/monitor' }
+  let failRefresh = false, resolve!: (value: Omit<typeof item, 'read_at'> & { read_at: string }) => void
+  vi.mocked(api).mockImplementation(async path => {
+    if (failRefresh) throw new Error('No se pudo actualizar la bandeja.')
+    return path.includes('unread-count') ? { unread_count: 1 } : { items: [item], total: 1 }
+  })
+  vi.mocked(post).mockImplementation(() => new Promise(done => { resolve = done }))
+  renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
+  const checkbox = await screen.findByRole('checkbox', { name: /^Leída:/ })
+  fireEvent.click(checkbox); fireEvent.click(checkbox)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  expect(checkbox).toBeDisabled()
+  expect(checkbox).not.toBeChecked()
+  failRefresh = true
+  await act(async () => resolve({ ...item, read_at: '2030-01-01T10:00:00Z' }))
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeChecked())
+  expect(await screen.findByRole('link', { name: 'Ver notificaciones, contador no disponible' })).toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeEnabled()
+})
+
+it('keeps detail on the same page after a read failure and navigates only after a confirmed retry', async () => {
+  let readAt: string | null = null
+  const item = { id: 'detail', module: 'intake', origin: 'MANUAL', status: 'SUCCESS', decision: 'APPROVED', description: 'Intake completado.', created_at: '2030-01-01T09:00:00Z', detail_url: '/runs/approved' }
+  vi.mocked(api).mockImplementation(async () => ({ items: [{ ...item, read_at: readAt }], total: 1 }))
+  let reject!: (error: Error) => void
+  vi.mocked(post).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+  const user = userEvent.setup()
+  renderApp(<><Location/><NotificationsPage/></>, { permissions: ['notifications:read'], path: '/notifications' })
+  await user.click(await screen.findByRole('link', { name: 'Ver detalle' }))
+  expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/notifications')
+  await act(async () => reject(new Error('No se pudo confirmar la lectura.')))
+  expect(await screen.findByText('No se pudo confirmar la lectura.')).toBeInTheDocument()
+  expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/notifications')
+  vi.mocked(post).mockImplementationOnce(async () => { readAt = '2030-01-01T10:00:00Z'; return { ...item, read_at: readAt } })
+  await user.click(screen.getByRole('link', { name: 'Ver detalle' }))
+  await waitFor(() => expect(screen.getByLabelText('Ruta actual')).toHaveTextContent('/runs/approved'))
+  expect(post).toHaveBeenCalledTimes(2)
+})
+
+it('supports changing read status with the keyboard Space key', async () => {
+  let readAt: string | null = null
+  const item = { id: 'keyboard', module: 'sentinel', origin: 'AUTOMATIC', status: 'SUCCESS', decision: 'HEALTHY', description: 'Estado del monitor.', created_at: '2030-01-01T09:00:00Z', detail_url: '/runs/monitor' }
+  vi.mocked(api).mockImplementation(async () => ({ items: [{ ...item, read_at: readAt }], total: 1 }))
+  vi.mocked(post).mockImplementation(async () => { readAt = '2030-01-01T10:00:00Z'; return { ...item, read_at: readAt } })
+  const user = userEvent.setup()
+  renderApp(<NotificationsPage/>, { permissions: ['notifications:read'] })
+  const checkbox = await screen.findByRole('checkbox', { name: /^Leída:/ })
+  checkbox.focus()
+  await user.keyboard(' ')
+  expect(post).toHaveBeenCalledWith('/notifications/inbox/keyboard/read')
+  await waitFor(() => expect(checkbox).toBeChecked())
 })

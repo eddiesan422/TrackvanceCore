@@ -1,6 +1,6 @@
 import type { RecordData } from '../../api/client'
 
-export type SinkType = 'POSTGRESQL' | 'SQLSERVER'
+export type SinkType = 'POSTGRESQL' | 'SQLSERVER' | 'REST'
 export type TargetMode = 'EXISTING_TABLE' | 'CREATE_TABLE'
 export type WriteStrategy = 'APPEND' | 'OVERWRITE' | 'UPSERT' | 'CREATE_AND_LOAD'
 export type DeliveryColumnType = 'STRING' | 'INT64' | 'DECIMAL' | 'DATE' | 'TIMESTAMP' | 'BOOLEAN'

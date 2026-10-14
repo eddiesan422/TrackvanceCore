@@ -333,8 +333,8 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
 ])
 def test_native_fixture_restore_requires_schema_exact_hashes_key_families_and_stopped_consumers(field, value, code):
     receipt = {"status": "PASS", "main_inventory": "UNCHANGED", "automatic_processes_started": False,
-               "restore": "STOPPED_VERIFIED", "revision": "0019_governance_people", "state_schema_version": 9,
-               "tables": 56, "multipart_integrity": "PASS", "historical_bytes_and_hashes": "PASS",
+               "restore": "STOPPED_VERIFIED", "revision": "0022_intake_automation_deletion", "state_schema_version": 10,
+               "tables": 65, "multipart_integrity": "PASS", "historical_bytes_and_hashes": "PASS",
                "exact_state_comparison": "PASS", "source_state_sha256": "a" * 64,
                "restored_state_sha256": "a" * 64, "manifest_sha256": "c" * 64,
                "verified_artifacts": 1, "verified_source_secrets": 1, "verified_delivery_secrets": 1}
@@ -345,13 +345,13 @@ def test_native_fixture_restore_requires_schema_exact_hashes_key_families_and_st
 
 
 def selective_receipt_fixture():
-    from docker_state import CURRENT_STATE_TABLES
-    from selective_cleanup_recovery import CHECKS, PROTECTED
+    from scripts.docker_state import CURRENT_STATE_TABLES
+    from scripts.tests.selective_cleanup_recovery import CHECKS, PROTECTED
     removed = {name: 0 if name in PROTECTED | {"audit_events"} else 1 for name in CURRENT_STATE_TABLES}
     removed["datasets"] = 2
     return {"status": "PASS", "scope": "OWNED_RESTORED_POSTGRES_COPY", "database": "POSTGRESQL",
-        "project": "trackvance-v080-test-restore085-012345abcdef", "source_sha": "a" * 40, "schema_version": 9,
-        "migration": "0019_governance_people", "tables": 56, "verified_restore": "STOPPED_VERIFIED",
+        "project": "trackvance-v080-test-restore085-012345abcdef", "source_sha": "a" * 40, "schema_version": 10,
+        "migration": "0022_intake_automation_deletion", "tables": 65, "verified_restore": "STOPPED_VERIFIED",
         "verified_restore_project": "trackvance-v080-test-cleanuprestore085-123456abcdef", "backup_manifest_sha256": "b" * 64,
         "verified_state_sha256": "c" * 64, "plan_sha256": "d" * 64, "external_destinations_touched": False,
         "backup_retained": True, "usual_inventory": "UNCHANGED", "reset_audit_added": 1,
@@ -376,3 +376,37 @@ def test_selective_cleanup_gate_rejects_missing_real_proofs(field, value):
     receipt[field] = value
     with pytest.raises(EvidenceError):
         selective_cleanup_receipt(receipt, "a" * 40)
+
+
+@pytest.mark.parametrize("source", ["0.5.1", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.8.5"])
+def test_historical_restore_gate_preserves_source_identity_and_requires_current_native_schema(source):
+    from scripts.ci.validators import restore
+    # Validator-only evidence fixture; the real migration/restore gate supplies
+    # its own independently measured row fingerprints and resource inventory.
+    receipt = {"status": "PASS", "source_destroyed_before_restore": True, "main_inventory": "UNCHANGED",
+        "source_version": source, "target_version": "0.9.0", "restore": "STOPPED_VERIFIED",
+        "automatic_processes_started": False, "exact_historical_state": "PASS", "source_state_sha256": "a" * 64,
+        "restored_legacy_sha256": "a" * 64, "native_tables": 65, "new_catalog_tables_empty": True,
+        "migration": "0022_intake_automation_deletion", "state_schema_version": 10, "cleanup": "PASS", "log_secret_scan": "PASS"}
+    restore(receipt, source)
+    receipt["restored_legacy_sha256"] = "b" * 64
+    with pytest.raises(EvidenceError, match="HASH_MISMATCH"):
+        restore(receipt, source)
+
+
+def test_native090_restore_gate_requires_populated085_upgrade_and_refuses_missing_proof():
+    from scripts.ci.validators import restore
+    core = {"status": "PASS", "source_version": "0.8.5", "target_version": "0.9.0", "tables_before": 56, "tables_after": 65,
+        "roundtrip": "PASS", "exact_historical_projection": "PASS", "customizations_rejected": True,
+        "approved_backfill_monitors": 1, "physical_schema": {"tables": 65}}
+    receipt = {"status": "PASS", "source_destroyed_before_restore": True, "main_inventory": "UNCHANGED",
+        "state_schema_version": 10, "alembic_revision": "0022_intake_automation_deletion",
+        "persistence_exact_comparison": "PASS", "immutable_comparison_before_automatic_processes": "PASS",
+        "plaintext_backup_scan": {"status": "PASS"}, "retained_projects": [], "doctor": "PASS",
+        "verified_source_secrets": 1, "verified_delivery_secrets": 1, "verified_artifacts": 1,
+        "postgres_migration": {"status": "PASS", "0016_0017_preservation": {"physical_schema": {"tables": 65}},
+                               "0019_0022_preservation": core}}
+    restore(receipt, "0.9.0")
+    core["customizations_rejected"] = False
+    with pytest.raises(EvidenceError, match="CORE090_ADDITIVE_PRESERVATION"):
+        restore(receipt, "0.9.0")

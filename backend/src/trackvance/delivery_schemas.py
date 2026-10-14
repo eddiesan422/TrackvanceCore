@@ -24,11 +24,11 @@ class StrictModel(BaseModel):
 
 class DestinationConnectionBody(StrictModel):
     name: str = Field(min_length=1, max_length=160)
-    sink_type: Literal["POSTGRESQL", "SQLSERVER"]
-    host: str = Field(min_length=1, max_length=253)
-    port: int = Field(ge=1, le=65535)
-    database: str = Field(min_length=1, max_length=128)
-    username: str = Field(min_length=1, max_length=128)
+    sink_type: Literal["POSTGRESQL", "SQLSERVER", "REST"]
+    host: str = Field(default="REST", min_length=1, max_length=253)
+    port: int = Field(default=443, ge=1, le=65535)
+    database: str = Field(default="REST", min_length=1, max_length=128)
+    username: str = Field(default="REST", min_length=1, max_length=128)
     options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -40,7 +40,13 @@ class DestinationConnectionBody(StrictModel):
 
 
 class DestinationBody(DestinationConnectionBody):
-    password: SecretStr = Field(min_length=1, max_length=1024)
+    password: SecretStr | None = Field(default=None, min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def require_sql_password(self):
+        if self.sink_type != "REST" and self.password is None:
+            raise ValueError("Indica la contraseña del destino SQL.")
+        return self
 
 
 class DestinationTestBody(DestinationConnectionBody):
@@ -63,7 +69,7 @@ class DestinationPatch(StrictModel):
 class DestinationResponse(BaseModel):
     id: str
     name: str
-    sink_type: Literal["POSTGRESQL", "SQLSERVER"]
+    sink_type: Literal["POSTGRESQL", "SQLSERVER", "REST"]
     enabled: bool
     version: int
     host: str
@@ -109,6 +115,32 @@ class TargetSpec(StrictModel):
         return self
 
 
+class RestTarget(StrictModel):
+    mode: Literal["REST"] = "REST"
+    rows_key: str = Field(default="records", min_length=1, max_length=128)
+    static_body: dict[str, Any] = Field(default_factory=dict)
+    batch_rows: int = Field(default=1000, ge=1, le=10000)
+    max_batches: int = Field(default=5000, ge=1, le=5000)
+    max_payload_bytes: int = Field(default=8 * 1024**2, ge=1024, le=8 * 1024**2)
+    confirmation_path: str = Field(min_length=1, max_length=128)
+    confirmation_value: str | bool | int
+    rows_path: str = Field(min_length=1, max_length=128)
+    batch_id_path: str = Field(min_length=1, max_length=128)
+    payload_hash_path: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def reserved_body(self):
+        if self.rows_key == "batch_id" or {self.rows_key, "batch_id"} & set(self.static_body):
+            raise ValueError("El cuerpo fijo no puede sobrescribir las filas ni la identidad del lote.")
+        import json
+        try:
+            if len(json.dumps(self.static_body, allow_nan=False).encode()) > 65536:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise ValueError("El cuerpo fijo REST debe ser JSON finito de hasta 64 KiB.") from None
+        return self
+
+
 class ColumnMapping(StrictModel):
     source_name: str = Field(min_length=1, max_length=256)
     target_name: str = Field(min_length=1, max_length=128)
@@ -142,9 +174,9 @@ class DeliveryDraft(StrictModel):
     dataset_version_id: str = Field(min_length=1, max_length=64)
     destination_id: str = Field(min_length=1, max_length=64)
     destination_version_id: str = Field(min_length=1, max_length=64)
-    target: TargetSpec
+    target: TargetSpec | RestTarget
     columns: list[ColumnMapping] = Field(min_length=1, max_length=100)
-    write_strategy: Literal["CREATE_AND_LOAD", "APPEND", "OVERWRITE", "UPSERT"]
+    write_strategy: Literal["CREATE_AND_LOAD", "APPEND", "OVERWRITE", "UPSERT", "REST_POST"] = "REST_POST"
     upsert_keys: list[str] = Field(default_factory=list, max_length=100)
     primary_key_mode: Literal["DEFINE", "NONE"] | None = None
     primary_key_columns: list[str] = Field(default_factory=list, max_length=32)
@@ -162,6 +194,12 @@ class DeliveryDraft(StrictModel):
         if len(set(ordinals)) != len(ordinals):
             raise ValueError("El orden de columnas no puede repetirse.")
         self.columns.sort(key=lambda column: column.ordinal)
+        if self.target.mode == "REST":
+            if self.write_strategy != "REST_POST" or self.upsert_keys or self.primary_key_mode is not None or self.primary_key_columns or self.audit_columns_enabled:
+                raise ValueError("REST usa POST por lotes sin estrategias, claves ni auditoría SQL.")
+            return self
+        if self.write_strategy == "REST_POST":
+            raise ValueError("Un target SQL requiere una estrategia SQL explícita.")
         if self.target.mode == "CREATE_TABLE" and self.write_strategy != "CREATE_AND_LOAD":
             raise ValueError("Una tabla nueva requiere CREATE_AND_LOAD.")
         if self.target.mode == "EXISTING_TABLE" and self.write_strategy == "CREATE_AND_LOAD":

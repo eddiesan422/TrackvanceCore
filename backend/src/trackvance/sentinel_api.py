@@ -1,17 +1,22 @@
 """Scheduled monitoring and compatible metric series over the existing local runtime."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from math import isfinite
+from typing import cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from .db import get_db, iso
+from .db import get_db, iso, utcnow
+from .governance import authorize_dataset, authorize_dataset_content, authorize_run_content
 from .models import (
     Configuration,
+    Dataset,
+    DatasetVersion,
     Finding,
     MonitorOccurrence,
     MonitorSchedule,
@@ -20,7 +25,15 @@ from .models import (
     User,
 )
 from .permissions import effective_permissions
-from .scheduler import ScheduleError, occurrence_dto, save_schedule, schedule_dto
+from .scheduler import (
+    ScheduleError,
+    authorize_responsible,
+    occurrence_dto,
+    save_schedule,
+    schedule_dto,
+)
+from .sentinel_auto import automatic_dto, ensure_automatic_monitor, record_revision
+from .sentinel_auto_models import AutomaticMonitor
 from .services import finding_dto
 
 router = APIRouter(prefix="/api/v1", tags=["Sentinel"])
@@ -37,6 +50,7 @@ def owned_monitor(db: Session, monitor_id: str, user: User) -> Configuration:
     ))
     if monitor is None:
         raise ScheduleError(404, "MONITOR_NOT_FOUND", "No se encontró el monitor.")
+    authorize_dataset(db, user, monitor.dataset_id, "MODULE")
     return monitor
 
 
@@ -215,3 +229,136 @@ def monitor_alerts(monitor_id: str, limit: int = Query(default=50, ge=1, le=200)
         Run.config_id.in_(family), Run.status == "SUCCESS",
     ).order_by(Finding.created_at.desc(), Finding.id).limit(limit)).all()
     return {"items": [finding_dto(db, row) for row in rows], "total": len(rows)}
+
+
+class AutomaticBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    expected_version: int = Field(ge=1, strict=True)
+    review_interval_seconds: int = Field(default=86400, ge=3600, le=2678400, strict=True)
+    responsible_user_id: str | None = Field(default=None, max_length=64)
+
+
+@router.get("/monitors/{monitor_id}/automatic")
+def get_automatic(monitor_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    monitor = owned_monitor(db, monitor_id, user)
+    automatic = db.scalar(select(AutomaticMonitor).where(AutomaticMonitor.dataset_id == monitor.dataset_id))
+    # A dataset has one automatic family; additional personalized monitors keep their own schedules.
+    if automatic is None:
+        return None
+    root = db.get(Configuration, automatic.monitor_root_id)
+    if root is None or monitor.id not in monitor_family(db, root):
+        return None
+    return automatic_dto(db, automatic)
+
+
+@router.post("/monitors/{monitor_id}/automatic")
+def configure_automatic(monitor_id: str, body: AutomaticBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .services import audit
+
+    monitor = owned_monitor(db, monitor_id, user)
+    dataset = db.get(Dataset, monitor.dataset_id)
+    if dataset is None:
+        raise ScheduleError(409, "MONITOR_DATASET_MISSING", "El dataset del monitor ya no está disponible.")
+    automatic = ensure_automatic_monitor(db, dataset)
+    root = db.get(Configuration, automatic.monitor_root_id)
+    if root is None or monitor.id not in monitor_family(db, root):
+        raise ScheduleError(409, "NOT_AUTOMATIC_MONITOR", "Este monitor tiene su propia programación personalizada.")
+    responsible_id = body.responsible_user_id or automatic.responsible_user_id or user.id
+    if body.enabled:
+        responsible = authorize_responsible(db, responsible_id, user.organization_id)
+        authorize_dataset(db, responsible, dataset.id)
+    instant = utcnow()
+    changed = db.execute(update(AutomaticMonitor).where(AutomaticMonitor.id == automatic.id,
+        AutomaticMonitor.version == body.expected_version).values(enabled=body.enabled,
+        responsible_user_id=responsible_id, review_interval_seconds=body.review_interval_seconds,
+        version=body.expected_version + 1, next_review_at=instant + timedelta(seconds=body.review_interval_seconds),
+        updated_at=instant).execution_options(synchronize_session=False))
+    if cast(CursorResult, changed).rowcount != 1:
+        raise ScheduleError(409, "AUTOMATIC_MONITOR_CONFLICT", "La programación cambió. Actualiza e intenta nuevamente.")
+    db.refresh(automatic)
+    record_revision(db, automatic, user.id)
+    audit(db, "SENTINEL_AUTOMATIC_UPDATED", "configuration", monitor.id,
+        "Responsable, pausa y frecuencia de revisión actualizados", user.name, user.organization_id,
+        {"automatic_monitor_id": automatic.id, "version": automatic.version, "enabled": automatic.enabled,
+         "review_interval_seconds": automatic.review_interval_seconds, "responsible_user_id": responsible_id})
+    db.commit()
+    return automatic_dto(db, automatic)
+
+
+def chart_number(value) -> float | None:
+    try:
+        candidate = float(Decimal(str(value)))
+        return candidate if isfinite(candidate) else None
+    except (InvalidOperation, ValueError, OverflowError, TypeError):
+        return None
+
+
+@router.get("/runs/{run_id}/visual-summary")
+def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Read immutable execution evidence and compatible metadata only; never scan."""
+    if "sentinel:read" not in effective_permissions(db, user):
+        raise ScheduleError(403, "FORBIDDEN", "No tienes permiso para consultar Sentinel.")
+    run = db.scalar(select(Run).where(Run.id == run_id, Run.organization_id == user.organization_id,
+                                     Run.module == "sentinel"))
+    if run is None:
+        raise ScheduleError(404, "RUN_NOT_FOUND", "No se encontró la ejecución Sentinel.")
+    authorize_run_content(db, user, run)
+    source = db.get(DatasetVersion, run.dataset_version_id)
+    if source is None:
+        raise ScheduleError(409, "MONITOR_VERSION_MISSING", "La versión de esta ejecución no está disponible.")
+    authorize_dataset_content(db, user, source, "MODULE")
+    metrics = run.metrics or {}
+    profile = metrics.get("profile_snapshot") or source.profile or {}
+    monitor = db.get(Configuration, run.config_id)
+    if monitor is None:
+        raise ScheduleError(409, "MONITOR_CONFIGURATION_MISSING", "La revisión de esta ejecución no está disponible.")
+    columns = [{"name": item["name"], "null_count": item.get("null_count"),
+        "null_rate": item.get("null_rate"), "distinct_count": item.get("distinct_count"),
+        "distinct_rate": item.get("distinct_rate"), "uniqueness_ratio": item.get("uniqueness_ratio"),
+        "logical_type": item.get("logical_type"), "null_denominator": profile.get("row_count"),
+        "distinct_denominator": profile.get("row_count", 0) - item["null_count"]
+            if isinstance(item.get("null_count"), int) and isinstance(profile.get("row_count"), int) else None}
+        for item in profile.get("columns", [])]
+    records = db.scalars(select(SentinelMetricHistory).where(SentinelMetricHistory.run_id == run.id,
+        SentinelMetricHistory.organization_id == user.organization_id)).all()
+    exact = [{"metric_key": item.metric_key, "dimensions": item.dimensions,
+        "exact_value": str(item.numeric_value) if item.numeric_value is not None else None,
+        "value": chart_number(item.numeric_value), "method": item.method,
+        "metric_definition_version": item.metric_definition_version} for item in records]
+    history_rows = db.execute(select(SentinelMetricHistory, Run, DatasetVersion)
+        .join(Run, Run.id == SentinelMetricHistory.run_id).join(DatasetVersion, DatasetVersion.id == Run.dataset_version_id)
+        .where(SentinelMetricHistory.organization_id == user.organization_id,
+            SentinelMetricHistory.monitor_id.in_(monitor_family(db, monitor)), Run.status == "SUCCESS",
+            Run.organization_id == user.organization_id, DatasetVersion.schema_hash == source.schema_hash,
+            DatasetVersion.version <= source.version,
+            or_(Run.id == run.id, SentinelMetricHistory.observed_at <= (run.started_at or run.created_at)))
+        .order_by(SentinelMetricHistory.observed_at.desc(), SentinelMetricHistory.id.desc()).limit(501)).all()
+    evolution: dict[tuple, dict] = {}
+    selected = {(item.metric_key, item.dimension_hash, item.method, item.metric_definition_version) for item in records}
+    for item, sample_run, _version in reversed(history_rows[:500]):
+        key = (item.metric_key, item.dimension_hash, item.method, item.metric_definition_version)
+        if key not in selected:
+            continue
+        authorize_run_content(db, user, sample_run)
+        group = evolution.setdefault(key, {"metric_key": item.metric_key, "dimensions": item.dimensions,
+            "method": item.method, "metric_definition_version": item.metric_definition_version, "points": []})
+        group["points"].append({"run_id": sample_run.id, "dataset_version_id": sample_run.dataset_version_id,
+            "observed_at": iso(item.observed_at), "exact_value": str(item.numeric_value) if item.numeric_value is not None else None,
+            "value": chart_number(item.numeric_value)})
+    return {"run_id": run.id, "configuration_id": run.config_id, "dataset_version_id": source.id,
+        "dataset_version": source.version, "status": run.status, "decision": run.decision,
+        "observed_at": iso(run.started_at), "profile_method": profile.get("metric_method"),
+        "metric_definition_version": profile.get("metric_definition_version"), "scans": 0,
+        "indicators": {"row_count": profile.get("row_count"), "column_count": profile.get("column_count"),
+            "duplicate_row_count": profile.get("duplicate_row_count"), "distinct_row_count": profile.get("distinct_row_count"),
+            "duplicate_definition": profile.get("row_duplicate_definition"), "total_checks": metrics.get("total_checks"),
+            "failed_checks": metrics.get("failed_checks"), "conforming_checks": metrics.get("conforming_checks")
+                if "conforming_checks" in metrics else metrics["total_checks"] - metrics["failed_checks"]
+                if "total_checks" in metrics and "failed_checks" in metrics else None,
+            "valid_rows": None}, "columns": columns,
+        "checks": metrics.get("checks", []), "exact_metrics": exact, "evolution": list(evolution.values()),
+        "evolution_truncated": len(history_rows) > 500, "evolution_limit": 500,
+        "notes": ["Los controles conformes no equivalen a filas válidas.",
+                  "Las reglas pueden superponerse; no se suman sus fallos como filas distintas.",
+                  "Los nulos y categorías solo incumplen los límites declarados."]}

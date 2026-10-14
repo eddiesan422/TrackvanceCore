@@ -11,9 +11,10 @@ import { SampleValue } from '../datasets/VersionIdentity'
 import { ClassificationField, unclassified } from '../catalog/ClassificationField'
 import type { Classification } from '../catalog/ClassificationField'
 import './connections.css'
+import { RestEndpointDialog } from './RestEndpointDialog'
 
-type SourceType = 'POSTGRESQL' | 'SQLSERVER'
-type ConnectionOptions = { connect_timeout: number; query_timeout: number; sslmode?: string; encryption?: string }
+type SourceType = 'POSTGRESQL' | 'SQLSERVER' | 'REST'
+type ConnectionOptions = { [key: string]: unknown; connect_timeout: number; query_timeout: number; sslmode?: string; encryption?: string }
 export type ConnectionRecord = {
   id: string; name: string; source_type: SourceType; host: string; port: number; database: string; username: string
   options: ConnectionOptions; enabled: boolean; version: number; last_test_status?: string | null
@@ -23,7 +24,7 @@ type ConnectionInput = Pick<ConnectionRecord, 'name' | 'source_type' | 'host' | 
 type ConnectionTest = { status: 'SUCCESS' | 'FAILED'; code?: string; message: string; tested_at: string }
 type SourceObject = { name: string; kind: 'TABLE' | 'VIEW' }
 type SourcePreview = { columns: { name: string; native_type: string; logical_type: string; nullable: boolean; numeric: boolean }[]; rows: Record<string, unknown>[]; sampled_rows: number }
-const sourceLabel = (value: SourceType) => value === 'POSTGRESQL' ? 'PostgreSQL' : 'SQL Server'
+const sourceLabel = (value: SourceType) => value === 'REST' ? 'REST JSON' : value === 'POSTGRESQL' ? 'PostgreSQL' : 'SQL Server'
 const defaultOptions = (source: SourceType): ConnectionOptions => ({ connect_timeout: 5, query_timeout: 30, ...(source === 'POSTGRESQL' ? { sslmode: 'require' } : { encryption: 'require' }) })
 const transportMode = (source: SourceType, options: ConnectionOptions) => source === 'POSTGRESQL' ? options.sslmode || 'require' : options.encryption || 'require'
 const updateInput = (connection: Pick<ConnectionRecord, 'name' | 'host' | 'port' | 'database' | 'username' | 'options'>) => ({ name: connection.name, host: connection.host, port: connection.port, database: connection.database, username: connection.username, options: connection.options })
@@ -32,7 +33,7 @@ function TestResult({ result }: { result: ConnectionTest }) {
   return <Notice success={result.status === 'SUCCESS'}><strong>{result.status === 'SUCCESS' ? 'Conexión verificada' : 'No se pudo conectar'}</strong> · {result.message}<small className="connection-test-code">{result.code ? `${result.code} · ` : ''}{date(result.tested_at)}</small></Notice>
 }
 
-export function ConnectionDialog({ connection, close, saved }: { connection?: ConnectionRecord; close: () => void; saved: (connection: ConnectionRecord) => void }) {
+function SqlConnectionDialog({ connection, close, saved }: { connection?: ConnectionRecord; close: () => void; saved: (connection: ConnectionRecord) => void }) {
   const [form, setForm] = useState<ConnectionInput>(() => connection ? { ...updateInput(connection), source_type: connection.source_type, options: { ...defaultOptions(connection.source_type), ...connection.options }, password: '' } : { name: '', source_type: 'POSTGRESQL', host: '', port: 5432, database: '', username: '', password: '', options: defaultOptions('POSTGRESQL') })
   const [result, setResult] = useState<ConnectionTest | null>(null)
   const revision = useRef(0)
@@ -87,41 +88,48 @@ export function ConnectionDialog({ connection, close, saved }: { connection?: Co
   </Modal>
 }
 
+export function ConnectionDialog(props: { connection?: ConnectionRecord; close: () => void; saved: (connection: ConnectionRecord) => void }) {
+  if (props.connection?.source_type === 'REST') return <RestEndpointDialog mode="SOURCE" existing={props.connection} close={props.close} saved={() => props.saved(props.connection!)}/>
+  return <SqlConnectionDialog {...props}/>
+}
+
 export function ConnectionsPage() {
   const canRead = usePermission('connections:read'), canManage = usePermission('connections:manage')
-  const [creating, setCreating] = useState(false), [search, setSearch] = useState('')
+  const [creating, setCreating] = useState(false), [creatingRest, setCreatingRest] = useState(false), [search, setSearch] = useState('')
   const cache = useQueryClient(), navigate = useNavigate()
   const connections = useQuery({ queryKey: ['connections'], queryFn: () => api<{ items: ConnectionRecord[]; total: number }>('/connections'), enabled: canRead })
   if (!canRead) return <Notice>No tienes permisos para consultar las conexiones.</Notice>
   const items = (connections.data?.items || []).filter(item => `${item.name} ${item.database} ${sourceLabel(item.source_type)}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
   return <>
-    <PageHeading eyebrow="FUENTES EXTERNAS" title="Conexiones" description="Explora tus bases de datos y crea datasets con evidencia de su origen." action={<button className="button primary" disabled={!canManage} onClick={() => setCreating(true)}><Plus size={17}/> Nueva conexión</button>}/>
+    <PageHeading eyebrow="FUENTES EXTERNAS" title="Conexiones" description="Explora tus bases de datos y crea datasets con evidencia de su origen." action={<><button className="button secondary" disabled={!canManage} onClick={() => setCreatingRest(true)}>Nueva conexión REST</button><button className="button primary" disabled={!canManage} onClick={() => setCreating(true)}><Plus size={17}/> Nueva conexión</button></>}/>
     <div className="module-intro connection-intro"><ShieldCheck size={25}/><div><strong>Fuentes de entrada · solo lectura</strong><p>Cada consulta importada genera una versión inmutable. Los controles de calidad trabajan sobre ese snapshot.</p></div></div>
     <section className="panel"><div className="table-toolbar"><SearchBox value={search} onChange={setSearch} placeholder="Buscar conexión o base de datos…"/><span className="muted">{number(connections.data?.total || 0)} conexiones</span></div>
       {connections.isPending ? <Loading text="Cargando conexiones…"/> : connections.error ? <ErrorState error={connections.error} retry={() => connections.refetch()}/> : !items.length ? <Empty title={search ? 'No hay coincidencias' : 'Conecta tu primera fuente'} description={search ? 'Prueba otro nombre o base de datos.' : 'Agrega PostgreSQL o SQL Server para explorar las tablas y vistas disponibles.'}/> : <div className="table-scroll"><table><thead><tr><th>Conexión</th><th>Tipo</th><th>Base de datos</th><th>Estado</th><th>Última prueba</th><th/></tr></thead><tbody>{items.map(connection => <tr key={connection.id}><td><Link className="table-primary" to={`/connections/${connection.id}`}>{connection.name}</Link><span className="table-subtitle">{connection.host}:{connection.port}</span></td><td>{sourceLabel(connection.source_type)}</td><td>{connection.database}</td><td><Badge value={connection.enabled ? 'ACTIVE' : 'INACTIVE'}/></td><td><Badge value={connection.last_test_status || 'NOT_REQUESTED'}>{connection.last_test_status === 'SUCCESS' ? 'Conectada' : connection.last_test_status === 'FAILED' ? 'Falló la prueba' : 'Sin probar'}</Badge><span className="table-subtitle">{date(connection.last_test_at)}</span></td><td><Link className="text-link" to={`/connections/${connection.id}`} aria-label={`Explorar ${connection.name}`}><ArrowRight size={17}/></Link></td></tr>)}</tbody></table></div>}
     </section>
+    {creatingRest && <RestEndpointDialog mode="SOURCE" close={() => setCreatingRest(false)} saved={id => { cache.invalidateQueries({ queryKey: ['connections'] }); setCreatingRest(false); navigate(`/connections/${id}`) }}/>}
     {creating && <ConnectionDialog close={() => setCreating(false)} saved={connection => { cache.invalidateQueries({ queryKey: ['connections'] }); setCreating(false); navigate(`/connections/${connection.id}`) }}/>}
   </>
 }
 
 function SourceBrowser({ connection }: { connection: ConnectionRecord }) {
   const canImport = usePermission('datasets:write'), cache = useQueryClient()
-  const [schema, setSchema] = useState(''), [object, setObject] = useState('')
+  const isRest = connection.source_type === 'REST'
+  const [schema, setSchema] = useState(isRest ? 'REST' : ''), [object, setObject] = useState(isRest ? 'collection' : '')
   const [name, setName] = useState(''), [classification, setClassification] = useState<Classification>(unclassified), [description, setDescription] = useState('')
   const [created, setCreated] = useState<{ id: string; name: string } | null>(null), [acquisitionId, setAcquisitionId] = useState<string | null>(null)
   const requestKey = useRef(crypto.randomUUID())
-  const schemas = useQuery({ queryKey: ['connection-schemas', connection.id, connection.version], queryFn: () => api<{ items: string[]; total: number }>(`/connections/${connection.id}/schemas`) })
-  const objects = useQuery({ queryKey: ['connection-objects', connection.id, connection.version, schema], queryFn: () => api<{ items: SourceObject[]; total: number }>(`/connections/${connection.id}/objects?${new URLSearchParams({ schema_name: schema })}`), enabled: !!schema })
+  const schemas = useQuery({ queryKey: ['connection-schemas', connection.id, connection.version], queryFn: () => api<{ items: string[]; total: number }>(`/connections/${connection.id}/schemas`), enabled: !isRest })
+  const objects = useQuery({ queryKey: ['connection-objects', connection.id, connection.version, schema], queryFn: () => api<{ items: SourceObject[]; total: number }>(`/connections/${connection.id}/objects?${new URLSearchParams({ schema_name: schema })}`), enabled: !isRest && !!schema })
   const preview = useQuery({ queryKey: ['connection-preview', connection.id, connection.version, schema, object], queryFn: () => api<SourcePreview>(`/connections/${connection.id}/preview?${new URLSearchParams({ schema_name: schema, object_name: object, limit: '20' })}`), enabled: !!schema && !!object })
   const create = useMutation({
     mutationFn: () => api<{ dataset: { id: string; name: string }; acquisition: Acquisition }>(`/connections/${connection.id}/acquisitions`, { method: 'POST', headers: { 'Idempotency-Key': requestKey.current }, body: JSON.stringify({ name: name.trim(), ...classification, description: description.trim(), schema_name: schema, object_name: object }) }),
     onSuccess: data => { setCreated(data.dataset); setAcquisitionId(data.acquisition.id); cache.invalidateQueries({ queryKey: ['acquisitions'] }); cache.invalidateQueries({ queryKey: ['datasets'] }); cache.invalidateQueries({ queryKey: ['dashboard'] }) },
   })
-  return <section className="panel connection-browser"><div className="panel-heading"><div><h2>Explorar fuente</h2><p>Selecciona una tabla o vista. La vista previa consulta hasta 20 registros.</p></div><button className="button secondary small" disabled={schemas.isFetching || create.isPending} onClick={() => { schemas.refetch(); if (schema) objects.refetch(); if (object) preview.refetch() }}><RefreshCw size={14}/> Actualizar fuente</button></div>
-    <div className="connection-browser-body"><div className="form-grid"><Field label="Schema"><select value={schema} disabled={schemas.isPending || create.isPending} onChange={event => { setSchema(event.target.value); setObject(''); setName(''); setCreated(null); create.reset() }}><option value="">Selecciona un schema</option>{(schemas.data?.items || []).map(item => <option key={item} value={item}>{item}</option>)}</select></Field><Field label="Tabla o vista"><select value={object} disabled={!schema || objects.isPending || create.isPending} onChange={event => { setObject(event.target.value); setName(event.target.value); setCreated(null); create.reset() }}><option value="">Selecciona una tabla o vista</option>{(objects.data?.items || []).map(item => <option key={item.name} value={item.name}>{item.name} · {item.kind === 'VIEW' ? 'Vista' : 'Tabla'}</option>)}</select></Field></div>
-      {schemas.isPending && <Loading text="Explorando schemas…"/>}{schemas.error && <ErrorState error={schemas.error} retry={() => schemas.refetch()}/>}
+  return <section className="panel connection-browser"><div className="panel-heading"><div><h2>Explorar fuente</h2><p>{isRest ? 'Lee la coleccion JSON y los campos configurados. La muestra consulta hasta 20 registros.' : 'Selecciona una tabla o vista. La vista previa consulta hasta 20 registros.'}</p></div><button className="button secondary small" disabled={schemas.isFetching || create.isPending} onClick={() => { if (!isRest) { schemas.refetch(); if (schema) objects.refetch() } if (object) preview.refetch() }}><RefreshCw size={14}/> Actualizar fuente</button></div>
+    <div className="connection-browser-body">{!isRest && <div className="form-grid"><Field label="Schema"><select value={schema} disabled={schemas.isPending || create.isPending} onChange={event => { setSchema(event.target.value); setObject(''); setName(''); setCreated(null); create.reset() }}><option value="">Selecciona un schema</option>{(schemas.data?.items || []).map(item => <option key={item} value={item}>{item}</option>)}</select></Field><Field label="Tabla o vista"><select value={object} disabled={!schema || objects.isPending || create.isPending} onChange={event => { setObject(event.target.value); setName(event.target.value); setCreated(null); create.reset() }}><option value="">Selecciona una tabla o vista</option>{(objects.data?.items || []).map(item => <option key={item.name} value={item.name}>{item.name} · {item.kind === 'VIEW' ? 'Vista' : 'Tabla'}</option>)}</select></Field></div>}
+      {!isRest && schemas.isPending && <Loading text="Explorando schemas…"/>}{schemas.error && <ErrorState error={schemas.error} retry={() => schemas.refetch()}/>}
       {schemas.data && !schemas.data.items.length && <Notice>No hay schemas accesibles para esta cuenta.</Notice>}
-      {schema && objects.isPending && <Loading text="Consultando tablas y vistas…"/>}{objects.error && <ErrorState error={objects.error} retry={() => objects.refetch()}/>}
+      {!isRest && schema && objects.isPending && <Loading text="Consultando tablas y vistas…"/>}{objects.error && <ErrorState error={objects.error} retry={() => objects.refetch()}/>}
       {schema && objects.data && !objects.data.items.length && <Notice>No hay tablas o vistas accesibles en este schema.</Notice>}
       {object && preview.isPending && <Loading text="Leyendo esquema y vista previa…"/>}{preview.error && <ErrorState error={preview.error} retry={() => preview.refetch()}/>}
       {object && preview.data && <><div className="connection-preview-heading"><h3>Columnas detectadas</h3><span>{number(preview.data.columns.length)} columnas</span></div><div className="table-scroll"><table aria-label="Columnas de la fuente"><thead><tr><th>Columna</th><th>Tipo de origen</th><th>Tipo en Trackvance</th><th>Permite nulos</th></tr></thead><tbody>{preview.data.columns.map(column => <tr key={column.name}><td className="mono">{column.name}</td><td>{column.native_type}</td><td><span className="type-pill">{column.logical_type}</span></td><td>{column.nullable ? 'Sí' : 'No'}</td></tr>)}</tbody></table></div>
@@ -145,7 +153,7 @@ export function ConnectionDetail() {
   if (connection.error) return <ErrorState error={connection.error} retry={() => connection.refetch()}/>
   const data = connection.data
   return <><PageHeading back="/connections" eyebrow="CONEXIÓN EXTERNA" title={data.name} description={`${sourceLabel(data.source_type)} · ${data.database}`} action={<><button className="button secondary" disabled={!canManage} onClick={() => setEditing(true)}><Pencil size={15}/> Editar conexión</button><button className="button primary" disabled={!canUse || !data.enabled || test.isPending} onClick={() => test.mutate()}><Plug size={16}/>{test.isPending ? 'Probando…' : 'Probar conexión'}</button></>}/>
-    <section className="panel connection-details"><div className="connection-summary"><div><span>Servidor</span><strong>{data.host}:{data.port}</strong></div><div><span>Cuenta de lectura</span><strong>{data.username}</strong></div><div><span>Configuración</span><strong>Versión {data.version}</strong></div><div><span>Estado</span><Badge value={data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div><div><span>Última prueba</span><strong>{date(data.last_test_at)}</strong><Badge value={data.last_test_status || 'NOT_REQUESTED'}>{data.last_test_status === 'SUCCESS' ? 'Conectada' : data.last_test_status === 'FAILED' ? 'Falló la prueba' : 'Sin probar'}</Badge></div></div>
+    <section className="panel connection-details"><div className="connection-summary"><div><span>{data.source_type === 'REST' ? 'Endpoint GET' : 'Servidor'}</span><strong>{data.source_type === 'REST' ? String(data.options.url) : `${data.host}:${data.port}`}</strong></div><div><span>Cuenta de lectura</span><strong>{data.username}</strong></div><div><span>Configuración</span><strong>Versión {data.version}</strong></div><div><span>Estado</span><Badge value={data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div><div><span>Última prueba</span><strong>{date(data.last_test_at)}</strong><Badge value={data.last_test_status || 'NOT_REQUESTED'}>{data.last_test_status === 'SUCCESS' ? 'Conectada' : data.last_test_status === 'FAILED' ? 'Falló la prueba' : 'Sin probar'}</Badge></div></div>
       {test.data ? <TestResult result={test.data}/> : data.last_test_message && <p className="connection-help">{data.last_test_message}</p>}{test.error && <ErrorState error={test.error}/>}
       <div className="connection-actions"><button className="text-button" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('toggle') }}>{data.enabled ? 'Deshabilitar conexión' : 'Habilitar conexión'}</button><button className="text-button connection-delete" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('delete') }}><Trash2 size={14}/> Eliminar conexión</button></div>
     </section>

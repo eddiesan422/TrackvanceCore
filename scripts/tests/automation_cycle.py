@@ -78,7 +78,6 @@ def certify_chain_decisions(client, engine, sessions, *, source_id, dataset_id,
     from decimal import Decimal
 
     from sqlalchemy import func, select, text
-
     from trackvance import events
     from trackvance.artifactstore import storage_provider
     from trackvance.automation import consume_intake_event
@@ -181,7 +180,6 @@ def certify_chain_decisions(client, engine, sessions, *, source_id, dataset_id,
 def main():
     project, url = require_isolated_environment()
     from sqlalchemy import func, select, text
-
     from trackvance.artifactstore import storage_provider
     from trackvance.automation import AutomationError, claim_delivery_target
     from trackvance.automation_models import (
@@ -273,7 +271,6 @@ def main():
     # Even an administrator from the same organization receives only their own
     # inbox. A second identity is generated solely for this disposable project.
     from argon2 import PasswordHasher
-
     from trackvance import identity_bootstrap  # noqa: F401
 
     password = secrets.token_urlsafe(30)

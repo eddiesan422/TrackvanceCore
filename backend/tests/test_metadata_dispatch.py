@@ -100,7 +100,13 @@ def test_chaining_consumer_dispatch_uses_only_metadata(database, automation_case
         assert source_run.decision == "APPROVED"
         output_id, source_run_id, automation_id = source_run.output_version_id, source_run.id, automation.id
     forbid_dispatch_io(monkeypatch)
-    assert events.consume_once("CHAINING")
+    # Publication consumers share the durable outbox. Drain a finite fixture
+    # queue before checking the intended terminal Intake event's dispatch.
+    for _ in range(20):
+        if not events.consume_once("CHAINING"):
+            break
+    else:
+        pytest.fail("The small fixture did not finish its outbox consumption")
     with database() as db:
         occurrence = db.scalar(select(DeliveryOccurrence).where(DeliveryOccurrence.automation_id == automation_id))
         run = db.get(Run, occurrence.run_id)

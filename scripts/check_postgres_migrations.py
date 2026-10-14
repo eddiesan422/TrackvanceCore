@@ -21,7 +21,6 @@ def seed_pre_corrections_baseline(connection) -> None:
     credential references. Its purpose is exact SQL preservation, not a live run.
     """
     import sqlalchemy as sa
-
     from trackvance.db import Base
 
     metadata = sa.MetaData()
@@ -128,7 +127,6 @@ def verify_corrections_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
-
     from trackvance.db import Base
 
     connection.rollback()
@@ -182,7 +180,6 @@ def verify_catalog_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
-
     from trackvance.db import Base
 
     connection.rollback()
@@ -229,7 +226,6 @@ def verify_people_preservation(connection, config) -> dict:
     import verify_storage
     from alembic import command
     from physical_schema_guard import validate_physical_schema
-
     from trackvance.db import Base
 
     connection.rollback()
@@ -275,16 +271,101 @@ def verify_people_preservation(connection, config) -> dict:
     connection.rollback()
     command.upgrade(config, "head")
     connection.commit()
-    return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.8.5",
-        "tables_before": 55, "tables_after": 56, "exact_historical_projection": "PASS", "roundtrip": "PASS",
+    return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.9.0",
+        "tables_before": 55, "tables_after": 65, "exact_historical_projection": "PASS", "roundtrip": "PASS",
         "explicit_user_links_reused": True, "frozen_governance_history_preserved": True, "physical_schema": physical}
+
+
+def verify_core090_preservation(connection, config) -> dict:
+    """Prove populated 0019→0022→0019, then only approved automatic bootstrap."""
+    import sqlalchemy as sa
+    import verify_storage
+    from alembic import command
+    from physical_schema_guard import validate_physical_schema
+    from sqlalchemy.orm import Session
+    from trackvance.db import Base
+    from trackvance.sentinel_auto import backfill_automatic_monitors
+
+    connection.rollback()
+    command.downgrade(config, verify_storage.PEOPLE_MIGRATION)
+    connection.commit()
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    for name, table in metadata.tables.items():
+        if name in Base.metadata.tables:
+            for column in table.columns:
+                column.default = Base.metadata.tables[name].c[column.name].default
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    common = {"organization_id": "corrections-fixture", "created_at": now}
+    contracts = metadata.tables["configurations"]
+    configuration = {"schema_version": 2, "required_columns": ["identifier"], "max_error_rate": 0,
+                     "rules": [], "transforms": []}
+    for version in (1, 2):
+        connection.execute(contracts.insert().values(**common, id=f"c09-contract-v{version}",
+            name="Historical Intake 0.8.5", module="intake", dataset_id="c05-dataset", version=version,
+            previous_version_id="c09-contract-v1" if version == 2 else None,
+            config=configuration, status="PUBLISHED"))
+    connection.execute(metadata.tables["runs"].insert().values(**common, id="c09-approved-history",
+        config_id="c09-contract-v2", module="intake", name="Historical approved execution",
+        dataset_version_id="c05-version", initiated_by="Nombre histórico íntegro",
+        initiated_by_type="USER", initiated_by_id="c05-user", status="SUCCESS", decision="APPROVED",
+        execution_plan={"config_hash": verify_storage._canonical_hash(configuration), "schema_version": 3},
+        started_at=now, finished_at=now))
+    connection.commit()
+    before, before_fks = corrections_rows(connection)
+    assert len(before) == 56 and before["configurations"] and before["runs"] and before["governance_history"]
+    hashes = verify_storage._table_hashes(before)
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    after, after_fks = corrections_rows(connection)
+    assert len(after) == 65 and set(after) - set(before) == verify_storage.CORE090_TABLES
+    projection = verify_storage.legacy_v9_report(after, after_fks,
+        current_migration=verify_storage.CURRENT_MIGRATION, verified_artifacts=len(before["artifacts"]),
+        verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert projection["tables"] == hashes
+    assert projection["validated_relationships"] == verify_storage.validate_relationships(before, before_fks)
+    connection.rollback()
+    command.downgrade(config, verify_storage.PEOPLE_MIGRATION)
+    connection.commit()
+    roundtrip, _ = corrections_rows(connection)
+    assert verify_storage._table_hashes(roundtrip) == hashes
+    connection.rollback()
+    command.upgrade(config, "head")
+    connection.commit()
+    with Session(bind=connection) as db:
+        added = backfill_automatic_monitors(db)
+        db.commit()
+    connection.commit()
+    populated, populated_fks = corrections_rows(connection)
+    bootstrapped = verify_storage.legacy_v9_report(populated, populated_fks,
+        current_migration=verify_storage.CURRENT_MIGRATION, verified_artifacts=len(before["artifacts"]),
+        verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert bootstrapped["tables"] == hashes
+    assert added == len(before["datasets"])
+    physical = validate_physical_schema(connection, Base.metadata)
+    # A personalized automatic identity may never be dropped by a legacy proof.
+    table = Base.metadata.tables["sentinel_automatic_monitors"]
+    connection.execute(table.update().values(version=2))
+    customized, customized_fks = corrections_rows(connection)
+    try:
+        verify_storage.project_core090_upgrade(customized, customized_fks)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A 0.9 monitor customization was silently projected away")
+    connection.rollback()
+    return {"status": "PASS", "source_version": "0.8.5", "target_version": "0.9.0",
+        "tables_before": 56, "tables_after": 65, "roundtrip": "PASS", "exact_historical_projection": "PASS",
+        "approved_backfill_monitors": added, "customizations_rejected": True, "physical_schema": physical}
 
 
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
     """Persist representative 0008 rows, not remote writes or credential files."""
     from sqlalchemy import MetaData
     from sqlalchemy.orm import Session, registry
-
     from trackvance import models
 
     # A migration fixture must use the actual old schema, not INSERT new ORM
@@ -420,7 +501,6 @@ def check() -> dict:
     from alembic.config import Config
     from alembic.migration import MigrationContext
     from sqlalchemy.engine import make_url
-
     from trackvance import models  # noqa: F401
     from trackvance.config import BACKEND_DIR, DATABASE_URL
     from trackvance.db import Base
@@ -520,6 +600,9 @@ def check() -> dict:
                 "dataset_security_dependencies", "strict_approvals", "report_definitions",
                 "report_revisions", "report_contexts", "report_executions",
                 "governance_people",
+                "rest_delivery_batches", "sentinel_automatic_monitors", "sentinel_automatic_revisions",
+                "sentinel_version_evaluations", "sentinel_light_reviews", "intake_contract_states",
+                "intake_schedules", "intake_schedule_versions", "intake_occurrences",
             }
             for name, historical in identity_rows.items():
                 actual = [dict(row) for row in connection.execute(
@@ -531,7 +614,7 @@ def check() -> dict:
                             assert row["enabled"] is False
                             row["enabled"] = True  # Only the documented legacy safety pause is projected.
                 if name == "role_permissions":
-                    actual = [row for row in actual if row["permission_code"] != "people:read"]
+                    actual = [row for row in actual if row["permission_code"] not in {"people:read", "intake:delete", "intake:schedule"}]
                 assert actual == historical, f"0012→0016 changed {name}"
             schedule_table, revision_table = upgraded.tables["monitor_schedules"], upgraded.tables["monitor_schedule_versions"]
             unresolved = connection.execute(sa.select(schedule_table).where(schedule_table.c.id == "0008-schedule-unresolved")).mappings().one()
@@ -594,6 +677,7 @@ def check() -> dict:
             corrections = verify_corrections_preservation(connection, config)
             catalog = verify_catalog_preservation(connection, config)
             people = verify_people_preservation(connection, config)
+            core090 = verify_core090_preservation(connection, config)
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
                 "0008_0016_roundtrip": "PASS", "0012_0016_preservation": "PASS",
@@ -602,7 +686,7 @@ def check() -> dict:
                 "0008_delivery_attempts_preserved": {"COMMITTED": 1, "UNKNOWN": 1},
                 "0008_delivery_lineage_edges_preserved": 8,
                 "0015_0017_preservation": corrections,
-                "0016_0017_preservation": catalog, "0017_0019_preservation": people}
+                "0016_0017_preservation": catalog, "0017_0019_preservation": people, "0019_0022_preservation": core090}
     finally:
         if test_engine is not None:
             test_engine.dispose()

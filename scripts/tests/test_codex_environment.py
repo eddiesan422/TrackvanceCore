@@ -247,6 +247,81 @@ def test_update_unchanged_component_bytes_is_verified_noop(fixture, monkeypatch)
     assert result["status"] == "PASS_NOOP" and len(calls) == 1 and value["images"]["backend"]["source_sha"] == OLD
 
 
+def schema_upgrade_evidence(tmp_path, value, existing):
+    from datetime import UTC, datetime
+
+    import docker_state
+    from test_docker_state import rewrite_legacy_state, write_delivery_backup
+
+    backup = tmp_path / "schema-backup"
+    manifest, state = write_delivery_backup(backup, current=True)
+    state.update(schema_version=9, migration=docker_state.PEOPLE_MIGRATION)
+    state["tables"].update({name: {} for name in docker_state.PEOPLE_STATE_TABLES - set(state["tables"])})
+    candidate = "sha256:" + "5" * 64
+    manifest.update(source_project=codex.PROJECT, migration=docker_state.PEOPLE_MIGRATION,
+        application_only_codex=True, source_inventory_sha256=codex.canonical_hash(docker_state.codex_backup_identity(existing)),
+        images={"api": value["images"]["backend"]["id"]}, preserved_external_destination={
+            "container_id": "8" * 64, "image_id": IDS["postgres"], "volume_name": "trackvance-codex_test_destination_data"})
+    rewrite_legacy_state(backup, manifest, state)
+    receipt = {"schema_version": 1, "status": "STOPPED_VERIFIED", "restored_at": datetime.now(UTC).isoformat(),
+        "source_manifest_sha256": codex.reference(backup / "backup-manifest.json")["sha256"],
+        "verified_state_sha256": codex.reference(backup / "state.json")["sha256"],
+        "target_project": "trackvance-v090-test-schema-rehearsal", "target_backend_image_id": candidate,
+        "source_code_sha": NEW, "restored_migration": docker_state.CURRENT_MIGRATION}
+    receipt_path = tmp_path / "restore-receipt.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    return SimpleNamespace(schema_upgrade_backup=backup, schema_upgrade_restore_receipt=receipt_path, backend_image=candidate), receipt, state
+
+
+def test_schema_upgrade_accepts_only_verified_backup_bound_to_exact_candidate_and_old_runtime(fixture, tmp_path):
+    _directory, value, values, defaults = fixture
+    existing = runtime(resolved(values), defaults)
+    args, _receipt, state = schema_upgrade_evidence(tmp_path, value, existing)
+    proof = codex.validate_schema_upgrade(args, value, NEW, existing)
+    assert proof["source_state"] == state and proof["candidate_backend_image_id"] == args.backend_image
+    existing["containers"][0]["Image"] = "sha256:" + "9" * 64
+    with pytest.raises(ValueError, match="DRIFT"):
+        codex.validate_schema_upgrade(args, value, NEW, existing)
+
+
+@pytest.mark.parametrize("damage", ["hash", "source_sha", "candidate", "migration", "permanent", "expired", "missing"])
+def test_schema_upgrade_rejects_unbound_or_unrestored_evidence(fixture, tmp_path, damage):
+    _directory, value, values, defaults = fixture
+    existing = runtime(resolved(values), defaults)
+    args, receipt, _state = schema_upgrade_evidence(tmp_path, value, existing)
+    if damage == "hash":receipt["source_manifest_sha256"] = "0" * 64
+    elif damage == "source_sha":receipt["source_code_sha"] = OLD
+    elif damage == "candidate":receipt["target_backend_image_id"] = IDS["backend"]
+    elif damage == "migration":receipt["restored_migration"] = "0019_governance_people"
+    elif damage == "permanent":receipt["target_project"] = "trackvance-certification"
+    elif damage == "expired":receipt["restored_at"] = "2020-01-01T00:00:00Z"
+    else:args.schema_upgrade_restore_receipt = None
+    if args.schema_upgrade_restore_receipt:
+        args.schema_upgrade_restore_receipt.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError):
+        codex.validate_schema_upgrade(args, value, NEW, existing)
+
+
+def test_schema_upgrade_quiesces_only_app_and_rejects_changed_state_before_migration(fixture, monkeypatch):
+    import docker_state
+
+    directory, _value, values, defaults = fixture
+    existing = runtime(resolved(values), defaults)
+    calls = []
+    monkeypatch.setattr(codex, "command", lambda args, **_kwargs: calls.append(args) or "")
+    def snapshot(_api_id, destination):
+        destination.write_text('{"changed":true}', encoding="utf-8")
+        return {"changed": True}
+    monkeypatch.setattr(docker_state, "_copy_snapshot", snapshot)
+    with pytest.raises(ValueError, match="STATE_CHANGED"):
+        codex.quiesce_schema_upgrade(["docker", "compose"], {}, existing, {"source_state": {}}, directory)
+    stops = [args for args in calls if "stop" in args]
+    assert len(stops) == 1 and "postgres" not in stops[0] and "test-postgres" not in stops[0]
+    assert not any("rm" in args or "up" in args or "build" in args for args in calls)
+    restarted = {args[-1] for args in calls if args[:2] == ["docker", "start"]}
+    assert restarted == {row["Id"] for row in existing["containers"] if row["Config"]["Labels"]["com.docker.compose.service"] not in {"postgres", "test-postgres"}}
+
+
 def test_persistent_c03_runner_uses_only_target_case_and_no_secrets(fixture, monkeypatch):
     directory, value, values, defaults = fixture
     config = resolved(values); existing = runtime(config, defaults)

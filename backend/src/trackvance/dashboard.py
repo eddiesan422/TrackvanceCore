@@ -61,6 +61,9 @@ def run_operational_status(run: Run) -> str:
 def run_health_score(run: Run) -> float | None:
     if run.module not in {"intake", "recon", "sentinel"}:
         return None
+    if run.module == "sentinel" and ((run.metrics or {}).get("quality_interpretation") == "CONTROL_COUNTS_ONLY"
+                                    or (run.execution_plan or {}).get("sentinel_automatic")):
+        return None
     operational_status = run_operational_status(run)
     if operational_status == "IN_PROGRESS":
         return None

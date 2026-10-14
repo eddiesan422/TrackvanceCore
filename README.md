@@ -1,6 +1,14 @@
 # Trackvance Core
 
-## Trackvance Core 0.8.5
+## Trackvance Core 0.9.0
+
+La implementación añade REST de entrada/salida, Sentinel automático con resumen
+visual por ejecución, calendario Intake y baja lógica, lectura de notificaciones
+por casilla y linaje gráfico autorizado. Conserva contratos e historia 0.8.5.
+Los gates de 0.9.0 permanecen abiertos hasta disponer de evidencia completa de
+pruebas pequeñas, millón de registros, CI del SHA final y actualización verificada.
+
+### Base conservada de 0.8.5
 
 Esta línea implementa R080-01–R080-04 y R085-01–R085-06. El cierre requiere
 certificación aislada, GitHub Actions funcional del SHA final, publicación

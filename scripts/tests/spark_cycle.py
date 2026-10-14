@@ -22,7 +22,6 @@ from pathlib import Path
 
 import polars as pl
 import pyarrow.parquet as pq
-
 from trackvance.dataset_scans import profile_paths
 from trackvance.processing import reconcile, sentinel
 from trackvance.spark_engine import (

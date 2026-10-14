@@ -31,7 +31,7 @@ def require_current_snapshot(state):
     if (state.get('schema_version') != docker_state.VERIFY_SCHEMA_VERSION
             or state.get('migration') != docker_state.CURRENT_MIGRATION
             or set(state.get('tables', {})) != docker_state.CURRENT_STATE_TABLES):
-        raise ValueError('La huella nativa no contiene el estado completo 0.8.5.')
+        raise ValueError('La huella nativa no contiene el estado completo 0.9.0.')
 
 
 def require_preserved_061_history(before, after, normalized):
@@ -264,7 +264,7 @@ def native_cycle(context_path, evidence_path=None):
 
 
 def authentic_061_cycle(commit, evidence_path=None):
-    """Archive an immutable 0.6.1 source and destroy it before restoring 0.8.5."""
+    """Archive an immutable 0.6.1 source and destroy it before restoring 0.9.0."""
     from docker_backup_cycle import (
         RecoveryApi,
         RecoveryCommandError,
@@ -327,7 +327,7 @@ def authentic_061_cycle(commit, evidence_path=None):
     source_claimed = target_claimed = False
     main_project = 'trackvance-certification'
     main_before = certification_v070.inventory(main_project)
-    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.8.5', 'baseline_commit': commit,
+    result = {'status': 'FAIL', 'source_version': '0.6.1', 'target_version': '0.9.0', 'baseline_commit': commit,
               'source_project': source, 'target_project': target, 'automatic_processes_started': False}
     stage, started = 'authentic_archive', time.monotonic()
     def run(arguments, *, input_text=None):
@@ -422,13 +422,13 @@ with SessionLocal() as db:
         if any(item['running'] for item in docker_state.inventory(target)['containers']):
             raise ValueError('El destino activó procesos antes de verificar la preservación.')
         docker_state.compose(target, 'up', '-d', '--wait', 'api', 'web', environment=target_environment)
-        if health_version(target_port) != '0.8.5':
-            raise ValueError('El destino no ejecuta 0.8.5.')
+        if health_version(target_port) != '0.9.0':
+            raise ValueError('El destino no ejecuta 0.9.0.')
         api_container = next(item for item in docker_state.inventory(target)['containers'] if item['service'] == 'api')
         after = docker_state._copy_snapshot(api_container['id'], evidence / 'restored-state.json')
         normalized = docker_state._copy_snapshot(api_container['id'], evidence / 'legacy-state.json', command='snapshot-legacy-v5')
         require_preserved_061_history(before, after, normalized)
-        result.update(exact_historical_state='PASS', schema_upgrade='0012→0017', native_tables=len(after['tables']), historical_tables=31,
+        result.update(exact_historical_state='PASS', schema_upgrade='0012→0022', native_tables=len(after['tables']), historical_tables=31,
             new_catalog_tables_empty=True,
             source_state_sha256=docker_state.canonical_hash(before), restored_legacy_sha256=docker_state.canonical_hash(normalized),
             artifacts=after['verified_artifacts'], source_secrets=after['verified_source_secrets'], delivery_secrets=after['verified_delivery_secrets'],

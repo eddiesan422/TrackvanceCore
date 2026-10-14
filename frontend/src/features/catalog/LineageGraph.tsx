@@ -1,0 +1,51 @@
+import { useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { api } from '../../api/client'
+import { Badge, Empty, ErrorState, Field, label, Loading, Notice } from '../../components/ui'
+import './lineage.css'
+
+type Node = { id: string; resource_id: string; type: string; label: string; href: string | null; status: string | null; decision: string | null; technical: boolean; has_more: boolean; sha256?: string; row_count?: number; module?: string }
+type Edge = { id: string; source: string; target: string; relation: string; stored_relation: string; state: string }
+type Graph = { root_id: string | null; version_id: string | null; nodes: Node[]; edges: Edge[]; complete: boolean; pending_branches: string[] }
+
+export function LineageGraph({ datasetId, initialVersion }: { datasetId: string; initialVersion?: string }) {
+  const [version, setVersion] = useState(initialVersion || ''), [versionOffset, setVersionOffset] = useState(0)
+  const [depth, setDepth] = useState(2), [maxNodes, setMaxNodes] = useState(100), [scale, setScale] = useState(1)
+  const [selected, setSelected] = useState<string | null>(null), [showTechnical, setShowTechnical] = useState(false)
+  const viewport = useRef<HTMLDivElement>(null), drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const versions = useQuery({ queryKey: ['lineage-versions', datasetId, versionOffset], queryFn: () => api<{ items: { id: string; version: number }[]; total: number }>(`/catalog/datasets/${datasetId}?section=versions&offset=${versionOffset}&limit=50`) })
+  const query = new URLSearchParams({ max_depth: String(depth), max_nodes: String(maxNodes) }); if (version) query.set('version_id', version)
+  const graph = useQuery({ queryKey: ['lineage-graph', datasetId, query.toString()], queryFn: () => api<Graph>(`/catalog/datasets/${datasetId}/lineage-graph?${query}`) })
+  const layout = useMemo(() => {
+    const nodes = (graph.data?.nodes || []).filter(node => showTechnical || !node.technical)
+    const ids = new Set(nodes.map(node => node.id)), edges = (graph.data?.edges || []).filter(edge => ids.has(edge.source) && ids.has(edge.target))
+    const ranks = new Map<string, number>(); if (graph.data?.root_id) ranks.set(graph.data.root_id, 0)
+    const queue = [...ranks.keys()]
+    for (let i = 0; i < queue.length; i++) {
+      const id = queue[i], rank = ranks.get(id) || 0
+      for (const edge of edges) {
+        const next = edge.source === id ? edge.target : edge.target === id ? edge.source : null
+        if (next && !ranks.has(next)) { ranks.set(next, rank + (edge.source === id ? 1 : -1)); queue.push(next) }
+      }
+    }
+    const min = Math.min(0, ...ranks.values()), counts = new Map<number, number>()
+    const placed = nodes.map(node => { const rank = ranks.get(node.id) || 0, row = counts.get(rank) || 0; counts.set(rank, row + 1); return { ...node, x: 40 + (rank - min) * 300, y: 45 + row * 132 } })
+    return { nodes: placed, edges, width: Math.max(700, ...placed.map(node => node.x + 280)), height: Math.max(340, ...placed.map(node => node.y + 110)) }
+  }, [graph.data, showTechnical])
+  const positions = new Map(layout.nodes.map(node => [node.id, node])), detail = graph.data?.nodes.find(node => node.id === selected)
+  function expand() { if (depth < 8) setDepth(depth + 1); else setMaxNodes(Math.min(500, maxNodes + 100)) }
+  function fit() { const width = viewport.current?.clientWidth || 700; setScale(Math.max(0.2, Math.min(1.4, width / layout.width))) }
+  return <div className="lineage-browser"><p className="muted">Procedencia registrada para la versión seleccionada. Sentinel representa monitoreo. Las relaciones no acreditan correspondencia por fila o columna.</p>
+    <div className="lineage-toolbar"><Field label="Versión del linaje"><select value={version || graph.data?.version_id || ''} onChange={event => { setVersion(event.target.value); setSelected(null); setDepth(2) }}><option value="">Última registrada</option>{versions.data?.items.map(item => <option key={item.id} value={item.id}>Versión {item.version}</option>)}</select></Field>{(versions.data?.total || 0) > 50 && <><button className="button secondary small" disabled={!versionOffset} onClick={() => setVersionOffset(Math.max(0, versionOffset - 50))}>Versiones anteriores</button><button className="button secondary small" disabled={versionOffset + 50 >= (versions.data?.total || 0)} onClick={() => setVersionOffset(versionOffset + 50)}>Más versiones</button></>}
+      <button className="button secondary small" aria-label="Alejar linaje" onClick={() => setScale(Math.max(0.2, scale / 1.2))}>−</button><span aria-live="polite">{Math.round(scale * 100)}%</span><button className="button secondary small" aria-label="Acercar linaje" onClick={() => setScale(Math.min(3, scale * 1.2))}>+</button><button className="button secondary small" onClick={fit}>Ajustar a pantalla</button><label className="checkbox-row"><input type="checkbox" checked={showTechnical} onChange={event => setShowTechnical(event.target.checked)}/>Artefactos técnicos ({graph.data?.nodes.filter(node => node.technical).length || 0})</label>
+    </div>{versions.error && <ErrorState error={versions.error} retry={() => { void versions.refetch() }}/>}
+    {graph.isPending ? <Loading text="Recorriendo metadata de linaje…"/> : graph.error ? <ErrorState error={graph.error} retry={() => { void graph.refetch() }}/> : !graph.data?.nodes.length ? <Empty title="Esperando primera versión" description="El linaje aparecerá cuando exista una publicación completa."/> : <>
+      {!graph.data.complete && <Notice>Recorrido parcial: quedan ramas pendientes de expansión. <button className="text-button" disabled={depth >= 8 && maxNodes >= 500} onClick={expand}>Expandir recorrido</button>{depth >= 8 && maxNodes >= 500 && ' Se alcanzó el límite de 8 niveles y 500 nodos.'}</Notice>}
+      <div className="lineage-viewport" ref={viewport} tabIndex={0} aria-label="Diagrama de linaje; usa las flechas para desplazar" onKeyDown={event => { if (!viewport.current || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) || event.target !== event.currentTarget) return; event.preventDefault(); viewport.current.scrollBy({ left: event.key === 'ArrowLeft' ? -100 : event.key === 'ArrowRight' ? 100 : 0, top: event.key === 'ArrowUp' ? -100 : event.key === 'ArrowDown' ? 100 : 0 }) }} onPointerDown={event => { if ((event.target as HTMLElement).closest('button')) return; drag.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; event.currentTarget.setPointerCapture(event.pointerId) }} onPointerMove={event => { if (!drag.current) return; event.currentTarget.scrollLeft = drag.current.left + drag.current.x - event.clientX; event.currentTarget.scrollTop = drag.current.top + drag.current.y - event.clientY }} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
+        <div style={{ width: layout.width * scale, height: layout.height * scale }}><div className="lineage-canvas" style={{ width: layout.width, height: layout.height, transform: `scale(${scale})` }}><svg width={layout.width} height={layout.height} aria-hidden="true"><defs><marker id="lineage-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7185a5"/></marker></defs>{layout.edges.map(edge => { const a = positions.get(edge.source)!, b = positions.get(edge.target)!, reverse = a.x > b.x; return <g key={edge.id}><path d={`M ${a.x + (reverse ? 0 : 240)} ${a.y + 45} C ${a.x + (reverse ? -30 : 270)} ${a.y + 45}, ${b.x + (reverse ? 270 : -30)} ${b.y + 45}, ${b.x + (reverse ? 240 : 0)} ${b.y + 45}`} markerEnd="url(#lineage-arrow)" className={edge.state === 'UNCONFIRMED' ? 'lineage-uncertain' : ''}/><title>{label(edge.relation)}</title></g> })}</svg>{layout.nodes.map(node => <button key={node.id} style={{ left: node.x, top: node.y }} className={`lineage-node ${node.id === graph.data?.root_id ? 'lineage-root' : ''} ${selected === node.id ? 'lineage-selected' : ''}`} onClick={() => setSelected(node.id)} aria-pressed={selected === node.id}><small>{node.module === 'sentinel' ? 'Sentinel · monitoreo' : label(node.type)}</small><strong>{node.label}</strong>{node.status && <Badge value={node.status}/>} {node.decision && <Badge value={node.decision}/>} {node.has_more && <span className="lineage-pending">Ramas pendientes</span>}</button>)}</div></div>
+      </div>{detail && <aside className="lineage-detail" aria-label="Detalle del nodo"><h3>{detail.label}</h3><p>{label(detail.type)} · {detail.resource_id}</p>{detail.sha256 && <p className="lineage-hash">SHA256: {detail.sha256}</p>}{detail.row_count != null && <p>Filas exactas: {detail.row_count.toLocaleString('es-CO')}</p>}{detail.href && <Link to={detail.href}>Ver detalle autorizado</Link>}{detail.has_more && <button className="button secondary small" disabled={depth >= 8 && maxNodes >= 500} onClick={expand}>Expandir ramas</button>}</aside>}
+      <details className="lineage-table"><summary>Detalle tabular y evidencia ({graph.data.edges.length} relaciones registradas)</summary><div className="table-scroll"><table><thead><tr><th>Origen</th><th>Relación</th><th>Resultado o destino</th><th>Confirmación</th></tr></thead><tbody>{graph.data.edges.map(edge => { const source = graph.data!.nodes.find(node => node.id === edge.source), target = graph.data!.nodes.find(node => node.id === edge.target); return <tr key={edge.id}><td>{source?.href ? <Link to={source.href}>{source.label}</Link> : source?.label}<small className="table-subtitle">{source?.resource_id}</small></td><td>{label(edge.relation)}<small className="table-subtitle">Metadata: {edge.stored_relation}</small></td><td>{target?.href ? <Link to={target.href}>{target.label}</Link> : target?.label}<small className="table-subtitle">{target?.resource_id}</small></td><td>{edge.state === 'CONFIRMED' ? 'Confirmada' : edge.state === 'UNCONFIRMED' ? 'Sin confirmación de entrega completa' : 'Relación registrada'}</td></tr> })}</tbody></table></div></details>
+    </>}
+  </div>
+}

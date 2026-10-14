@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class ConnectionResponse(BaseModel):
     id: str
     name: str
-    source_type: Literal["POSTGRESQL", "SQLSERVER"]
+    source_type: Literal["POSTGRESQL", "SQLSERVER", "REST"]
     enabled: bool
     version: int
     host: str

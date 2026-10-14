@@ -320,6 +320,7 @@ def profile_frame(
         schema.append(schema_item)
     signature = [{"name": s["name"], "logical_type": s["logical_type"]} for s in schema]
     schema_hash = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+    distinct_rows = frame.n_unique() if frame.width else 0
     return (
         schema,
         {
@@ -330,6 +331,9 @@ def profile_frame(
             "metric_method": "EXACT_OBSERVED",
             "metric_definition_version": 2,
             "null_policy": "NULL_EXCLUDED_EMPTY_PRESERVED",
+            "distinct_row_count": distinct_rows,
+            "duplicate_row_count": frame.height - distinct_rows,
+            "row_duplicate_definition": "EXCESS_EXACT_BUSINESS_ROWS_NULL_EQUAL_V1",
         },
         schema_hash,
     )

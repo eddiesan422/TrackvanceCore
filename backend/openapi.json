@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.8.5"
+    "version": "0.9.0"
   },
   "paths": {
     "/health": {
@@ -687,12 +687,34 @@
       "get": {
         "summary": "Configurations",
         "operationId": "configurations_api_v1_monitors_get",
+        "parameters": [
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Deleted"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           },
@@ -720,14 +742,14 @@
         "summary": "Monitor",
         "operationId": "monitor_api_v1_monitors_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/MonitorBody"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -783,12 +805,34 @@
       "get": {
         "summary": "Configurations",
         "operationId": "configurations_api_v1_recon_controls_get",
+        "parameters": [
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Deleted"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           },
@@ -816,14 +860,14 @@
         "summary": "Recon Control",
         "operationId": "recon_control_api_v1_recon_controls_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ReconBody"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -879,12 +923,34 @@
       "get": {
         "summary": "Configurations",
         "operationId": "configurations_api_v1_intake_contracts_get",
+        "parameters": [
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Deleted"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           },
@@ -912,14 +978,14 @@
         "summary": "Intake Contract",
         "operationId": "intake_contract_api_v1_intake_contracts_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/IntakeBody"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -5017,6 +5083,87 @@
         "x-required-permission": "delivery:review_unknown"
       }
     },
+    "/api/v1/delivery/runs/{run_id}/rest-batches": {
+      "get": {
+        "tags": [
+          "Data Delivery"
+        ],
+        "summary": "Rest Delivery Batches",
+        "operationId": "rest_delivery_batches_api_v1_delivery_runs__run_id__rest_batches_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "delivery:read"
+      }
+    },
     "/api/v1/roles/permissions": {
       "get": {
         "tags": [
@@ -6952,7 +7099,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleBody"
+                "$ref": "#/components/schemas/trackvance__sentinel_api__ScheduleBody"
               }
             }
           }
@@ -7223,6 +7370,197 @@
         "x-required-permission": "sentinel:read"
       }
     },
+    "/api/v1/monitors/{monitor_id}/automatic": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Get Automatic",
+        "operationId": "get_automatic_api_v1_monitors__monitor_id__automatic_get",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "sentinel:read"
+      },
+      "post": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Configure Automatic",
+        "operationId": "configure_automatic_api_v1_monitors__monitor_id__automatic_post",
+        "parameters": [
+          {
+            "name": "monitor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Monitor Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomaticBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "sentinel:schedule"
+      }
+    },
+    "/api/v1/runs/{run_id}/visual-summary": {
+      "get": {
+        "tags": [
+          "Sentinel"
+        ],
+        "summary": "Visual Summary",
+        "description": "Read immutable execution evidence and compatible metadata only; never scan.",
+        "operationId": "visual_summary_api_v1_runs__run_id__visual_summary_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "runs:read"
+      }
+    },
     "/api/v1/auth/providers": {
       "get": {
         "tags": [
@@ -7345,7 +7683,8 @@
                 "PARQUET",
                 "XLSX",
                 "POSTGRESQL",
-                "SQLSERVER"
+                "SQLSERVER",
+                "REST"
               ],
               "type": "string",
               "default": "CSV",
@@ -8562,6 +8901,409 @@
           }
         ],
         "x-required-permission": "delivery:review_unknown"
+      }
+    },
+    "/api/v1/intake/contracts/{configuration_id}": {
+      "get": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Historical Contract",
+        "operationId": "historical_contract_api_v1_intake_contracts__configuration_id__get",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:read"
+      },
+      "delete": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Logical Delete",
+        "operationId": "logical_delete_api_v1_intake_contracts__configuration_id__delete",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:delete"
+      }
+    },
+    "/api/v1/intake/contracts/{configuration_id}/schedule": {
+      "get": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Get Schedule",
+        "operationId": "get_schedule_api_v1_intake_contracts__configuration_id__schedule_get",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:read"
+      },
+      "post": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Update Schedule",
+        "operationId": "update_schedule_api_v1_intake_contracts__configuration_id__schedule_post",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/trackvance__intake_automation_api__ScheduleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:schedule"
+      }
+    },
+    "/api/v1/intake/contracts/{configuration_id}/occurrences": {
+      "get": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Get Occurrences",
+        "operationId": "get_occurrences_api_v1_intake_contracts__configuration_id__occurrences_get",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:read"
+      }
+    },
+    "/api/v1/intake/contracts/{configuration_id}/deletion-impact": {
+      "get": {
+        "tags": [
+          "Intake automation and lifecycle"
+        ],
+        "summary": "Get Impact",
+        "operationId": "get_impact_api_v1_intake_contracts__configuration_id__deletion_impact_get",
+        "parameters": [
+          {
+            "name": "configuration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Configuration Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "intake:delete"
       }
     },
     "/api/v1/notifications/inbox": {
@@ -12881,6 +13623,104 @@
         ],
         "x-required-permission": "reports:generate"
       }
+    },
+    "/api/v1/catalog/datasets/{dataset_id}/lineage-graph": {
+      "get": {
+        "tags": [
+          "Linaje gráfico"
+        ],
+        "summary": "Lineage Graph",
+        "operationId": "lineage_graph_api_v1_catalog_datasets__dataset_id__lineage_graph_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "max_depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 8,
+              "minimum": 1,
+              "default": 2,
+              "title": "Max Depth"
+            }
+          },
+          {
+            "name": "max_nodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 10,
+              "default": 100,
+              "title": "Max Nodes"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "catalog:read"
+      }
     }
   },
   "components": {
@@ -12957,7 +13797,8 @@
             "enum": [
               "UPLOAD",
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Source Type"
           },
@@ -13287,6 +14128,45 @@
           "demo_mode"
         ],
         "title": "AuthenticationResponse"
+      },
+      "AutomaticBody": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "review_interval_seconds": {
+            "type": "integer",
+            "maximum": 2678400.0,
+            "minimum": 3600.0,
+            "title": "Review Interval Seconds",
+            "default": 86400
+          },
+          "responsible_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responsible User Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled",
+          "expected_version"
+        ],
+        "title": "AutomaticBody"
       },
       "AutomationBody": {
         "properties": {
@@ -13969,6 +14849,23 @@
               }
             ],
             "title": "Description"
+          },
+          "update_intake_schedule": {
+            "type": "boolean",
+            "title": "Update Intake Schedule",
+            "default": false
+          },
+          "expected_schedule_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Schedule Version"
           }
         },
         "additionalProperties": false,
@@ -13990,7 +14887,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Source Type"
           },
@@ -13998,25 +14896,29 @@
             "type": "string",
             "maxLength": 253,
             "minLength": 1,
-            "title": "Host"
+            "title": "Host",
+            "default": "REST"
           },
           "port": {
             "type": "integer",
             "maximum": 65535.0,
             "minimum": 1.0,
-            "title": "Port"
+            "title": "Port",
+            "default": 443
           },
           "database": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Database"
+            "title": "Database",
+            "default": "REST"
           },
           "username": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Username"
+            "title": "Username",
+            "default": "REST"
           },
           "password": {
             "anyOf": [
@@ -14042,11 +14944,7 @@
         "type": "object",
         "required": [
           "name",
-          "source_type",
-          "host",
-          "port",
-          "database",
-          "username"
+          "source_type"
         ],
         "title": "ConnectionBody"
       },
@@ -14215,7 +15113,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Source Type"
           },
@@ -14318,7 +15217,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Source Type"
           },
@@ -14326,25 +15226,29 @@
             "type": "string",
             "maxLength": 253,
             "minLength": 1,
-            "title": "Host"
+            "title": "Host",
+            "default": "REST"
           },
           "port": {
             "type": "integer",
             "maximum": 65535.0,
             "minimum": 1.0,
-            "title": "Port"
+            "title": "Port",
+            "default": 443
           },
           "database": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Database"
+            "title": "Database",
+            "default": "REST"
           },
           "username": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Username"
+            "title": "Username",
+            "default": "REST"
           },
           "password": {
             "anyOf": [
@@ -14381,11 +15285,7 @@
         "type": "object",
         "required": [
           "name",
-          "source_type",
-          "host",
-          "port",
-          "database",
-          "username"
+          "source_type"
         ],
         "title": "ConnectionTestBody"
       },
@@ -14682,6 +15582,29 @@
         ],
         "title": "DefinitionBody"
       },
+      "DeleteBody": {
+        "properties": {
+          "impact_token": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Impact Token"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 3,
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "impact_token",
+          "note"
+        ],
+        "title": "DeleteBody"
+      },
       "DeliveryAttemptsResponse": {
         "properties": {
           "items": {
@@ -14734,7 +15657,15 @@
             "title": "Destination Version Id"
           },
           "target": {
-            "$ref": "#/components/schemas/TargetSpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetSpec"
+              },
+              {
+                "$ref": "#/components/schemas/RestTarget"
+              }
+            ],
+            "title": "Target"
           },
           "columns": {
             "items": {
@@ -14751,9 +15682,11 @@
               "CREATE_AND_LOAD",
               "APPEND",
               "OVERWRITE",
-              "UPSERT"
+              "UPSERT",
+              "REST_POST"
             ],
-            "title": "Write Strategy"
+            "title": "Write Strategy",
+            "default": "REST_POST"
           },
           "upsert_keys": {
             "items": {
@@ -14819,7 +15752,6 @@
           "destination_version_id",
           "target",
           "columns",
-          "write_strategy",
           "name"
         ],
         "title": "DeliveryConfigurationBody"
@@ -14854,7 +15786,15 @@
             "title": "Destination Version Id"
           },
           "target": {
-            "$ref": "#/components/schemas/TargetSpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetSpec"
+              },
+              {
+                "$ref": "#/components/schemas/RestTarget"
+              }
+            ],
+            "title": "Target"
           },
           "columns": {
             "items": {
@@ -14871,9 +15811,11 @@
               "CREATE_AND_LOAD",
               "APPEND",
               "OVERWRITE",
-              "UPSERT"
+              "UPSERT",
+              "REST_POST"
             ],
-            "title": "Write Strategy"
+            "title": "Write Strategy",
+            "default": "REST_POST"
           },
           "upsert_keys": {
             "items": {
@@ -14931,8 +15873,7 @@
           "destination_id",
           "destination_version_id",
           "target",
-          "columns",
-          "write_strategy"
+          "columns"
         ],
         "title": "DeliveryConfigurationVersionBody"
       },
@@ -14966,7 +15907,15 @@
             "title": "Destination Version Id"
           },
           "target": {
-            "$ref": "#/components/schemas/TargetSpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetSpec"
+              },
+              {
+                "$ref": "#/components/schemas/RestTarget"
+              }
+            ],
+            "title": "Target"
           },
           "columns": {
             "items": {
@@ -14983,9 +15932,11 @@
               "CREATE_AND_LOAD",
               "APPEND",
               "OVERWRITE",
-              "UPSERT"
+              "UPSERT",
+              "REST_POST"
             ],
-            "title": "Write Strategy"
+            "title": "Write Strategy",
+            "default": "REST_POST"
           },
           "upsert_keys": {
             "items": {
@@ -15031,8 +15982,7 @@
           "destination_id",
           "destination_version_id",
           "target",
-          "columns",
-          "write_strategy"
+          "columns"
         ],
         "title": "DeliveryDraft"
       },
@@ -15463,7 +16413,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Sink Type"
           },
@@ -15471,25 +16422,29 @@
             "type": "string",
             "maxLength": 253,
             "minLength": 1,
-            "title": "Host"
+            "title": "Host",
+            "default": "REST"
           },
           "port": {
             "type": "integer",
             "maximum": 65535.0,
             "minimum": 1.0,
-            "title": "Port"
+            "title": "Port",
+            "default": 443
           },
           "database": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Database"
+            "title": "Database",
+            "default": "REST"
           },
           "username": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Username"
+            "title": "Username",
+            "default": "REST"
           },
           "options": {
             "additionalProperties": true,
@@ -15497,24 +16452,26 @@
             "title": "Options"
           },
           "password": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 1,
-            "format": "password",
-            "title": "Password",
-            "writeOnly": true
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
-          "sink_type",
-          "host",
-          "port",
-          "database",
-          "username",
-          "password"
+          "sink_type"
         ],
         "title": "DestinationBody"
       },
@@ -15670,7 +16627,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Sink Type"
           },
@@ -15773,7 +16731,8 @@
             "type": "string",
             "enum": [
               "POSTGRESQL",
-              "SQLSERVER"
+              "SQLSERVER",
+              "REST"
             ],
             "title": "Sink Type"
           },
@@ -15781,25 +16740,29 @@
             "type": "string",
             "maxLength": 253,
             "minLength": 1,
-            "title": "Host"
+            "title": "Host",
+            "default": "REST"
           },
           "port": {
             "type": "integer",
             "maximum": 65535.0,
             "minimum": 1.0,
-            "title": "Port"
+            "title": "Port",
+            "default": 443
           },
           "database": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Database"
+            "title": "Database",
+            "default": "REST"
           },
           "username": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Username"
+            "title": "Username",
+            "default": "REST"
           },
           "options": {
             "additionalProperties": true,
@@ -15837,11 +16800,7 @@
         "type": "object",
         "required": [
           "name",
-          "sink_type",
-          "host",
-          "port",
-          "database",
-          "username"
+          "sink_type"
         ],
         "title": "DestinationTestBody"
       },
@@ -16398,6 +17357,68 @@
           "dataset_version_id"
         ],
         "title": "IntakeRunBody"
+      },
+      "IntakeScheduleSettings": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "INTERVAL",
+              "DAILY",
+              "WEEKLY",
+              "EVENT"
+            ],
+            "title": "Mode",
+            "default": "EVENT"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Timezone",
+            "default": "America/Bogota"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "maximum": 2678400.0,
+            "minimum": 60.0,
+            "title": "Interval Seconds",
+            "default": 3600
+          },
+          "local_time": {
+            "type": "string",
+            "title": "Local Time",
+            "default": "09:00"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 7,
+            "title": "Weekdays"
+          },
+          "requested_engine": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "POLARS",
+              "PYSPARK"
+            ],
+            "title": "Requested Engine",
+            "default": "AUTO"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "starts_at"
+        ],
+        "title": "IntakeScheduleSettings"
       },
       "KeyNormalization": {
         "properties": {
@@ -17377,6 +18398,103 @@
         ],
         "title": "ResolveBody"
       },
+      "RestTarget": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "REST",
+            "title": "Mode",
+            "default": "REST"
+          },
+          "rows_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Rows Key",
+            "default": "records"
+          },
+          "static_body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Static Body"
+          },
+          "batch_rows": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Batch Rows",
+            "default": 1000
+          },
+          "max_batches": {
+            "type": "integer",
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Max Batches",
+            "default": 5000
+          },
+          "max_payload_bytes": {
+            "type": "integer",
+            "maximum": 8388608.0,
+            "minimum": 1024.0,
+            "title": "Max Payload Bytes",
+            "default": 8388608
+          },
+          "confirmation_path": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Confirmation Path"
+          },
+          "confirmation_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Confirmation Value"
+          },
+          "rows_path": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Rows Path"
+          },
+          "batch_id_path": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Batch Id Path"
+          },
+          "payload_hash_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Hash Path"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirmation_path",
+          "confirmation_value",
+          "rows_path",
+          "batch_id_path"
+        ],
+        "title": "RestTarget"
+      },
       "RevisionBody": {
         "properties": {
           "expected_version": {
@@ -17679,63 +18797,6 @@
         ],
         "title": "RuleDefinition"
       },
-      "ScheduleBody": {
-        "properties": {
-          "interval_seconds": {
-            "type": "integer",
-            "maximum": 2678400.0,
-            "minimum": 60.0,
-            "title": "Interval Seconds"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "default": true
-          },
-          "starts_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Starts At"
-          },
-          "expected_version": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Version"
-          },
-          "responsible_user_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 64
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Responsible User Id"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "interval_seconds"
-        ],
-        "title": "ScheduleBody"
-      },
       "ScheduleResponse": {
         "properties": {
           "id": {
@@ -17846,13 +18907,15 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Schema Name"
+            "title": "Schema Name",
+            "default": "REST"
           },
           "object_name": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Object Name"
+            "title": "Object Name",
+            "default": "collection"
           },
           "column_overrides": {
             "additionalProperties": true,
@@ -17887,9 +18950,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "name",
-          "schema_name",
-          "object_name"
+          "name"
         ],
         "title": "SourceAcquisitionBody"
       },
@@ -17951,13 +19012,15 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Schema Name"
+            "title": "Schema Name",
+            "default": "REST"
           },
           "object_name": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "title": "Object Name"
+            "title": "Object Name",
+            "default": "collection"
           },
           "column_overrides": {
             "additionalProperties": true,
@@ -17992,9 +19055,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "name",
-          "schema_name",
-          "object_name"
+          "name"
         ],
         "title": "SourceDatasetBody"
       },
@@ -19073,6 +20134,47 @@
         ],
         "title": "NotificationResponse"
       },
+      "trackvance__intake_automation_api__ScheduleBody": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/IntakeScheduleSettings"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "responsible_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responsible User Id"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "title": "ScheduleBody"
+      },
       "trackvance__notifications_api__NotificationResponse": {
         "properties": {
           "id": {
@@ -19457,6 +20559,63 @@
           "metrics"
         ],
         "title": "OccurrenceResponse"
+      },
+      "trackvance__sentinel_api__ScheduleBody": {
+        "properties": {
+          "interval_seconds": {
+            "type": "integer",
+            "maximum": 2678400.0,
+            "minimum": 60.0,
+            "title": "Interval Seconds"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          },
+          "responsible_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responsible User Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "interval_seconds"
+        ],
+        "title": "ScheduleBody"
       }
     },
     "securitySchemes": {

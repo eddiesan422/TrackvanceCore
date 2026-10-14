@@ -8,7 +8,9 @@ import delivery_cycle as delivery
 import pytest
 from ci import failure_diagnostics as diagnostics
 from test_ci_delivery_failure_diagnostics import CI, SHA, SOURCE
-from test_ci_delivery_failure_diagnostics import delivery_failure as _delivery_failure_fixture
+from test_ci_delivery_failure_diagnostics import (
+    delivery_failure as _delivery_failure_fixture,
+)
 
 
 def result(failed=False, reason='TIMEOUT'):

@@ -182,15 +182,22 @@ def test_unknown_blocks_manual_and_auto_until_explicit_conclusive_review(databas
 
 
 def test_outbox_rollback_consumer_dedupe_and_failures_are_independent(database, queued_intake, monkeypatch):
+    # Consume the fixture's complete publication before testing an independent
+    # terminal-event failure/replay. Consumers no longer depend on ordinal IDs.
+    for _ in range(20):
+        if not events.consume_once("CHAINING"):
+            break
+    else:
+        pytest.fail("Fixture publication queue did not finish")
     with database() as db:
         run = db.get(Run, queued_intake["run_id"])
         run.initiated_by_type, run.initiated_by_id = "USER", "test-user"
         db.commit()
         run.status, run.decision = "SUCCESS", "REJECTED"
         db.flush()
-        assert db.scalar(select(func.count()).select_from(OutboxEvent)) == 1
+        assert db.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.event_type == "RUN_TERMINAL")) == 1
         db.rollback()
-        assert db.scalar(select(func.count()).select_from(OutboxEvent)) == 0
+        assert db.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.event_type == "RUN_TERMINAL")) == 0
         run.status, run.decision = "SUCCESS", "REJECTED"
         db.commit()
         run_id = run.id
@@ -210,7 +217,8 @@ def test_outbox_rollback_consumer_dedupe_and_failures_are_independent(database, 
     monkeypatch.setattr("trackvance.automation.consume_intake_event", failure)
     assert events.consume_once("CHAINING")
     with database() as db:
-        delivery = db.scalar(select(EventConsumption).where(EventConsumption.consumer == "CHAINING"))
+        delivery = db.scalar(select(EventConsumption).join(OutboxEvent).where(
+            EventConsumption.consumer == "CHAINING", OutboxEvent.aggregate_id == run_id))
         assert delivery.status == "PENDING" and delivery.error_code == "EVENT_CONSUMER_FAILED"
         assert "password" not in str(delivery.__dict__)
         assert db.get(Run, run_id).status == "SUCCESS"
@@ -382,6 +390,11 @@ def test_request_idempotency_conflict_remains_distinct_from_no_repeat(authentica
 
 
 def test_expired_consumer_lease_recovers_and_attempts_stop_at_five(database, queued_intake, monkeypatch):
+    for _ in range(20):
+        if not events.consume_once("CHAINING"):
+            break
+    else:
+        pytest.fail("Fixture publication queue did not finish")
     with database() as db:
         run = db.get(Run, queued_intake['run_id'])
         run.initiated_by_type, run.initiated_by_id = 'USER', 'test-user'
@@ -393,7 +406,8 @@ def test_expired_consumer_lease_recovers_and_attempts_stop_at_five(database, que
     assert events.consume_once('NOTIFICATIONS')
     with database() as db:
         assert db.scalar(select(func.count()).select_from(InternalNotification)) == 1
-        delivery = db.scalar(select(EventConsumption).where(EventConsumption.consumer == 'CHAINING'))
+        delivery = db.scalar(select(EventConsumption).join(OutboxEvent).where(
+            EventConsumption.consumer == 'CHAINING', OutboxEvent.aggregate_id == queued_intake['run_id']))
         delivery.attempts = 4
         db.commit()
     def fail(*_):
@@ -401,7 +415,8 @@ def test_expired_consumer_lease_recovers_and_attempts_stop_at_five(database, que
     monkeypatch.setattr('trackvance.automation.consume_intake_event', fail)
     assert events.consume_once('CHAINING')
     with database() as db:
-        delivery = db.scalar(select(EventConsumption).where(EventConsumption.consumer == 'CHAINING'))
+        delivery = db.scalar(select(EventConsumption).join(OutboxEvent).where(
+            EventConsumption.consumer == 'CHAINING', OutboxEvent.aggregate_id == queued_intake['run_id']))
         assert delivery.status == 'DEAD' and delivery.attempts == 5
         assert db.get(Run, queued_intake['run_id']).status == 'SUCCESS'
     assert not events.consume_once('CHAINING')
@@ -475,7 +490,7 @@ def test_outbox_payload_finishes_atomically_across_flushes_and_is_frozen_after_c
         run = db.get(Run, queued_intake['run_id'])
         run.status, run.decision = 'SUCCESS', None
         db.flush()
-        event = db.scalar(select(OutboxEvent))
+        event = db.scalar(select(OutboxEvent).where(OutboxEvent.aggregate_id == run.id, OutboxEvent.event_type == 'RUN_TERMINAL'))
         assert event.payload['output_version_id'] is None
         run.output_version_id, run.decision = queued_intake['version_id'], 'APPROVED'
         run.initiated_by_type, run.initiated_by_id = 'USER', 'test-user'
@@ -484,8 +499,8 @@ def test_outbox_payload_finishes_atomically_across_flushes_and_is_frozen_after_c
         assert event.payload['output_version_id'] == queued_intake['version_id']
         assert event.payload['recipient_user_id'] == 'test-user'
         assert event.payload['decision'] == 'APPROVED'
-        assert db.scalar(select(func.count()).select_from(OutboxEvent)) == 1
-        assert db.scalar(select(func.count()).select_from(EventConsumption)) == 2
+        assert db.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.aggregate_id == run.id, OutboxEvent.event_type == 'RUN_TERMINAL')) == 1
+        assert db.scalar(select(func.count()).select_from(EventConsumption).where(EventConsumption.event_id == event.id)) == 2
         original_payload = dict(event.payload)
         run.output_version_id = None
         db.commit()

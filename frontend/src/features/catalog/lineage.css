@@ -1,0 +1,19 @@
+.lineage-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:18px 0; }
+.lineage-viewport { height:480px; overflow:auto; background:#f6f8fc; border:1px solid #d7e0ec; border-radius:10px; cursor:grab; touch-action:none; }
+.lineage-viewport:focus-visible { outline:3px solid #315bbb; }
+.lineage-canvas { position:relative; transform-origin:top left; }
+.lineage-canvas svg { position:absolute; pointer-events:none; }
+.lineage-canvas svg path:not(marker path) { fill:none; stroke:#7185a5; stroke-width:2; }
+.lineage-canvas svg path.lineage-uncertain { stroke:#bd7b17; stroke-dasharray:6 5; }
+.lineage-node { position:absolute; width:240px; min-height:90px; padding:12px; text-align:left; background:white; border:1px solid #bccbe0; border-radius:9px; box-shadow:0 2px 6px #243f6814; cursor:pointer; }
+.lineage-node small,.lineage-node strong { display:block; margin-bottom:6px; }
+.lineage-node strong { overflow-wrap:anywhere; }
+.lineage-node small { color:#526481; }
+.lineage-root { border:2px solid #315bbb; }
+.lineage-selected { outline:3px solid #799ee4; }
+.lineage-pending { display:block; color:#835712; font-size:11px; margin-top:6px; }
+.lineage-detail { padding:18px; margin-top:14px; border:1px solid #d7e0ec; border-radius:9px; overflow-wrap:anywhere; }
+.lineage-detail .button { margin-left:12px; }
+.lineage-hash { font-family:monospace; font-size:12px; }
+.lineage-table { margin-top:20px; }
+.lineage-table summary { cursor:pointer; font-weight:600; padding:12px 0; }

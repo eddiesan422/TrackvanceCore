@@ -191,7 +191,7 @@ def test_ci_restore_uses_original_private_receipt_context_through_verified_stagi
     _manifest, expected = write_pre_corrections_backup(source)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"}})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
     state = modern_inventory()
     state["project"] = target["project"]
     monkeypatch.setattr(docker_state, "inventory", lambda _: state)
@@ -633,7 +633,7 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     _manifest, expected = write_pre_corrections_backup(root)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"}})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
     restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
     state = modern_inventory()
     state["project"] = "trackvance-restore-test"
@@ -667,7 +667,7 @@ def test_restore_v6_refuses_changed_or_missing_historical_projection(tmp_path, d
     manifest, expected = write_pre_corrections_backup(tmp_path / "backup")
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"}})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
     projected = json.loads(json.dumps(expected))
     if damage == "normalized_hash":
         projected["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64
@@ -966,7 +966,7 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
                     migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"}})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
     restored["tables"]["delivery_reviews"] = {}
     restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES | docker_state.ASYNC_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
@@ -1196,3 +1196,59 @@ def test_report_attempt_staging_excluded_only_from_data_backup(tmp_path, logical
     entries = docker_state.inspect_archive(archive)
     assert ("report-staging/execution/attempt/part.parquet" in entries) is expected
     assert "published/report-staging" in entries
+
+
+def test_schema9_backup_remains_valid_and_projection_is_required_for_schema10_restore(tmp_path):
+    root = tmp_path / "backup-085"
+    manifest, expected = write_delivery_backup(root, current=True)
+    expected.update(schema_version=9, migration=docker_state.PEOPLE_MIGRATION)
+    expected["tables"].update({name: {} for name in docker_state.PEOPLE_STATE_TABLES - set(expected["tables"])})
+    manifest["migration"] = docker_state.PEOPLE_MIGRATION
+    rewrite_legacy_state(root, manifest, expected)
+    assert docker_state.verify_backup(root) == manifest
+    restored = json.loads(json.dumps(expected))
+    restored.update(schema_version=10, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CORE090_STATE_TABLES})
+    # Native additions can be present; only the separately validated v9 report
+    # proves exact preservation of every preexisting row and approval.
+    restored["tables"]["sentinel_automatic_monitors"] = {"bootstrap": "a" * 64}
+    docker_state.validate_restored_state(manifest, expected, restored, expected)
+    with pytest.raises(docker_state.OperationError, match="v9 normalizada"):
+        docker_state.validate_restored_state(manifest, expected, restored)
+    wrong = json.loads(json.dumps(expected))
+    wrong["tables"]["delivery_attempts"]["committed"] = "f" * 64
+    with pytest.raises(docker_state.OperationError, match="v9 normalizada"):
+        docker_state.validate_restored_state(manifest, expected, restored, wrong)
+
+
+def test_codex_app_backup_excludes_only_verified_synthetic_target_and_retains_all_app_volumes(monkeypatch, tmp_path):
+    import codex_environment as codex
+    from test_codex_environment import IDS, resolved, runtime
+
+    values = {"CODEX_BACKEND_IMAGE": IDS["backend"], "CODEX_WEB_IMAGE": IDS["web"], "CODEX_POSTGRES_IMAGE": IDS["postgres"],
+        "POSTGRES_PASSWORD": "synthetic-password", "CODEX_ADMIN_PASSWORD": "synthetic-admin", "CODEX_DESTINATION_PASSWORD": "synthetic-target"}
+    config = resolved(values)
+    defaults = {key: {"Env": [], "Cmd": [], "Entrypoint": None, "User": ""} for key in IDS}
+    actual = runtime(config, defaults)
+    state = {"project": "trackvance-codex", "containers": [{"id": row["Id"], "service": row["Config"]["Labels"]["com.docker.compose.service"], "image_id": row["Image"], "running": True} for row in actual["containers"]],
+        "volumes": [{"name": item["name"], "logical_name": logical} for logical, item in config["volumes"].items()], "networks": []}
+    monkeypatch.setattr(codex, "private_directory", lambda _path: tmp_path)
+    monkeypatch.setattr(codex, "load", lambda _path: ({}, {}))
+    monkeypatch.setattr(codex, "prepare", lambda *_args: ([], {}, config, actual, {}, {}))
+    filtered, proof, *_ = docker_state._codex_application_inventory(state)
+    docker_state.require_backup_inventory(filtered, application_only_codex=True)
+    assert {row["logical_name"] for row in filtered["volumes"]} == set(codex.APP_VOLUMES)
+    assert "test-postgres" not in {row["service"] for row in filtered["containers"]}
+    assert proof["preserved_external_destination"]["volume_name"] == "trackvance-codex_test_destination_data"
+    state["volumes"].pop()
+    with pytest.raises(docker_state.OperationError, match="siete volúmenes"):
+        docker_state._codex_application_inventory(state)
+
+
+@pytest.mark.parametrize("project", ["trackvance-codex", "trackvance-certification"])
+def test_new_backup_adapter_does_not_authorize_reset_of_permanent_stacks(monkeypatch, tmp_path, project):
+    calls = []
+    monkeypatch.setattr(docker_state, "inventory", lambda name: calls.append(name))
+    with pytest.raises(docker_state.OperationError, match="permanente protegido"):
+        docker_state.create_reset_plan(project, tmp_path / "plan.json")
+    assert not calls and not (tmp_path / "plan.json").exists()

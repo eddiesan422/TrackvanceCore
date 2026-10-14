@@ -15,11 +15,12 @@ import subprocess
 import sys
 import threading
 import time
-import tomllib
 import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = "/app/backend/.venv/lib/python3.12/site-packages"

@@ -33,6 +33,7 @@ from starlette.background import BackgroundTask
 from . import (
     __version__,
     identity_bootstrap,  # noqa: F401
+    rest_models,  # noqa: F401
 )
 from .acquisition import AcquisitionOperationError
 from .acquisition_api import router as acquisition_router
@@ -69,6 +70,7 @@ from .delivery_validation import router as delivery_validation_router
 from .exceptions_api import router as exceptions_router
 from .identity_api import UserResponse, user_dto
 from .identity_api import router as identity_router
+from .intake_automation_api import router as intake_automation_router
 from .migrate import migrate, migration_ready
 from .models import (
     Artifact,
@@ -154,6 +156,8 @@ async def lifespan(_app):
     migrate()
     with SessionLocal() as db:
         backfill_artifacts(db)
+        from .sentinel_auto import backfill_automatic_monitors
+        backfill_automatic_monitors(db)
         db.commit()
     from .seed import ensure_demo_user, seed_demo
 
@@ -730,6 +734,8 @@ def new_dataset(body: DatasetBody, db: Session = Depends(get_db), user: User = D
             raise dataset_name_exists(existing) from None
         raise
     audit(db, "DATASET_CREATED", "dataset", dataset.id, f"Dataset creado: {dataset.name}", user.name, user.organization_id)
+    from .sentinel_auto import ensure_automatic_monitor
+    ensure_automatic_monitor(db, dataset, user.id)
     db.commit()
     return dataset_dto(db, dataset)
 
@@ -1046,9 +1052,10 @@ def validate_rule_references(db: Session, config: dict, user: User) -> None:
 @router.get("/intake/contracts")
 @router.get("/recon/controls")
 @router.get("/monitors")
-def configurations(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def configurations(request: Request, include_deleted: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)):
     module = "intake" if "/intake/" in request.url.path else "recon" if "/recon/" in request.url.path else "sentinel"
-    return listing([config_dto(db, c) for c in scoped(db, Configuration, user) if c.module == module])
+    return listing([config_dto(db, c) for c in scoped(db, Configuration, user) if c.module == module
+                    and (include_deleted or c.status != "DELETED")])
 
 
 @router.post("/intake/contracts", status_code=201)
@@ -1170,7 +1177,7 @@ def cancel_run(run_id: str, db: Session = Depends(get_db), user: User = Depends(
         raise APIError(404, "NOT_FOUND", "No se encontró el registro solicitado.")
     if f"{run.module.lower()}:execute" not in effective_permissions(db, user):
         raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite cancelar ejecuciones de este módulo.")
-    if run.status in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}:
+    if run.status in {"SUCCESS", "FAILED", "PARTIAL", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}:
         raise APIError(409, "RUN_FINISHED", "La ejecución ya terminó.")
     run.cancel_requested = True
     if run.status == "QUEUED":
@@ -1380,9 +1387,19 @@ def export_csv(run_id: str, db: Session = Depends(get_db), user: User = Depends(
 
 @router.get("/monitors/{monitor_id}/metrics")
 def monitor_metrics(monitor_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    owned(db, Configuration, monitor_id, user)
-    rows = db.scalars(select(Run).where(Run.config_id == monitor_id, Run.status == "SUCCESS").order_by(Run.created_at)).all()
-    return listing([{"run_id": run.id, "observed_at": iso(run.created_at), "row_count": run.metrics.get("row_count", 0), "null_rate": run.metrics.get("null_rate", 0), "health_score": run.metrics.get("health_score", 0), "status": run.decision} for run in rows])
+    monitor = owned(db, Configuration, monitor_id, user)
+    if monitor.module != "sentinel":
+        raise APIError(404, "MONITOR_NOT_FOUND", "No se encontró el monitor Sentinel.")
+    rows = db.scalars(select(Run).where(Run.config_id == monitor_id, Run.organization_id == user.organization_id,
+                                       Run.status == "SUCCESS").order_by(Run.created_at)).all()
+    items = []
+    for run in rows:
+        owned(db, Run, run.id, user)
+        default = None if (run.metrics or {}).get("quality_interpretation") == "CONTROL_COUNTS_ONLY" else 0
+        items.append({"run_id": run.id, "observed_at": iso(run.created_at),
+            "row_count": run.metrics.get("row_count", default), "null_rate": run.metrics.get("null_rate", default),
+            "health_score": run.metrics.get("health_score", default), "status": run.decision})
+    return listing(items)
 
 
 @router.get("/findings")
@@ -1493,6 +1510,8 @@ def dashboard(
 class ConfigurationVersionBody(InputModel):
     config: dict
     description: str | None = Field(default=None, max_length=4000)
+    update_intake_schedule: bool = False
+    expected_schedule_version: int | None = Field(default=None, ge=1)
 
 
 @router.post("/intake/contracts/{configuration_id}/versions", status_code=201)
@@ -1503,6 +1522,9 @@ def publish_configuration_version(configuration_id: str, body: ConfigurationVers
     module = "intake" if "/intake/" in request.url.path else "recon" if "/recon/" in request.url.path else "sentinel"
     if previous.module != module:
         raise APIError(422, "WRONG_MODULE", "La configuración no pertenece a este módulo.")
+    if module == "intake":
+        from .intake_automation import assert_active_contract
+        assert_active_contract(db, previous, lock=True)
     if db.scalar(select(Configuration).where(Configuration.previous_version_id == previous.id)):
         raise APIError(409, "VERSION_CONFLICT", "Ya existe una versión posterior. Utilízala como base.")
     schemas: dict[str, type[BaseModel]] = {"intake": IntakeRules, "recon": ReconRules, "sentinel": MonitorRules}
@@ -1515,6 +1537,22 @@ def publish_configuration_version(configuration_id: str, body: ConfigurationVers
     new = Configuration(organization_id=user.organization_id, name=previous.name, module=module, version=previous.version + 1, dataset_id=previous.dataset_id, target_dataset_id=previous.target_dataset_id, owner=previous.owner, description=body.description if body.description is not None else previous.description, config=config, previous_version_id=previous.id)
     db.add(new)
     db.flush()
+    if body.update_intake_schedule:
+        if module != "intake" or "intake:schedule" not in effective_permissions(db, user):
+            raise APIError(403, "PERMISSION_DENIED", "Tu rol no permite actualizar esta programación Intake.")
+        from .intake_automation import (
+            IntakeScheduleSettings,
+            save_schedule,
+            schedule_for,
+            schedule_revision,
+        )
+        schedule = schedule_for(db, previous)
+        if schedule is None:
+            raise APIError(409, "SCHEDULE_UNAVAILABLE", "La programación ya no está disponible.")
+        revision = schedule_revision(db, schedule)
+        save_schedule(db, new, user, IntakeScheduleSettings.model_validate(revision.settings["calendar"]),
+            enabled=schedule.enabled, responsible_user_id=revision.responsible_user_id,
+            expected_version=body.expected_schedule_version)
     audit(db, "CONFIGURATION_PUBLISHED", "configuration", new.id, f"Nueva versión publicada: {new.name}", user.name, user.organization_id, {"module": module, "version": new.version, "previous_version_id": previous.id})
     db.commit()
     return config_dto(db, new)
@@ -1567,15 +1605,18 @@ app.include_router(sentinel_router)
 app.include_router(sso_router)
 app.include_router(acquisition_router)
 app.include_router(automation_router)
+app.include_router(intake_automation_router)
 app.include_router(notifications_router)
 app.include_router(delivery_validation_router)
 from .governance_api import router as governance_router
 from .governance_people import router as people_router
+from .lineage_api import router as lineage_router
 from .report_api import router as report_router
 
 app.include_router(governance_router)
 app.include_router(people_router)
 app.include_router(report_router)
+app.include_router(lineage_router)
 
 
 def openapi_contract():

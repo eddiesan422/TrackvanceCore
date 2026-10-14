@@ -12,6 +12,8 @@ _ACTIONS_BY_GROUP = {"datasets": "read write", "connections": "read use manage",
 GROUPS.update({"catalog": "Catálogo", "governance": "Gobierno", "domains": "Dominios",
                "glossary": "Glosario", "blocks": "Restricciones", "reports": "Reportes", "people": "Personas de gobierno"})
 ACTIONS.update({"preview": "Previsualizar", "generate": "Generar dataset"})
+ACTIONS["delete"] = "Eliminar lógicamente"
+_ACTIONS_BY_GROUP["intake"] = "read configure execute schedule delete"
 _ACTIONS_BY_GROUP.update({"catalog": "read", "governance": "read write", "domains": "read manage",
                          "glossary": "read manage", "blocks": "read manage",
                          "reports": "read write preview download generate", "people": "read manage"})
@@ -25,6 +27,7 @@ for _code in CATALOG:
 for _code in ("delivery:overwrite", "delivery:alter_target", "delivery:repair_evidence"):
     DEPENDENCIES[_code] |= {"delivery:execute"}
 DEPENDENCIES["sentinel:schedule"] |= {"sentinel:execute"}
+DEPENDENCIES["intake:schedule"] |= {"intake:execute", "intake:configure"}
 DEPENDENCIES["delivery:schedule"] |= {"delivery:execute", "delivery:configure"}
 DEPENDENCIES["exceptions:close"] |= {"exceptions:write"}
 for _module in ("intake", "recon", "sentinel", "delivery"):
@@ -110,12 +113,19 @@ for _module, _path in (("intake", "/intake/contracts"), ("recon", "/recon/contro
     _routes(f"{_module}:read", "GET", _path)
     _routes(f"{_module}:configure", "POST", _path, _path + "/{id}/versions")
 _routes("intake:execute", "POST", "/intake/runs")
+_routes("intake:read", "GET", "/intake/contracts/{id}", "/intake/contracts/{id}/schedule", "/intake/contracts/{id}/occurrences")
+_routes("intake:schedule", "POST", "/intake/contracts/{id}/schedule")
+_routes("intake:delete", "GET", "/intake/contracts/{id}/deletion-impact")
+_routes("intake:delete", "DELETE", "/intake/contracts/{id}")
 _routes("recon:execute", "POST", "/recon/runs")
 _routes("sentinel:execute", "POST", "/monitors/{id}/runs")
 _routes("intake:read", "GET", "/intake/runs/{id}/errors")
 _routes("recon:read", "GET", "/recon/runs/{id}/results")
 _routes("sentinel:read", "GET", *(f"/monitors/{{id}}/{action}" for action in ("metrics", "schedule", "occurrences", "series", "alerts")))
 _routes("sentinel:schedule", "POST", "/monitors/{id}/schedule")
+_routes("sentinel:read", "GET", "/monitors/{id}/automatic")
+_routes("sentinel:schedule", "POST", "/monitors/{id}/automatic")
+_routes("runs:read", "GET", "/runs/{id}/visual-summary")
 _routes("runs:read", "GET", "/runs", "/runs/{id}", "/runs/{id}/results", "/runs/{id}/execution-plan", "/runs/{id}/diagnostics", "/findings", "/dashboard")
 _routes("runs:execute", "POST", "/runs/{id}/cancel", "/execution-plans/preview")
 _routes("exports:download", "GET", "/runs/{id}/export.xlsx", "/runs/{id}/export.csv")
@@ -145,7 +155,7 @@ _routes("destinations:manage", "PATCH", "/delivery/destinations/{id}")
 _routes("destinations:manage", "DELETE", "/delivery/destinations/{id}")
 _routes("destinations:use", "POST", "/delivery/destinations/{id}/test")
 _routes("destinations:use", "GET", "/delivery/destinations/{id}/schemas", "/delivery/destinations/{id}/tables", "/delivery/destinations/{id}/table-metadata")
-_routes("delivery:read", "GET", "/delivery/configurations", "/delivery/runs", "/delivery/runs/{id}/attempts", "/delivery/runs/{id}/reviews", "/delivery/destinations/{id}/target-policy")
+_routes("delivery:read", "GET", "/delivery/configurations", "/delivery/runs", "/delivery/runs/{id}/attempts", "/delivery/runs/{id}/rest-batches", "/delivery/runs/{id}/reviews", "/delivery/destinations/{id}/target-policy")
 _routes("delivery:configure", "POST", "/delivery/preview", "/delivery/preflight", "/delivery/configurations", "/delivery/configurations/{id}/versions")
 _routes("delivery:execute", "POST", "/delivery/runs")
 _routes("delivery:repair_evidence", "POST", "/delivery/runs/{id}/repair-evidence")
@@ -166,6 +176,7 @@ _routes("datasets:read", "GET", "/governance/macrodomains", "/governance/domains
 _routes("domains:manage", "POST", "/governance/macrodomains", "/governance/domains", "/catalog/macrodomains", "/catalog/domains")
 _routes("domains:manage", "PATCH", "/governance/macrodomains/{id}", "/governance/domains/{id}", "/catalog/macrodomains/{id}", "/catalog/domains/{id}")
 _routes("catalog:read", "GET", "/catalog/tree", "/catalog/resources", "/catalog/datasets", "/catalog/datasets/{id}", "/catalog/datasets/{id}/blocks")
+_routes("catalog:read", "GET", "/catalog/datasets/{id}/lineage-graph")
 _routes("governance:write", "PATCH", "/datasets/{id}/governance", "/catalog/datasets/{id}/columns")
 _routes("glossary:read", "GET", "/governance/glossary")
 _routes("glossary:manage", "POST", "/governance/glossary", "/catalog/datasets/{id}/terms")

@@ -190,7 +190,11 @@ def register_source(db: Session, user: User, connection: ExternalConnection,
         return existing
     source, version = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
     columns = source.columns(binding.schema_name, binding.object_name)
-    validate_column_overrides(binding.column_overrides, [column["name"] for column in columns])
+    overrides = dict(binding.column_overrides)
+    if connection.source_type == "REST":
+        from .rest_source import declared_overrides
+        overrides = declared_overrides(columns, overrides)
+    validate_column_overrides(overrides, [column["name"] for column in columns])
     previous = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version.desc()))
     source_snapshot = {"source_type": connection.source_type, "connection_id": connection.id,
         "connection_version_id": version.id, "connection_version": version.version,
@@ -201,7 +205,7 @@ def register_source(db: Session, user: User, connection: ExternalConnection,
     run = AcquisitionRun(id=uid(), organization_id=user.organization_id, dataset_id=dataset.id,
         source_type=connection.source_type, connection_version_id=version.id,
         filename=f"{binding.schema_name}.{binding.object_name}.parquet"[:240], source_snapshot=source_snapshot,
-        reader_options={}, column_overrides=dict(binding.column_overrides), effective_limits=limits.as_dict(),
+        reader_options={}, column_overrides=overrides, effective_limits=limits.as_dict(),
         request_hash=digest, idempotency_key=idempotency_key, initiated_by_id=user.id, initiated_by_name=user.name)
     db.add(run)
     db.flush()

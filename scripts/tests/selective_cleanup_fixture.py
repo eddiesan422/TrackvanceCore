@@ -20,7 +20,6 @@ def build(project: str) -> dict:
     if not re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", project) or os.getenv("TRACKVANCE_CERTIFICATION_PROJECT") != project:
         raise ValueError("Synthetic cleanup fixture requires the exact owned restored-copy environment.")
     from sqlalchemy import select
-
     from trackvance import models  # noqa: F401
     from trackvance.automation_models import (
         DeliveryTargetGuard,
@@ -158,6 +157,21 @@ def build(project: str) -> dict:
         # artifact graph as normal runtime creation before sealing its backup.
         # Otherwise API startup repairs missing links during the second restore.
         backfill_artifacts(db)
+        # Only this verified disposable restore is changed. Complete bootstrap
+        # before sealing the backup, then pause its metadata-only automation;
+        # the second restore must preserve exactly these identities/revisions.
+        from trackvance.sentinel_auto import (
+            backfill_automatic_monitors,
+            record_revision,
+        )
+        from trackvance.sentinel_auto_models import AutomaticMonitor
+        backfill_automatic_monitors(db)
+        for automatic in db.scalars(select(AutomaticMonitor)):
+            if automatic.enabled:
+                automatic.enabled = False
+                automatic.version += 1
+                automatic.updated_at = now
+                record_revision(db, automatic, admin.id if automatic.organization_id == org else None)
         db.commit()
         return {"project":project,"organization_id":org,"actor_id":admin.id,"dataset_ids":[clean.id,output_dataset.id,guarded.id],
             "removable_dataset_ids":[clean.id,output_dataset.id],"protected_dataset_id":guarded.id,"unknown_run_id":unknown.id,

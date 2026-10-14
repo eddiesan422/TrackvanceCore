@@ -1,3 +1,4 @@
+import { usePermission } from '../../app/session'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -25,6 +26,9 @@ const definitions = { intake: { singular: 'contrato', endpoint: '/intake/contrac
 const newOwnerOption = '__new_owner__'
 export function ConfigDialog({ module, open, close, initial, initialDatasetId }: { module: Module; open: boolean; close: () => void; initial?: RecordData; initialDatasetId?: string }) {
   const definition = definitions[module], cache = useQueryClient(), old = initial?.config || {}
+  const canScheduleIntake = usePermission('intake:schedule')
+  const [updateSchedule, setUpdateSchedule] = useState(false)
+  const intakeSchedule = useQuery({ queryKey: ['intake-schedule', initial?.id], queryFn: () => api<RecordData | null>(`/intake/contracts/${initial?.id}/schedule`), enabled: open && module === 'intake' && !!initial && canScheduleIntake })
   const [name, setName] = useState(initial?.name || ''), [datasetId, setDatasetId] = useState(initial?.dataset_id || initialDatasetId || ''), [targetId, setTargetId] = useState(initial?.target_dataset_id || '')
   const [owner, setOwner] = useState(initial?.owner || 'Equipo de datos'), [addingOwner, setAddingOwner] = useState(false), [customOwner, setCustomOwner] = useState(''), [description, setDescription] = useState(initial?.description || '')
   const [required, setRequired] = useState<string[]>(old.required_columns || []), [unique, setUnique] = useState<string[]>(old.unique_columns || []), [numeric, setNumeric] = useState<string[]>(old.numeric_columns || []), [positive, setPositive] = useState<string[]>(old.positive_columns || [])
@@ -61,8 +65,8 @@ export function ConfigDialog({ module, open, close, initial, initialDatasetId }:
     if (module === 'recon') delete base.rules
     else base.rules = rules
     const config = module === 'intake' ? { ...base, transforms, required_columns: required, unique_columns: unique, numeric_columns: numeric, positive_columns: positive, max_error_rate: Number(threshold) / 100 } : module === 'recon' ? { ...base, source_transforms: sourceTransforms, target_transforms: targetTransforms, key_columns: keys, key_normalization: normalization, comparison_rules: comparisons, aggregation: aggregate ? aggregation : null, aggregations: aggregate ? [aggregation, ...extraAggregations.map(item => ({ ...item, side: aggregation.side }))] : [] } : { ...base, required_columns: sentinelRequired, null_columns: nullColumns, max_null_rate: Number(threshold) / 100, max_volume_change_pct: Number(volume), max_age_hours: Number(age) }
-    return initial ? post(`${definition.endpoint}/${initial.id}/versions`, { config, description }) : post(definition.endpoint, { name: name.trim(), dataset_id: datasetId, ...(module === 'recon' ? { target_dataset_id: targetId } : {}), owner: selectedOwner, description, config })
-  }, onSuccess: () => { cache.invalidateQueries({ queryKey: ['configurations', module] }); close() } })
+    return initial ? post(`${definition.endpoint}/${initial.id}/versions`, { config, description, ...(module === 'intake' && updateSchedule ? { update_intake_schedule: true, expected_schedule_version: intakeSchedule.data?.version } : {}) }) : post(definition.endpoint, { name: name.trim(), dataset_id: datasetId, ...(module === 'recon' ? { target_dataset_id: targetId } : {}), owner: selectedOwner, description, config })
+  }, onSuccess: () => { cache.invalidateQueries({ queryKey: ['configurations', module] }); cache.invalidateQueries({ queryKey: ['intake-schedule'] }); close() } })
   const selectDataset = (target = false) => <select required disabled={!!initial} value={target ? targetId : datasetId} onChange={e => {
     if (target) return setTargetId(e.target.value)
     setDatasetId(e.target.value)
@@ -95,6 +99,7 @@ export function ConfigDialog({ module, open, close, initial, initialDatasetId }:
       {module === 'sentinel' && <><div className="form-grid"><ColumnMultiSelect label="Columnas requeridas" hint="Selecciona las columnas que deben existir en el esquema del dataset." columns={schema.data?.columns || []} selected={sentinelRequired} onChange={setSentinelRequired} disabled={!schema.data?.version_id || schema.isPending}/><ColumnMultiSelect label="Columnas a revisar por nulos" hint="Selecciona las columnas cuyo porcentaje de valores nulos debe vigilar Sentinel." columns={schema.data?.columns || []} selected={nullColumns} onChange={setNullColumns} disabled={!schema.data?.version_id || schema.isPending}/><Field label="Porcentaje máximo de nulos (%)"><input required type="number" min="0" max="100" step="0.1" value={threshold} onChange={e => setThreshold(e.target.value)}/></Field><Field label="Cambio máximo de volumen (%)"><input required type="number" min="0" step="0.1" value={volume} onChange={e => setVolume(e.target.value)}/></Field><Field label="Antigüedad máxima (horas)"><input required type="number" min="0.1" step="any" value={age} onChange={e => setAge(e.target.value)}/></Field></div><Notice>El volumen se compara con la versión anterior. Puedes agregar una banda histórica y controles sobre el tipo de las columnas.</Notice></>}
       {module === 'intake' && <TransformBuilder value={transforms} onChange={setTransforms} columns={schema.data?.columns || []} rows={sourceSample.data?.sample || []} sampleState={sourceSampleState}/>}
       {module !== 'recon' && <RuleBuilder value={rules} onChange={setRules} sentinel={module === 'sentinel'} columns={schema.data?.columns || []}/>}
+      {module === 'intake' && initial && canScheduleIntake && intakeSchedule.data && <label><input type="checkbox" checked={updateSchedule} onChange={event => setUpdateSchedule(event.target.checked)}/> Actualizar la programación a esta nueva revisión. Los trabajos registrados conservan su revisión, entrada y parámetros.</label>}
       <Field label="Descripción (opcional)"><textarea rows={2} value={description} onChange={e => setDescription(e.target.value)}/></Field>
     </div>}{create.error && <ErrorState error={create.error}/>}<div className="modal-footer"><button type="button" className="button secondary" onClick={close} disabled={create.isPending}>Cancelar</button><button className="button primary" disabled={create.isPending || !datasetId || (!initial && !selectedOwner) || (module === 'recon' && !targetId)}><Plus size={16}/>{create.isPending ? 'Guardando…' : initial ? 'Publicar nueva versión' : `Crear ${definition.singular}`}</button></div>
   </form></Modal>

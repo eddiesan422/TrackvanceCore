@@ -202,6 +202,14 @@ def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
         count = int(record[0])
         if count > effective.max_rows:
             raise ProcessingError("ACQUISITION_SIZE_LIMIT: El dataset supera el límite de registros.")
+        checkpoint()
+        business_columns = ",".join('"' + name.replace('"', '""') + '"' for name in names)
+        distinct_rows = connection.execute(
+            f"SELECT COUNT(*) FROM (SELECT {business_columns} FROM population GROUP BY {business_columns})"
+        ).fetchone() if names else (1 if count else 0,)
+        assert distinct_rows is not None
+        distinct_row_count = int(distinct_rows[0])
+        checkpoint()
         for name in names:
             checkpoint()
             quoted = '"' + name.replace('"', '""') + '"'
@@ -301,6 +309,9 @@ def profile_paths(paths: list[Path], *, column_overrides: dict | None = None,
     signature = [{"name": column["name"], "logical_type": column["logical_type"]} for column in schema]
     digest = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
     profile = {"row_count": count, "column_count": len(names), "columns": profiles,
+               "distinct_row_count": distinct_row_count,
+               "duplicate_row_count": count - distinct_row_count,
+               "row_duplicate_definition": "EXCESS_EXACT_BUSINESS_ROWS_NULL_EQUAL_V1",
                "profiling_policy": "OBSERVED_EXACT_V2", "metric_method": "EXACT_OBSERVED",
                "metric_definition_version": 2, "null_policy": "NULL_EXCLUDED_EMPTY_PRESERVED",
                "observed_record_bytes_upper_bound": observed_record_bytes_upper_bound}
@@ -370,4 +381,6 @@ def publish_materialized_version(db: Session, dataset: Dataset, paths: list[Path
           dataset.organization_id, {"dataset_id": dataset.id, "row_count": version.row_count,
           "sha256": version.sha256, "source_type": source_type, "source_run_id": source_run_id})
     checkpoint()
+    from .publication import publish_version_event
+    publish_version_event(db, version, actor)
     return version

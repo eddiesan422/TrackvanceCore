@@ -54,18 +54,18 @@ class ConnectionInput(BaseModel):
     @classmethod
     def safe_options(cls, value):
         # Never accept opaque connection strings, credentials or driver callbacks.
-        if value is not None and set(value) - {"connect_timeout", "query_timeout", "sslmode", "encryption"}:
+        if value is not None and set(value) - {"connect_timeout", "query_timeout", "sslmode", "encryption", "url", "auth", "api_key_header", "timeout_seconds", "collection", "fields", "pagination", "page_size", "max_pages", "max_rows", "max_bytes", "total_timeout_seconds"}:
             raise ValueError("Parámetros de conexión no admitidos.")
         return value
 
 
 class ConnectionBody(ConnectionInput):
     name: str = Field(min_length=1, max_length=160)
-    source_type: Literal["POSTGRESQL", "SQLSERVER"]
-    host: str = Field(min_length=1, max_length=253)
-    port: int = Field(ge=1, le=65535)
-    database: str = Field(min_length=1, max_length=128)
-    username: str = Field(min_length=1, max_length=128)
+    source_type: Literal["POSTGRESQL", "SQLSERVER", "REST"]
+    host: str = Field(default="REST", min_length=1, max_length=253)
+    port: int = Field(default=443, ge=1, le=65535)
+    database: str = Field(default="REST", min_length=1, max_length=128)
+    username: str = Field(default="REST", min_length=1, max_length=128)
     password: SecretStr | None = Field(default=None, max_length=1024)
     options: dict = Field(default_factory=dict)
 
@@ -93,8 +93,8 @@ class SourceDatasetBody(ConnectionInput):
     name: str = Field(min_length=1, max_length=160)
     domain: str = Field(default="", max_length=80, deprecated=True)
     description: str = Field(default="", max_length=4000)
-    schema_name: str = Field(min_length=1, max_length=128)
-    object_name: str = Field(min_length=1, max_length=128)
+    schema_name: str = Field(default="REST", min_length=1, max_length=128)
+    object_name: str = Field(default="collection", min_length=1, max_length=128)
     column_overrides: dict = Field(default_factory=dict)
     macro_domain_id: str | None = Field(default=None, max_length=64)
     domain_id: str | None = Field(default=None, max_length=64)
@@ -111,6 +111,8 @@ def list_connections(db: Session = Depends(get_db), user: User = Depends(current
 @router.post("/connections/test", response_model=ConnectionTestResponse)
 def test_draft(body: ConnectionTestBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     password = body.password.get_secret_value() if body.password else ""
+    if body.source_type == "REST" and body.options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     if body.connection_id:
         connection = owned_connection(db, body.connection_id, user)
         if body.source_type != connection.source_type:
@@ -127,6 +129,8 @@ def test_draft(body: ConnectionTestBody, db: Session = Depends(get_db), user: Us
                 options=body.options,
             )
             password = secret_store.get(user.organization_id, version.secret_reference)
+    if not password and body.source_type == "REST" and body.options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     if not password:
         raise ConnectionOperationError(422, "PASSWORD_REQUIRED", "Indica la contraseña de la conexión.")
     settings = ConnectionSettings(source_type=body.source_type, host=body.host, port=body.port,

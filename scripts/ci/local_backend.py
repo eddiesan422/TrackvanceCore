@@ -6,8 +6,9 @@ import os
 import re
 import shutil
 import subprocess
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 
 def _git(repository: Path, *arguments: str) -> str:

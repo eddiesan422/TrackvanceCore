@@ -1,0 +1,14 @@
+.sentinel-visual-summary { padding: 1.25rem; display: grid; gap: 1rem; }
+.sentinel-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.sentinel-chart { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: 12px; }
+.sentinel-chart h3 { margin: 0 0 1rem; }
+.sentinel-bar-row { display: grid; grid-template-columns: minmax(80px, 30%) 1fr auto; align-items: center; gap: .75rem; margin: .7rem 0; }
+.sentinel-bar-row > span { overflow-wrap: anywhere; }
+.sentinel-bar-row > div { height: 10px; background: #edf1f7; border-radius: 5px; }
+.sentinel-bar-row i { display: block; height: 10px; background: #5271e8; border-radius: 5px; }
+.sentinel-chart svg { width: 100%; height: auto; }
+.sentinel-chart svg line { stroke: #a7b1c4; }
+.sentinel-chart svg polyline { stroke: #5271e8; fill: none; stroke-width: 2; }
+.sentinel-chart svg circle { fill: #5271e8; }
+.sentinel-chart svg text { font-size: 10px; fill: #65718b; }
+@media (max-width: 800px) { .sentinel-chart-grid { grid-template-columns: 1fr; } }

@@ -15,11 +15,12 @@ import secrets
 import shutil
 import socket
 import subprocess
-import tomllib
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import tomllib
 from ci.local_resources import (
     OWNER_LABEL,
     PERMANENT_LABEL,
@@ -379,6 +380,80 @@ def check_health(values, version):
     return results
 
 
+def validate_schema_upgrade(args, value, sha, existing):
+    """Require a verified old backup restored with the exact candidate backend."""
+    import docker_state
+
+    backup = getattr(args, "schema_upgrade_backup", None)
+    receipt_path = getattr(args, "schema_upgrade_restore_receipt", None)
+    candidate = getattr(args, "backend_image", None)
+    require(backup is not None and receipt_path is not None and candidate,
+            "SCHEMA_CHANGE_REQUIRES_VERIFIED_BACKUP_RESTORE_AND_EXACT_BACKEND_IMAGE")
+    require(not backup.is_symlink() and not receipt_path.is_symlink(), "LINKED_SCHEMA_UPGRADE_EVIDENCE_FORBIDDEN")
+    manifest = docker_state.verify_backup(backup)
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        restored_at = datetime.fromisoformat(receipt["restored_at"].replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError("VERIFIED_SCHEMA_UPGRADE_RESTORE_RECEIPT_REQUIRED") from None
+    require(receipt.get("status") == "STOPPED_VERIFIED" and receipt.get("restored_migration") == docker_state.CURRENT_MIGRATION
+        and re.fullmatch(r"trackvance-[a-z0-9-]+", receipt.get("target_project", ""))
+        and receipt["target_project"] not in {PROJECT, "trackvance-certification", "trackvance", "bikerwash"},
+        "ISOLATED_STOPPED_VERIFIED_CURRENT_MIGRATION_RESTORE_REQUIRED")
+    require(restored_at.tzinfo is not None and datetime.now(UTC) - timedelta(hours=24) <= restored_at <= datetime.now(UTC) + timedelta(minutes=1),
+        "RECENT_SCHEMA_UPGRADE_RESTORE_RECEIPT_REQUIRED")
+    require(manifest.get("source_project") == PROJECT and manifest.get("application_only_codex") is True
+        and manifest.get("migration") == docker_state.PEOPLE_MIGRATION
+        and manifest.get("images", {}).get("api") == value["images"]["backend"]["id"]
+        and receipt.get("source_manifest_sha256") == reference(backup / "backup-manifest.json")["sha256"]
+        and receipt.get("verified_state_sha256") == reference(backup / "state.json")["sha256"]
+        and receipt.get("target_backend_image_id") == candidate and receipt.get("source_code_sha") == sha
+        and manifest.get("source_inventory_sha256") == canonical_hash(docker_state.codex_backup_identity(existing)),
+        "SCHEMA_UPGRADE_EVIDENCE_OR_SOURCE_INVENTORY_DRIFT")
+    return {"backup": reference(backup / "backup-manifest.json"), "restore_receipt": reference(receipt_path),
+            "candidate_backend_image_id": candidate, "source_state": json.loads((backup / "state.json").read_text(encoding="utf-8"))}
+
+
+def quiesce_schema_upgrade(prefix, environment, existing, proof, directory):
+    """Freeze only this Codex app; PostgreSQL and the synthetic target remain up."""
+    import docker_state
+
+    running = {row["Config"]["Labels"]["com.docker.compose.service"]: row["Id"]
+               for row in existing["containers"] if row["State"]["Running"]}
+    consumers = sorted(((set(BACKEND) | {"web"}) - {"api"}) & set(running))
+    try:
+        if consumers:
+            command([*prefix, "stop", "--timeout", "30", *consumers], environment=environment, timeout=180)
+        state_path = directory / ("schema-before-" + uuid4().hex + ".json")
+        source = docker_state._copy_snapshot(running["api"], state_path)
+        require(source == proof["source_state"], "CODEX_STATE_CHANGED_SINCE_VERIFIED_BACKUP")
+        command([*prefix, "stop", "--timeout", "30", "api"], environment=environment, timeout=180)
+    except BaseException:
+        # No migration/image mutation occurred; restore only original app IDs.
+        for name in ("api", *sorted(consumers)):
+            if name in running:
+                command(["docker", "start", running[name]], environment=environment, timeout=180)
+        raise
+    return reference(state_path)
+
+
+def verify_schema_upgrade(environment, proof, directory):
+    """Check migration and all old row hashes before reactivating consumers."""
+    import docker_state
+
+    actual = inventory(PROJECT, environment)
+    apis = [row for row in actual["containers"] if row["Config"]["Labels"]["com.docker.compose.service"] == "api"]
+    require(len(apis) == 1 and apis[0]["State"]["Running"], "EXACT_MIGRATED_CODEX_API_REQUIRED")
+    after_path = directory / ("schema-after-" + uuid4().hex + ".json")
+    projection_path = after_path.with_name(after_path.stem + "-legacy-v9.json")
+    after = docker_state._copy_snapshot(apis[0]["Id"], after_path)
+    projected = docker_state._copy_snapshot(apis[0]["Id"], projection_path, command="snapshot-legacy-v9")
+    require(after["migration"] == docker_state.CURRENT_MIGRATION and projected == proof["source_state"],
+            "CODEX_SCHEMA_UPGRADE_HISTORICAL_STATE_PRESERVATION_FAILED")
+    return {"current": reference(after_path), "historical_projection": reference(projection_path),
+            "historical_state_preserved": True}
+
+
 def execute_stage(args, directory, value, values, sha):
     change = plan(value, sha)
     prefix, environment, config, existing, protected, budgets = prepare(directory, value, values)
@@ -400,7 +475,12 @@ def execute_stage(args, directory, value, values, sha):
                         with socket.socket() as probe:probe.bind(("127.0.0.1", int(values[key])))
                 command([*prefix, "up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", "180", *selected], environment=environment, timeout=240)
             elif change["changed_components"]:
-                require(not command(["git", "diff", "--name-only", value["images"]["backend"]["source_sha"], sha, "--", "backend/migrations"]), "SCHEMA_CHANGE_REQUIRES_SEPARATE_BACKUP_RESTORE_REVIEW")
+                schema_changed = bool(command(["git", "diff", "--name-only", value["images"]["backend"]["source_sha"], sha, "--", "backend/migrations"]))
+                if schema_changed:
+                    proof = validate_schema_upgrade(args, value, sha, existing)
+                    intent["schema_upgrade"] = {key: item for key, item in proof.items() if key != "source_state"}
+                    intent["schema_upgrade"]["verified_quiescent_source"] = quiesce_schema_upgrade(prefix, environment, existing, proof, directory)
+                    save(intent_path, {"status": "INTENT", **intent})
                 for role in change["changed_components"]:
                     supplied = getattr(args, role + "_image")
                     image_sha = args.image_source_sha or sha
@@ -430,6 +510,8 @@ def execute_stage(args, directory, value, values, sha):
                 value["runtime_version"] = source_version(sha)
                 update_pins(directory, value, values); prefix, environment = compose(directory, values)
                 roles = (set(BACKEND) if "backend" in change["changed_components"] else set()) | ({"web"} if "web" in change["changed_components"] else set())
+                if schema_changed:
+                    roles.add("web")  # Reactivate the existing web service quiesced for the snapshot.
                 was_running = {row["Config"]["Labels"]["com.docker.compose.service"] for row in existing["containers"] if row["State"]["Running"]}
                 restart = sorted(roles & was_running); stopped = sorted(roles - was_running)
                 if not existing["containers"]:
@@ -438,6 +520,12 @@ def execute_stage(args, directory, value, values, sha):
                     command([*prefix, "up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", "180", *ACTIVE], environment=environment, timeout=240)
                 else:
                     if stopped:command([*prefix, "up", "--no-start", "--no-deps", "--no-build", "--pull", "never", *stopped], environment=environment, timeout=240)
+                    if schema_changed:
+                        require("api" in restart, "MIGRATED_CODEX_API_MUST_HAVE_BEEN_RUNNING")
+                        command([*prefix, "up", "--no-deps", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", "180", "api"], environment=environment, timeout=240)
+                        intent["schema_upgrade"]["preservation"] = verify_schema_upgrade(environment, proof, directory)
+                        save(intent_path, {"status": "INTENT", **intent})
+                        restart = [name for name in restart if name != "api"]
                     if restart:command([*prefix, "up", "--no-deps", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", "180", *restart], environment=environment, timeout=240)
             else:
                 require(existing["containers"], "IMAGES_UNCHANGED_USE_START_FOR_INITIAL_PROVISIONING")
@@ -541,6 +629,8 @@ def main():
     parser.add_argument("--image-source-sha"); parser.add_argument("--engine-id")
     parser.add_argument("--web-port", type=int, default=3205); parser.add_argument("--api-port", type=int, default=3206)
     parser.add_argument("--services", nargs="+"); parser.add_argument("--build-changed", action="store_true")
+    parser.add_argument("--schema-upgrade-backup", type=Path)
+    parser.add_argument("--schema-upgrade-restore-receipt", type=Path)
     args = parser.parse_args(); directory = private_directory(args.directory)
     if args.stage == "init":result = initialize(args, directory)
     else:

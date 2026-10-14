@@ -1,6 +1,6 @@
 # Convenciones de trabajo de Trackvance Core
 
-Esta línea implementa 0.8.5; la especificación técnica conserva su edición v1.1.
+Esta línea implementa 0.9.0 y conserva compatibilidad con 0.8.5; la especificación técnica conserva su edición v1.1.
 Implementación, pruebas y despliegue se registran por separado: cambiar esta
 versión no acredita el cierre ni modifica una instalación existente.
 La fuente documental oficial está en el repositorio privado

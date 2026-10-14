@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
+PEOPLE_SCHEMA_VERSION = 9
 CATALOG_SCHEMA_VERSION = 8
 CORRECTIONS_SCHEMA_VERSION = 7
 PRE_CORRECTIONS_SCHEMA_VERSION = 6
@@ -31,7 +32,11 @@ IDENTITY_MIGRATION = "0012_delivery_target_audit"
 PRE_CORRECTIONS_MIGRATION = "0015_sentinel_execution_identity"
 CORRECTIONS_MIGRATION = "0016_acquisition_diagnostics"
 CATALOG_MIGRATION = "0017_catalog_reports"
-CURRENT_MIGRATION = "0019_governance_people"
+PEOPLE_MIGRATION = "0019_governance_people"
+CURRENT_MIGRATION = "0022_intake_automation_deletion"
+CORE090_TABLES = frozenset({"rest_delivery_batches", "sentinel_automatic_monitors",
+    "sentinel_automatic_revisions", "sentinel_version_evaluations", "sentinel_light_reviews",
+    "intake_contract_states", "intake_schedules", "intake_schedule_versions", "intake_occurrences"})
 CATALOG_TABLES = frozenset({
     "macro_domains", "data_domains", "governance_history", "glossary_terms",
     "column_documentation", "glossary_associations", "dataset_blocks",
@@ -70,7 +75,7 @@ REVIEW_OUTCOMES = frozenset({
 })
 ACTIVE_STATUSES = frozenset({"QUEUED", "RUNNING"})
 JOB_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT"})
-DELIVERY_ATTEMPT_STATUSES = frozenset({"STARTED", "COMMITTED", "FAILED", "UNKNOWN"})
+DELIVERY_ATTEMPT_STATUSES = frozenset({"STARTED", "COMMITTED", "FAILED", "UNKNOWN", "PARTIAL"})
 DELIVERY_TABLES = frozenset(
     {
         "delivery_destinations",
@@ -95,7 +100,8 @@ FINGERPRINT_TABLES = {
     PRE_CORRECTIONS_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES,
     CORRECTIONS_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES,
     CATALOG_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES,
-    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES | {"governance_people"},
+    PEOPLE_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES | {"governance_people"},
+    CURRENT_MIGRATION: LEGACY_TABLES | DELIVERY_TABLES | {REVIEW_TABLE} | IDENTITY_TABLES | ASYNC_TABLES | CATALOG_TABLES | {"governance_people"} | CORE090_TABLES,
 }
 POLYMORPHIC_TABLES = {
     "ARTIFACT": "artifacts",
@@ -386,10 +392,103 @@ def validate_catalog_relationships(rows: Mapping[str, list[Mapping[str, Any]]], 
     return checks
 
 
+def project_core090_upgrade(rows, foreign_keys):
+    """Project only untouched 0.9 bootstrap additions onto a populated 0.8.5 state.
+
+    A customized monitor, registered Intake schedule, event evaluation, light
+    review or REST batch is product activity and cannot be hidden by projection.
+    Old row hashes are compared separately to the authentic backup afterwards.
+    """
+    foreign_keys = list(foreign_keys)
+    if set(rows) != FINGERPRINT_TABLES[CURRENT_MIGRATION]:
+        raise ValueError("La proyección v9 requiere el inventario completo de 0.9.0.")
+    validate_relationships(rows, foreign_keys)
+    inactive_tables = CORE090_TABLES - {"sentinel_automatic_monitors", "sentinel_automatic_revisions"}
+    if any(rows[name] for name in inactive_tables):
+        raise ValueError("La proyección v9 contiene actividad nueva de REST, Intake o Sentinel.")
+    datasets = {item["id"]: item for item in rows["datasets"]}
+    configs = {item["id"]: item for item in rows["configurations"]}
+    automatics = {item["id"]: item for item in rows["sentinel_automatic_monitors"]}
+    revisions = rows["sentinel_automatic_revisions"]
+    removed_configs, roots = set(), set()
+    for automatic in automatics.values():
+        dataset = datasets.get(automatic["dataset_id"])
+        monitor = configs.get(automatic["monitor_root_id"])
+        own_revisions = [item for item in revisions if item["automatic_monitor_id"] == automatic["id"]]
+        if (dataset is None or monitor is None or monitor["module"] != "sentinel"
+                or monitor["dataset_id"] != dataset["id"] or automatic["version"] != 1
+                or automatic["review_interval_seconds"] != 86400 or len(own_revisions) != 1
+                or own_revisions[0]["version"] != 1
+                or own_revisions[0]["actor_id"] != automatic["responsible_user_id"]):
+            raise ValueError("El monitor automático contiene personalizaciones posteriores al alta.")
+        settings = own_revisions[0].get("settings") or {}
+        if (set(settings) != {"enabled", "responsible_user_id", "review_interval_seconds", "next_review_at"}
+                or settings["enabled"] != automatic["enabled"]
+                or settings["responsible_user_id"] != automatic["responsible_user_id"]
+                or settings["review_interval_seconds"] != automatic["review_interval_seconds"]):
+            raise ValueError("La revisión automática no conserva los valores de su alta.")
+        # Databases encode timestamps differently; compare the actual instants.
+        from datetime import UTC, datetime
+        def instant(value):
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+        if instant(settings["next_review_at"]) != instant(automatic["next_review_at"]):
+            raise ValueError("La cadencia automática contiene actividad posterior al alta.")
+        roots.add(monitor["id"])
+        if (monitor.get("config") or {}).get("automatic_base_version") == 1:
+            expected_config = {"schema_version": 2, "automatic_base_version": 1, "rules": [],
+                "required_columns": [], "null_columns": [], "max_age_hours": 48, "max_volume_change_pct": 50}
+            if (monitor["config"] != expected_config or monitor["version"] != 1
+                    or monitor.get("previous_version_id") is not None or monitor.get("target_dataset_id") is not None
+                    or monitor["status"] != "PUBLISHED" or monitor["owner"] != dataset["owner"]
+                    or monitor["name"] != dataset["name"][:130] + " · Monitor"
+                    or monitor["description"] != "Monitoreo automático del perfil completo; los nulos y categorías son observaciones."
+                    or any(item.get("previous_version_id") == monitor["id"] for item in configs.values())):
+                raise ValueError("La configuración genérica contiene personalizaciones posteriores al alta.")
+            removed_configs.add(monitor["id"])
+    if len(revisions) != len(automatics):
+        raise ValueError("El inventario de revisiones automáticas contiene actividad posterior.")
+    registered = [item for item in rows["audit_events"] if item["event_type"] == "SENTINEL_AUTOMATIC_REGISTERED"]
+    if len(registered) != len(automatics) or {item["subject_id"] for item in registered} != roots:
+        raise ValueError("La evidencia del alta automática no coincide con sus identidades.")
+    if any(item["subject_type"] != "configuration" or item.get("run_id") is not None
+            or item["message"] != "Monitor por dataset registrado sin modificar revisiones existentes" for item in registered):
+        raise ValueError("La auditoría automática contiene actividad posterior al alta.")
+    administrators = {item["id"] for item in rows["roles"] if item.get("system_key") == "ADMINISTRATOR"}
+    new_permissions = {"intake:delete", "intake:schedule"}
+    if any(item["role_id"] not in administrators for item in rows["role_permissions"]
+            if item["permission_code"] in new_permissions):
+        raise ValueError("Los permisos Intake contienen personalizaciones posteriores a la migración.")
+    previous = {}
+    for name, values in rows.items():
+        if name in CORE090_TABLES:
+            continue
+        previous[name] = [dict(item) for item in values
+            if not (name == "configurations" and item["id"] in removed_configs)
+            and not (name == "audit_events" and item["event_type"] == "SENTINEL_AUTOMATIC_REGISTERED")
+            and not (name == "role_permissions" and item["permission_code"] in new_permissions)]
+    previous_fks = [fk for fk in foreign_keys if fk[0] not in CORE090_TABLES and fk[2] not in CORE090_TABLES]
+    validate_relationships(previous, previous_fks)
+    return previous, previous_fks
+
+
+def legacy_v9_report(rows, foreign_keys, *, current_migration, verified_artifacts,
+                     verified_source_secrets, verified_delivery_secrets):
+    if current_migration != CURRENT_MIGRATION:
+        raise ValueError("La proyección v9 requiere la migración 0022.")
+    previous, previous_fks = project_core090_upgrade(rows, foreign_keys)
+    return {"schema_version": PEOPLE_SCHEMA_VERSION, "tables": _table_hashes(previous),
+        "verified_artifacts": verified_artifacts, "verified_secrets": verified_source_secrets + verified_delivery_secrets,
+        "verified_source_secrets": verified_source_secrets, "verified_delivery_secrets": verified_delivery_secrets,
+        "validated_relationships": validate_relationships(previous, previous_fks), "migration": PEOPLE_MIGRATION}
+
+
 def project_people_upgrade(rows, foreign_keys):
     """Remove only the deterministic 0018/0019 additions, proving populated 0.8.0."""
     foreign_keys = list(foreign_keys)
-    if set(rows) != FINGERPRINT_TABLES[CURRENT_MIGRATION]:
+    if "rest_delivery_batches" in rows:
+        rows, foreign_keys = project_core090_upgrade(rows, foreign_keys)
+    if set(rows) != FINGERPRINT_TABLES[PEOPLE_MIGRATION]:
         raise ValueError("La proyección v8 requiere el inventario completo de 0.8.5.")
     validate_relationships(rows, foreign_keys)
     roles = ("business_owner", "steward", "technical_custodian")
@@ -429,7 +528,7 @@ def project_people_upgrade(rows, foreign_keys):
 
 def legacy_v8_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration != CURRENT_MIGRATION:
+    if current_migration not in {PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección v8 requiere la migración 0019.")
     previous, previous_fks = project_people_upgrade(rows, foreign_keys)
     return {"schema_version": CATALOG_SCHEMA_VERSION, "tables": _table_hashes(previous),
@@ -465,7 +564,7 @@ def project_catalog_upgrade(rows, foreign_keys):
 
 def legacy_v7_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration not in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration not in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección v7 requiere la migración 0017.")
     previous, previous_fks = project_catalog_upgrade(rows, foreign_keys)
     return {"schema_version": CORRECTIONS_SCHEMA_VERSION, "tables": _table_hashes(previous),
@@ -495,9 +594,9 @@ def project_corrections_upgrade(rows, foreign_keys):
 
 def legacy_v6_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration not in {CORRECTIONS_MIGRATION, CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration not in {CORRECTIONS_MIGRATION, CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         raise ValueError("La proyección v6 requiere la migración 0016.")
-    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
     previous, previous_fks = project_corrections_upgrade(rows, foreign_keys)
     return {"schema_version": PRE_CORRECTIONS_SCHEMA_VERSION, "tables": _table_hashes(previous),
@@ -546,7 +645,7 @@ def project_async_upgrade(rows, foreign_keys):
 
 def legacy_v5_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
-    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -580,7 +679,7 @@ def legacy_v2_report(
     """Recalculate the exact 0.4.1 fingerprint after the deterministic 0008 upgrade."""
 
     foreign_keys = list(foreign_keys)
-    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {DELIVERY_BASELINE_MIGRATION, REVIEW_MIGRATION, IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -642,7 +741,7 @@ def legacy_v3_report(
     verified_source_secrets: int, verified_delivery_secrets: int,
 ) -> dict[str, Any]:
     """Project a fresh 0009 upgrade onto the exact, unchanged 0.5.0 state."""
-    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {REVIEW_MIGRATION, IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION} or rows.get(REVIEW_TABLE):
@@ -706,7 +805,7 @@ def project_identity_upgrade(rows, foreign_keys):
 def legacy_v4_report(rows, foreign_keys, *, current_migration, verified_artifacts,
                      verified_source_secrets, verified_delivery_secrets):
     """Recreate the exact 0.5.1 fingerprint after the additive 0.6.0 migration."""
-    if current_migration in {CATALOG_MIGRATION, CURRENT_MIGRATION}:
+    if current_migration in {CATALOG_MIGRATION, PEOPLE_MIGRATION, CURRENT_MIGRATION}:
         rows, foreign_keys = project_catalog_upgrade(rows, foreign_keys)
         current_migration = CORRECTIONS_MIGRATION
     if current_migration not in {IDENTITY_MIGRATION, PRE_CORRECTIONS_MIGRATION, CORRECTIONS_MIGRATION}:
@@ -740,7 +839,6 @@ def _snapshot_inputs() -> tuple[
     import runpy
 
     from sqlalchemy import select, text
-
     from trackvance.artifactstore import artifact_store, storage_provider
     from trackvance.credential_store import secret_store
     from trackvance.db import Base, SessionLocal
@@ -842,6 +940,7 @@ def snapshot() -> dict[str, Any]:
             PRE_CORRECTIONS_SCHEMA_VERSION if migration == PRE_CORRECTIONS_MIGRATION else
             CORRECTIONS_SCHEMA_VERSION if migration == CORRECTIONS_MIGRATION else
             CATALOG_SCHEMA_VERSION if migration == CATALOG_MIGRATION else
+            PEOPLE_SCHEMA_VERSION if migration == PEOPLE_MIGRATION else
             SCHEMA_VERSION
         ),
         "tables": _table_hashes(rows),
@@ -887,7 +986,7 @@ def snapshot_legacy_v3() -> dict[str, Any]:
 def compare(before: Mapping[str, Any], after: Mapping[str, Any]) -> None:
     if before.get("schema_version") not in {
         DELIVERY_BASELINE_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION, IDENTITY_SCHEMA_VERSION,
-        PRE_CORRECTIONS_SCHEMA_VERSION, CORRECTIONS_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, SCHEMA_VERSION,
+        PRE_CORRECTIONS_SCHEMA_VERSION, CORRECTIONS_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION, PEOPLE_SCHEMA_VERSION, SCHEMA_VERSION,
     }:
         raise ValueError("Versión del informe previo no reconocida.")
     if after.get("schema_version") != before.get("schema_version"):
@@ -915,6 +1014,7 @@ def main() -> int:
     commands.add_parser("snapshot-legacy-v6")
     commands.add_parser("snapshot-legacy-v7")
     commands.add_parser("snapshot-legacy-v8")
+    commands.add_parser("snapshot-legacy-v9")
     comparison = commands.add_parser("compare")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -947,6 +1047,12 @@ def main() -> int:
         elif args.command == "snapshot-legacy-v8":
             migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
             print(json.dumps(legacy_v8_report(
+                rows, fks, current_migration=migration, verified_artifacts=artifacts,
+                verified_source_secrets=source, verified_delivery_secrets=delivery,
+            ), indent=2, sort_keys=True))
+        elif args.command == "snapshot-legacy-v9":
+            migration, rows, fks, artifacts, source, delivery = _snapshot_inputs()
+            print(json.dumps(legacy_v9_report(
                 rows, fks, current_migration=migration, verified_artifacts=artifacts,
                 verified_source_secrets=source, verified_delivery_secrets=delivery,
             ), indent=2, sort_keys=True))

@@ -26,7 +26,11 @@ try:
         require,
         sha256,
     )
-    from .executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
+    from .executable_proof import (
+        GitHubAPI,
+        executable_fingerprint,
+        revalidate_inheritance,
+    )
     from .image_bundle import mapping_images
     from .validators import junit_document, validate_content
 except ImportError:
@@ -43,7 +47,11 @@ except ImportError:
         require,
         sha256,
     )
-    from executable_proof import GitHubAPI, executable_fingerprint, revalidate_inheritance
+    from executable_proof import (
+        GitHubAPI,
+        executable_fingerprint,
+        revalidate_inheritance,
+    )
     from image_bundle import mapping_images
     from validators import junit_document, validate_content
 

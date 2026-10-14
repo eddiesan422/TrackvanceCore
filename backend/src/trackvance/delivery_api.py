@@ -100,6 +100,8 @@ def test_destination_draft(
     user: User = Depends(current_user),
 ):
     password = body.password.get_secret_value() if body.password else ""
+    if body.sink_type == "REST" and body.options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     config = {
         "host": body.host,
         "port": body.port,
@@ -122,6 +124,8 @@ def test_destination_draft(
             password = destination_secret_store.get(
                 user.organization_id, version.secret_reference
             )
+    if not password and body.sink_type == "REST" and body.options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     if not password:
         raise DeliveryOperationError(
             422, "PASSWORD_REQUIRED", "Indica la contraseña del destino."
@@ -617,3 +621,18 @@ def review_delivery_outcome(
 ):
     """Record a human observation; original UNKNOWN and Run/Job identity are unchanged."""
     return review_dto(record_delivery_review(db, user, run_id, body))
+
+
+@router.get("/runs/{run_id}/rest-batches")
+def rest_delivery_batches(run_id: str, limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0),
+                          db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from sqlalchemy import func
+
+    from .rest_delivery import batch_dto
+    from .rest_models import RestDeliveryBatch
+    run = owned_delivery_run(db, user, run_id)
+    query = select(RestDeliveryBatch).where(RestDeliveryBatch.run_id == run.id,
+        RestDeliveryBatch.organization_id == user.organization_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.scalars(query.order_by(RestDeliveryBatch.ordinal).offset(offset).limit(limit)).all()
+    return {"items": [batch_dto(item) for item in rows], "total": total, "limit": limit, "offset": offset}

@@ -130,7 +130,6 @@ def certify_sqlserver_streaming(host, admin_password, reader_password, rows=ROWS
     if rows not in (1028, ROWS):
         raise ValueError('Streaming population must cover at least four real batches or historical30k rows')
     import pymssql
-
     from trackvance.acquisition_config import AcquisitionLimits
     from trackvance.dataset_sources import ConnectionSettings, SQLServerDatasetSource
 

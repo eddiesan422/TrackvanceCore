@@ -48,7 +48,7 @@ from .db import SessionLocal, iso, require_record, utcnow
 from .delivery_audit import target_policy
 from .delivery_credential_store import destination_secret_store
 from .delivery_metrics import delivery_metric_semantics
-from .delivery_schemas import DeliveryDraft, DeliveryReviewBody
+from .delivery_schemas import DeliveryDraft, DeliveryReviewBody, TargetSpec
 from .delivery_streams import DatasetRecords, DeliveryLimits, PreparedRows, unique_keys
 from .jobqueue import JobQueue, job_queue
 from .manifests import SCHEMA_VERSION, configuration_hash
@@ -260,6 +260,11 @@ def require_password_for_destination_change(
     version: DeliveryDestinationVersion,
     candidate: dict[str, Any],
 ) -> None:
+    if destination.sink_type == "REST":
+        prior_options, options = version.config.get("options", {}), candidate.get("options", {})
+        if tuple(prior_options.get(key) for key in ("url", "auth", "api_key_header")) != tuple(options.get(key) for key in ("url", "auth", "api_key_header")):
+            raise DeliveryOperationError(422, "PASSWORD_REQUIRED_FOR_ENDPOINT_CHANGE", "Vuelve a indicar la credencial al cambiar endpoint o autenticación REST.")
+        return
     tls_key = "sslmode" if destination.sink_type == "POSTGRESQL" else "encryption"
     previous = version.config
     prior_endpoint = (
@@ -320,9 +325,13 @@ def save_destination(
     )
     if only_disable:
         password = "UNCHANGED_CREDENTIAL"
+    elif sink_type == "REST" and config["options"].get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     elif not password and destination and previous:
         require_password_for_destination_change(destination, previous, config)
         password = destination_secret_store.get(user.organization_id, previous.secret_reference)
+    if not password and sink_type == "REST" and config["options"].get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     if not password:
         raise DeliveryOperationError(422, "PASSWORD_REQUIRED", "Indica la contraseña del destino.")
     settings = DestinationSettings(
@@ -580,6 +589,9 @@ def _assert_dispatch_snapshot(db: Session, run: Run, draft: DeliveryDraft) -> No
 def preview_delivery(
     db: Session, organization_id: str, draft: DeliveryDraft, *, limit: int = 8
 ) -> dict[str, Any]:
+    if draft.target.mode == "REST":
+        from .rest_delivery import rest_preview
+        return rest_preview(db, organization_id, draft, limit=limit)
     version, _dataset, _artifact, frame = _owned_version(
         db, draft.dataset_version_id, organization_id
     )
@@ -982,6 +994,9 @@ def preflight_delivery(
     control=None,
     release_metadata: bool = False,
 ) -> dict[str, Any]:
+    if draft.target.mode == "REST":
+        from .rest_delivery import rest_preflight
+        return rest_preflight(db, organization_id, draft, control=control, release_metadata=release_metadata)
     checks: list[dict[str, Any]] = []
     version, dataset, artifact, frame = _owned_version(
         db, draft.dataset_version_id, organization_id,
@@ -1006,6 +1021,8 @@ def preflight_delivery(
     destination_version = exact_destination_version(
         db, destination, draft.destination_version_id
     )
+    if destination.sink_type == "REST":
+        raise DeliveryOperationError(412, "REST_TARGET_REQUIRED", "Un destino REST requiere target mode REST sin tabla ni schema.")
     policy, _fingerprint, _identity = target_policy(
         db, destination, destination_version, draft.target.model_dump()
     )
@@ -1861,10 +1878,16 @@ def _publish_delivery_evidence(
         "result": attempt.status,
         "delivery_attempt_id": attempt.id,
         "attempt_number": attempt.attempt_number,
-        "metric_semantics": delivery_metric_semantics(),
+        "metric_semantics": run.metrics.get("metric_semantics", delivery_metric_semantics()),
         **({"system_audit": attempt.system_audit} if attempt.system_audit else {}),
         **{key: metrics[key] for key in ("preflight_seconds", "write_seconds") if key in metrics},
     }
+    if draft.target.mode == "REST":
+        receipt_payload["rest_batches"] = run.metrics.get("batches", [])
+        receipt_payload["transaction_scope"] = "PER_BATCH"
+        receipt_payload["decimal_encoding"] = "EXACT_STRING"
+        from .rest_delivery import rest_metric_semantics
+        receipt_payload["metric_semantics"] = rest_metric_semantics()
     receipt = _publish_evidence_artifact(
         db, run, "DELIVERY_RECEIPT", "delivery-receipt.json", receipt_payload
     )
@@ -1934,7 +1957,7 @@ def _publish_delivery_evidence(
             "attempt": attempt_dto(attempt),
         },
         "metrics": metrics,
-        "metric_semantics": delivery_metric_semantics(),
+        "metric_semantics": run.metrics.get("metric_semantics", delivery_metric_semantics()),
         "result_artifacts": [artifact_dto(receipt)],
     }
     evidence = _publish_evidence_artifact(db, run, "RUN_MANIFEST", "evidence.json", manifest)
@@ -1966,6 +1989,10 @@ def execute_delivery_run(
     lease_owner: str | None = None,
 ) -> None:
     from .automation import AutomationError, authorize_automated_run, claim_delivery_target
+    configuration = require_record(db, Configuration, run.config_id)
+    if configuration.config.get("target", {}).get("mode") == "REST":
+        from .rest_delivery import execute_rest_delivery
+        return execute_rest_delivery(db, run, lease_owner=lease_owner)
     if run.module != "DELIVERY":
         raise DeliveryOperationError(422, "WRONG_MODULE", "La Run no pertenece a Delivery.")
     if run.status in {
@@ -1979,6 +2006,8 @@ def execute_delivery_run(
     config = require_record(db, Configuration, run.config_id)
     source = require_record(db, DatasetVersion, run.dataset_version_id)
     draft = DeliveryDraft.model_validate(config.config)
+    if not isinstance(draft.target, TargetSpec):
+        raise DeliveryOperationError(422, "SQL_TARGET_REQUIRED", "La ejecucion SQL requiere un target SQL.")
     actor = Actor("WORKER", "trackvance:delivery-worker", "Delivery Worker")
     prior = db.scalar(
         select(DeliveryAttempt)
@@ -2417,7 +2446,7 @@ def _repair_context(db: Session, run: Run) -> tuple[
     if any(run.execution_plan.get(key) != value for key, value in plan_checks.items()):
         raise _evidence_problem("El plan persistido no coincide con el destino y la estrategia originales.")
     if (attempt.destination_version_id != destination_version.id
-            or attempt.target_locator != f"{draft.target.schema_name}.{draft.target.table_name}"
+            or attempt.target_locator != (destination_version.config["options"]["url"][:300] if draft.target.mode == "REST" else f"{draft.target.schema_name}.{draft.target.table_name}")
             or attempt.idempotency_key != _delivery_idempotency(run, config)
             or not attempt.started_at or not attempt.finished_at
             or not run.started_at or not run.finished_at):

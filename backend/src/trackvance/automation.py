@@ -202,6 +202,8 @@ def save_automation(db: Session, actor: User, configuration_id: str, name: str,
         intake = db.get(Configuration, settings.intake_configuration_id)
         if intake is None or intake.organization_id != actor.organization_id or intake.module != "intake":
             raise AutomationError(404, "NOT_FOUND", "No se encontró el contrato Intake.")
+        from .intake_automation import assert_active_contract
+        assert_active_contract(db, intake, lock=True)
         if responsible and "intake:read" not in effective_permissions(db, responsible):
             raise AutomationError(403, "FORBIDDEN", "El responsable no puede consultar el Intake que dispara la entrega.")
     now = utcnow()
@@ -353,7 +355,7 @@ def settle_delivery_target(db: Session, run: Run):
     if guard and guard.organization_id == run.organization_id and guard.active_run_id == run.id:
         if run.status == "UNKNOWN":
             guard.unknown_run_id, guard.active_run_id = run.id, None
-        elif run.status in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED"}:
+        elif run.status in {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED", "PARTIAL"}:
             guard.active_run_id = None
 
 
@@ -393,6 +395,17 @@ def release_unknown_target(db: Session, user: User, run_id: str, review_id: str,
 
 def _resolve_source(db, config, revision, settings, source_run):
     if settings.source_policy == "INTAKE_OUTPUT":
+        from .intake_automation import assert_active_contract
+        intake = db.get(Configuration, settings.intake_configuration_id)
+        try:
+            if intake is None:
+                return None, "INTAKE_NOT_ELIGIBLE"
+            # The automation row is already locked. Deletion waits on it before
+            # committing its fence, so a concurrently registered delivery is
+            # historical and retained. Never acquire Intake in reverse order.
+            assert_active_contract(db, intake)
+        except AutomationError:
+            return None, "INTAKE_CONTRACT_DELETED"
         if (source_run is None or source_run.module != "intake" or source_run.status != "SUCCESS"
                 or source_run.organization_id != config.organization_id
                 or source_run.config_id != settings.intake_configuration_id):
@@ -549,6 +562,11 @@ def consume_intake_event(db: Session, event):
         revision = revision_for(db, automation)
         settings = settings_for_revision(revision)
         if settings.mode != "CHAINED" or settings.intake_configuration_id != run.config_id:
+            continue
+        from .intake_automation import assert_active_contract
+        try:
+            assert_active_contract(db, db.get(Configuration, settings.intake_configuration_id))
+        except AutomationError:
             continue
         # Activation is a durable temporal fence, never replay historic events.
         activated = datetime.fromisoformat(revision.settings["activated_at"])

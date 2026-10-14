@@ -116,7 +116,7 @@ def save_schedule(
 
 
 def authorize_responsible(db: Session, user_id: str | None, organization_id: str):
-    user = db.get(User, user_id) if user_id else None
+    user = db.get(User, user_id, populate_existing=True) if user_id else None
     if user is None or user.organization_id != organization_id or not user.active or user.deleted:
         raise ScheduleError(412, "SCHEDULE_EXECUTOR_DISABLED", "El responsable no está habilitado o requiere asignación.")
     if not {"sentinel:read", "sentinel:execute", "datasets:read"}.issubset(effective_permissions(db, user)):
@@ -241,7 +241,11 @@ def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) 
 
 def tick() -> int:
     with SessionLocal() as db:
+        from .intake_automation import dispatch_due as dispatch_intake_due
+        from .sentinel_auto import dispatch_daily
         count = dispatch_due(db)
+        count += dispatch_intake_due(db)
+        count += dispatch_daily(db)
         db.commit()
         return count
 

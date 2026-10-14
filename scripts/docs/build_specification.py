@@ -59,8 +59,8 @@ REPO: Path
 DOCS_ROOT: Path
 SOURCE: Path
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.8.5"
-EDITION_DATE = "9 octubre 2026"
+VERSION = "0.9.0"
+EDITION_DATE = "14 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 WIDTH, HEIGHT = letter if AUTHORING_IMPORT_ERROR is None else (612, 792)
 MARGIN = 43

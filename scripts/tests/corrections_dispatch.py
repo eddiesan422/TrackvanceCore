@@ -64,8 +64,12 @@ def forbid_population_io():
     from unittest.mock import patch
 
     import polars as pl
-
-    from trackvance import artifactstore, dataset_scans, delivery_service, delivery_streams
+    from trackvance import (
+        artifactstore,
+        dataset_scans,
+        delivery_service,
+        delivery_streams,
+    )
 
     calls = Counter()
 
@@ -94,7 +98,6 @@ def forbid_population_io():
 
 def busy_snapshot(run_id, source_id, organization_id, expected_rows):
     from sqlalchemy import select
-
     from trackvance.db import SessionLocal, iso, utcnow
     from trackvance.models import DatasetVersion, DeliveryAttempt, Job, Run
 
@@ -231,7 +234,6 @@ def cancel_validations(client, identifiers, report, timeout):
 def discover_owned_runs(automations, organization_id):
     """Recover committed run IDs even if an assertion failed after dispatch."""
     from sqlalchemy import select
-
     from trackvance.automation_models import DeliveryOccurrence
     from trackvance.db import SessionLocal
 
@@ -243,7 +245,6 @@ def discover_owned_runs(automations, organization_id):
 
 def cancel_owned(client, identifiers, organization_id, report):
     from sqlalchemy import select
-
     from trackvance.db import SessionLocal
     from trackvance.models import DeliveryAttempt, Run
 
@@ -281,9 +282,11 @@ def verify_occurrence_contract(db, occurrence, report, organization_id):
     This check uses real persisted rows and neither requires nor invents that FK.
     """
     from sqlalchemy import select
-
     from trackvance.automation import AUTOMATION_ACTOR
-    from trackvance.automation_models import DeliveryAutomation, DeliveryAutomationVersion
+    from trackvance.automation_models import (
+        DeliveryAutomation,
+        DeliveryAutomationVersion,
+    )
     from trackvance.delivery_schemas import DeliveryDraft
     from trackvance.manifests import configuration_hash
     from trackvance.models import Configuration, DeliveryDestinationVersion, Job, Run
@@ -336,7 +339,6 @@ def verify_occurrence_contract(db, occurrence, report, organization_id):
 
 def measured_dispatch(args, client, automations, organization_id, report, owned_runs):
     from sqlalchemy import select
-
     from trackvance.automation import dispatch_due
     from trackvance.automation_models import DeliveryAutomation, DeliveryOccurrence
     from trackvance.db import SessionLocal, iso, utcnow

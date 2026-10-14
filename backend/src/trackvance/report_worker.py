@@ -319,6 +319,8 @@ def materialize(identity, owner):
             audit(db, "REPORT_DATASET_PUBLISHED", "report_execution", identity, "Nuevo dataset publicado íntegramente, pendiente de calidad", actor,
                   organization_id, {"dataset_id": dataset.id, "dataset_version_id": version.id,
                                     "row_count": version.row_count, "artifact_id": canonical.id})
+            from .publication import publish_version_event
+            publish_version_event(db, version, actor)
             db.commit()
     finally:
         _cleanup_prepared(organization_id, identity, attempt, owner, part_count)

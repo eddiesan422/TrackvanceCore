@@ -1,0 +1,7 @@
+.notification-filters { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:16px; margin:20px 0; }
+.notifications-panel td { padding-top:16px; padding-bottom:16px; }
+.notification-unread { background:var(--surface-subtle,#f4f7fc); }
+.notification-unread td:first-child { border-left:3px solid var(--primary,#315bbb); }
+.notifications-panel input[type=checkbox] { width:20px; height:20px; cursor:pointer; }
+.notifications-panel input[type=checkbox]:focus-visible { outline:3px solid #315bbb; outline-offset:3px; }
+@media(max-width:800px) { .notification-filters { grid-template-columns:repeat(2,minmax(130px,1fr)); } }

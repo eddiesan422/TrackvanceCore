@@ -608,10 +608,10 @@ def test_representative_restore_closes_partial_scope_and_still_attempts_images_a
         thread=SimpleNamespace(start=lambda: None), finish=dict))
     executed, validated, image_cleanup = [], [], []
     historical_result = {"status": "PASS", "source_destroyed_before_restore": True,
-        "main_inventory": "UNCHANGED", "source_version": "0.6.1", "target_version": "0.8.5",
+        "main_inventory": "UNCHANGED", "source_version": "0.6.1", "target_version": "0.9.0",
         "restore": "STOPPED_VERIFIED", "automatic_processes_started": False,
         "exact_historical_state": "PASS", "source_state_sha256": "c" * 64,
-        "restored_legacy_sha256": "c" * 64, "native_tables": 56, "new_catalog_tables_empty": True}
+        "restored_legacy_sha256": "c" * 64, "native_tables": 65, "new_catalog_tables_empty": True}
     def execute(arguments, *_args, **_kwargs):
         executed.append(arguments)
         output = Path(arguments[arguments.index("--evidence-dir") + 1])

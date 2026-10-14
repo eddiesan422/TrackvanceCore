@@ -517,4 +517,7 @@ class MonitorOccurrence(Record, Base):
 from . import acquisition_models as _acquisition_models  # noqa: F401
 from . import automation_models as _automation_models  # noqa: F401
 from . import governance_models as _governance_models  # noqa: F401
+from . import intake_automation_models as _intake_automation_models  # noqa: F401
 from . import report_models as _report_models  # noqa: F401
+from . import rest_models as _rest_models  # noqa: F401
+from . import sentinel_auto_models as _sentinel_auto_models  # noqa: F401

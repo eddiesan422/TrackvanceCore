@@ -59,8 +59,8 @@ class SourceAcquisitionBody(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     domain: str = Field(default="", max_length=80, deprecated=True)
     description: str = Field(default="", max_length=4000)
-    schema_name: str = Field(min_length=1, max_length=128)
-    object_name: str = Field(min_length=1, max_length=128)
+    schema_name: str = Field(default="REST", min_length=1, max_length=128)
+    object_name: str = Field(default="collection", min_length=1, max_length=128)
     column_overrides: dict = Field(default_factory=dict)
     macro_domain_id: str | None = Field(default=None, max_length=64)
     domain_id: str | None = Field(default=None, max_length=64)
@@ -76,7 +76,7 @@ class SourceAcquisitionBody(BaseModel):
 class AcquisitionResponse(BaseModel):
     id: str
     dataset_id: str
-    source_type: Literal["UPLOAD", "POSTGRESQL", "SQLSERVER"]
+    source_type: Literal["UPLOAD", "POSTGRESQL", "SQLSERVER", "REST"]
     filename: str
     status: Literal["QUEUED", "RUNNING", "SUCCESS", "FAILED", "CANCELLED"]
     stage: str
@@ -133,7 +133,7 @@ def _upload(db: Session, user: User, identifier: str) -> AcquisitionUpload:
 
 
 @router.get("/acquisitions/limits")
-def acquisition_limits(source_format: Literal["CSV", "TXT", "JSON", "JSON_LINES", "PARQUET", "XLSX", "POSTGRESQL", "SQLSERVER"] = Query("CSV", alias="format"),
+def acquisition_limits(source_format: Literal["CSV", "TXT", "JSON", "JSON_LINES", "PARQUET", "XLSX", "POSTGRESQL", "SQLSERVER", "REST"] = Query("CSV", alias="format"),
                        route: Literal["ASYNC_ACQUISITION", "LEGACY_UPLOAD"] = "ASYNC_ACQUISITION"):
     return AcquisitionLimits.configured().describe(source_format, route=route)
 

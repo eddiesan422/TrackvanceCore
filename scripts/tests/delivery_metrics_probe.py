@@ -7,7 +7,6 @@ password in memory; the returned report contains no connection details/secrets.
 from dataclasses import asdict
 
 import psycopg
-
 from trackvance.data_sinks import DeliveryError, DestinationSettings, PostgreSQLDataSink
 
 

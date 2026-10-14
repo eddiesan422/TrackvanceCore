@@ -22,7 +22,7 @@ CHECKS = ("dry_plan_read_only", "fault_rollback", "abrupt_fault_recovery", "meta
 
 def require_copy(project):
     if not re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", project):
-        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.8.5 copy.")
+        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.9.0 copy.")
 
 
 def assert_plan(plan, before, fixture):
@@ -39,7 +39,8 @@ def assert_plan(plan, before, fixture):
             raise ValueError("The UNKNOWN branch or external-target barrier was not protected.")
     if any(not scope["delete"][name] for name in ("configurations", "monitor_schedules", "monitor_schedule_versions",
             "report_definitions", "report_revisions", "report_contexts", "report_executions", "strict_approvals",
-            "governance_history", "outbox_events", "event_consumptions", "internal_notifications")):
+            "governance_history", "outbox_events", "event_consumptions", "internal_notifications",
+            "sentinel_automatic_monitors", "sentinel_automatic_revisions")):
         raise ValueError("The trial did not populate and select every required dependent operational family.")
     if scope["external_destinations_touched"] is not False:
         raise ValueError("An external operation is forbidden in the cleanup trial.")
@@ -216,7 +217,7 @@ def trial(harness, directory, context, environment, evidence):
             raise ValueError("The protected encrypted credential/key bytes changed during cleanup.")
     harness.assert_main(context)
     result = {"status": "PASS", "scope": "OWNED_RESTORED_POSTGRES_COPY", "database": "POSTGRESQL", "project": context["project"],
-        "source_sha": revision, "schema_version": 9, "migration": "0019_governance_people", "tables": len(after["tables"]),
+        "source_sha": revision, "schema_version": docker_state.VERIFY_SCHEMA_VERSION, "migration": docker_state.CURRENT_MIGRATION, "tables": len(after["tables"]),
         "backup_manifest_sha256": manifest_sha, "verified_state_sha256": state_sha, "verified_restore_project": restored["project"],
         "verified_restore": "STOPPED_VERIFIED", "plan_sha256": plan["plan_sha256"], "quarantined_files": count,
         "verified_surviving_artifacts": after["verified_artifacts"], "protected_secret_volumes": 4,

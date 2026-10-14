@@ -149,7 +149,7 @@ def main():
     # fixture exercises both exact admission and rejection before transmission.
     limit = 120 if args.rows == [120] else 1000000
     resource_profile = configure_report_resources(directory, context, limit)
-    summary = {"version": "0.8.5", "status": "FAIL", "project": context["project"], "tiers": [],
+    summary = {"version": "0.9.0", "status": "FAIL", "project": context["project"], "tiers": [],
                "source_sha": guard.command(["git", "rev-parse", "HEAD"]).strip(),
                "source_tree_dirty": bool(guard.command(["git", "status", "--porcelain"]).strip()),
                "main_inventory_before": context["main_before"], "isolation": "RESOLVED_PREFLIGHT",

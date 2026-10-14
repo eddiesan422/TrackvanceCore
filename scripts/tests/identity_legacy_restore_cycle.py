@@ -1,4 +1,4 @@
-"""Build authentic historical installations and certify isolated 0.8.0 restores."""
+"""Build authentic historical installations and certify isolated 0.9.0 restores."""
 from __future__ import annotations
 
 import argparse
@@ -32,7 +32,7 @@ SOURCES = {
     "0.6.0": ("587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5),
     "0.6.1": ("6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5),
 }
-TARGET_VERSION = "0.8.0"
+TARGET_VERSION = "0.9.0"
 
 
 def health_version(port: int) -> str:
@@ -267,10 +267,13 @@ def main() -> int:
         os.environ.update(environment)
         run([*target_compose, "up", "-d", "--wait", "api", "web"])
         if health_version(target_port) != TARGET_VERSION:
-            raise ValueError("La restauración no ejecuta 0.8.0.")
+            raise ValueError("La restauración no ejecuta 0.9.0.")
         restored = docker_state.inventory(target)
         api_container = next(item for item in restored["containers"] if item["service"] == "api")
         after = docker_state._copy_snapshot(str(api_container["id"]), evidence / "restored-state.json")
+        if (after["migration"] != docker_state.CURRENT_MIGRATION or after["schema_version"] != docker_state.VERIFY_SCHEMA_VERSION
+                or set(after["tables"]) != docker_state.CURRENT_STATE_TABLES):
+            raise ValueError("El restore histórico no contiene el inventario nativo completo de 0.9.0.")
         normalized = docker_state._copy_snapshot(str(api_container["id"]), evidence / "legacy-state.json",
             command="snapshot-legacy-v5" if expected_state == 5 else "snapshot-legacy-v4")
         if normalized != before:
@@ -278,7 +281,8 @@ def main() -> int:
         result.update(source_state_sha256=docker_state.canonical_hash(before),
                       restored_legacy_sha256=docker_state.canonical_hash(normalized),
                       exact_historical_state="PASS", migration=after["migration"],
-                      state_schema_version=after["schema_version"], artifacts=after["verified_artifacts"],
+                      state_schema_version=after["schema_version"], native_tables=len(after["tables"]),
+                      new_catalog_tables_empty=all(not after["tables"][name] for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"}), artifacts=after["verified_artifacts"],
                       source_secrets=after["verified_source_secrets"], delivery_secrets=after["verified_delivery_secrets"],
                       restore=receipt["status"], roles=len(after["tables"]["roles"]),
                       users=len(after["tables"]["users"]),

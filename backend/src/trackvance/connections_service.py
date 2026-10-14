@@ -92,6 +92,10 @@ def require_password_for_endpoint_change(
     options: dict,
 ) -> None:
     """Do not forward a stored credential to a different authentication endpoint."""
+    if connection.source_type == "REST":
+        if tuple(version.options.get(key) for key in ("url", "auth", "api_key_header")) != tuple(options.get(key) for key in ("url", "auth", "api_key_header")):
+            raise ConnectionOperationError(422, "PASSWORD_REQUIRED_FOR_ENDPOINT_CHANGE", "Vuelve a indicar la credencial al cambiar endpoint o autenticación REST.")
+        return
     tls_key = "sslmode" if connection.source_type == "POSTGRESQL" else "encryption"
     previous_endpoint = (
         version.host,
@@ -164,6 +168,8 @@ def save_connection(
         # Disabling access must remain possible even during a credential-store outage.
         # This placeholder is neither tested nor saved as a credential.
         password = "UNCHANGED_CREDENTIAL"
+    elif source_type == "REST" and candidate_options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     elif not password and previous and connection:
         require_password_for_endpoint_change(
             connection,
@@ -175,6 +181,8 @@ def save_connection(
             options=candidate_options,
         )
         password = secret_store.get(user.organization_id, previous.secret_reference)
+    if not password and source_type == "REST" and candidate_options.get("auth", "NONE") == "NONE":
+        password = "REST_NO_AUTH"
     if not password:
         raise ConnectionOperationError(422, "PASSWORD_REQUIRED", "Indica la contraseña de la conexión.")
     settings = ConnectionSettings(
@@ -236,6 +244,10 @@ def acquire_snapshot(
 ) -> DatasetVersion:
     source, configuration = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
     result = source.read()
+    overrides = dict(binding.column_overrides)
+    if connection.source_type == "REST":
+        from .rest_source import declared_overrides
+        overrides = declared_overrides(source.columns(), overrides)
     source_identity = {
         "source_type": connection.source_type, "connection_id": connection.id,
         "connection_version_id": configuration.id, "connection_version": configuration.version,
@@ -248,7 +260,7 @@ def acquire_snapshot(
                       .order_by(DatasetVersion.version.desc()))
     version = create_version(
         db, dataset, None, f"{binding.schema_name}.{binding.object_name}.parquet", user.name,
-        source_type=connection.source_type, column_overrides=binding.column_overrides,
+        source_type=connection.source_type, column_overrides=overrides,
         read_result=result,
     )
     link_artifact(db, user.organization_id, "SOURCE_SNAPSHOT", "DATASET_VERSION", version.id,

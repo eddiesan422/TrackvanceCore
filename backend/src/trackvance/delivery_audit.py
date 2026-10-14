@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -15,6 +16,19 @@ from .models import DeliveryDestination, DeliveryDestinationVersion, DeliveryTar
 def target_identity(
     organization_id: str, sink_type: str, config: dict[str, Any], target: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
+    if sink_type == "REST":
+        parsed = urlsplit(config["options"]["url"])
+        rest_host = (parsed.hostname or "").rstrip(".").casefold()
+        try:
+            rest_host = ipaddress.ip_address(rest_host).compressed
+        except ValueError:
+            pass
+        identity = {"organization_id": organization_id, "sink_type": sink_type,
+            "scheme": parsed.scheme.casefold(), "host": rest_host,
+            "port": parsed.port or (443 if parsed.scheme.casefold() == "https" else 80),
+            "path": parsed.path or "/"}
+        fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return fingerprint, identity
     host = str(config["host"]).rstrip(".").casefold()
     try:
         host = ipaddress.ip_address(host).compressed

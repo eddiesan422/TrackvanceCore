@@ -9,6 +9,7 @@ import type { DeliveryDestination, DestinationConfig, DestinationInput, Destinat
 import { destinationVersionId } from './types'
 import { DeliveryNavigation } from './DeliveryNavigation'
 import './delivery.css'
+import { RestEndpointDialog } from '../connections/RestEndpointDialog'
 
 interface DestinationForm {
   name: string
@@ -17,7 +18,7 @@ interface DestinationForm {
   password?: string
 }
 
-const sinkLabel = (value: SinkType) => value === 'POSTGRESQL' ? 'PostgreSQL' : 'SQL Server'
+const sinkLabel = (value: SinkType) => value === 'REST' ? 'REST JSON' : value === 'POSTGRESQL' ? 'PostgreSQL' : 'SQL Server'
 const defaultConfig = (sink: SinkType): DestinationConfig => ({
   host: '',
   port: sink === 'POSTGRESQL' ? 5432 : 1433,
@@ -49,7 +50,7 @@ function TestResult({ result }: { result: DestinationTestResult }) {
   return <Notice success={result.status === 'SUCCESS'}><strong>{result.status === 'SUCCESS' ? 'Destino verificado' : 'No se pudo conectar'}</strong> · {result.message}<small className="delivery-test-code">{result.code ? `${result.code} · ` : ''}{date(result.tested_at)}</small></Notice>
 }
 
-export function DestinationDialog({ destination, close, saved }: { destination?: DeliveryDestination; close: () => void; saved: (destination: DeliveryDestination) => void }) {
+function SqlDestinationDialog({ destination, close, saved }: { destination?: DeliveryDestination; close: () => void; saved: (destination: DeliveryDestination) => void }) {
   const initial = destination ? savedConfig(destination) : defaultConfig('POSTGRESQL')
   const [form, setForm] = useState<DestinationForm>(() => ({ name: destination?.name || '', sink_type: destination?.sink_type || 'POSTGRESQL', config: initial, password: '' }))
   const [result, setResult] = useState<DestinationTestResult | null>(null)
@@ -123,18 +124,24 @@ export function DestinationDialog({ destination, close, saved }: { destination?:
   </Modal>
 }
 
+export function DestinationDialog(props: { destination?: DeliveryDestination; close: () => void; saved: (destination: DeliveryDestination) => void }) {
+  if (props.destination?.sink_type === 'REST') return <RestEndpointDialog mode="DESTINATION" existing={props.destination} close={props.close} saved={() => props.saved(props.destination!)}/>
+  return <SqlDestinationDialog {...props}/>
+}
+
 export function DestinationsPage() {
   const canRead = usePermission('destinations:read'), canManage = usePermission('destinations:manage')
-  const [creating, setCreating] = useState(false), [search, setSearch] = useState('')
+  const [creating, setCreating] = useState(false), [creatingRest, setCreatingRest] = useState(false), [search, setSearch] = useState('')
   const cache = useQueryClient(), navigate = useNavigate()
   const destinations = useQuery({ queryKey: ['delivery-destinations'], queryFn: () => api<{ items: DeliveryDestination[]; total: number }>('/delivery/destinations'), enabled: canRead })
   if (!canRead) return <><DeliveryNavigation/><Notice>No tienes permisos para consultar los destinos.</Notice></>
   const items = (destinations.data?.items || []).filter(item => `${item.name} ${item.sink_type} ${item.database || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-  return <><DeliveryNavigation/><PageHeading eyebrow="DATA DELIVERY / DESTINOS" title="Destinos" description="Administra conexiones de escritura versionadas y separadas de las fuentes de adquisición." action={<button className="button primary" disabled={!canManage} onClick={() => setCreating(true)}><Plus size={17}/> Nuevo destino</button>}/>
+  return <><DeliveryNavigation/><PageHeading eyebrow="DATA DELIVERY / DESTINOS" title="Destinos" description="Administra conexiones de escritura versionadas y separadas de las fuentes de adquisición." action={<><button className="button secondary" disabled={!canManage} onClick={() => setCreatingRest(true)}>Nuevo destino REST</button><button className="button primary" disabled={!canManage} onClick={() => setCreating(true)}><Plus size={17}/> Nuevo destino</button></>}/>
     <div className="module-intro delivery"><ShieldCheck size={25}/><div><strong>Publicación controlada · credenciales segregadas</strong><p>Un destino define dónde publicar; cada entrega fija la revisión exacta que utilizó.</p></div></div>
     <section className="panel"><div className="table-toolbar"><SearchBox value={search} onChange={setSearch} placeholder="Buscar destino o motor…"/><span className="muted">{number(destinations.data?.total || 0)} destinos</span></div>
       {destinations.isPending ? <Loading text="Cargando destinos…"/> : destinations.error ? <ErrorState error={destinations.error} retry={() => destinations.refetch()}/> : !items.length ? <Empty title={search ? 'No hay coincidencias' : 'Crea tu primer destino'} description={search ? 'Prueba otro nombre o motor.' : 'Agrega PostgreSQL o SQL Server para preparar entregas controladas.'}/> : <div className="table-scroll"><table><thead><tr><th>Destino</th><th>Motor</th><th>Estado</th><th>Última prueba</th><th>Última actualización</th><th/></tr></thead><tbody>{items.map(destination => <tr key={destination.id}><td><Link className="table-primary" to={`/delivery/destinations/${destination.id}`}>{destination.name}</Link><span className="table-subtitle">Revisión {destination.version}</span></td><td>{sinkLabel(destination.sink_type)}</td><td><Badge value={destination.enabled && !destination.deleted ? 'ACTIVE' : 'INACTIVE'}/></td><td><Badge value={destination.last_test_status || 'NOT_REQUESTED'}>{destination.last_test_status === 'SUCCESS' ? 'Conectado' : destination.last_test_status === 'FAILED' ? 'Falló la prueba' : 'Sin probar'}</Badge><span className="table-subtitle">{date(destination.last_test_at)}</span></td><td>{date(destination.updated_at)}</td><td><Link className="text-link" to={`/delivery/destinations/${destination.id}`} aria-label={`Abrir ${destination.name}`}><ArrowRight size={17}/></Link></td></tr>)}</tbody></table></div>}
     </section>
+    {creatingRest && <RestEndpointDialog mode="DESTINATION" close={() => setCreatingRest(false)} saved={id => { cache.invalidateQueries({ queryKey: ['delivery-destinations'] }); setCreatingRest(false); navigate(`/delivery/destinations/${id}`) }}/>}
     {creating && <DestinationDialog close={() => setCreating(false)} saved={destination => { cache.invalidateQueries({ queryKey: ['delivery-destinations'] }); setCreating(false); navigate(`/delivery/destinations/${destination.id}`) }}/>}
   </>
 }
@@ -157,8 +164,8 @@ export function DestinationDetail() {
   if (destination.error) return <ErrorState error={destination.error} retry={() => destination.refetch()}/>
   const data = destination.data, config = savedConfig(data)
   return <><DeliveryNavigation/><PageHeading back="/delivery/destinations" eyebrow="DATA DELIVERY / DESTINO" title={data.name} description={`${sinkLabel(data.sink_type)} · ${config.database}`} action={<><button className="button secondary" disabled={!canManage} onClick={() => setEditing(true)}><Pencil size={15}/> Editar destino</button><button className="button primary" disabled={!canUse || !data.enabled || test.isPending} onClick={() => test.mutate()}><Plug size={16}/>{test.isPending ? 'Probando…' : 'Probar destino'}</button></>}/>
-    <section className="panel delivery-details"><div className="delivery-summary"><div><span>Servidor</span><strong>{config.host}:{config.port}</strong></div><div><span>Cuenta de escritura</span><strong>{config.username}</strong></div><div><span>Revisión</span><strong>{data.version}</strong><small className="mono">{destinationVersionId(data).slice(0, 16) || '—'}</small></div><div><span>Estado</span><Badge value={data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div><div><span>Última prueba</span><strong>{date(data.last_test_at)}</strong><Badge value={data.last_test_status || 'NOT_REQUESTED'}/></div></div>
-      {test.data ? <TestResult result={test.data}/> : data.last_test_message && <p className="delivery-help">{data.last_test_message}</p>}{test.error && <ErrorState error={test.error}/>}<div className="delivery-actions"><button className="text-button" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('toggle') }}>{data.enabled ? 'Deshabilitar destino' : 'Habilitar destino'}</button><button className="text-button delivery-delete" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('delete') }}><Trash2 size={14}/> Dar de baja</button>{canConfigure && <Link className="button secondary small" to={`/delivery/new?destination=${data.id}`}><Send size={14}/> Preparar entrega</Link>}</div>
+    <section className="panel delivery-details"><div className="delivery-summary"><div><span>{data.sink_type === 'REST' ? 'Endpoint POST' : 'Servidor'}</span><strong>{data.sink_type === 'REST' ? String(data.options.url) : `${config.host}:${config.port}`}</strong></div><div><span>{data.sink_type === 'REST' ? 'Autenticacion' : 'Cuenta de escritura'}</span><strong>{data.sink_type === 'REST' ? String(data.options.auth || 'NONE') : config.username}</strong></div><div><span>Revisión</span><strong>{data.version}</strong><small className="mono">{destinationVersionId(data).slice(0, 16) || '—'}</small></div><div><span>Estado</span><Badge value={data.enabled ? 'ACTIVE' : 'INACTIVE'}/></div><div><span>Última prueba</span><strong>{date(data.last_test_at)}</strong><Badge value={data.last_test_status || 'NOT_REQUESTED'}/></div></div>
+      {test.data ? <TestResult result={test.data}/> : data.last_test_message && <p className="delivery-help">{data.last_test_message}</p>}{test.error && <ErrorState error={test.error}/>}<div className="delivery-actions"><button className="text-button" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('toggle') }}>{data.enabled ? 'Deshabilitar destino' : 'Habilitar destino'}</button><button className="text-button delivery-delete" disabled={!canManage || change.isPending} onClick={() => { change.reset(); setConfirm('delete') }}><Trash2 size={14}/> Dar de baja</button>{canConfigure && <Link className="button secondary small" to={`/delivery/${data.sink_type === 'REST' ? 'rest' : 'new'}?destination=${data.id}`}><Send size={14}/> Preparar entrega</Link>}</div>
     </section>
     {!data.enabled && <Notice>El destino está deshabilitado. Las configuraciones y entregas históricas se conservan.</Notice>}
     {editing && <DestinationDialog destination={data} close={() => setEditing(false)} saved={() => { invalidate(); test.reset(); setEditing(false) }}/>}

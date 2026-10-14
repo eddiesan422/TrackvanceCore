@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .automation_models import OutboxEvent
     from .models import Run
 
-TERMINAL = frozenset({"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED", "UNKNOWN"})
+TERMINAL = frozenset({"SUCCESS", "FAILED", "FAILED_PRECONDITION", "CANCELLED", "UNKNOWN", "PARTIAL"})
 CONSUMERS = frozenset({"CHAINING", "NOTIFICATIONS"})
 _installed = False
 logger = logging.getLogger(__name__)
@@ -53,6 +53,8 @@ def append_event(db: Session, *, organization_id: str, dedupe_key: str, event_ty
     db.add(record)
     db.info.setdefault("outbox_created_in_transaction", set()).add(record.id)
     for consumer in sorted(CONSUMERS):
+        if event_type == "DATASET_VERSION_PUBLISHED" and consumer == "NOTIFICATIONS":
+            continue
         db.add(EventConsumption(id=uid(), organization_id=organization_id,
                                 event_id=record.id, event=record, consumer=consumer))
     return record
@@ -66,10 +68,14 @@ def record_run_event(db: Session, run: Run):
     plan = run.execution_plan or {}
     automation = plan.get("automation") or {}
     schedule = plan.get("schedule") or {}
-    recipient = automation.get("responsible_user_id") or schedule.get("responsible_user_id")
+    intake_schedule = plan.get("intake_schedule") or {}
+    sentinel_automatic = plan.get("sentinel_automatic") or {}
+    recipient = (automation.get("responsible_user_id") or schedule.get("responsible_user_id")
+                 or intake_schedule.get("responsible_user_id") or sentinel_automatic.get("responsible_user_id"))
     if not recipient and run.initiated_by_type == "USER":
         recipient = run.initiated_by_id
-    origin = automation.get("origin") or ("SCHEDULED" if schedule else "MANUAL")
+    origin = (automation.get("origin") or intake_schedule.get("origin")
+              or ("AUTOMATIC" if sentinel_automatic else "SCHEDULED" if schedule else "MANUAL"))
     evidence = (run.metrics or {}).get("evidence_status")
     append_event(db, organization_id=run.organization_id,
         dedupe_key=f"run:{run.id}:{run.status}:{run.decision or '-'}:{evidence or '-'}",
@@ -80,6 +86,9 @@ def record_run_event(db: Session, run: Run):
                  "operation": "PREFLIGHT" if run.module == "DELIVERY_PREFLIGHT" else "EXECUTION"})
     if run.module == "DELIVERY":
         settle_delivery_target(db, run)
+    elif run.module == "intake":
+        from .intake_automation import settle_contract_run
+        settle_contract_run(db, run)
 
 
 def _before_flush(db: Session, _context, _instances):
@@ -128,6 +137,12 @@ def functional_description(event: OutboxEvent):
                 "MONITOR_BUSY": "El intervalo Sentinel se omitió porque existe una ejecución activa.",
                 "NO_DATASET_VERSION": "El intervalo Sentinel se omitió porque no existe una versión registrada."}.get(
                     str(payload.get("reason_code")), "La programación Sentinel no pudo ejecutar este intervalo; revisa sus ocurrencias.")
+    if event.event_type == "INTAKE_SCHEDULE_BLOCKED":
+        return {"QUALITY_REJECTION_REVIEW_REQUIRED": "La entrada ya fue rechazada con esta revisión Intake; requiere revisión antes de repetirse.",
+                "INTAKE_EXECUTOR_DISABLED": "La programación Intake se bloqueó porque su responsable no está habilitado.",
+                "INTAKE_PERMISSION_REVOKED": "La programación Intake se bloqueó por permisos revocados.",
+                "NO_PUBLISHED_VERSION": "La programación Intake espera una versión completa publicada."}.get(
+                    str(payload.get("reason_code")), "La programación Intake no pudo ejecutar esta ocurrencia; revisa su detalle.")
     if event.event_type == "DELIVERY_AUTOMATION_BLOCKED":
         reasons = {
             "TARGET_UNKNOWN_BLOCKED": "La automatización está bloqueada por una confirmación remota desconocida.",
@@ -142,6 +157,8 @@ def functional_description(event: OutboxEvent):
     if event.module == "DELIVERY":
         if status == "UNKNOWN":
             return "La confirmación remota de la entrega es desconocida; requiere revisión."
+        if status == "PARTIAL":
+            return "La entrega confirmó sólo algunos lotes; revisa el detalle."
         if decision == "COMMITTED":
             return ("Entrega confirmada con evidencia local pendiente de reparación."
                     if payload.get("evidence_status") == "PENDING_REPAIR" else "Entrega confirmada en el destino.")
@@ -166,6 +183,8 @@ def consume_notification(db: Session, record: OutboxEvent):
     from .automation_models import InternalNotification
     from .models import User, uid
 
+    if record.event_type == "DATASET_VERSION_PUBLISHED":
+        return  # Publication events drive metadata consumers, not status notifications.
     recipient_id = record.payload.get("recipient_user_id")
     user = db.get(User, recipient_id) if recipient_id else None
     if user is None or user.organization_id != record.organization_id:
@@ -180,6 +199,8 @@ def consume_notification(db: Session, record: OutboxEvent):
         url = f"/datasets/{record.payload.get('dataset_id', '')}?acquisition={record.aggregate_id}"
     elif record.aggregate_type == "MONITOR_OCCURRENCE":
         url = f"/sentinel?monitor={record.payload.get('monitor_id', '')}"
+    elif record.aggregate_type == "INTAKE_OCCURRENCE":
+        url = f"/intake?contract_id={record.payload.get('configuration_id', '')}"
     else:
         url = f"/delivery/automation/{record.payload.get('automation_id', '')}"
     db.add(InternalNotification(id=uid(), organization_id=record.organization_id,
@@ -234,7 +255,11 @@ def consume_once(consumer: str, *, owner: str | None = None, now=None) -> bool:
                 consume_notification(db, record)
             else:
                 from .automation import consume_intake_event
+                from .intake_automation import consume_dataset_event
+                from .sentinel_auto import consume_dataset_event as consume_sentinel_dataset_event
                 consume_intake_event(db, record)
+                consume_sentinel_dataset_event(db, record)
+                consume_dataset_event(db, record)
             from .scheduler import aware
 
             if delivery.lease_until is None or aware(delivery.lease_until) <= utcnow():

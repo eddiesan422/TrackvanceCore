@@ -3,9 +3,22 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, download } from '../../api/client'
 import { renderApp } from '../../test/render'
-import { RunDetail } from './Runs'
+import { ModulePage, RunDetail } from './Runs'
 
 vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../../api/client')>(), api: vi.fn(), download: vi.fn(), post: vi.fn() }))
+
+it('opens a deleted contract from a lineage history link without enabling new operations', async () => {
+  vi.mocked(api).mockImplementation(async path => path === '/intake/contracts?include_deleted=true' ? {
+    items: [{ id: 'deleted-revision', name: 'Histórico', version: 2, deleted: true, status: 'DELETED',
+      dataset_id: 'source', dataset_name: 'Datos', owner: 'Equipo', config: { required_columns: ['id'] } }], total: 1,
+  } : { items: [], total: 0 })
+  renderApp(<ModulePage module="intake"/>, { path: '/intake?contract_id=deleted-revision&include_deleted=true' })
+  expect(await screen.findByRole('heading', { name: 'Histórico' })).toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: 'Incluir contratos eliminados' })).toBeChecked()
+  expect(screen.getByRole('button', { name: 'Nueva versión' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /^Ejecutar$/ })).toBeDisabled()
+  expect(api).toHaveBeenCalledWith('/intake/contracts?include_deleted=true')
+})
 
 function mockRun(status = 'SUCCESS') {
   vi.mocked(api).mockImplementation(async path => path.includes('/results?') ? { items: [{ original_row_number: 5, rule_code: 'REQUIRED', column: 'customer_id', received_value: null, severity: 'ERROR', message: 'Dato obligatorio' }], total: 1 } : {

@@ -43,7 +43,7 @@ def test_helper_has_finite_limits_certified_digest_and_no_secret_mounts(monkeypa
     digest, sha = "sha256:" + "a" * 64, "b" * 40
     def inspect(kind, identity):
         if kind == "image":
-            return {"Config": {"Labels": {"org.opencontainers.image.version": "0.8.5", "org.opencontainers.image.revision": sha}}}
+            return {"Config": {"Labels": {"org.opencontainers.image.version": "0.9.0", "org.opencontainers.image.revision": sha}}}
         if identity == "id-postgres":
             return {"Config": {"Env": ["POSTGRES_USER=synthetic", "POSTGRES_DB=synthetic", "POSTGRES_PASSWORD=private+secret"]}}
         return {"Mounts": [{"Type": "volume", "Name": "owned-trackvance_data", "Destination": "/var/lib/trackvance"}]}

@@ -34,17 +34,21 @@ ALLOWED = frozenset({"datasets", "dataset_versions", "configurations", "runs", "
     "delivery_attempts", "delivery_reviews", "delivery_automations", "delivery_automation_versions", "delivery_occurrences",
     "delivery_input_claims", "outbox_events", "event_consumptions", "internal_notifications", "report_definitions",
     "report_revisions", "report_contexts", "report_executions", "strict_approvals", "governance_history",
-    "column_documentation", "glossary_associations", "dataset_source_bindings"})
+    "column_documentation", "glossary_associations", "dataset_source_bindings",
+    "rest_delivery_batches", "sentinel_automatic_monitors", "sentinel_automatic_revisions",
+    "sentinel_version_evaluations", "sentinel_light_reviews", "intake_contract_states",
+    "intake_schedules", "intake_schedule_versions", "intake_occurrences"})
 TYPE_TABLE = {"DATASET": "datasets", "DATASET_VERSION": "dataset_versions", "RUN": "runs", "ARTIFACT": "artifacts",
     "CONFIGURATION": "configurations", "EXCEPTION": "exceptions", "ACQUISITION": "acquisition_runs",
     "REPORT_DEFINITION": "report_definitions", "REPORT_REVISION": "report_revisions", "REPORT_CONTEXT": "report_contexts",
     "REPORT_EXECUTION": "report_executions", "DELIVERY_ATTEMPT": "delivery_attempts",
     "MONITOR_OCCURRENCE": "monitor_occurrences", "DELIVERY_OCCURRENCE": "delivery_occurrences",
+    "INTAKE_OCCURRENCE": "intake_occurrences",
     "CONNECTION_VERSION": "external_connection_versions", "DELIVERY_DESTINATION": "delivery_destinations",
     "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions", "DELIVERY_TARGET_POLICY": "delivery_target_policies"}
 PATH_FIELDS = {"dataset_versions": ("original_path", "canonical_path"), "runs": ("result_path", "evidence_path"),
                "artifacts": ("path",), "acquisition_uploads": ("path",)}
-ACTIVE = frozenset({"QUEUED", "RUNNING", "LEASED", "STARTED"})
+ACTIVE = frozenset({"QUEUED", "RUNNING", "LEASED", "STARTED", "WAITING", "RETRY_WAIT"})
 
 
 def digest(value: Any) -> str:
@@ -297,7 +301,7 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
     for name in ("runs", "jobs", "report_executions", "acquisition_runs", "event_consumptions"):
         if any(item.get("status") in ACTIVE for item in rows[name].values()):
             error("CLEANUP_NOT_QUIESCENT", "Resuelve trabajos y leases activos antes del backup y la limpieza.")
-    for name in ("monitor_schedules", "delivery_automations"):
+    for name in ("monitor_schedules", "delivery_automations", "intake_schedules", "sentinel_automatic_monitors"):
         if any(item.get("enabled") for item in rows[name].values()):
             error("CLEANUP_DISPATCH_ACTIVE", "Pausa las programaciones antes del backup y del plan selectivo.")
     selected = {("datasets", identity) for identity in dataset_ids}
@@ -317,6 +321,8 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         if name == "configurations":
             return item["dataset_id"] in dataset_ids and (not item.get("target_dataset_id") or item["target_dataset_id"] in dataset_ids)
         if name == "delivery_attempts" and item.get("status") == "UNKNOWN":
+            return False
+        if name == "rest_delivery_batches" and item.get("status") in {"STARTED", "UNKNOWN"}:
             return False
         if name == "runs":
             return item.get("status") != "UNKNOWN"
@@ -428,8 +434,8 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         files_by_path[entry["path"]] = entry
     files = sorted(files_by_path.values(), key=lambda item: item["path"])
     revisions = list(db.scalars(text("SELECT version_num FROM alembic_version")))
-    if revisions != ["0019_governance_people"]:
-        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.8.5 requiere exactamente la revisión 0019 certificada.")
+    if revisions != ["0022_intake_automation_deletion"]:
+        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.0 requiere exactamente la revisión 0022 y su modelo completo.")
     revision = revisions[0]
     return {"project": project, "organization_id": organization_id, "dataset_ids": sorted(dataset_ids),
         "migration": revision, "schema_sha256": digest(schema), "population_sha256": digest(rows),
@@ -601,7 +607,7 @@ def _recover_locked(db: Session, quarantine: Path, storage: Path, *, project: st
             error("CLEANUP_RECOVERY_INVALID", "El marcador de commit no corresponde al journal sellado.")
         return {"status": "METADATA_COMMITTED_FILES_QUARANTINED", "files_restored": 0}
     rows, _, _ = population(db)
-    if journal.get("migration") != "0019_governance_people" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
+    if journal.get("migration") != "0022_intake_automation_deletion" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
         error("CLEANUP_SCHEMA_DRIFT", "La recuperación requiere la misma revisión certificada del journal.")
     live = {(Path(row[field]) if Path(row[field]).is_absolute() else storage / row[field]).resolve()
             for name, items in rows.items() for row in items.values() for field in PATH_FIELDS.get(name, ())

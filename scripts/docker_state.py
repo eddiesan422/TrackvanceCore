@@ -33,7 +33,8 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 9
+VERIFY_SCHEMA_VERSION = 10
+PEOPLE_VERIFY_SCHEMA_VERSION = 9
 CATALOG_VERIFY_SCHEMA_VERSION = 8
 CORRECTIONS_VERIFY_SCHEMA_VERSION = 7
 CORRECTIONS_MIGRATION = "0016_acquisition_diagnostics"
@@ -48,7 +49,8 @@ DELIVERY_BASELINE_MIGRATION = "0008_data_delivery"
 LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
 CATALOG_MIGRATION = "0017_catalog_reports"
-CURRENT_MIGRATION = "0019_governance_people"
+PEOPLE_MIGRATION = "0019_governance_people"
+CURRENT_MIGRATION = "0022_intake_automation_deletion"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
@@ -139,7 +141,11 @@ CATALOG_STATE_TABLES = frozenset({
     "report_revisions", "report_contexts", "report_executions",
 })
 CATALOG_STATE_TABLES_ALL = CORRECTIONS_STATE_TABLES | CATALOG_STATE_TABLES
-CURRENT_STATE_TABLES = CATALOG_STATE_TABLES_ALL | {"governance_people"}
+PEOPLE_STATE_TABLES = CATALOG_STATE_TABLES_ALL | {"governance_people"}
+CORE090_STATE_TABLES = frozenset({"rest_delivery_batches", "sentinel_automatic_monitors",
+    "sentinel_automatic_revisions", "sentinel_version_evaluations", "sentinel_light_reviews",
+    "intake_contract_states", "intake_schedules", "intake_schedule_versions", "intake_occurrences"})
+CURRENT_STATE_TABLES = PEOPLE_STATE_TABLES | CORE090_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -306,11 +312,15 @@ def _by_key(items: Iterable[Mapping[str, Any]], key: str) -> dict[str, Mapping[s
     return result
 
 
-def require_backup_inventory(state: Mapping[str, Any]) -> None:
+def require_backup_inventory(state: Mapping[str, Any], *, application_only_codex=False) -> None:
     services = _by_key(state["containers"], "service")
     volumes = _by_key(state["volumes"], "logical_name")
     modern = set(services).intersection(PRIMARY_SERVICES - LEGACY_PRIMARY_SERVICES - {"scheduler"})
     required_services = PRIMARY_SERVICES if modern else LEGACY_PRIMARY_SERVICES
+    if application_only_codex:
+        if state["project"] != "trackvance-codex":
+            raise OperationError("El adapter de respaldo sólo admite el entorno permanente Codex.")
+        required_services = PRIMARY_SERVICES - {"scheduler", "events-chaining"}
     missing_services = sorted(required_services - services.keys())
     missing_volumes = sorted(PRIMARY_VOLUMES - volumes.keys())
     unsupported_volumes = sorted(set(volumes) - PRIMARY_VOLUMES)
@@ -532,7 +542,7 @@ def snapshot_stdin_source() -> str:
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     bootstrap = snapshot_bootstrap()
     for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
@@ -549,9 +559,49 @@ def _copy_snapshot(
     return value
 
 
-def backup(project: str, destination: Path) -> Path:
+def codex_backup_identity(actual):
+    """Restart timestamps may change only for the app services quiesced by backup."""
+    import codex_environment as codex
+    stable = codex.stable_inventory(actual)
+    for item in actual["containers"]:
+        service = item["Config"]["Labels"][SERVICE_LABEL]
+        if service not in {"postgres", "test-postgres"}:
+            stable["containers"][item["Id"]].pop("started_at", None)
+    return stable
+
+
+def _codex_application_inventory(state):
+    """Prove all permanent resources before excluding the untouched synthetic sink."""
+    import codex_environment as codex
+
+    if state["project"] != codex.PROJECT:
+        raise OperationError("El adapter de respaldo sólo admite trackvance-codex.")
+    directory = codex.private_directory(None)
+    value, values = codex.load(directory)
+    _prefix, environment, _config, actual, protected, _budget = codex.prepare(directory, value, values)
+    raw_ids = {item["Id"] for item in actual["containers"]}
+    if raw_ids != {item["id"] for item in state["containers"]}:
+        raise OperationError("Las identidades del adapter Codex no coinciden con Docker.")
+    volumes = _by_key(state["volumes"], "logical_name")
+    if set(volumes) != set(codex.VOLUMES):
+        raise OperationError("El adapter Codex requiere sus siete volúmenes exactos.")
+    synthetic = _container_for(state, "test-postgres")
+    filtered = {**state,
+        "containers": [item for item in state["containers"] if item["service"] != "test-postgres"],
+        "volumes": [item for item in state["volumes"] if item["logical_name"] != "test_destination_data"]}
+    proof = {"application_only_codex": True,
+        "source_inventory_sha256": codex.canonical_hash(codex_backup_identity(actual)),
+        "preserved_external_destination": {"container_id": synthetic["id"], "image_id": synthetic["image_id"],
+            "volume_name": volumes["test_destination_data"]["name"]}}
+    return filtered, proof, environment, actual, protected
+
+
+def backup(project: str, destination: Path, *, application_only_codex=False) -> Path:
     state = inventory(project)
-    require_backup_inventory(state)
+    proof, codex_environment, codex_actual, protected = {}, None, None, None
+    if application_only_codex:
+        state, proof, codex_environment, codex_actual, protected = _codex_application_inventory(state)
+    require_backup_inventory(state, application_only_codex=application_only_codex)
     destination = _new_directory(destination)
     (destination / "volumes").mkdir(mode=0o700)
     initially_running = {item["id"] for item in state["containers"] if item["running"]}
@@ -623,6 +673,7 @@ def backup(project: str, destination: Path) -> Path:
                 if item["service"] in PRIMARY_SERVICES | OPTIONAL_SERVICES
             },
             "components": dict(sorted(components.items())),
+            **proof,
         }
         manifest_path = destination / "backup-manifest.json"
         manifest_path.write_text(
@@ -633,6 +684,11 @@ def backup(project: str, destination: Path) -> Path:
         return manifest_path
     finally:
         _restart_containers(state, initially_running)
+        if application_only_codex:
+            import codex_environment as codex
+            if (codex.stable_inventory(codex.inventory("trackvance-certification", codex_environment)) != protected
+                    or codex_backup_identity(codex.inventory(project, codex_environment)) != codex_backup_identity(codex_actual)):
+                raise OperationError("El respaldo Codex detectó cambios en recursos o en la instalación protegida.")
 
 
 def _safe_component_path(root: Path, relative: str) -> Path:
@@ -699,6 +755,7 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION: PRE_CORRECTIONS_MIGRATION,
         CORRECTIONS_VERIFY_SCHEMA_VERSION: CORRECTIONS_MIGRATION,
         CATALOG_VERIFY_SCHEMA_VERSION: CATALOG_MIGRATION,
+        PEOPLE_VERIFY_SCHEMA_VERSION: PEOPLE_MIGRATION,
         VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
     if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
             or state.get("migration") != expected_migrations[state["schema_version"]]):
@@ -714,6 +771,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         if state.get("schema_version") in {PRE_CORRECTIONS_VERIFY_SCHEMA_VERSION, CORRECTIONS_VERIFY_SCHEMA_VERSION}
         else CATALOG_STATE_TABLES_ALL
         if state.get("schema_version") == CATALOG_VERIFY_SCHEMA_VERSION
+        else PEOPLE_STATE_TABLES
+        if state.get("schema_version") == PEOPLE_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -762,6 +821,14 @@ def verify_backup(source: Path) -> dict[str, Any]:
         raise OperationError("Versión de manifest no reconocida.")
     if manifest.get("consistency") != "quiesced":
         raise OperationError("El respaldo no declara una captura quiescente.")
+    if manifest.get("application_only_codex"):
+        preserved = manifest.get("preserved_external_destination") or {}
+        if (manifest.get("application_only_codex") is not True or manifest.get("source_project") != "trackvance-codex"
+                or not SHA256_PATTERN.fullmatch(str(manifest.get("source_inventory_sha256", "")))
+                or not SHA256_PATTERN.fullmatch(str(preserved.get("container_id", "")))
+                or not re.fullmatch(r"sha256:[a-f0-9]{64}", str(preserved.get("image_id", "")))
+                or preserved.get("volume_name") != "trackvance-codex_test_destination_data"):
+            raise OperationError("La evidencia del adapter Codex no conserva su destino sintético exacto.")
     components = manifest.get("components")
     if not isinstance(components, dict):
         raise OperationError("El manifest no enumera sus componentes.")
@@ -818,6 +885,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = CORRECTIONS_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CATALOG_MIGRATION:
         expected_state_schema = CATALOG_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == PEOPLE_MIGRATION:
+        expected_state_schema = PEOPLE_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -880,6 +949,12 @@ def validate_restored_state(
     schema_version = manifest.get("schema_version")
     validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == PEOPLE_MIGRATION:
+            if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                    or restored_state.get("migration") != CURRENT_MIGRATION
+                    or normalized_legacy_state != expected_state):
+                raise OperationError("La huella v9 normalizada no coincide con el respaldo 0.8.5.")
+            return
         if manifest.get("migration") == CATALOG_MIGRATION:
             if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                     or restored_state.get("migration") != CURRENT_MIGRATION
@@ -984,7 +1059,7 @@ def compose(project: str, *arguments: str, environment: Mapping[str, str] | None
     if private_env or private_overlay:
         if (not private_env or not private_overlay or
                 child_environment.get('TRACKVANCE_CERTIFICATION_PROJECT') != project or
-                not re.fullmatch(r'trackvance-v0(?:70|80)-test-[a-z0-9-]+-[a-f0-9]{12}', project)):
+                not re.fullmatch(r'trackvance-v0(?:70|80|90)-test-[a-z0-9-]+-[a-f0-9]{12}', project)):
             raise OperationError('El perfil Compose privado no coincide con el proyecto desechable.')
         if not Path(private_env).is_file() or not Path(private_overlay).is_file():
             raise OperationError('El perfil Compose privado no existe.')
@@ -1034,7 +1109,7 @@ def _restore_creation_options(
     sha = values.get("CI_SOURCE_SHA", values.get("GITHUB_SHA", ""))
     head = str(execute(["git", "rev-parse", "HEAD"], environment=values)).strip()
     if (not re.fullmatch(r"[0-9a-f]{40}", sha) or sha != head
-            or not re.fullmatch(r"trackvance-v0(?:70|80)-test-[a-z0-9-]+-[a-f0-9]{12}", project)):
+            or not re.fullmatch(r"trackvance-v0(?:70|80|90)-test-[a-z0-9-]+-[a-f0-9]{12}", project)):
         raise OperationError("La restauración CI no coincide con el checkout y proyecto privados.")
     images = verified_images(values)
     if not images or set(images) != {"backend", "web"}:
@@ -1187,6 +1262,8 @@ def _restore_verified(
             if manifest.get("migration") == CORRECTIONS_MIGRATION
             else "snapshot-legacy-v8"
             if manifest.get("migration") == CATALOG_MIGRATION
+            else "snapshot-legacy-v9"
+            if manifest.get("migration") == PEOPLE_MIGRATION
             else None
         )
         if legacy_command:
@@ -1245,6 +1322,9 @@ def _restore_verified(
             "target_project": target_project,
             "verified_state_sha256": digest(source.resolve() / "state.json"),
             "status": "RUNNING_VERIFIED" if start else "STOPPED_VERIFIED",
+            "restored_migration": restored_state["migration"],
+            "target_backend_image_id": api["image_id"],
+            "source_code_sha": str(execute(["git", "rev-parse", "HEAD"])).strip(),
         }
         receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
         return receipt
@@ -1286,6 +1366,8 @@ def restore(
 
 
 def create_reset_plan(project: str, output: Path, ttl_minutes: int = 15) -> dict[str, Any]:
+    if project in {"trackvance-codex", "trackvance-certification"}:
+        raise OperationError("Un entorno permanente protegido no admite reset.")
     state = inventory(project)
     resources = _resource_identity(state)
     if not resources["containers"] and not resources["volumes"] and not resources["networks"]:
@@ -1316,6 +1398,8 @@ def reset(plan_path: Path, confirmation: str) -> dict[str, Any]:
     if not isinstance(expected_hash, str) or canonical_hash(plan) != expected_hash:
         raise OperationError("El plan de reset fue modificado.")
     project = validate_project(str(plan.get("project", "")))
+    if project in {"trackvance-codex", "trackvance-certification"}:
+        raise OperationError("Un entorno permanente protegido no admite reset.")
     try:
         expires = datetime.fromisoformat(str(plan["expires_at"]))
     except (KeyError, ValueError) as error:
@@ -1360,6 +1444,7 @@ def parse_arguments() -> argparse.Namespace:
     backup_parser = commands.add_parser("backup")
     backup_parser.add_argument("--project", required=True)
     backup_parser.add_argument("--destination", required=True, type=Path)
+    backup_parser.add_argument("--application-only-codex", action="store_true")
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--source", required=True, type=Path)
     restore_parser = commands.add_parser("restore")
@@ -1384,7 +1469,8 @@ def main() -> int:
         if options.command == "inventory":
             result = inventory(options.project)
         elif options.command == "backup":
-            result = {"manifest": str(backup(options.project, options.destination))}
+            result = {"manifest": str(backup(options.project, options.destination,
+                                            application_only_codex=options.application_only_codex))}
         elif options.command == "verify":
             result = verify_backup(options.source)
         elif options.command == "restore":

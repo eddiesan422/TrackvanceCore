@@ -1342,7 +1342,10 @@ def main() -> int:
     inventory_reader = lambda arguments: command(arguments, capture=True)
     docker_context = command(["docker", "context", "show"], capture=True).strip()
     main_before = main_inventory(inventory_reader)
-    from ci.failure_diagnostics import delivery_diagnostic_context, write_delivery_failure
+    from ci.failure_diagnostics import (
+        delivery_diagnostic_context,
+        write_delivery_failure,
+    )
     diagnostic_context = None
     try:
         diagnostic_context = delivery_diagnostic_context(evidence, project, environment)

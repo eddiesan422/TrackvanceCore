@@ -31,7 +31,7 @@ class CertificationProgress:
 
     def __init__(self, rows, directory):
         self.directory, self.began = directory, time.monotonic()
-        self.result = {"version": "0.8.5", "status": "RUNNING", "rows_per_source": rows,
+        self.result = {"version": "0.9.0", "status": "RUNNING", "rows_per_source": rows,
                        "sources": [], "joins": [], "active_phase": "SCOPE_VALIDATION"}
 
     def save(self):
@@ -256,7 +256,6 @@ def draft(sources, kind="INNER", *, triple=False):
 
 def verify_materialized(execution, expected):
     import polars as pl
-
     from trackvance.artifactstore import storage_provider
     from trackvance.db import SessionLocal
     from trackvance.models import Artifact, DatasetVersion

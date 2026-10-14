@@ -67,7 +67,6 @@ def test_private_cell_fixture_is_admitted_by_acquisition_and_canonical_scan_at_e
     import csv
 
     import polars as pl
-
     from trackvance.batch_readers import FileBatchReader
     from trackvance.dataset_scans import profile_paths
     from trackvance.report_query import compile_draft

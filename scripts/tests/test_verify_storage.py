@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-
 from trackvance.db import Base
 from trackvance.models import Artifact, ArtifactLink, ExceptionCase
 
@@ -801,3 +800,62 @@ def test_native_catalog_relationships_reject_corrupt_security_and_frozen_context
             return
     with pytest.raises(ValueError):
         verify_storage.validate_relationships(rows, [])
+
+
+def core090_bootstrap_rows():
+    before = {name: [] for name in verify_storage.FINGERPRINT_TABLES[verify_storage.PEOPLE_MIGRATION]}
+    before["datasets"] = [{"id": "dataset", "organization_id": "org", "name": "Historical source", "owner": "Historical owner"}]
+    before["roles"] = [{"id": "admin", "organization_id": "org", "system_key": "ADMINISTRATOR"}]
+    rows = deepcopy(before)
+    rows.update({name: [] for name in verify_storage.CORE090_TABLES})
+    timestamp = "2026-10-14T12:00:00Z"
+    rows["configurations"] = [{"id": "generic", "organization_id": "org", "module": "sentinel", "dataset_id": "dataset",
+        "name": "Historical source · Monitor", "owner": "Historical owner", "version": 1, "status": "PUBLISHED",
+        "previous_version_id": None, "target_dataset_id": None,
+        "description": "Monitoreo automático del perfil completo; los nulos y categorías son observaciones.",
+        "config": {"schema_version": 2, "automatic_base_version": 1, "rules": [], "required_columns": [], "null_columns": [], "max_age_hours": 48, "max_volume_change_pct": 50}}]
+    rows["sentinel_automatic_monitors"] = [{"id": "automatic", "organization_id": "org", "dataset_id": "dataset",
+        "monitor_root_id": "generic", "responsible_user_id": None, "version": 1, "enabled": True,
+        "review_interval_seconds": 86400, "next_review_at": timestamp}]
+    rows["sentinel_automatic_revisions"] = [{"id": "revision", "organization_id": "org", "automatic_monitor_id": "automatic",
+        "version": 1, "actor_id": None, "settings": {"enabled": True, "responsible_user_id": None,
+            "review_interval_seconds": 86400, "next_review_at": timestamp}}]
+    rows["audit_events"] = [{"id": "auto-audit", "organization_id": "org", "event_type": "SENTINEL_AUTOMATIC_REGISTERED",
+        "subject_type": "configuration", "subject_id": "generic", "run_id": None,
+        "message": "Monitor por dataset registrado sin modificar revisiones existentes"}]
+    rows["role_permissions"] = [{"role_id": "admin", "permission_code": permission} for permission in ("intake:delete", "intake:schedule")]
+    return before, rows
+
+
+def test_core090_projection_proves_only_allowed_bootstrap_and_restains_schema9():
+    before, rows = core090_bootstrap_rows()
+    report = verify_storage.legacy_v9_report(rows, [], current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0)
+    assert report["schema_version"] == 9 and report["migration"] == "0019_governance_people"
+    assert report["tables"] == verify_storage._table_hashes(before)
+    assert rows["configurations"] and rows["sentinel_automatic_monitors"]  # The projection never mutates persisted input.
+    assert len(verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]) == 65
+    assert len(verify_storage.FINGERPRINT_TABLES[verify_storage.PEOPLE_MIGRATION]) == 56
+
+
+@pytest.mark.parametrize("damage", ["automatic_edit", "generic_rule", "extra_revision", "intake", "rest", "custom_permission", "cadence", "audit"])
+def test_core090_projection_rejects_activity_or_customizations_instead_of_hiding_it(damage):
+    _before, rows = core090_bootstrap_rows()
+    if damage == "automatic_edit":
+        rows["sentinel_automatic_monitors"][0]["version"] = 2
+    elif damage == "generic_rule":
+        rows["configurations"][0]["config"]["max_age_hours"] = 72
+    elif damage == "extra_revision":
+        rows["sentinel_automatic_revisions"].append({**rows["sentinel_automatic_revisions"][0], "id": "extra", "version": 2})
+    elif damage == "intake":
+        rows["intake_occurrences"] = [{"id": "registered", "organization_id": "org"}]
+    elif damage == "rest":
+        rows["rest_delivery_batches"] = [{"id": "batch", "organization_id": "org"}]
+    elif damage == "custom_permission":
+        rows["role_permissions"].append({"role_id": "custom", "permission_code": "intake:delete"})
+    elif damage == "cadence":
+        rows["sentinel_automatic_monitors"][0]["next_review_at"] = "2026-10-15T12:00:00Z"
+    else:
+        rows["audit_events"][0]["subject_id"] = "other-config"
+    with pytest.raises(ValueError):
+        verify_storage.project_core090_upgrade(rows, [])

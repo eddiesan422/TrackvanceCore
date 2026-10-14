@@ -163,6 +163,10 @@ def update_case(case_id: str, body: CasePatch, db: Session = Depends(get_db), us
     values = body.model_dump(exclude={"version", "comment"}, exclude_unset=True)
     changes = {key: value for key, value in values.items() if value is not None or key in {"assigned_user_id", "sla_hours", "due_at"}}
     state = changes.get("state", case.state)
+    if case.module == "intake" and state in OPEN_STATES and case.state in CLOSED:
+        from .intake_automation import assert_active_contract
+        from .models import Configuration
+        assert_active_contract(db, db.get(Configuration, case.configuration_id), lock=True)
     permissions = effective_permissions(db, user)
     if ((state != case.state and state in CLOSED) or
         ("auto_resolve_enabled" in changes and changes["auto_resolve_enabled"] != case.auto_resolve_enabled)) and "exceptions:close" not in permissions:

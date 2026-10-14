@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.8.5
+# Matriz de permisos HTTP y catálogo 0.9.0
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 58 códigos; la matriz tiene 175 entradas protegidas.
+El catálogo contiene 60 códigos; la matriz tiene 186 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -42,8 +42,10 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | `governance:read` | Gobierno | datasets:read | Sí |
 | `governance:write` | Gobierno | governance:read, people:read | Sí |
 | `intake:configure` | Data Intake | datasets:read, intake:read | Sí |
+| `intake:delete` | Data Intake | intake:read | Sí |
 | `intake:execute` | Data Intake | datasets:read, intake:read | Sí |
 | `intake:read` | Data Intake | — | Sí |
+| `intake:schedule` | Data Intake | intake:configure, intake:execute, intake:read | Sí |
 | `notifications:manage` | Notificaciones | notifications:read | Sí |
 | `notifications:read` | Notificaciones | — | Sí |
 | `people:manage` | Personas de gobierno | people:read | Sí |
@@ -76,6 +78,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | DELETE | `/catalog/glossary-associations/{id}` | `glossary:manage` |
 | DELETE | `/connections/{id}` | `connections:manage` |
 | DELETE | `/delivery/destinations/{id}` | `destinations:manage` |
+| DELETE | `/intake/contracts/{id}` | `intake:delete` |
 | DELETE | `/roles/{id}` | `roles:manage` |
 | DELETE | `/users/{id}` | `users:manage` |
 | DELETE | `/users/{id}/external-identities/{identity_id}` | `users:manage` |
@@ -87,6 +90,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/catalog/datasets` | `catalog:read` |
 | GET | `/catalog/datasets/{id}` | `catalog:read` |
 | GET | `/catalog/datasets/{id}/blocks` | `catalog:read` |
+| GET | `/catalog/datasets/{id}/lineage-graph` | `catalog:read` |
 | GET | `/catalog/domains` | `datasets:read` |
 | GET | `/catalog/macrodomains` | `datasets:read` |
 | GET | `/catalog/resources` | `catalog:read` |
@@ -115,6 +119,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/delivery/runs` | `delivery:read` |
 | GET | `/delivery/runs/{id}/attempts` | `delivery:read` |
 | GET | `/delivery/runs/{id}/receipt` | `artifacts:download` |
+| GET | `/delivery/runs/{id}/rest-batches` | `delivery:read` |
 | GET | `/delivery/runs/{id}/reviews` | `delivery:read` |
 | GET | `/delivery/validations` | `delivery:read` |
 | GET | `/delivery/validations/{id}` | `delivery:read` |
@@ -130,9 +135,14 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/governance/people/users` | `people:manage` |
 | GET | `/governance/people/{id}` | `people:read` |
 | GET | `/intake/contracts` | `intake:read` |
+| GET | `/intake/contracts/{id}` | `intake:read` |
+| GET | `/intake/contracts/{id}/deletion-impact` | `intake:delete` |
+| GET | `/intake/contracts/{id}/occurrences` | `intake:read` |
+| GET | `/intake/contracts/{id}/schedule` | `intake:read` |
 | GET | `/intake/runs/{id}/errors` | `intake:read` |
 | GET | `/monitors` | `sentinel:read` |
 | GET | `/monitors/{id}/alerts` | `sentinel:read` |
+| GET | `/monitors/{id}/automatic` | `sentinel:read` |
 | GET | `/monitors/{id}/metrics` | `sentinel:read` |
 | GET | `/monitors/{id}/occurrences` | `sentinel:read` |
 | GET | `/monitors/{id}/schedule` | `sentinel:read` |
@@ -161,6 +171,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/runs/{id}/export.csv` | `exports:download` |
 | GET | `/runs/{id}/export.xlsx` | `exports:download` |
 | GET | `/runs/{id}/results` | `runs:read` |
+| GET | `/runs/{id}/visual-summary` | `runs:read` |
 | GET | `/system/engines` | `system:read` |
 | GET | `/users` | `users:read` |
 | GET | `/users/roles` | `users:read` |
@@ -223,9 +234,11 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/governance/macrodomains` | `domains:manage` |
 | POST | `/governance/people` | `people:manage` |
 | POST | `/intake/contracts` | `intake:configure` |
+| POST | `/intake/contracts/{id}/schedule` | `intake:schedule` |
 | POST | `/intake/contracts/{id}/versions` | `intake:configure` |
 | POST | `/intake/runs` | `intake:execute` |
 | POST | `/monitors` | `sentinel:configure` |
+| POST | `/monitors/{id}/automatic` | `sentinel:schedule` |
 | POST | `/monitors/{id}/runs` | `sentinel:execute` |
 | POST | `/monitors/{id}/schedule` | `sentinel:schedule` |
 | POST | `/monitors/{id}/versions` | `sentinel:configure` |

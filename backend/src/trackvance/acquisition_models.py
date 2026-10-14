@@ -39,7 +39,7 @@ class AcquisitionRun(Record, Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "initiated_by_id", "idempotency_key"),
         CheckConstraint("status IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED')", name="ck_acquisition_status"),
-        CheckConstraint("(source_type = 'UPLOAD' AND upload_id IS NOT NULL AND connection_version_id IS NULL) OR (source_type IN ('POSTGRESQL','SQLSERVER') AND upload_id IS NULL AND connection_version_id IS NOT NULL)", name="ck_acquisition_source_identity"),
+        CheckConstraint("(source_type = 'UPLOAD' AND upload_id IS NOT NULL AND connection_version_id IS NULL) OR (source_type IN ('POSTGRESQL','SQLSERVER','REST') AND upload_id IS NULL AND connection_version_id IS NOT NULL)", name="ck_acquisition_source_identity"),
         Index("ix_acquisition_org_dataset_created", "organization_id", "dataset_id", "created_at"),
     )
     dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), index=True)

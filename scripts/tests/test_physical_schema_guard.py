@@ -4,7 +4,15 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, ForeignKeyConstraint, Integer, MetaData, String, Table, create_engine
+from sqlalchemy import (
+    Column,
+    ForeignKeyConstraint,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+)
 from sqlalchemy.orm import Session
 
 SCRIPT = Path(__file__).resolve().parents[1] / "physical_schema_guard.py"
@@ -93,12 +101,14 @@ def test_composite_constraints_are_not_flattened_into_independent_links():
 
 
 def test_installed_runtime_contract_and_snapshot_reject_physical_extra_column(monkeypatch):
-    from trackvance import models  # noqa: F401 - populate the installed runtime contract
+    from trackvance import (
+        models,  # noqa: F401 - populate the installed runtime contract
+    )
     from trackvance.db import Base
 
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    assert guard.validate_physical_schema(engine, Base.metadata)["tables"] == 56
+    assert guard.validate_physical_schema(engine, Base.metadata)["tables"] == 65
     with engine.begin() as connection:
         connection.exec_driver_sql("CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY)")
         connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0015_sentinel_execution_identity')")

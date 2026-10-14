@@ -9,7 +9,6 @@ from spark_cycle import (
     fixture_record,
     logical_result,
 )
-
 from trackvance.processing import intake, reconcile
 
 

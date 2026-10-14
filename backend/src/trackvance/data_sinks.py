@@ -56,6 +56,13 @@ class DestinationSettings:
     options: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.sink_type == "REST":
+            from .rest_transport import RestError, validate_options
+            try:
+                validate_options(self.options, self.password, source=False)
+            except RestError as error:
+                raise DeliveryError(error.code, error.message) from None
+            return
         if self.sink_type not in SUPPORTED_SINKS:
             raise DeliveryError("UNSUPPORTED_SINK", "Tipo de destino no soportado.")
         try:
@@ -1932,6 +1939,9 @@ class DataSinkRegistry:
         self._adapters[sink_type] = adapter
 
     def create(self, settings: DestinationSettings) -> DatabaseDataSink:
+        if settings.sink_type == "REST":
+            from .rest_delivery import RestSink
+            return RestSink(settings)
         adapter = self._adapters.get(settings.sink_type)
         if adapter is None:
             raise DeliveryError("UNSUPPORTED_SINK", "No existe un adaptador para este destino.")

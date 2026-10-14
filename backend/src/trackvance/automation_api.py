@@ -133,7 +133,9 @@ def automation_version(automation_id: str, body: AutomationBody,
                        db: Session = Depends(get_db), user: User = Depends(current_user)):
     item = save_automation(db, user, body.configuration_id, body.name, body.settings,
         enabled=body.enabled, responsible_user_id=body.responsible_user_id,
-        automation=owned_automation(db, user, automation_id, lock=True), expected_version=body.expected_version)
+        # save_automation owns a version CAS. Chain validation locks Intake
+        # first, avoiding Automation→Intake versus deletion's reverse lock order.
+        automation=owned_automation(db, user, automation_id), expected_version=body.expected_version)
     db.commit()
     return automation_dto(db, item)
 

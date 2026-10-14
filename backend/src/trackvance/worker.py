@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 LEASE_SECONDS = 90
 WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT"})
 DELIVERY_TERMINAL_STATUSES = frozenset(
-    {"SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}
+    {"SUCCESS", "FAILED", "PARTIAL", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED"}
 )
 
 
@@ -90,6 +90,9 @@ def _latest_delivery_attempt(db, run_id: str) -> DeliveryAttempt | None:
 def _reconcile_durable_delivery_state(db, job: Job, run: Run) -> bool:
     """Repair the queue projection without replaying a durable remote outcome."""
     attempt = _latest_delivery_attempt(db, run.id)
+    if attempt and run.execution_plan.get("sink_type") == "REST":
+        from .rest_delivery import reconcile_rest_batches
+        reconcile_rest_batches(db, run, attempt)
     if attempt and attempt.status == "COMMITTED":
         job.status, job.last_error, job.lease_until = "SUCCESS", None, None
         run.status, run.decision, run.error = "SUCCESS", "COMMITTED", None
@@ -134,10 +137,12 @@ def _reconcile_durable_delivery_state(db, job: Job, run: Run) -> bool:
         return True
     if attempt and attempt.status == "FAILED":
         message = attempt.error_message or run.error or "La entrega remota falló."
-        job.status, job.last_error, job.lease_until = "FAILED", message, None
-        run.status, run.decision, run.error = "FAILED", "FAILED", message
+        outcome = run.metrics.get("delivery_outcome")
+        state = "PARTIAL" if outcome == "PARTIAL" else "CANCELLED" if outcome == "CANCELLED" else "FAILED"
+        job.status, job.last_error, job.lease_until = "CANCELLED" if state == "CANCELLED" else "FAILED", message, None
+        run.status, run.decision, run.error = state, state, message
         run.finished_at = run.finished_at or attempt.finished_at or utcnow()
-        run.progress_stage = "Entrega fallida"
+        run.progress_stage = "Entrega REST parcial" if run.status == "PARTIAL" else "Entrega cancelada" if run.status == "CANCELLED" else "Entrega fallida"
         return True
     if run.status in DELIVERY_TERMINAL_STATUSES:
         if run.status == "SUCCESS" and run.decision != "COMMITTED":
@@ -162,7 +167,8 @@ def process_once(
     if lane == "REPORT":
         raise RuntimeError("La lane REPORT utiliza trackvance.report_worker.")
     selected_engine = engine or execution_engine
-    eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()))
+    eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()),
+                   and_(Job.status == "RETRY_WAIT", Job.lease_until <= utcnow()))
     with SessionLocal() as db:
         job = db.scalar(
             select(Job).where(eligible, Job.lane == lane).order_by(Job.created_at).limit(1)
@@ -174,6 +180,18 @@ def process_once(
         run = db.scalar(select(Run).where(Run.id == job.run_id).with_for_update())
         if run is None:
             raise LookupError(f"Run {job.run_id} no existe")
+        if run.module == "intake":
+            from .automation import AutomationError
+            from .intake_automation import claim_contract_run
+            try:
+                if not claim_contract_run(db, run, job):
+                    db.commit()
+                    return True
+            except AutomationError as error:
+                run.status, run.error, run.finished_at = "FAILED_PRECONDITION", error.code, utcnow()
+                job.status, job.lease_until = "FAILED_PRECONDITION", None
+                db.commit()
+                return True
         # Own the eligible projection before interpreting any durable Delivery
         # outcome. A previous owner may renew its lease after our SELECT; the
         # conditional UPDATE is the linearization point that prevents a second
@@ -234,6 +252,23 @@ def process_once(
                     )
                 else:
                     logger.error("Falló ejecución %s (%s)", run_id, type(exc).__name__)
+                    from .artifactstore import ArtifactIntegrityError
+                    from .services import OperationError
+                    # Quality rejection is SUCCESS/REJECTED and never reaches
+                    # this boundary. Invalid configuration, permissions and
+                    # integrity failures also require correction, not replay.
+                    retryable = (run.module == "intake" and job.attempts < 3
+                        and not run.cancel_requested
+                        and not isinstance(exc, (ProcessingError, OperationError, ArtifactIntegrityError, ValueError)))
+                    if retryable:
+                        job.status, job.last_error = "RETRY_WAIT", "Fallo técnico transitorio; reintento acotado pendiente."
+                        job.lease_until = utcnow() + timedelta(seconds=min(60, 2 ** job.attempts))
+                        run.status, run.error, run.finished_at = "QUEUED", None, None
+                        run.progress_stage = "Reintento técnico pendiente"
+                        audit(db, "INTAKE_TECHNICAL_RETRY", "run", run.id, job.last_error,
+                              "Worker", run.organization_id, {"attempt": job.attempts, "max_attempts": 3})
+                        db.commit()
+                        return True
                     message = ("La integridad del artefacto no coincide con su SHA-256."
                                if str(exc).startswith("ARTIFACT_HASH_MISMATCH:")
                                else "La ejecución falló; consulta su identificador en el diagnóstico técnico.")

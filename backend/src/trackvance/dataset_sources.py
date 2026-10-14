@@ -76,6 +76,13 @@ class ConnectionSettings:
     options: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.source_type == "REST":
+            from .rest_transport import RestError, validate_options
+            try:
+                validate_options(self.options, self.password, source=True)
+            except RestError as error:
+                raise SourceError(error.code, error.message) from None
+            return
         if self.source_type not in {"POSTGRESQL", "SQLSERVER"}:
             raise SourceError("UNSUPPORTED_SOURCE", "Tipo de conexión no soportado.")
         try:
@@ -512,6 +519,9 @@ class DatasetSourceRegistry:
 
     def create(self, settings: ConnectionSettings, schema_name: str | None = None,
                object_name: str | None = None) -> DatabaseDatasetSource:
+        if settings.source_type == "REST":
+            from .rest_source import RestDatasetSource
+            return RestDatasetSource(settings, schema_name, object_name)
         adapter = self._adapters.get(settings.source_type)
         if adapter is None:
             raise SourceError("UNSUPPORTED_SOURCE", "No existe un adaptador para esta fuente.")

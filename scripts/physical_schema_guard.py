@@ -98,7 +98,9 @@ def validate_physical_schema(bind: Engine | Connection, metadata: MetaData) -> d
 
 def main() -> int:
     try:
-        from trackvance import models  # noqa: F401 - register the installed runtime's mappings.
+        from trackvance import (
+            models,  # noqa: F401 - register the installed runtime's mappings.
+        )
         from trackvance.db import Base, engine
 
         report = validate_physical_schema(engine, Base.metadata)

@@ -190,6 +190,7 @@ def config_dto(db: Session, c: Configuration) -> dict:
             "dataset_id": c.dataset_id, "dataset_name": dataset.name, "target_dataset_id": c.target_dataset_id,
             "target_dataset_name": target.name if target else None, "owner": c.owner,
             "description": c.description, "status": c.status, "config": c.config,
+            "deleted": c.status == "DELETED", "status_label": "Contrato eliminado" if c.status == "DELETED" else c.status,
             "previous_version_id": c.previous_version_id,
             "created_at": iso(c.created_at), "latest_run": run_dto(db, latest) if latest else None}
 
@@ -588,6 +589,8 @@ def create_version(db: Session, dataset: Dataset, source: Path | None, filename:
                                     "reader_version": 1,
                                     "sheet_name": read_result.selected_sheet,
                                     "delimiter": read_result.detected_delimiter}, run_id=source_run_id)
+    from .publication import publish_version_event
+    publish_version_event(db, v, actor)
     return v
 
 
@@ -612,7 +615,11 @@ def enqueue(
     *,
     queue: JobQueue | None = None,
     requested_engine: str = "AUTO",
+    intake_responsible_id: str | None = None,
 ) -> Run:
+    if config.module == "intake":
+        from .intake_automation import assert_active_contract
+        assert_active_contract(db, config, lock=True)
     if source.dataset_id != config.dataset_id:
         raise ProcessingError("La versión de origen no pertenece al dataset del contrato/control.")
     if config.module == "recon" and (target is None or target.dataset_id != config.target_dataset_id):
@@ -646,6 +653,11 @@ def enqueue(
     else:
         plan = ExecutionPlanner().plan(config.module, inputs, effective,
                                        requested_engine=requested_engine)
+    if config.module == "sentinel":
+        from .sentinel_metrics import profile_execution_plan, profile_sufficient
+        if profile_sufficient(source, effective) and plan.get("estimated_input_bytes") is not None:
+            plan = profile_execution_plan(source, effective, requested_engine,
+                population_bytes=plan["estimated_input_bytes"])
     plan["config_hash"] = configuration_hash(effective)
     from .governance import governance_snapshot
     plan["governance_snapshot"] = governance_snapshot(db, require_record(db, Dataset, source.dataset_id))
@@ -658,7 +670,10 @@ def enqueue(
         run.error, run.finished_at = plan["rejection_code"], utcnow()
     db.add(run)
     db.flush()
-    (queue or job_queue).submit(db, run, executable=plan["allowed"])
+    job = (queue or job_queue).submit(db, run, executable=plan["allowed"])
+    if config.module == "intake":
+        from .intake_automation import register_run
+        register_run(db, config, source, run, job, responsible_id=intake_responsible_id)
     for version in [source, target]:
         if version:
             link_artifact(db, run.organization_id, "RUN_INPUT", "RUN", run.id, "DATASET_VERSION", version.id)
@@ -749,6 +764,9 @@ def create_exception(db: Session, finding: Finding, actor: str) -> ExceptionCase
     if existing:
         return existing
     run = require_record(db, Run, finding.run_id)
+    if run.module == "intake":
+        from .intake_automation import assert_active_contract
+        assert_active_contract(db, require_record(db, Configuration, run.config_id), lock=True)
     identity, legacy = resolve_actor(db, actor, finding.organization_id)
     case = ExceptionCase(id=uid(), organization_id=finding.organization_id,
                          display_id="EXC-" + uid()[:8].upper(), finding_id=finding.id, run_id=run.id,
@@ -868,8 +886,10 @@ def refresh_pending_exception_validations(db: Session, run: Run, actor: Actor | 
 
 def _sentinel_context(db: Session, run: Run, source: DatasetVersion, config: Configuration) -> dict:
     from .config_semantics import effective_config
+    from .sentinel_auto import monitor_family
 
     baseline = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == source.dataset_id,
+                         DatasetVersion.organization_id == source.organization_id, DatasetVersion.profile_status == "READY",
                          DatasetVersion.version < source.version).order_by(DatasetVersion.version.desc()))
     windows: dict[str, int] = {}
     for rule in effective_config("sentinel", config.config).get("rules", []):
@@ -883,8 +903,8 @@ def _sentinel_context(db: Session, run: Run, source: DatasetVersion, config: Con
     query = (select(SentinelMetricHistory).join(Run, SentinelMetricHistory.run_id == Run.id)
              .join(Configuration, SentinelMetricHistory.monitor_id == Configuration.id)
              .where(SentinelMetricHistory.organization_id == run.organization_id,
-                    Configuration.dataset_id == config.dataset_id, Configuration.name == config.name,
-                    Run.status == "SUCCESS", Run.id != run.id,
+                    Configuration.id.in_(monitor_family(db, config)),
+                    Run.organization_id == run.organization_id, Run.status == "SUCCESS", Run.id != run.id,
                     SentinelMetricHistory.method == source.profile.get("metric_method", "LEGACY_NORMALIZED"),
                     SentinelMetricHistory.metric_definition_version == source.profile.get("metric_definition_version", 1),
                     SentinelMetricHistory.numeric_value.is_not(None),
@@ -913,12 +933,15 @@ def execute_run(db: Session, run: Run, lease_owner: str | None = None, observed_
 
 
 def _authorize_execution_sources(db: Session, run: Run, versions: list[DatasetVersion | None]) -> None:
-    if run.initiated_by_type != "USER":
+    effective_user_id = run.initiated_by_id if run.initiated_by_type == "USER" else (
+        ((run.execution_plan or {}).get("schedule") or {}).get("responsible_user_id")
+        if run.module == "sentinel" else None)
+    if effective_user_id is None:
         return
     from .governance import authorize_dataset_content
     from .permissions import effective_permissions
 
-    user = db.get(User, run.initiated_by_id, populate_existing=True)
+    user = db.get(User, effective_user_id, populate_existing=True)
     if user is None or user.organization_id != run.organization_id:
         raise OperationError(403, "SOURCE_ACCESS_DENIED", "El usuario ejecutor ya no está disponible.")
     if f"{run.module.lower()}:execute" not in effective_permissions(db, user):
@@ -934,12 +957,19 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     from .config_semantics import effective_config
     from .planner import ExecutionPlanner, WorkloadInput
     from .scheduler import ScheduleError, authorize_scheduled_run
+    from .sentinel_auto import authorize_automatic_run
+    from .sentinel_metrics import (
+        augment_base_observations,
+        profile_execution_plan,
+        profile_sufficient,
+    )
     from .spark_execution import SparkRunCancelled, compute_spark_run
 
     if run.status in {"SUCCESS", "FAILED_PRECONDITION", "CANCELLED"}:
         return
     try:
         authorize_scheduled_run(db, run)
+        authorize_automatic_run(db, run)
     except ScheduleError as exc:
         _verify_lease(db, run, lease_owner)
         run.status, run.error, run.progress_stage, run.finished_at = (
@@ -949,12 +979,30 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
               {"reason_code": exc.code})
         return
     config = require_record(db, Configuration, run.config_id)
-    effective = effective_config(config.module, config.config)
+    if run.module == "intake":
+        from .automation import AutomationError
+        from .intake_automation import authorize_run, claim_contract_run
+        try:
+            authorize_run(db, run)
+        except AutomationError as exc:
+            _verify_lease(db, run, lease_owner)
+            run.status, run.error, run.progress_stage, run.finished_at = (
+                "FAILED_PRECONDITION", exc.code, "No se cumplen las condiciones de ejecución", utcnow()
+            )
+            return
+        job = db.scalar(select(Job).where(Job.run_id == run.id))
+        if job is not None and not claim_contract_run(db, run, job):
+            return
+    effective = ((run.execution_plan or {}).get("intake") or {}).get("effective_parameters") if run.module == "intake" else None
+    effective = effective if effective is not None else effective_config(config.module, config.config)
     source = require_record(db, DatasetVersion, run.dataset_version_id)
     target = require_record(db, DatasetVersion, run.target_version_id) if run.target_version_id else None
     reference_versions = rule_reference_versions(db, effective, run.organization_id)
     _authorize_execution_sources(db, run, [source, target, *reference_versions])
-    current_plan = ExecutionPlanner().plan(config.module,
+    reuse_profile = run.module == "sentinel" and profile_sufficient(source, effective)
+    current_plan = profile_execution_plan(source, effective,
+        (run.execution_plan or {}).get("requested_engine", "AUTO"),
+        population_bytes=WorkloadInput.from_metadata(db, source).size_bytes) if reuse_profile else ExecutionPlanner().plan(config.module,
         [WorkloadInput.from_version(db, v) for v in {v.id: v for v in [source, target, *reference_versions] if v}.values()], effective,
         requested_engine=(run.execution_plan or {}).get("requested_engine", "AUTO"))
     run.execution_plan = {**run.execution_plan, **current_plan, "config_hash": configuration_hash(effective)}
@@ -975,7 +1023,13 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     accepted_profile = None
     from .processing import intake_output_overrides
     output_overrides = intake_output_overrides(source.schema_json, effective) if run.module == "intake" else None
-    if current_plan["engine"] == "PYSPARK":
+    if reuse_profile:
+        frame, reference_frames = None, {}
+        source_numbering = (source.profile or {}).get("row_numbering", "RECORD_NUMBER")
+        run.execution_plan = {**run.execution_plan, "runtime": {"mode": "COMPLETE_PROFILE_REUSE", "scans": 0,
+            "dataset_version_id": source.id, "profile_method": source.profile.get("metric_method"),
+            "metric_definition_version": source.profile.get("metric_definition_version")}}
+    elif current_plan["engine"] == "PYSPARK":
         from .dataset_scans import profile_paths
         from .spark_execution import spark_input
 
@@ -1028,9 +1082,11 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     if spark_result is not None:
         pass
     elif run.module == "intake":
+        assert frame is not None
         rows, metrics, accepted = intake(frame, effective, observed_at=run.started_at, input_row_numbers=source_numbers, references=reference_frames)
         decision = metrics["decision"]
     elif run.module == "recon":
+        assert frame is not None
         target_version = require_record(db, DatasetVersion, run.target_version_id)
         target_frame = ensure_input(target_version, db)
         target_numbers, target_numbering = input_record_numbers(target_version, db)
@@ -1040,6 +1096,19 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     else:
         rows, metrics = sentinel(config=effective, observed_at=run.started_at,
                                  frame=frame, references=reference_frames, **_sentinel_context(db, run, source, config))
+        decision = "HEALTHY" if metrics["failed_checks"] == 0 else "ALERT"
+    if run.module == "sentinel":
+        observation_config = {**effective, "automatic_base_version": 1} if run.execution_plan.get("sentinel_automatic") else effective
+        observed_profile = source.profile
+        if (observation_config.get("automatic_base_version") and "duplicate_row_count" not in observed_profile
+                and spark_result is None and frame is not None):
+            distinct_rows = frame.n_unique() if frame.width else 0
+            observed_profile = {**observed_profile, "distinct_row_count": distinct_rows,
+                "duplicate_row_count": frame.height - distinct_rows,
+                "row_duplicate_definition": "EXCESS_EXACT_BUSINESS_ROWS_NULL_EQUAL_V1"}
+        metrics = augment_base_observations(metrics, source, observation_config,
+            _sentinel_context(db, run, source, config)["previous_schema"], profile_snapshot=observed_profile)
+        rows = metrics["checks"]
         decision = "HEALTHY" if metrics["failed_checks"] == 0 else "ALERT"
     metrics["source_row_numbering"] = source_numbering
     computed_plan = dict(run.execution_plan)
@@ -1051,6 +1120,7 @@ def _execute_run_impl(db: Session, run: Run, lease_owner: str | None = None, obs
     # Revalidate after compute, before publishing any results or derived version.
     # A block or permission change during a long scan must not mint a new asset.
     _authorize_execution_sources(db, run, [source, target, *reference_versions])
+    authorize_automatic_run(db, run)
     run.execution_plan = computed_plan
     # Provider-generated artifact identities keep retries immutable without
     # exposing a local directory layout to the application service.

@@ -13,7 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_reports_recovery as recovery
 from ci import local_resources as resources
 from ci import run_suite
-from test_ci_local_image_registry import BASELINE, EXECUTION, OWNED, PROJECT, SimulatedDocker
+from test_ci_local_image_registry import (
+    BASELINE,
+    EXECUTION,
+    OWNED,
+    PROJECT,
+    SimulatedDocker,
+)
 
 
 def controlled_environment(directory, version):
