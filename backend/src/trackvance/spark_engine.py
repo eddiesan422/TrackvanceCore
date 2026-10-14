@@ -38,6 +38,12 @@ from .processing import (
     rule_failure_message,
     sentinel,
 )
+from .spark_thread_limits import (
+    SparkThreadLimitError,
+    bound_local_driver_pools,
+    cgroup_pid_limit,
+    needs_local_thread_bound,
+)
 
 SPARK_VERSION = "4.0.3"
 RECORD_NUMBER_COLUMN = "__tv_record_number"
@@ -608,6 +614,8 @@ class SparkRuntime:
             raise ProcessingError("ENGINE_UNAVAILABLE: PySpark 4.0.3 y Java 17/21 son necesarios.")
         from pyspark.sql import SparkSession
         settings = self.settings
+        pid_limit = cgroup_pid_limit()
+        bounded_threads = needs_local_thread_bound(settings.master, pid_limit)
         self.directory.mkdir(parents=True, exist_ok=False)
         builder = SparkSession.builder.master(settings.master).appName("Trackvance-" + self.run_id)
         effective = {"spark.submit.deployMode": "client", "spark.driver.memory": f"{settings.driver_memory_mb}m",
@@ -621,6 +629,10 @@ class SparkRuntime:
                      "spark.python.worker.memory": "128m", "spark.python.worker.reuse": "true",
                      "spark.executorEnv.POLARS_MAX_THREADS": "1", "spark.executorEnv.OMP_NUM_THREADS": "1",
                      "spark.pyspark.python": os.getenv("PYSPARK_PYTHON", sys.executable)}
+        if bounded_threads:
+            effective.update({"spark.rpc.connect.threads": "2", "spark.rpc.netty.dispatcher.numThreads": "2",
+                              "spark.rpc.io.serverThreads": "2", "spark.rpc.io.clientThreads": "2",
+                              "spark.shuffle.io.serverThreads": "2", "spark.shuffle.io.clientThreads": "2"})
         for name, variable in (("spark.driver.host", "TRACKVANCE_SPARK_DRIVER_HOST"),
                                ("spark.driver.bindAddress", "TRACKVANCE_SPARK_DRIVER_BIND_ADDRESS"),
                                ("spark.driver.port", "TRACKVANCE_SPARK_DRIVER_PORT"),
@@ -630,21 +642,36 @@ class SparkRuntime:
         for key, value in effective.items():
             builder = builder.config(key, value)
         self.session = builder.getOrCreate()
-        self.session.sparkContext.setLogLevel("ERROR")
-        self.session.sparkContext.setJobGroup(self.run_id, "Trackvance processing", interruptOnCancel=True)
-        # Only package code is shipped; no .env, database, staging or secret files.
-        package = Path(__file__).parent
-        archive = self.directory / "trackvance-code.zip"
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as stream:
-            for path in sorted(package.glob("*.py")):
-                stream.write(path, "trackvance/" + path.name)
-        self.session.sparkContext.addPyFile(str(archive))
-        self.metadata = {"engine": "PYSPARK", "engine_version": self.session.version,
-                         "java_version": runtime_status()["java_version"],
-                         "deployment_mode": settings.deployment_mode, "master": settings.master,
-                         "application_id": self.session.sparkContext.applicationId,
-                         "effective_parameters": effective, "resource_budget": asdict(settings),
-                         "scalar_kernel": "PORTABLE_POLARS_BATCH_V1"}
+        try:
+            pools = bound_local_driver_pools(self.session) if bounded_threads else {}
+            self.session.sparkContext.setLogLevel("ERROR")
+            self.session.sparkContext.setJobGroup(self.run_id, "Trackvance processing", interruptOnCancel=True)
+            # Only package code is shipped; no .env, database, staging or secret files.
+            package = Path(__file__).parent
+            archive = self.directory / "trackvance-code.zip"
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as stream:
+                for path in sorted(package.glob("*.py")):
+                    stream.write(path, "trackvance/" + path.name)
+            self.session.sparkContext.addPyFile(str(archive))
+            self.metadata = {"engine": "PYSPARK", "engine_version": self.session.version,
+                             "java_version": runtime_status()["java_version"],
+                             "deployment_mode": settings.deployment_mode, "master": settings.master,
+                             "application_id": self.session.sparkContext.applicationId,
+                             "effective_parameters": effective, "resource_budget": asdict(settings),
+                             "thread_budget": {"observed_cgroup_pid_limit": pid_limit,
+                                               "local_storage_bound_applied": bounded_threads, "pools": pools},
+                             "scalar_kernel": "PORTABLE_POLARS_BATCH_V1"}
+        except BaseException as error:
+            # __exit__ is not called when __enter__ fails. Close even a session
+            # whose pinned ABI or packaging failed, before any population job.
+            try:
+                self.session.stop()
+            except Exception:  # noqa: BLE001 -- preserve the original startup failure.
+                error.add_note("SPARK_SESSION_STOP_FAILED")
+            self.session = None
+            if isinstance(error, SparkThreadLimitError):
+                raise ProcessingError(str(error)) from error
+            raise
         return self
 
     def cancel(self):

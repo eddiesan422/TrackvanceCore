@@ -6,10 +6,12 @@ The standalone harness sets TRACKVANCE_SPARK_MASTER to its isolated master.
 
 import json
 import os
+import sys
 import threading
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -33,6 +35,7 @@ from trackvance.spark_engine import (
     _transform_partition,
     runtime_status,
 )
+from trackvance.spark_thread_limits import SparkThreadLimitError, bound_local_driver_pools
 
 NOW = datetime(2026, 10, 3, 12, tzinfo=UTC)
 
@@ -70,6 +73,45 @@ def test_spark_memory_budget_is_checked_even_for_explicit_selection(tmp_path, mo
         "intake", [], {}, free_bytes=1024 ** 3, requested_engine="PYSPARK"
     )
     assert plan["rejection_code"] == "RESOURCE_SPARK_MEMORY_INSUFFICIENT"
+
+
+def test_local_spark_binding_failure_closes_new_session_before_jobs(tmp_path, monkeypatch):
+    from trackvance import spark_engine
+
+    stopped = []
+    configured = {}
+    session = SimpleNamespace(stop=lambda: stopped.append(True))
+
+    class Builder:
+        def master(self, value):
+            configured["master"] = value
+            return self
+
+        def appName(self, _value):
+            return self
+
+        def config(self, key, value):
+            configured[key] = value
+            return self
+
+        def getOrCreate(self):
+            return session
+
+    def unavailable(_session):
+        raise SparkThreadLimitError("RESOURCE_SPARK_THREAD_BINDING_UNSUPPORTED")
+
+    monkeypatch.setitem(sys.modules, "pyspark.sql", SimpleNamespace(SparkSession=SimpleNamespace(builder=Builder())))
+    monkeypatch.setattr(spark_engine, "runtime_status", lambda: {"available": True})
+    monkeypatch.setattr(spark_engine, "cgroup_pid_limit", lambda: 128)
+    monkeypatch.setattr(spark_engine, "bound_local_driver_pools", unavailable)
+    runtime = SparkRuntime("binding-failure", tmp_path / "runtime", SparkSettings(
+        master="local[1]", driver_memory_mb=512, executor_memory_mb=512, total_cores=1))
+    with pytest.raises(ProcessingError, match="RESOURCE_SPARK_THREAD_BINDING_UNSUPPORTED"):
+        runtime.__enter__()
+    assert stopped == [True] and runtime.session is None
+    assert configured["spark.driver.memory"] == configured["spark.executor.memory"] == "512m"
+    assert configured["master"] == "local[1]" and configured["spark.rpc.connect.threads"] == "2"
+    assert not (runtime.directory / "trackvance-code.zip").exists()
 
 
 def test_legacy_physical_lines_are_streamed_for_multiline_csv(tmp_path):
@@ -369,6 +411,32 @@ def test_real_spark_job_group_cancellation_stops_computation(real_spark):
         timer.join(timeout=2)
     assert time.monotonic() - started < 8
     # A cancelled job cannot prevent a separate subsequent action.
+    assert context.parallelize([1, 2], 2).sum() == 3
+
+
+def test_real_local_spark_storage_callbacks_remain_live_with_bounded_pools(real_spark):
+    engine, runtime = real_spark
+    context = engine.session.sparkContext
+    if not context.master.startswith("local["):
+        assert runtime.metadata["thread_budget"]["local_storage_bound_applied"] is False
+        return
+    # Exercise the same pinned pools even if this test runner has >=512 PIDs;
+    # this is a synthetic test application, not an assertion of its actual quota.
+    bound_local_driver_pools(engine.session)
+    for offset in range(8):
+        broadcast = context.broadcast(offset)
+        records = context.parallelize(range(16), 2).map(lambda value, broadcast=broadcast: (
+            value % 4, value + broadcast.value)).persist()
+        try:
+            actual = dict(records.reduceByKey(lambda left, right: left + right).collect())
+            assert actual == {key: sum(value + offset for value in range(16) if value % 4 == key)
+                              for key in range(4)}
+        finally:
+            records.unpersist(blocking=True)
+            broadcast.destroy(blocking=True)
+    pools = bound_local_driver_pools(engine.session)
+    assert all(value["maximum_threads"] == 4 and value["largest_threads"] <= 4 for value in pools.values())
+    # Cleanup callback completion must leave a separate subsequent job live.
     assert context.parallelize([1, 2], 2).sum() == 3
 
 
