@@ -294,6 +294,28 @@ def chart_number(value) -> float | None:
         return None
 
 
+def ratio_denominator(profile: dict, column: dict, metric: str) -> int | None:
+    population = profile.get("row_count")
+    if not isinstance(population, int) or isinstance(population, bool) or population < 0:
+        return None
+    if metric == "null_rate":
+        return population
+    nulls = column.get("null_count")
+    if not isinstance(nulls, int) or isinstance(nulls, bool) or not 0 <= nulls <= population:
+        return None
+    return population - nulls
+
+
+def metric_is_available(item: SentinelMetricHistory, profile: dict) -> bool:
+    metric, _, name = item.metric_key.partition(":")
+    if metric not in {"null_rate", "distinct_rate", "uniqueness_ratio"}:
+        return True
+    column_name = (item.dimensions or {}).get("column") or name
+    column: dict = next((value for value in profile.get("columns", []) if value.get("name") == column_name), {})
+    denominator = ratio_denominator(profile, column, metric)
+    return denominator is not None and denominator > 0
+
+
 @router.get("/runs/{run_id}/visual-summary")
 def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Read immutable execution evidence and compatible metadata only; never scan."""
@@ -314,17 +336,19 @@ def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depe
     if monitor is None:
         raise ScheduleError(409, "MONITOR_CONFIGURATION_MISSING", "La revisión de esta ejecución no está disponible.")
     columns = [{"name": item["name"], "null_count": item.get("null_count"),
-        "null_rate": item.get("null_rate"), "distinct_count": item.get("distinct_count"),
-        "distinct_rate": item.get("distinct_rate"), "uniqueness_ratio": item.get("uniqueness_ratio"),
+        "null_rate": item.get("null_rate") if (ratio_denominator(profile, item, "null_rate") or 0) > 0 else None,
+        "distinct_count": item.get("distinct_count"),
+        "distinct_rate": item.get("distinct_rate") if (ratio_denominator(profile, item, "distinct_rate") or 0) > 0 else None,
+        "uniqueness_ratio": item.get("uniqueness_ratio") if (ratio_denominator(profile, item, "uniqueness_ratio") or 0) > 0 else None,
         "logical_type": item.get("logical_type"), "null_denominator": profile.get("row_count"),
-        "distinct_denominator": profile.get("row_count", 0) - item["null_count"]
-            if isinstance(item.get("null_count"), int) and isinstance(profile.get("row_count"), int) else None}
+        "distinct_denominator": ratio_denominator(profile, item, "distinct_rate")}
         for item in profile.get("columns", [])]
     records = db.scalars(select(SentinelMetricHistory).where(SentinelMetricHistory.run_id == run.id,
         SentinelMetricHistory.organization_id == user.organization_id)).all()
     exact = [{"metric_key": item.metric_key, "dimensions": item.dimensions,
-        "exact_value": str(item.numeric_value) if item.numeric_value is not None else None,
-        "value": chart_number(item.numeric_value), "method": item.method,
+        "exact_value": str(item.numeric_value) if item.numeric_value is not None and metric_is_available(item, profile) else None,
+        "value": chart_number(item.numeric_value) if metric_is_available(item, profile) else None, "method": item.method,
+        "unavailable_reason": None if metric_is_available(item, profile) else "UNDEFINED_DENOMINATOR",
         "metric_definition_version": item.metric_definition_version} for item in records]
     history_rows = db.execute(select(SentinelMetricHistory, Run, DatasetVersion)
         .join(Run, Run.id == SentinelMetricHistory.run_id).join(DatasetVersion, DatasetVersion.id == Run.dataset_version_id)
@@ -338,7 +362,8 @@ def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depe
     selected = {(item.metric_key, item.dimension_hash, item.method, item.metric_definition_version) for item in records}
     for item, sample_run, _version in reversed(history_rows[:500]):
         key = (item.metric_key, item.dimension_hash, item.method, item.metric_definition_version)
-        if key not in selected:
+        sample_profile = (sample_run.metrics or {}).get("profile_snapshot") or _version.profile or {}
+        if key not in selected or not metric_is_available(item, sample_profile):
             continue
         authorize_run_content(db, user, sample_run)
         group = evolution.setdefault(key, {"metric_key": item.metric_key, "dimensions": item.dimensions,

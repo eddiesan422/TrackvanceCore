@@ -591,7 +591,7 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Paragraph("Especificación técnica v1.1", ParagraphStyle("subtitle", fontName="Arial", fontSize=21, leading=28, textColor=NAVY)))
     story.append(Spacer(1, 25))
     cover_status = "Borrador: certificación consolidada en curso" if draft else "Estado funcional y evidencia de validación"
-    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · CATÁLOGO DE GOBIERNO Y REPORTES"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
+    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · REST, AUTOMATIZACIÓN Y CICLO DE CONTRATOS"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
     story.append(Spacer(1, 18))
     story.append(paragraph("Arquitectura local y evolución a producto", "h2"))
     story.append(paragraph("Monolito modular · Persistencia local · Reglas portables · Evidencia verificable"))

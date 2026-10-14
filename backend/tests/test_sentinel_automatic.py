@@ -378,6 +378,45 @@ def test_visual_summary_uses_selected_version_and_never_scans(authenticated, dat
     assert all(point["dataset_version_id"] == first_version for series in result["evolution"] for point in series["points"])
 
 
+@pytest.mark.parametrize("content,population,nulls", [("id,optional\n001,\n002,\n", 2, 2), ("id,optional\n", 0, 0)])
+def test_visual_summary_does_not_present_zero_denominator_ratios_as_zero(
+        authenticated, database, tmp_path, monkeypatch, content, population, nulls):
+    from trackvance import services
+    with database() as db:
+        _, source, _ = source_version(db, tmp_path, name="Undefined ratios", content=content)
+        consume_dataset_event(db, publication(source))
+        run = db.get(Run, db.scalar(select(SentinelVersionEvaluation)).run_id)
+        execute_run(db, run)
+        assert run.status == "SUCCESS"
+        original_profile = source.profile.copy()
+        original_hash = source.sha256
+        run_id, version_id = run.id, source.id
+        db.commit()
+    monkeypatch.setattr(services, "ensure_input", lambda *args: (_ for _ in ()).throw(AssertionError("New data scan")))
+    response = authenticated.get(f"/api/v1/runs/{run_id}/visual-summary")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    column = next(item for item in result["columns"] if item["name"] == "optional")
+    assert result["indicators"]["row_count"] == population
+    assert column["null_count"] == nulls and column["distinct_count"] == 0
+    assert column["distinct_denominator"] == 0
+    assert column["distinct_rate"] is None and column["uniqueness_ratio"] is None
+    assert column["null_rate"] == (1 if population else None)
+    undefined = {"distinct_rate:optional", "uniqueness_ratio:optional"}
+    if population == 0:
+        undefined |= {"null_rate:optional", "null_rate:id", "distinct_rate:id", "uniqueness_ratio:id"}
+    undefined_records = [item for item in result["exact_metrics"] if item["metric_key"] in undefined]
+    assert {item["metric_key"] for item in undefined_records} == undefined
+    assert all(item["exact_value"] is None and item["value"] is None
+               and item["unavailable_reason"] == "UNDEFINED_DENOMINATOR"
+               for item in undefined_records)
+    assert not any(series["metric_key"] in undefined for series in result["evolution"])
+    assert result["scans"] == 0
+    with database() as db:
+        restored = db.get(type(source), version_id)
+        assert restored.sha256 == original_hash and restored.profile == original_profile
+
+
 def test_automatic_settings_keep_revisions_and_reject_stale_write(authenticated, database):
     with database() as db:
         dataset = Dataset(name="Settings")
