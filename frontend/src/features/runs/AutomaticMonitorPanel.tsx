@@ -23,12 +23,17 @@ function AutomaticEditor({ monitorId, data }: { monitorId: string; data: RecordD
   </div>
 }
 
-export function AutomaticMonitorPanel({ monitorId }: { monitorId: string }) {
+function AutomaticContent({ monitorId }: { monitorId: string }) {
   const automatic = useQuery({ queryKey: ['monitor-automatic', monitorId], queryFn: () => api<RecordData | null>(`/monitors/${monitorId}/automatic`) })
   if (automatic.isPending) return <Loading text="Cargando monitoreo automático…"/>
   if (automatic.error) return <ErrorState error={automatic.error} retry={() => automatic.refetch()}/>
-  if (!automatic.data) return null
+  if (!automatic.data) return <p className="muted">Este monitor no tiene monitoreo automático por dataset.</p>
   const data = automatic.data
   const state = data.state === 'WAITING_FIRST_VERSION' ? 'Esperando primera versión' : data.state === 'PAUSED' ? 'Monitoreo automático pausado' : data.requires_executor_assignment ? 'Requiere responsable autorizado' : 'Monitoreo automático activo'
-  return <><p className="muted">{state}</p><details className="monitor-schedule"><summary>Monitoreo automático por dataset</summary><div className="monitor-schedule-content"><AutomaticEditor key={data.version} monitorId={monitorId} data={data}/></div></details></>
+  return <><p className="muted">{state}</p><AutomaticEditor key={data.version} monitorId={monitorId} data={data}/></>
+}
+
+export function AutomaticMonitorPanel({ monitorId }: { monitorId: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return <details className="monitor-schedule" onToggle={event => setExpanded(event.currentTarget.open)}><summary>Monitoreo automático por dataset</summary>{expanded && <div className="monitor-schedule-content"><AutomaticContent monitorId={monitorId}/></div>}</details>
 }

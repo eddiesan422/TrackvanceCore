@@ -12,12 +12,13 @@ it('opens a deleted contract from a lineage history link without enabling new op
     items: [{ id: 'deleted-revision', name: 'Histórico', version: 2, deleted: true, status: 'DELETED',
       dataset_id: 'source', dataset_name: 'Datos', owner: 'Equipo', config: { required_columns: ['id'] } }], total: 1,
   } : { items: [], total: 0 })
-  renderApp(<ModulePage module="intake"/>, { path: '/intake?contract_id=deleted-revision&include_deleted=true' })
+  renderApp(<ModulePage module="intake"/>, { path: '/intake?contract_id=deleted-revision&include_deleted=true&dataset_id=source' })
   expect(await screen.findByRole('heading', { name: 'Histórico' })).toBeInTheDocument()
   expect(screen.getByRole('checkbox', { name: 'Incluir contratos eliminados' })).toBeChecked()
   expect(screen.getByRole('button', { name: 'Nueva versión' })).toBeDisabled()
   expect(screen.getByRole('button', { name: /^Ejecutar$/ })).toBeDisabled()
   expect(api).toHaveBeenCalledWith('/intake/contracts?include_deleted=true')
+  expect(screen.getByText(/Crear un contrato o ejecutar requiere una acción explícita/)).toBeInTheDocument()
 })
 
 function mockRun(status = 'SUCCESS') {

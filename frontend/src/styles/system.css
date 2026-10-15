@@ -106,6 +106,10 @@ button:disabled, .disabled-link { opacity: .56; }
 .table-scroll > table { min-width: 720px; }
 .table-scroll td:has(.table-primary) { min-width: 210px; }
 .dataset-profile-table th:first-child, .dataset-profile-table td:first-child { min-width: 170px; }
+.report-list-actions { min-width: 240px; }
+.table-scroll > .intake-results-table { min-width: 1040px; }
+.intake-results-table th:nth-child(2), .intake-results-table td:nth-child(2) { min-width: 140px; }
+.intake-results-table th:nth-child(3), .intake-results-table td:nth-child(3) { min-width: 170px; }
 th, .recent-panel th { color: #4d6657; background: #f2f6f3; font-size: 12px; font-weight: 650; border-color: #e0e8e2; }
 td, .recent-panel td { color: #465e51; border-color: #e7ede9; font-size: 13px; vertical-align: top; }
 td strong, .table-primary, .recent-panel .table-primary { color: #1e4531; font-size: 13px; }

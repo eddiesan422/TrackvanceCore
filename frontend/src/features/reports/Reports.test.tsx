@@ -30,6 +30,33 @@ async function resolveAndPreview() {
   return user
 }
 
+it('keeps generate dialog focus inside and restores its exact opener on Escape without publishing', async () => {
+  renderApp(<ReportBuilder initial={draft}/>, { permissions })
+  const user = await resolveAndPreview(), opener = screen.getByRole('button', { name: 'Generar dataset' })
+  await user.click(opener)
+  const dialog = await screen.findByRole('dialog', { name: 'Generar dataset' })
+  for (let index = 0; index < 6; index++) { await user.tab(); expect(dialog).toContainElement(document.activeElement as HTMLElement) }
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(opener).toHaveFocus())
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(vi.mocked(post).mock.calls.map(([path]) => path)).toEqual(['/reports/resolve', '/reports/preview'])
+  expect(api).not.toHaveBeenCalledWith('/reports/datasets', expect.anything())
+})
+
+it('labels a saved source outside the candidate page by its alias and discloses its exact identities', async () => {
+  renderApp(<ReportBuilder initial={draft}/>, { permissions })
+  expect(await screen.findByRole('heading', { name: 'Fuente base · base' })).toBeVisible()
+  expect(screen.getByText('Contrato fijo: Contrato seleccionado')).toBeVisible()
+  const summary = screen.getByText('Ver fuente y contrato exactos'), details = summary.closest('details')!
+  expect(within(details).getByText('input')).not.toBeVisible()
+  expect(within(details).getByText('contract')).not.toBeVisible()
+  await userEvent.setup().click(summary)
+  expect(within(details).getByText('input')).toBeVisible()
+  expect(within(details).getByText('contract')).toBeVisible()
+  expect(api).not.toHaveBeenCalledWith('/datasets/input')
+  expect(screen.getByRole('checkbox', { name: 'revision' })).toBeChecked()
+})
+
 it('opens the approved source output and exact version while preserving origin and Intake links', async () => {
   vi.mocked(api).mockImplementation(async path => {
     if (path.startsWith('/reports/sources')) return { items: [candidate], total: 1 }

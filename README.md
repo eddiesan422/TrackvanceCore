@@ -116,10 +116,11 @@ UNKNOWN bloquea target hasta revisión y decisión explícita; reparar evidencia
 no vuelve a escribir. La bandeja entrega resúmenes al iniciador/responsable real,
 sin enviar correo ni credenciales y con permisos vigentes al consultar.
 
-Alembic conserva las migraciones aplicadas `0001..0017` y añade
-`0018_strict_approval_criterion` y `0019_governance_people`. El modelo vigente
-tiene 56 tablas de aplicación y backup state 9; los backups state 8 de 0.8.0
-conservan su proyección histórica de 55 tablas. Backup/restore verifica conjuntos multipartes
+Alembic conserva las migraciones aplicadas y el modelo vigente de 0.9.0 tiene
+65 tablas de aplicación, backup state 10 y head `0022_intake_automation_deletion`.
+La compatibilidad histórica de 0.8.5 conserva sus 56 tablas, backup state 9 y
+head `0019_governance_people`; los backups state 8 de 0.8.0 conservan su
+proyección histórica de 55 tablas. Backup/restore verifica conjuntos multipartes
 con metadata, secretos fuente/destino y claves separados. Sentinel legacy sin
 usuario verificable queda pausado hasta asignación explícita. Roles personalizados,
 actores y notification_deliveries históricos se conservan.
@@ -139,7 +140,7 @@ puerto/origen y SSO desactivado; nunca sirve como entorno de pruebas.
 - [ADRs 0020–0025](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/adr/0020-async-acquisition-multipart.md).
 
 Los apartados históricos siguientes conservan contexto de 0.5.x/0.6.x y sus
-propias cifras; no sustituyen la certificación 0.8.5. Credenciales temporales de
+propias cifras; no sustituyen las verificaciones de la implementación 0.9.0. Credenciales temporales de
 una presentación, primer acceso y RBAC/SSO opcional continúan vigentes. No se
 reactiva SMTP ni Mailpit. Redis/Celery, Kubernetes, masking y conectores
 adicionales continúan fuera del alcance del catálogo de gobierno descrito arriba.

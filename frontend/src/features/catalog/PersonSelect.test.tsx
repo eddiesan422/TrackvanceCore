@@ -5,9 +5,23 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
 import { renderApp } from '../../test/render'
 import { PersonSelect } from './PersonSelect'
+import { PeopleAdmin } from './PeopleAdmin'
 
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: vi.fn(), post: vi.fn() }))
 beforeEach(() => vi.clearAllMocks())
+
+it('keeps keyboard focus inside the person dialog and returns to its exact admin opener on Escape', async () => {
+  vi.mocked(api).mockResolvedValue({ items: [], total: 0 })
+  renderApp(<PeopleAdmin/>, { permissions: ['people:read', 'people:manage'] })
+  const user = userEvent.setup(), opener = await screen.findByRole('button', { name: 'Agregar persona' })
+  await user.click(opener)
+  const dialog = await screen.findByRole('dialog', { name: 'Agregar persona de gobierno' })
+  for (let index = 0; index < 6; index++) { await user.tab(); expect(dialog).toContainElement(document.activeElement as HTMLElement) }
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(opener).toHaveFocus())
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(post).not.toHaveBeenCalled()
+})
 
 function Form({ initial = null }: { initial?: string | null }) {
   const [person, setPerson] = useState<string | null>(initial)
