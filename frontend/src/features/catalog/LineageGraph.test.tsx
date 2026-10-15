@@ -23,6 +23,8 @@ it('uses selected version, continues a real branch cursor, zooms and retains unc
   await waitFor(() => expect(screen.queryByLabelText('Ramas pendientes')).not.toBeInTheDocument())
   await user.click(screen.getByRole('button', { name: 'Acercar linaje' }))
   expect(screen.getByText('120%')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Restablecer zoom del linaje al 100 %' }))
+  expect(screen.getByText('100%')).toBeVisible()
   await user.click(screen.getByRole('button', { name: /Entrega pendiente/ }))
   expect(screen.getByRole('link', { name: 'Ver detalle autorizado' })).toHaveAttribute('href', '/runs/delivery')
   await user.click(screen.getByText(/Detalle tabular y evidencia/))
