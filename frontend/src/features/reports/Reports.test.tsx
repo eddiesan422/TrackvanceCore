@@ -4,7 +4,7 @@ import { Route, Routes } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api, ApiError, download, post } from '../../api/client'
 import { renderApp } from '../../test/render'
-import { ReportBuilder } from './Reports'
+import { ReportBuilder, ReportsRoutes } from './Reports'
 import { DatasetDetail } from '../datasets/Datasets'
 import { draftError, emptyDraft, executableDraft, mapFilterSources } from './types'
 import type { ReportDraft } from './types'
@@ -55,6 +55,19 @@ it('encodes both approved output identifiers in the primary source link', async 
   vi.mocked(api).mockImplementation(async path => path.startsWith('/reports/sources') ? { items: [{ ...candidate, output_dataset_id: 'output /?', output_version_id: 'version &/#' }], total: 1 } : { items: [], total: 0 })
   renderApp(<ReportBuilder/>, { permissions })
   expect(await screen.findByRole('link', { name: candidate.name })).toHaveAttribute('href', '/datasets/output%20%2F%3F?version=version%20%26%2F%23')
+})
+
+it('keeps exact execution links and profile filter values behind functional history names', async () => {
+  vi.mocked(api).mockImplementation(async path => path.startsWith('/reports/executions') ? { items: [{ id: 'exact-execution-id', profile: 'PREVIEW', status: 'SUCCESS', sources: [{ alias: 'base' }], created_at: '2026-10-15T00:00:00Z' }], total: 1 } : { items: [], total: 0 })
+  renderApp(<Routes><Route path="/reports/*" element={<ReportsRoutes/>}/></Routes>, { permissions, path: '/reports/history' })
+  expect(await screen.findByRole('link', { name: 'Vista previa' })).toHaveAttribute('href', '/reports/executions/exact-execution-id')
+  expect(screen.getByRole('option', { name: 'Vista previa' })).toHaveValue('PREVIEW')
+  expect(screen.getByRole('option', { name: 'Descarga de reporte' })).toHaveValue('DOWNLOAD')
+  expect(screen.getByRole('option', { name: 'Generación de dataset' })).toHaveValue('DATASET')
+  const identity = screen.getByText('exact-execution-id')
+  expect(identity.closest('details')).not.toHaveAttribute('open')
+  await userEvent.setup().click(screen.getByText('Ver identidad de ejecución'))
+  expect(identity).toBeVisible()
 })
 
 it.each([{ output_dataset_id: undefined }, { output_version_id: undefined }])('keeps only secondary provenance links when approved output identity is incomplete (%j)', async missing => {

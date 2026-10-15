@@ -6,13 +6,18 @@
 .schedule-enabled { display: flex; align-items: center; gap: 8px; font-size: 12px; grid-column: 1 / -1; }
 .schedule-enabled input { width: auto; }
 .schedule-section-title { display: flex; justify-content: space-between; align-items: center; }
-.metric-evolution svg { width: 100%; max-height: 190px; }
+.metric-evolution svg { width: 100%; min-width: 600px; height: auto; display: block; }
+.metric-history-plot { overflow-x: auto; max-width: 100%; }
+.metric-history-plot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.metric-chart-scroll-hint { display: none; color: var(--muted); font-size: .8rem; }
+.metric-evolution > p { overflow-wrap: anywhere; }
 .metric-evolution polyline { fill: none; stroke: var(--teal, #008b80); stroke-width: 2.5; }
 .metric-evolution circle { fill: var(--teal, #008b80); }
 .metric-axis { stroke: var(--border, #dce5ed); }
-.metric-evolution svg text { fill: var(--muted, #647b8d); font-size: 11px; }
-.metric-time-range { display: flex; justify-content: space-between; gap: 12px; color: var(--muted, #647b8d); font-size: 11px; margin: -10px 0 12px; }
+.metric-evolution svg text { fill: var(--muted, #647b8d); font-size: 14px; }
+.metric-time-range { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: var(--muted, #647b8d); font-size: 12px; margin: .35rem 0 12px; }
 .schedule-alerts { list-style: none; margin: 0; padding: 0; }
 .schedule-alerts li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border, #dce5ed); }
 .schedule-alerts small { color: var(--muted, #647b8d); }
 @media (max-width: 700px) { .schedule-fields { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .metric-chart-scroll-hint { display: block; } }

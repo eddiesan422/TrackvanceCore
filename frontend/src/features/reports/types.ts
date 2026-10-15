@@ -1,4 +1,7 @@
 export type SchemaColumn = { name: string; type?: string; logical_type?: string; semantic_tag?: string }
+export function reportProfileName(value: unknown): string {
+  return ({ PREVIEW: 'Vista previa', DOWNLOAD: 'Descarga de reporte', DATASET: 'Generación de dataset' } as Record<string, string>)[String(value || '')] || 'Ejecución de reporte'
+}
 export type SourceCandidate = { input_dataset_id: string; name: string; contract_id: string; contract_name: string; contract_revision_ids: string[]; versions: { id: string; version: number }[]; contract_revision_total?: number; contract_revision_offset?: number; contract_revision_limit?: number; version_total?: number; version_offset?: number; version_limit?: number; output_version_id?: string; output_dataset_id?: string; input_version_id?: string; approval_run_id?: string; approval_finished_at?: string; schema: SchemaColumn[]; eligibility: { eligible: boolean; strict_approval?: boolean; reasons: (string | { message?: string; code?: string })[] }; warnings?: string[]; finished_at?: string }
 export type ReportSource = { alias: string; input_dataset_id: string; contract_id: string; contract_revision_ids: string[]; policy: 'LATEST_APPROVED' | 'SPECIFIC'; input_version_id?: string }
 export type Join = { left_alias: string; right_alias: string; type: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL'; keys: { left_column: string; right_column: string }[]; expected_cardinality: '1:1' | '1:N' | 'N:1' | 'N:M'; allow_many_to_many: boolean }

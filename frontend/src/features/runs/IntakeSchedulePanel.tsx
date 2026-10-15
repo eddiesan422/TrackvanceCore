@@ -30,7 +30,7 @@ function ScheduleEditor({ contract, schedule }: { contract: RecordData; schedule
     void cache.invalidateQueries({ queryKey: ['intake-schedule'] }); void cache.invalidateQueries({ queryKey: ['intake-occurrences'] })
   } })
   const usersList = users.data?.items || (session ? [{ id: session.user.id, name: session.user.name }] : [])
-  return <form className="form-stack" onSubmit={event => { event.preventDefault(); save.mutate() }}>
+  return <form className="form-stack intake-schedule-editor" onSubmit={event => { event.preventDefault(); save.mutate() }}>
     <div className="form-grid"><Field label="Disparo Intake"><select value={mode} onChange={event => setMode(event.target.value)} disabled={!canSchedule}>
       <option value="EVENT">Cada nueva versión publicada</option><option value="INTERVAL">Por intervalo</option><option value="DAILY">Diario</option><option value="WEEKLY">Semanal</option>
     </select></Field><Field label="Zona horaria"><input required maxLength={80} value={zone} onChange={event => setZone(event.target.value)} disabled={!canSchedule}/></Field>

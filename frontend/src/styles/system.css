@@ -168,6 +168,13 @@ fieldset { border-color: var(--border); border-radius: 8px; }
 legend { color: #345c43; }
 .checkbox-row { display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; }
 .checkbox-row input { margin-top: 3px; }
+.schedule-fields > fieldset,.intake-schedule-editor > fieldset { display:flex; flex-wrap:wrap; gap:12px 18px; padding:14px; }
+.schedule-fields > fieldset > label,.intake-schedule-editor > fieldset > label { display:inline-flex; align-items:center; gap:8px; }
+.intake-schedule-editor { container: intake-schedule / inline-size; }
+.intake-schedule-editor > label { display:flex; align-items:flex-start; gap:8px; }
+@container intake-schedule (max-width:540px) {
+  .intake-schedule-editor > .form-grid { grid-template-columns:1fr; }
+}
 .modal-overlay { background: #06150e9c; backdrop-filter: blur(2px); }
 .modal { border-color: #c7d8cc; border-radius: 14px; box-shadow: 0 24px 100px #06150e40; padding: 26px; scrollbar-gutter: stable; }
 .modal-heading { gap: 16px; }
