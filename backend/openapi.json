@@ -13680,6 +13680,47 @@
               "default": 100,
               "title": "Max Nodes"
             }
+          },
+          {
+            "name": "projection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "technical",
+                "business"
+              ],
+              "type": "string",
+              "default": "technical",
+              "title": "Projection"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32768
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "evidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Evidence"
+            }
           }
         ],
         "responses": {

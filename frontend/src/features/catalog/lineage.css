@@ -11,6 +11,8 @@
 .lineage-zoom { display:flex; gap:3px; align-items:center; border:1px solid var(--lineage-line); border-radius:8px; padding:2px; background:white; }
 .lineage-zoom span { min-width:48px; font-size:12px; text-align:center; font-variant-numeric:tabular-nums; }
 .lineage-count { margin-left:auto; color:var(--text-muted,#586256); font-size:12px; }
+.lineage-reading-help { font-size:11px; line-height:1.7; color:var(--muted,#586967); margin:0 0 11px; }
+.lineage-reading-help .text-button { font-size:inherit; }
 .lineage-legend { display:flex; gap:12px 18px; flex-wrap:wrap; padding:4px 0 15px; color:var(--text-muted,#586256); font-size:11px; }
 .lineage-legend>span { display:flex; align-items:center; gap:7px; }
 .lineage-key { display:block; width:23px; border-top:2px solid #60745b; }

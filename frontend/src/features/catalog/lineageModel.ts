@@ -40,8 +40,13 @@ export function mergeLineage(current: LineageData, page: LineageData, consumedCu
   }
   const branches = new Map((current.branches || []).filter(branch => branch.cursor !== consumedCursor).map(branch => [`${branch.node_id}:${branch.direction}`, branch]))
   for (const branch of page.branches || []) branches.set(`${branch.node_id}:${branch.direction}`, branch)
-  const pending = [...new Set([...branches.values()].map(branch => branch.node_id))]
-  return { graph: { ...current, nodes: [...nodes.values()], edges: [...edges.values()], branches: [...branches.values()], pending_branches: pending, complete: branches.size === 0 }, focused: false }
+  // A finite path boundary deliberately has no resumable cursor. Preserve its
+  // pending identity when another page is merged instead of claiming completion.
+  const boundaries = current.pending_branches.filter(id => !(current.branches || []).some(branch => branch.node_id === id))
+  const pending = [...new Set([...boundaries, ...page.pending_branches, ...[...branches.values()].map(branch => branch.node_id)])]
+  const unknownPartial = (!current.complete && !current.pending_branches.length && !(current.branches || []).length)
+    || (!page.complete && !page.pending_branches.length && !(page.branches || []).length)
+  return { graph: { ...current, nodes: [...nodes.values()], edges: [...edges.values()], branches: [...branches.values()], pending_branches: pending, complete: !unknownPartial && pending.length === 0 }, focused: false }
 }
 
 /** Directed SCC ranks avoid backward transforms and remain finite for real cycles.
@@ -92,7 +97,9 @@ export function layoutLineage(nodes: LineageNode[], edges: LineageEdge[], height
       const parentY = (id: string) => { const parents = transforms.filter(edge => edge.target === id).map(edge => placed.find(node => node.id === edge.source)?.y).filter((y): y is number => y != null); return parents.length ? parents.reduce((sum, y) => sum + y, 0) / parents.length : 0 }
       return parentY(a.id) - parentY(b.id) || a.id.localeCompare(b.id)
     })
-    let y = 66
+    // Reserve separate upper channels for shortcuts across intermediate ranks.
+    // Their labels and lines must not pass behind any measured business card.
+    let y = 150
     for (const node of column) { const height = heightOf(node.id); placed.push({ ...node, x: 44 + rank * (CARD_WIDTH + 116), y, width: CARD_WIDTH, height, rank }); y += height + 42 }
     businessHeight = Math.max(businessHeight, y)
   }
@@ -101,7 +108,43 @@ export function layoutLineage(nodes: LineageNode[], edges: LineageEdge[], height
     const rank = rankOf.get(node.id)!, y = monitorY.get(rank) ?? businessHeight + 64, height = heightOf(node.id)
     placed.push({ ...node, x: 44 + rank * (CARD_WIDTH + 116), y, width: CARD_WIDTH, height, rank }); monitorY.set(rank, y + height + 42)
   }
-  return { nodes: placed, edges: edges.filter(edge => nodeMap.has(edge.source) && nodeMap.has(edge.target)), width: Math.max(760, ...placed.map(node => node.x + node.width + 44)), height: Math.max(440, ...placed.map(node => node.y + node.height + 54)), monitoringY: monitors.length ? businessHeight + 22 : null }
+  return { nodes: placed, edges: edges.filter(edge => nodeMap.has(edge.source) && nodeMap.has(edge.target)), width: Math.max(760, ...placed.map(node => node.x + node.width + 110)), height: Math.max(440, ...placed.map(node => node.y + node.height + 54)), monitoringY: monitors.length ? businessHeight + 22 : null }
+}
+
+export type LineagePoint = { x: number; y: number }
+/** Route through reserved channels, never through another resource's rectangle.
+ * Keeping the exact orthogonal points makes card clearance independently testable.
+ */
+export function routeLineage(layout: ReturnType<typeof layoutLineage>) {
+  const nodes = new Map(layout.nodes.map(node => [node.id, node]))
+  const outgoing = new Map<string, string[]>(), incoming = new Map<string, string[]>()
+  for (const edge of [...layout.edges].sort((a, b) => a.id.localeCompare(b.id))) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge.id])
+    incoming.set(edge.target, [...(incoming.get(edge.target) || []), edge.id])
+  }
+  return layout.edges.map((edge, index) => {
+    const source = nodes.get(edge.source)!, target = nodes.get(edge.target)!
+    const sourcePorts = outgoing.get(edge.source)!, targetPorts = incoming.get(edge.target)!
+    const sy = source.y + 34 + (source.height - 68) * (sourcePorts.indexOf(edge.id) + 1) / (sourcePorts.length + 1)
+    const ty = target.y + 34 + (target.height - 68) * (targetPorts.indexOf(edge.id) + 1) / (targetPorts.length + 1)
+    const sx = source.x + source.width, tx = target.x
+    let points: LineagePoint[], labelPoint: LineagePoint | null
+    if (source.rank === target.rank) {
+      const channel = sx + 42 + index % 4 * 12
+      points = [{ x: sx, y: sy }, { x: channel, y: sy }, { x: channel, y: ty }, { x: target.x + target.width, y: ty }]
+      labelPoint = null
+    } else if (target.rank - source.rank === 1 && edge.relation !== 'MONITOREA') {
+      const channel = (sx + tx) / 2
+      points = [{ x: sx, y: sy }, { x: channel, y: sy }, { x: channel, y: ty }, { x: tx, y: ty }]
+      labelPoint = { x: channel, y: (sy + ty) / 2 - 8 }
+    } else {
+      // All cards begin at y >= 150; y <= 114 belongs only to edge channels.
+      const channelY = 66 + index % 4 * 16, sourceChannel = sx + 30, targetChannel = tx - 30
+      points = [{ x: sx, y: sy }, { x: sourceChannel, y: sy }, { x: sourceChannel, y: channelY }, { x: targetChannel, y: channelY }, { x: targetChannel, y: ty }, { x: tx, y: ty }]
+      labelPoint = edge.relation === 'MONITOREA' ? null : { x: (sourceChannel + targetChannel) / 2, y: channelY - 8 }
+    }
+    return { edge, points, path: points.map((point, i) => `${i ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '), labelPoint }
+  })
 }
 
 /** Highlight only ancestors and descendants, never unrelated sibling consumers. */
