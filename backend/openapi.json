@@ -12202,6 +12202,20 @@
             }
           },
           {
+            "name": "lineage_projection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "technical",
+                "business"
+              ],
+              "type": "string",
+              "default": "technical",
+              "title": "Lineage Projection"
+            }
+          },
+          {
             "name": "offset",
             "in": "query",
             "required": false,

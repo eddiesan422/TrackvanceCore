@@ -27,9 +27,24 @@
 .delivery-actions .button { margin-left:auto; }
 .delivery-delete { color:#ae554b; }
 .delivery-config-list .config-meta span { display:inline-flex; align-items:center; gap:5px; }
+.table-scroll>.delivery-destinations-table { min-width:850px; }
+.delivery-destinations-table th:first-child,.delivery-destinations-table td:first-child { min-width:220px; width:26%; }
+.delivery-attempts .table-scroll>table { min-width:1080px; }
+.delivery-attempts th:nth-child(3),.delivery-attempts td:nth-child(3) { min-width:260px; max-width:360px; overflow-wrap:anywhere; }
+.delivery-automation-editor { margin-top:20px; padding:22px; }
+.delivery-automation-editor h2 { margin:0; }
+.delivery-automation-editor .schedule-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.delivery-automation-editor .schedule-fields>.checkbox-label { grid-column:1/-1; }
+.delivery-automation-editor fieldset { display:flex; flex-wrap:wrap; gap:12px 18px; margin:0; padding:14px; border:1px solid var(--border); border-radius:8px; grid-column:1/-1; }
+.delivery-automation-editor legend { padding:0 6px; }
+.delivery-automation-editor .checkbox-label,.delivery-automation-detail .checkbox-label { display:flex; align-items:flex-start; gap:9px; line-height:1.5; }
+.delivery-automation-editor .checkbox-label input,.delivery-automation-detail .checkbox-label input { margin-top:2px; }
+.delivery-automation-detail { padding:20px; }
+.delivery-automation-detail .table-toolbar { padding:0 0 16px; }
+.delivery-automation-detail>.form-stack { margin-top:18px; }
 .delivery-config-badges { display:flex; align-items:center; gap:7px; margin-top:12px; flex-wrap:wrap; }
 .delivery-config-badges>span:last-child { color:#81939d; font-size:11px; }
-.delivery-stepper { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:0; margin:0 0 20px; padding:0; list-style:none; overflow-x:auto; }
+.delivery-stepper { display:grid; grid-template-columns:repeat(7,minmax(145px,1fr)); gap:0; margin:0 0 20px; padding:4px 0 10px; list-style:none; overflow-x:auto; overscroll-behavior-x:contain; }
 .delivery-stepper li { position:relative; min-width:125px; }
 .delivery-stepper li:not(:last-child):after { content:""; position:absolute; z-index:0; top:16px; right:-50%; width:100%; height:1px; background:#d9e3e7; }
 .delivery-stepper button { position:relative; z-index:1; display:flex; align-items:center; width:100%; min-height:52px; flex-direction:column; gap:6px; padding:0 6px; color:#8b9aa4; background:transparent; font-size:12px; white-space:nowrap; }
@@ -165,6 +180,8 @@
   .delivery-key-picker>p { grid-column:1; }
 }
 @media(max-width:640px) {
+  .delivery-automation-editor,.delivery-automation-detail { padding:18px; }
+  .delivery-automation-editor .schedule-fields { grid-template-columns:1fr; }
   .delivery-technical { padding:14px 16px; }
   .delivery-technical-identities { grid-template-columns:1fr; }
   .rest-delivery-panel { padding:16px; }

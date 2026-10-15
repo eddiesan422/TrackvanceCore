@@ -232,3 +232,36 @@ def test_empty_business_projection_has_explicit_continuation_contract(authentica
     assert graph["anchor_id"] is None
     assert graph["metadata_relationships_scanned"] == 0
     assert graph["limits"]["adjacency_page_size"] == 80
+
+
+def test_business_header_skips_the_legacy_technical_query_and_preserves_its_default(authenticated, database, tmp_path, monkeypatch):
+    from trackvance import dataset_scans
+    from trackvance.db import engine
+
+    with database() as db:
+        dataset, version = source(db, tmp_path, "Bounded header")
+        run = process(db, dataset, version)
+        dataset_id = dataset.id
+        db.commit()
+    monkeypatch.setattr(dataset_scans, "profile_paths", lambda *a, **k: (_ for _ in ()).throw(AssertionError("header must not scan")))
+    statements = []
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = authenticated.get(f"/api/v1/catalog/datasets/{dataset_id}?section=lineage&lineage_projection=business")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200, response.text
+    header = response.json()
+    assert header["dataset"]["id"] == dataset_id
+    assert header["governance"]["dataset_id"] == dataset_id
+    assert header["lineage_projection"] == "business" and header["technical_evidence_loaded"] is False
+    assert header["items"] == [] and header["total"] == 0
+    assert not any("artifact_links" in statement.lower() for statement in statements)
+    assert len(statements) < 40
+    legacy = authenticated.get(f"/api/v1/catalog/datasets/{dataset_id}?section=lineage").json()
+    explicit = authenticated.get(f"/api/v1/catalog/datasets/{dataset_id}?section=lineage&lineage_projection=technical").json()
+    assert legacy == explicit
+    assert legacy["total"] > 0
+    assert any(item["source_id"] == run.id for item in legacy["items"])

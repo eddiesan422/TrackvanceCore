@@ -69,3 +69,20 @@ it('signals a finite path limit without presenting the branch as complete', asyn
   renderApp(<LineageGraph datasetId="d"/>)
   expect(await screen.findByText(/El camino alcanzó su límite de 64 identidades/)).toBeVisible()
 })
+
+it('shows the exact version resolved by the latest graph and keeps an explicitly selected historical version', async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (path.includes('section=versions')) return { items: [{ id: 'v2', version: 2 }, { id: 'v1', version: 1 }], total: 2 }
+    const id = path.includes('version_id=v1') ? 'v1' : 'v2'
+    return { root_id: `DATASET_VERSION:${id}`, version_id: id, nodes: [{ id: `DATASET_VERSION:${id}`, resource_id: id, type: 'DATASET_VERSION', label: `Fuente · ${id}`, href: null, technical: false, has_more: false }], edges: [], complete: true, pending_branches: [], branches: [] }
+  })
+  const user = userEvent.setup()
+  renderApp(<LineageGraph datasetId="d"/>)
+  await screen.findByRole('button', { name: /Fuente · v2/ })
+  expect(screen.getByLabelText('Versión del linaje')).toHaveValue('v2')
+  expect(api).toHaveBeenCalledWith('/catalog/datasets/d/lineage-graph?projection=business&max_depth=4&max_nodes=100')
+  await user.selectOptions(screen.getByLabelText('Versión del linaje'), 'v1')
+  await screen.findByRole('button', { name: /Fuente · v1/ })
+  expect(screen.getByLabelText('Versión del linaje')).toHaveValue('v1')
+  expect(api).toHaveBeenCalledWith('/catalog/datasets/d/lineage-graph?projection=business&max_depth=4&max_nodes=100&version_id=v1')
+})

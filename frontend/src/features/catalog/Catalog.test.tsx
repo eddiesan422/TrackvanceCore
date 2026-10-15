@@ -1,5 +1,6 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Link } from 'react-router-dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import { renderApp } from '../../test/render'
@@ -83,4 +84,37 @@ it('preserves keyboard focus while a different deep section is loading', async (
   expect(screen.getByRole('tab', { name: 'Versiones' })).toHaveFocus()
   await user.keyboard('{Home}')
   expect(await screen.findByRole('tab', { name: 'Resumen y gobierno' })).toHaveFocus()
+})
+
+it('loads only the authorized metadata header before the business graph and never prefetches the legacy technical traversal', async () => {
+  vi.mocked(api).mockImplementation(async endpoint => {
+    if (endpoint.includes('/lineage-graph')) return { root_id: null, version_id: null, nodes: [], edges: [], complete: true, pending_branches: [], branches: [] }
+    if (endpoint.includes('section=versions')) return { items: [], total: 0 }
+    return { dataset: { id: 'dataset', name: 'Fuente acotada' }, governance: {}, items: [], total: 0, lineage_projection: 'business', technical_evidence_loaded: false }
+  })
+  renderApp(<CatalogDataset/>, { path: '/catalog/datasets/dataset?section=lineage&version_id=frozen', route: '/catalog/datasets/:id', permissions: ['catalog:read'] })
+  expect(await screen.findByText('Esperando primera versión')).toBeVisible()
+  expect(api).toHaveBeenCalledWith('/catalog/datasets/dataset?section=lineage&offset=0&limit=25&lineage_projection=business&version_id=frozen')
+  expect(api).toHaveBeenCalledWith('/catalog/datasets/dataset/lineage-graph?projection=business&max_depth=4&max_nodes=100&version_id=frozen')
+  expect(vi.mocked(api).mock.calls.filter(([endpoint]) => endpoint.includes('section=lineage')).every(([endpoint]) => endpoint.includes('lineage_projection=business'))).toBe(true)
+  expect(vi.mocked(api).mock.calls.some(([endpoint]) => /\/(profile|results|download|preview)(\?|$)/.test(endpoint))).toBe(false)
+})
+
+it('updates the graph and version selector when a historical deep link changes only the query string', async () => {
+  vi.mocked(api).mockImplementation(async endpoint => {
+    if (endpoint.includes('/lineage-graph')) {
+      const id = endpoint.includes('version_id=v1') ? 'v1' : 'v2'
+      return { root_id: `DATASET_VERSION:${id}`, version_id: id, nodes: [{ id: `DATASET_VERSION:${id}`, resource_id: id, type: 'DATASET_VERSION', label: `Fuente ${id}`, href: null, technical: false, has_more: false }], edges: [], complete: true, pending_branches: [], branches: [] }
+    }
+    if (endpoint.includes('section=versions')) return { items: [{ id: 'v2', version: 2 }, { id: 'v1', version: 1 }], total: 2 }
+    return { dataset: { id: 'dataset', name: 'Fuente' }, governance: {}, items: [], total: 0 }
+  })
+  renderApp(<><Link to="/catalog/datasets/dataset?section=lineage&version_id=v1">Abrir versión histórica exacta</Link><CatalogDataset/></>, { path: '/catalog/datasets/dataset?section=lineage&version_id=v2', route: '/catalog/datasets/:id', permissions: ['catalog:read'] })
+  const user = userEvent.setup()
+  await screen.findByRole('button', { name: /Fuente v2/ })
+  expect(screen.getByLabelText('Versión del linaje')).toHaveValue('v2')
+  await user.click(screen.getByRole('link', { name: 'Abrir versión histórica exacta' }))
+  await screen.findByRole('button', { name: /Fuente v1/ })
+  expect(screen.getByLabelText('Versión del linaje')).toHaveValue('v1')
+  expect(api).toHaveBeenCalledWith('/catalog/datasets/dataset/lineage-graph?projection=business&max_depth=4&max_nodes=100&version_id=v1')
 })

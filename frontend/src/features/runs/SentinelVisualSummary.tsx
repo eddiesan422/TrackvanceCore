@@ -32,14 +32,14 @@ function Evolution({ series }: { series: RecordData }) {
   const y = (point: RecordData) => 145 - (point.value - low) / (high - low || 1) * 100
   const title = metricLabel(series.metric_key, series.dimensions)
   return <div className="sentinel-chart"><p className="muted">{title} · {profileMethod(series.method)} · definición v{series.metric_definition_version}</p>
-    {points.length < 2 ? <p>Se necesitan dos observaciones comparables para mostrar evolución.</p> : <><svg viewBox="0 0 620 195" role="img" aria-label={`Evolución compatible de ${title}`}>
+    {points.length < 2 ? <p>Se necesitan dos observaciones comparables para mostrar evolución.</p> : <><p className="sentinel-chart-scroll-hint">Desplaza el gráfico horizontalmente para consultar todo el período. También puedes usar las flechas del teclado al enfocarlo.</p><div className="sentinel-evolution-plot" role="region" aria-label={`Gráfico de evolución: ${title}`} tabIndex={0}><svg viewBox="0 0 620 195" role="img" aria-label={`Evolución compatible de ${title}`}>
       <line x1="70" y1="145" x2="560" y2="145"/><line x1="70" y1="40" x2="70" y2="145"/>
       <polyline points={points.map(point => `${x(point)},${y(point)}`).join(' ')}/>
       {points.map((point, index) => <circle key={`${point.run_id}-${index}`} cx={x(point)} cy={y(point)} r="4"><title>{date(point.observed_at)}: {metricValue(series.metric_key, point.exact_value)} · versión {point.dataset_version_id}</title></circle>)}
       <text x="60" y="149" textAnchor="end">{quantity(low)}</text>{high !== low && <text x="60" y="48" textAnchor="end">{quantity(high)}</text>}
       <text x="70" y="170">{date(points[0].observed_at, false)}</text><text x="560" y="170" textAnchor="end">{date(points.at(-1)?.observed_at, false)}</text>
       <text x="315" y="190" textAnchor="middle">Fecha de observación · {series.metric_key.split(':')[0].includes('rate') || series.metric_key.startsWith('uniqueness_ratio') ? 'proporción de 0 a 1' : 'cantidad registrada'}</text>
-    </svg><p className="muted">Los puntos se comparan por método, definición, columna y esquema. La línea une observaciones; no estima periodos sin datos.</p></>}
+    </svg></div><p className="muted">Los puntos se comparan por método, definición, columna y esquema. La línea une observaciones; no estima periodos sin datos.</p></>}
     <details><summary>Observaciones y valores exactos de la evolución</summary><div className="table-scroll"><table><thead><tr><th>Observación</th><th>Valor</th><th>Valor exacto</th><th>Versión registrada</th><th>Ejecución</th></tr></thead><tbody>{raw.map((point, index) => <tr key={`${point.run_id}-${index}`}><td>{date(point.observed_at)}</td><td>{metricValue(series.metric_key, point.exact_value)}</td><td className="mono">{exactValue(point.exact_value)}</td><td className="mono">{point.dataset_version_id}</td><td><Link to={`/runs/${point.run_id}`}>Ver ejecución</Link></td></tr>)}</tbody></table></div></details>
   </div>
 }

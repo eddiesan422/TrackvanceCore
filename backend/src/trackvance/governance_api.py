@@ -647,7 +647,9 @@ def resources(resource_type: str = "DATASET", search: str = "", status: str | No
 
 @router.get("/catalog/datasets/{dataset_id}")
 def dataset_panel(dataset_id: str, section: Literal["summary", "columns", "versions", "quality", "lineage", "history"] = "summary",
-                  version_id: str | None = None, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+                  version_id: str | None = None,
+                  lineage_projection: Literal["technical", "business"] = "technical",
+                  offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
                   db: Session = Depends(get_db), user: User = Depends(current_user)):
     dataset = owned(db, Dataset, dataset_id, user)
     authorize_dataset(db, user, dataset.id, "METADATA")
@@ -655,6 +657,11 @@ def dataset_panel(dataset_id: str, section: Literal["summary", "columns", "versi
     latest = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version.desc()).limit(1))
     result = {"dataset": dataset_dto(db, dataset), "governance": governance, "items": [], "total": 0,
               "offset": offset, "limit": limit, "section": section}
+    if section == "lineage" and lineage_projection == "business":
+        # The business diagram has its own bounded graph/evidence endpoint.
+        # Loading its authorized header must not first count the unused legacy
+        # technical graph, whose correlated authorization query grows with it.
+        return {**result, "lineage_projection": "business", "technical_evidence_loaded": False}
     if section == "summary":
         result["eligibility"] = dataset_eligibility(db, user, latest) if latest else None
         result["blocks"] = dataset_blocks(dataset.id, db, user)["items"]

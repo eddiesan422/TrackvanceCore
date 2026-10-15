@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Database, FileBox, Focus, GitBranch, Maximize2, Minus, Plus, Send, Server, ShieldCheck, Workflow } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -13,18 +13,19 @@ function NodeIcon({ node }: { node: LineageNode }) { const Icon = node.module ==
 function confirmation(state: string) { return ({ CONFIRMED: 'Confirmada', PARTIAL: 'Entrega parcial: no acredita entrega completa', UNKNOWN: 'Confirmación incierta: sin reenvío automático', UNCONFIRMED: 'Sin confirmación de entrega completa' } as Record<string, string>)[state] || 'Relación registrada' }
 
 export function LineageGraph({ datasetId, initialVersion }: { datasetId: string; initialVersion?: string }) {
-  const [version, setVersion] = useState(initialVersion || ''), [versionOffset, setVersionOffset] = useState(0)
+  const [version, setVersion] = useState(initialVersion || ''), [resolvedVersion, setResolvedVersion] = useState(initialVersion || ''), [versionOffset, setVersionOffset] = useState(0)
   const versions = useQuery({ queryKey: ['lineage-versions', datasetId, versionOffset], queryFn: () => api<{ items: { id: string; version: number }[]; total: number }>(`/catalog/datasets/${datasetId}?section=versions&offset=${versionOffset}&limit=50`) })
   return <div className="lineage-browser"><div className="lineage-intro"><GitBranch size={21} aria-hidden="true"/><div><h3>Del origen al destino</h3><p>Recorrido de negocio de la versión seleccionada. Cada conexión conserva evidencia registrada; no representa correspondencia por fila o columna.</p></div></div>
-    <div className="lineage-version-toolbar"><Field label="Versión del linaje"><select value={version} onChange={event => setVersion(event.target.value)}><option value="">Última registrada</option>{version && !versions.data?.items.some(item => item.id === version) && <option value={version}>Versión seleccionada</option>}{versions.data?.items.map(item => <option key={item.id} value={item.id}>Versión {item.version}</option>)}</select></Field>{(versions.data?.total || 0) > 50 && <div className="lineage-version-pages"><button className="button secondary small" disabled={!versionOffset} onClick={() => setVersionOffset(Math.max(0, versionOffset - 50))}>Versiones anteriores</button><button className="button secondary small" disabled={versionOffset + 50 >= (versions.data?.total || 0)} onClick={() => setVersionOffset(versionOffset + 50)}>Más versiones</button></div>}</div>
+    <div className="lineage-version-toolbar"><Field label="Versión del linaje"><select value={version || resolvedVersion} onChange={event => { setVersion(event.target.value); setResolvedVersion(event.target.value) }}><option value="">Última registrada</option>{(version || resolvedVersion) && !versions.data?.items.some(item => item.id === (version || resolvedVersion)) && <option value={version || resolvedVersion}>Versión seleccionada</option>}{versions.data?.items.map(item => <option key={item.id} value={item.id}>Versión {item.version}</option>)}</select></Field>{(versions.data?.total || 0) > 50 && <div className="lineage-version-pages"><button className="button secondary small" disabled={!versionOffset} onClick={() => setVersionOffset(Math.max(0, versionOffset - 50))}>Versiones anteriores</button><button className="button secondary small" disabled={versionOffset + 50 >= (versions.data?.total || 0)} onClick={() => setVersionOffset(versionOffset + 50)}>Más versiones</button></div>}</div>
     {versions.error && <ErrorState error={versions.error} retry={() => { void versions.refetch() }}/>}
-    <LineageWorkspace key={`${datasetId}:${version}`} datasetId={datasetId} version={version}/>
+    <LineageWorkspace key={`${datasetId}:${version}`} datasetId={datasetId} version={version} onVersionResolved={setResolvedVersion}/>
   </div>
 }
 
-function LineageWorkspace({ datasetId, version }: { datasetId: string; version: string }) {
+function LineageWorkspace({ datasetId, version, onVersionResolved }: { datasetId: string; version: string; onVersionResolved: (identity: string) => void }) {
   const query = new URLSearchParams({ projection: 'business', max_depth: '4', max_nodes: '100' }); if (version) query.set('version_id', version)
   const graph = useQuery({ queryKey: ['lineage-graph', datasetId, query.toString()], queryFn: () => api<LineageData>(`/catalog/datasets/${datasetId}/lineage-graph?${query}`) })
+  useEffect(() => { if (graph.data?.version_id) onVersionResolved(graph.data.version_id) }, [graph.data?.version_id, onVersionResolved])
   const [expanded, setExpanded] = useState<LineageData | null>(null), [history, setHistory] = useState<LineageData[]>([])
   const [selected, setSelected] = useState<string | null>(null), [scale, setScale] = useState(1), [heights, setHeights] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState(false), [branchError, setBranchError] = useState<unknown>(null), [focused, setFocused] = useState(false), [technical, setTechnical] = useState(false)

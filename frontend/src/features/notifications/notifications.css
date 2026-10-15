@@ -2,6 +2,8 @@
 .notifications-panel > p { padding:18px 20px 0; }
 .notifications-panel .notification-filters { padding:0 20px; }
 .notifications-panel td { padding-top:16px; padding-bottom:16px; }
+.notifications-panel .table-scroll>table { min-width:1000px; }
+.notifications-panel th:nth-child(2),.notifications-panel td:nth-child(2) { min-width:260px; }
 .notification-unread { background:var(--surface-subtle,#f4f7fc); }
 .notification-unread td:first-child { border-left:3px solid var(--primary,#315bbb); }
 .notifications-panel input[type=checkbox] { width:20px; height:20px; cursor:pointer; }

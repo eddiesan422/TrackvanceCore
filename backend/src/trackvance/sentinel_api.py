@@ -332,7 +332,7 @@ def check_category(check: dict) -> str:
 
 def check_projection(check: dict, config: dict) -> dict:
     rules = config.get("rules", [])
-    rule = next((item for item in rules if check.get("rule_id") and item.get("rule_id") == check["rule_id"]), {})
+    rule: dict = next((item for item in rules if check.get("rule_id") and item.get("rule_id") == check["rule_id"]), {})
     return {**check, "visual_category": check_category(check), "rule_type": rule.get("type")}
 
 
