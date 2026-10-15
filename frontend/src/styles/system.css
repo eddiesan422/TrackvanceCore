@@ -105,6 +105,7 @@ button:disabled, .disabled-link { opacity: .56; }
 .table-scroll { scrollbar-color: #b3c7bb #f1f5f2; }
 .table-scroll > table { min-width: 720px; }
 .table-scroll td:has(.table-primary) { min-width: 210px; }
+.dataset-profile-table th:first-child, .dataset-profile-table td:first-child { min-width: 170px; }
 th, .recent-panel th { color: #4d6657; background: #f2f6f3; font-size: 12px; font-weight: 650; border-color: #e0e8e2; }
 td, .recent-panel td { color: #465e51; border-color: #e7ede9; font-size: 13px; vertical-align: top; }
 td strong, .table-primary, .recent-panel .table-primary { color: #1e4531; font-size: 13px; }
