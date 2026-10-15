@@ -151,6 +151,9 @@ td .icon-button { width: 32px; height: 32px; color: #527260; }
 .field > small { color: #5d7365; font-size: 12px; line-height: 1.6; }
 .field input, .field select, .field textarea { min-width: 0; }
 .form-grid, .form-stack, fieldset { min-width: 0; }
+.classification-fields { display: flex; flex-direction: column; gap: 10px; grid-column: 1 / -1; min-width: 0; }
+.classification-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.classification-fields > small { color: var(--muted); font-size: 12px; line-height: 1.6; }
 fieldset { border-color: var(--border); border-radius: 8px; }
 legend { color: #345c43; }
 .checkbox-row { display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; }

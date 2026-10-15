@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cloneElement, isValidElement, useId } from 'react'
+import { cloneElement, isValidElement, useId, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlertCircle, ArrowLeft, Check, ChevronLeft, ChevronRight, Database, LoaderCircle, Search, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -26,7 +26,14 @@ export function Loading({ text = 'Cargando información…' }: { text?: string }
 export function ErrorState({ error, retry }: { error: unknown; retry?: () => void }) { return <div className="error-state" role="alert"><AlertCircle size={22}/><div><strong>No pudimos completar la operación</strong><p>{error instanceof Error ? error.message : String(error)}</p>{error instanceof ApiError && error.code && <small className="reason-code">{error.code}</small>}{error instanceof ApiError && error.requestId && <small>Referencia: {error.requestId}</small>}{retry && <button className="button secondary small" onClick={retry}>Volver a intentar</button>}</div></div> }
 export function Empty({ title, description, action }: { title: string; description: string; action?: ReactNode }) { return <div className="empty-state"><div className="empty-icon"><Database size={25}/></div><h3>{title}</h3><p>{description}</p>{action}</div> }
 export function PageHeading({ eyebrow, title, description, action, back }: { eyebrow?: string; title: string; description: string; action?: ReactNode; back?: string }) { return <div className="page-heading"><div>{back && <Link to={back} className="back-link"><ArrowLeft size={14}/> Volver</Link>}{eyebrow && <div className="eyebrow">{eyebrow}</div>}<h1>{title}</h1><p>{description}</p></div>{action && <div className="heading-actions">{action}</div>}</div> }
-export function Modal({ open, onOpenChange, title, description, children, wide = false }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description?: string; children: ReactNode; wide?: boolean }) { return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="modal-overlay"/><Dialog.Content className={`modal ${wide ? 'wide' : ''}`} {...(!description ? { 'aria-describedby': undefined } : {})}><div className="modal-heading"><div><Dialog.Title>{title}</Dialog.Title>{description && <Dialog.Description>{description}</Dialog.Description>}</div><Dialog.Close type="button" className="icon-button" aria-label="Cerrar ventana"><X size={20}/></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root> }
+export function Modal({ open, onOpenChange, title, description, children, wide = false }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description?: string; children: ReactNode; wide?: boolean }) {
+  const opener = useRef<HTMLElement | null>(null)
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="modal-overlay"/><Dialog.Content className={`modal ${wide ? 'wide' : ''}`} {...(!description ? { 'aria-describedby': undefined } : {})} onOpenAutoFocus={() => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => {
+    event.preventDefault()
+    if (opener.current?.isConnected && opener.current !== document.body) opener.current.focus()
+    else if (!document.activeElement || document.activeElement === document.body) document.querySelector<HTMLElement>('main')?.focus()
+  }}><div className="modal-heading"><div><Dialog.Title>{title}</Dialog.Title>{description && <Dialog.Description>{description}</Dialog.Description>}</div><Dialog.Close type="button" className="icon-button" aria-label="Cerrar ventana"><X size={20}/></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
+}
 export function Field({ label: title, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   const generatedId = useId()
   const control = isValidElement<{ id?: string; 'aria-describedby'?: string }>(children) ? children : null
