@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { Modal } from './ui'
 
 function Dialogs() {
@@ -36,4 +36,35 @@ it('returns a directly opened dialog to the main content when no trigger exists'
   await user.keyboard('{Escape}')
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(screen.getByRole('main')).toHaveFocus()
+})
+
+it('falls back to main when a connected opener can no longer accept focus', async () => {
+  const user = userEvent.setup()
+  render(<Dialogs/>)
+  const opener = screen.getByRole('button', { name: 'Abrir configuración' })
+  await user.click(opener)
+  await screen.findByRole('dialog', { name: 'Configuración' })
+  // A responsive sidebar can hide the still-connected opener while the dialog is open.
+  const focus = vi.spyOn(opener, 'focus').mockImplementation(() => {})
+  await user.keyboard('{Escape}')
+  expect(opener.isConnected).toBe(true)
+  expect(focus).toHaveBeenCalled()
+  expect(screen.getByRole('main')).toHaveFocus()
+  focus.mockRestore()
+})
+
+it('keeps focus in a replacement dialog instead of returning to the old opener', async () => {
+  function Replacement() {
+    const [step, setStep] = useState(0)
+    return <main tabIndex={-1}><button onClick={() => setStep(1)}>Abrir paso</button><Modal open={step === 1} onOpenChange={open => { if (!open) setStep(0) }} title="Primer paso"><button onClick={() => setStep(2)}>Cambiar paso</button></Modal><Modal open={step === 2} onOpenChange={open => { if (!open) setStep(0) }} title="Segundo paso"><input aria-label="Dato siguiente"/></Modal></main>
+  }
+  const user = userEvent.setup()
+  render(<Replacement/>)
+  const opener = screen.getByRole('button', { name: 'Abrir paso' })
+  await user.click(opener)
+  await user.click(await screen.findByRole('button', { name: 'Cambiar paso' }))
+  const next = await screen.findByRole('dialog', { name: 'Segundo paso' })
+  expect(within(next).getByRole('textbox', { name: 'Dato siguiente' })).toBeVisible()
+  expect(next.contains(document.activeElement)).toBe(true)
+  expect(opener).not.toHaveFocus()
 })

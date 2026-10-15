@@ -67,12 +67,12 @@ MARGIN = 43
 CONTENT = WIDTH - 2 * MARGIN
 
 if AUTHORING_IMPORT_ERROR is None:
-    NAVY = colors.HexColor("#15324B")
-    TEAL = colors.HexColor("#008B83")
-    INK = colors.HexColor("#263E50")
-    MUTED = colors.HexColor("#617787")
-    PALE = colors.HexColor("#EFF7F7")
-    LINE = colors.HexColor("#D9E4EB")
+    NAVY = colors.HexColor("#182322")
+    TEAL = colors.HexColor("#0B756D")
+    INK = colors.HexColor("#182322")
+    MUTED = colors.HexColor("#4D6657")
+    PALE = colors.HexColor("#EEF8F6")
+    LINE = colors.HexColor("#D9E4DF")
     font_candidates = [
         (Path("C:/Windows/Fonts"), ("arial.ttf", "arialbd.ttf", "ariali.ttf")),
         (Path("/usr/share/fonts/truetype/dejavu"), ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf")),
@@ -582,7 +582,7 @@ def parameter_tables():
 def build(candidate: Path, results: dict, draft: bool):
     require_authoring_runtime()
     story = []
-    logo = REPO / "frontend/public/trackvance-logo.jpg"
+    logo = REPO / "frontend/public/trackvance-logo.png"
     story.append(Spacer(1, 40))
     logo_img = Image(str(logo), width=215, height=115, kind="proportional", hAlign="LEFT")
     story.extend([logo_img, Spacer(1, 32)])

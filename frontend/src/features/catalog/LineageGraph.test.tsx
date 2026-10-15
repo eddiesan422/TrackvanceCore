@@ -86,3 +86,54 @@ it('shows the exact version resolved by the latest graph and keeps an explicitly
   expect(screen.getByLabelText('Versión del linaje')).toHaveValue('v1')
   expect(api).toHaveBeenCalledWith('/catalog/datasets/d/lineage-graph?projection=business&max_depth=4&max_nodes=100&version_id=v1')
 })
+
+it('fits the complete long business chain inside the measured viewport and restores readable real size', async () => {
+  const nodes = Array.from({ length: 12 }, (_, index) => ({ id: `DATASET_VERSION:v${index}`, resource_id: `v${index}`, type: 'DATASET_VERSION', label: `Versión ${index}`, technical: false, has_more: false }))
+  const edges = nodes.slice(1).map((node, index) => ({ id: `e${index}`, source: nodes[index].id, target: node.id, relation: 'DERIVED_FROM', stored_relation: 'DERIVED_FROM', state: 'RECORDED' }))
+  vi.mocked(api).mockImplementation(async path => path.includes('section=versions') ? { items: [], total: 0 } : { root_id: nodes[0].id, version_id: 'v0', nodes, edges, complete: true, pending_branches: [], branches: [] })
+  const user = userEvent.setup()
+  const { container } = renderApp(<LineageGraph datasetId="d"/>)
+  await screen.findByRole('button', { name: /Versión de datos Versión 11/ })
+  const viewport = screen.getByLabelText('Diagrama de linaje; usa las flechas para desplazar')
+  const scrollTo = vi.fn()
+  Object.defineProperties(viewport, { clientWidth: { value: 344 }, clientHeight: { value: 590 }, scrollTo: { value: scrollTo } })
+  await user.click(screen.getByRole('button', { name: 'Ajustar a pantalla' }))
+  const fullCanvas = container.querySelector('.lineage-canvas') as HTMLElement
+  const fittedExtent = fullCanvas.parentElement as HTMLElement
+  expect(Number.parseFloat(fittedExtent.style.width)).toBeLessThanOrEqual(320)
+  expect(Number.parseFloat(fittedExtent.style.height)).toBeLessThanOrEqual(566)
+  expect(Number.parseFloat(fittedExtent.style.width)).toBeGreaterThan(0)
+  expect(container.querySelectorAll('.lineage-node')).toHaveLength(12)
+  expect(scrollTo).toHaveBeenCalledWith({ left: 0, top: 0 })
+  expect(screen.getByRole('button', { name: 'Alejar linaje' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Acercar linaje' })).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Restablecer zoom del linaje al 100 %' }))
+  expect(screen.getByText('100%')).toBeVisible()
+  expect(fullCanvas.style.transform).toBe('scale(1)')
+  expect(screen.getByRole('button', { name: 'Alejar linaje' })).toBeEnabled()
+})
+
+it('reveals a real-size card with finite keyboard panning in a narrow desktop viewport without oscillating', async () => {
+  const node = { id: 'DATASET_VERSION:v', resource_id: 'v', type: 'DATASET_VERSION', label: 'Versión visible', technical: false, has_more: false }
+  vi.mocked(api).mockImplementation(async path => path.includes('section=versions') ? { items: [], total: 0 } : { root_id: node.id, version_id: 'v', nodes: [node], edges: [], complete: true, pending_branches: [], branches: [] })
+  const user = userEvent.setup()
+  renderApp(<LineageGraph datasetId="d"/>)
+  const card = await screen.findByRole('button', { name: /Versión de datos Versión visible/ })
+  const viewport = screen.getByLabelText('Diagrama de linaje; usa las flechas para desplazar')
+  const cardLeft = Number.parseFloat(card.style.left)
+  let scrollLeft = cardLeft + 10
+  Object.defineProperties(viewport, { clientWidth: { value: 344 }, scrollLeft: { get: () => scrollLeft } })
+  const scrollBy = vi.fn((movement: ScrollToOptions) => { scrollLeft += movement.left || 0 })
+  Object.defineProperty(viewport, 'scrollBy', { value: scrollBy })
+  viewport.focus()
+  let visible = false
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const left = cardLeft - scrollLeft, right = left + 256
+    if (left >= 4 && right <= 340) { visible = true; break }
+    await user.keyboard(left < 4 ? '{ArrowLeft}' : '{ArrowRight}')
+  }
+  expect(visible).toBe(true)
+  expect(scrollBy).toHaveBeenCalled()
+  expect(Math.abs(scrollBy.mock.calls[0][0].left || 0)).toBeLessThanOrEqual((344 - 256 - 8) / 2)
+  expect(screen.getByText('100%')).toBeVisible()
+})

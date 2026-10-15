@@ -30,8 +30,10 @@ export function Modal({ open, onOpenChange, title, description, children, wide =
   const opener = useRef<HTMLElement | null>(null)
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="modal-overlay"/><Dialog.Content className={`modal ${wide ? 'wide' : ''}`} {...(!description ? { 'aria-describedby': undefined } : {})} onOpenAutoFocus={() => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => {
     event.preventDefault()
+    const activeDialog = document.activeElement?.closest('[role="dialog"]')
+    if (activeDialog && activeDialog !== event.target) return
     if (opener.current?.isConnected && opener.current !== document.body) opener.current.focus()
-    else if (!document.activeElement || document.activeElement === document.body) document.querySelector<HTMLElement>('main')?.focus()
+    if (!document.activeElement || document.activeElement === document.body) document.querySelector<HTMLElement>('main')?.focus()
   }}><div className="modal-heading"><div><Dialog.Title>{title}</Dialog.Title>{description && <Dialog.Description>{description}</Dialog.Description>}</div><Dialog.Close type="button" className="icon-button" aria-label="Cerrar ventana"><X size={20}/></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 export function Field({ label: title, hint, children }: { label: string; hint?: string; children: ReactNode }) {
