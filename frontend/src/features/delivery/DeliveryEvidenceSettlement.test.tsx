@@ -40,13 +40,13 @@ describe('Delivery commit before local evidence publication', () => {
     currentRun = { ...currentRun, status: 'SUCCESS', decision: 'COMMITTED' }
     await advance(1600)
     expect(screen.getByText('Entrega confirmada. Publicando evidencia local…')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Manifiesto' })).toBeDisabled()
     expect(vi.mocked(api).mock.calls.some(([path]) => path.endsWith('/receipt'))).toBe(false)
     currentRun = { ...currentRun, metrics: { receipt_artifact_id: 'receipt-settling' } }
     await advance(1600)
     expect(screen.getByText('public.published')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Manifiesto' })).toBeEnabled()
     const settledReads = runReads
     await advance(5000)
@@ -63,7 +63,7 @@ describe('Delivery commit before local evidence publication', () => {
     await advance(1600)
     expect(screen.getByText('Entrega confirmada. La evidencia local está pendiente de reparación.')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Reparar evidencia' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeDisabled()
     const settledReads = runReads
     await advance(5000)
     expect(runReads).toBe(settledReads)
@@ -78,7 +78,7 @@ describe('Delivery commit before local evidence publication', () => {
     expect(runReads).toBeGreaterThan(10)
     expect(runReads).toBeLessThanOrEqual(42)
     expect(screen.queryByRole('button', { name: 'Reparar evidencia' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeDisabled()
     const stoppedReads = runReads
     await advance(30_000)
     expect(runReads).toBe(stoppedReads)
@@ -98,7 +98,7 @@ describe('Delivery commit before local evidence publication', () => {
     await advance(1600)
     expect(screen.getByText('Entrega confirmada. La evidencia local está pendiente de reparación.')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Reparar evidencia' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Manifiesto' })).toBeDisabled()
     expect(vi.mocked(api).mock.calls.some(([path]) => path.endsWith('/receipt'))).toBe(false)
     expect(post).not.toHaveBeenCalled()

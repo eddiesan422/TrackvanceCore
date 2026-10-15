@@ -19,6 +19,7 @@ const names: Record<string, string> = {
   shared_strings: 'Entradas de texto compartido', shared_string_entries: 'Entradas de texto compartido',
   styles: 'Estilos', style_entries: 'Estilos', inspection_bytes: 'Bytes de inspección',
   max_rows: 'Registros de datos', max_upload_bytes: 'Archivo recibido',
+  observed_bytes: 'Contenido de valores observados', disk_reserve_bytes: 'Reserva mínima de disco libre',
 }
 
 export function limitFormat(filename?: string) {

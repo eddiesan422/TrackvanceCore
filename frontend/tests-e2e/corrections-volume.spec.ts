@@ -252,7 +252,7 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   expect(committed.decision).toBe('COMMITTED')
   expect(committed.metrics.receipt_artifact_id).toBeTruthy()
   await page.goto(`/runs/${occurrence.run_id}`)
-  await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Comprobante inmutable', exact: true })).toBeVisible()
   await expect(page.getByText(`${schema}.${tableName}`, { exact: true }).first()).toBeVisible()
   const wanted = [acquisition.id, execution.id, committed.id]
   await expect.poll(async () => {

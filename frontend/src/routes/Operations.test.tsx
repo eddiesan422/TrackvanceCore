@@ -4,11 +4,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { label } from '../components/ui'
 import { renderApp } from '../test/render'
-import { ExceptionsPage, RulesPage } from './Operations'
+import { AuditPage, ExceptionsPage, RulesPage } from './Operations'
 
 vi.mock('../api/client', async importOriginal => ({ ...await importOriginal<typeof import('../api/client')>(), api: vi.fn() }))
 
 beforeEach(() => vi.clearAllMocks())
+
+it('paginates all recovered audit events and resets the page when filtering', async () => {
+  const items = Array.from({ length: 60 }, (_, index) => ({ id: `event-${index + 1}`, message: `Acción ${String(index + 1).padStart(2, '0')}`, actor: index < 10 ? 'Ana' : 'Luis', subject_id: `subject-${index + 1}`, event_type: 'DATASET_UPDATED', created_at: '2026-10-15T05:00:00Z' }))
+  vi.mocked(api).mockResolvedValue({ items, total: items.length })
+  const user = userEvent.setup()
+  renderApp(<AuditPage/>, { permissions: ['audit:read'] })
+  expect(await screen.findByText('Acción 01')).toBeInTheDocument()
+  expect(screen.queryByText('Acción 26')).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Página siguiente' }))
+  expect(screen.getByText('Acción 26')).toBeInTheDocument()
+  expect(screen.queryByText('Acción 01')).not.toBeInTheDocument()
+  await user.selectOptions(screen.getByLabelText('Filtrar por actor'), 'Ana')
+  expect(screen.getByText('Acción 01')).toBeInTheDocument()
+  expect(screen.queryByText('Acción 26')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Página anterior' })).toBeDisabled()
+  expect(screen.getByText(/60 eventos recuperados/)).toBeInTheDocument()
+  expect(api).toHaveBeenCalledTimes(1)
+})
 
 const baseException = {
   id: 'case-1', display_id: 'EXC-0001', finding_id: 'finding-1', run_id: 'run-origin', origin_run_id: 'run-origin',

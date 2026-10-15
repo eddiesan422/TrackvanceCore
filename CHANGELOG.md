@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.9.0 - 2026-10-15 - Correcciones de interfaz sobre la implementación vigente
+
+- Conserva implementación 0.9.0 y especificación v1.1, contratos históricos,
+  reglas, permisos y datos. No añade migraciones ni dependencias gráficas.
+- Sistema visual compartido con el logo suministrado, blanco/negro y tonos de
+  marca, contraste, foco visible, navegación móvil por teclado, tablas y diálogos
+  adaptables. Corrige referencias visibles obsoletas a 0.8.5.
+- Linaje de negocio de izquierda a derecha con dimensiones medidas, selección
+  y resaltado de recorrido, monitoreo lateral y múltiples entradas conservadas.
+  La proyección agrupa artefactos y payloads en backend antes del presupuesto;
+  cursores firmados permiten continuación por rama y evidencia técnica paginada,
+  siempre con autorización actual, cotas finitas y navegación sólo de metadata.
+- Resumen Sentinel predeterminado por ejecución: cantidad/tasa de nulos con
+  denominador y umbral evaluado, columnas seleccionables, distribución reconciliada
+  de controles y observaciones separadas, unidades y evolución compatibles.
+  Conserva valores exactos en el detalle y los estados sin evidencia disponible.
+- Presentación funcional de comprobantes e intentos Delivery y detalle de lotes
+  bajo demanda; paginación visual de los eventos de auditoría recuperados.
+  El constructor distingue selección pendiente de carga real de versiones.
+- Refuerza las pruebas de identidad, autorización, proyección, continuación,
+  layout y coherencia de métricas. El oráculo REST conserva su comprobación
+  técnica anterior y exige además la ruta de negocio desde una sola raíz.
+
+La entrega del 14 de octubre (26826c1) conserva sus gates y evidencia histórica.
+Los resultados de este ciclo se publican por SHA y etapa, incluidos los intentos
+fallidos; esta entrada describe cambios y no anticipa pruebas ni actualización.
+
 ## 0.8.5 - 2026-10-11 - Reportes, preservación y desarrollo aislado
 
 - Criterio estricto de aprobación v2 y catálogo de personas de gobierno, con

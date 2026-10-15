@@ -20,6 +20,52 @@ const destination = {
 
 beforeEach(() => vi.resetAllMocks())
 
+it('waits for a dataset selection before announcing a version request', async () => {
+  let finish!: (value: { id: string; name: string; versions: never[] }) => void
+  const detail = new Promise(resolve => { finish = resolve })
+  vi.mocked(api).mockImplementation(async path => {
+    if (path === '/datasets') return { items: [{ id: 'source-waiting', name: 'Fuente por seleccionar' }], total: 1 }
+    if (path === '/delivery/destinations') return { items: [], total: 0 }
+    if (path === '/datasets/source-waiting') return detail
+    throw new Error(`Unexpected request: ${path}`)
+  })
+  const user = userEvent.setup()
+  renderApp(<DeliveryBuilder/>, { permissions })
+  await screen.findByRole('option', { name: 'Fuente por seleccionar' })
+  expect(screen.getByText('Selecciona un dataset para consultar sus versiones registradas.')).toBeVisible()
+  expect(screen.queryByText('Cargando versiones inmutables…')).not.toBeInTheDocument()
+  await user.selectOptions(screen.getByLabelText('Dataset'), 'source-waiting')
+  expect(screen.getByText('Cargando versiones inmutables…')).toBeVisible()
+  await act(async () => finish({ id: 'source-waiting', name: 'Fuente por seleccionar', versions: [] }))
+  expect(await screen.findByLabelText('DatasetVersion exacta')).toBeVisible()
+  expect(screen.queryByText('Cargando versiones inmutables…')).not.toBeInTheDocument()
+})
+
+it('shows confirmed REST totals without expanding a thousand technical batch identities', async () => {
+  vi.mocked(api).mockImplementation(async path => {
+    if (path.endsWith('/attempts')) return { items: [{ id: 'attempt-batches', status: 'COMMITTED', rows_written: 1000000, rows_attempted: 1000000 }], total: 1 }
+    if (path.includes('/rest-batches?')) {
+      const offset = Number(new URLSearchParams(path.split('?')[1]).get('offset'))
+      return { items: Array.from({ length: 100 }, (_, index) => ({ id: `batch-${offset + index + 1}`, ordinal: offset + index, rows: 1000, attempts: 1, status: 'COMMITTED', payload_sha256: `exact-hash-${offset + index + 1}`, response_status: 200 })), total: 1000 }
+    }
+    if (path.endsWith('/receipt')) return { result: 'COMMITTED', rows_written: 1000000, target: { mode: 'REST' } }
+    throw new Error(`Unexpected request: ${path}`)
+  })
+  const user = userEvent.setup()
+  renderApp(<DeliveryRunDetail data={{ id: 'run-batches', status: 'SUCCESS', decision: 'COMMITTED', name: 'Entrega REST', metrics: { receipt_artifact_id: 'receipt-batches', confirmed_batches: 1000, batch_count: 1000 }, execution_plan: { target: { mode: 'REST' } } }}/>, { permissions })
+  expect(await screen.findByText('batch-1')).not.toBeVisible()
+  expect(screen.getByText('lotes confirmados')).toHaveTextContent('1.000 lotes confirmados')
+  expect(screen.getByRole('heading', { name: 'Comprobante inmutable' })).toBeVisible()
+  await user.click(screen.getByText('Consultar lotes e identidades exactas'))
+  expect(screen.getByText('batch-1')).toBeVisible()
+  expect(screen.queryByText('batch-101')).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+  expect(await screen.findByText('batch-101')).toBeVisible()
+  expect(screen.queryByText('batch-1')).not.toBeInTheDocument()
+  expect(api).toHaveBeenCalledWith('/delivery/runs/run-batches/rest-batches?limit=100&offset=100')
+  expect(post).not.toHaveBeenCalled()
+})
+
 describe('Delivery destinations', () => {
   it('requires a successful test of the current write configuration before saving', async () => {
     vi.mocked(post).mockResolvedValueOnce({ status: 'SUCCESS', message: 'Acceso de escritura verificado.', tested_at: '2026-09-22T12:00:00Z' }).mockResolvedValueOnce(destination)
@@ -197,12 +243,12 @@ describe('Delivery runs and evidence', () => {
       throw new Error(`Unexpected request: ${path}`)
     })
     renderApp(<DeliveryRunDetail data={{ id: 'run-committed', module: 'DELIVERY', status: 'SUCCESS', name: 'Publicar ventas', dataset_name: 'Ventas', dataset_version_id: 'version-3', created_at: '2026-09-22T12:00:00Z', execution_plan: { destination_name: 'Warehouse', destination_version: 2, destination_version_id: 'destination-version-2', write_strategy: 'APPEND', target: { schema_name: 'public', table_name: 'sales' } } }}/>, { permissions: [...permissions, 'audit:read'] })
-    expect(await screen.findByText('Receipt inmutable')).toBeInTheDocument()
+    expect(await screen.findByText('Comprobante inmutable')).toBeInTheDocument()
     expect(screen.getByText('Warehouse')).toBeInTheDocument()
     expect(screen.getByText('v2 · destination-version-2')).toBeInTheDocument()
     expect(await screen.findByText('public.sales')).toBeInTheDocument()
     expect(await screen.findByText('DELIVERY_COMMITTED')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Receipt' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Comprobante' })).toBeEnabled()
     expect(download).not.toHaveBeenCalled()
   })
 

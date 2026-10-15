@@ -1,6 +1,7 @@
 """Bounded, authorized metadata traversal; stored relationship directions stay intact."""
 
 from collections import deque
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import and_, or_, select
@@ -187,6 +188,9 @@ def _edge(link, nodes):
 @router.get("/datasets/{dataset_id}/lineage-graph")
 def lineage_graph(dataset_id: str, request: Request, version_id: str | None = None,
                   max_depth: int = Query(2, ge=1, le=8), max_nodes: int = Query(100, ge=10, le=500),
+                  projection: Literal["technical", "business"] = "technical",
+                  cursor: str | None = Query(None, max_length=32768),
+                  evidence: bool = False,
                   db: Session = Depends(get_db)):
     user: User = request.state.user
     asset = db.get(Dataset, dataset_id)
@@ -200,12 +204,24 @@ def lineage_graph(dataset_id: str, request: Request, version_id: str | None = No
     if not version:
         if version_id:
             raise OperationError(404, "NOT_FOUND", "No se encontró la versión del dataset.")
-        return {"nodes": [], "edges": [], "root_id": None, "version_id": None,
-                "complete": True, "pending_branches": [], "limits": {"max_depth": max_depth, "max_nodes": max_nodes}}
+        empty: dict[str, object] = {"nodes": [], "edges": [], "root_id": None, "version_id": None,
+                 "complete": True, "pending_branches": [], "limits": {"max_depth": max_depth, "max_nodes": max_nodes}}
+        if projection == "business":
+            from .lineage_business import MAX_PATH, PAGE_SIZE
+            empty.update(projection="business", anchor_id=None, branches=[],
+                         metadata_relationships_scanned=0,
+                         limits={"max_depth": max_depth, "max_nodes": max_nodes,
+                                 "adjacency_page_size": PAGE_SIZE, "max_path": MAX_PATH})
+        return empty
     grants = set(effective_permissions(db, user))
     root = _node(db, user, "DATASET_VERSION", version.id, grants)
     if root is None:
         raise OperationError(403, "PERMISSION_DENIED", "Tu rol no permite consultar esta versión.")
+    if projection == "business":
+        from .lineage_business import business_graph
+        return business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evidence)
+    if cursor or evidence:
+        raise OperationError(422, "LINEAGE_CURSOR_INVALID", "La continuación requiere la vista de negocio.")
     nodes, links, pending = {root["id"]: root}, {}, set()
     queue = deque([(root["id"], 0)])
     visited = set()

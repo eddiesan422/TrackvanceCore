@@ -88,7 +88,9 @@ describe('Sentinel local scheduling', () => {
     const user = userEvent.setup()
     renderApp(<MonitorSchedulePanel monitorId="monitor"/>)
     await user.click(screen.getByText('Programación e histórico'))
-    const chart = await screen.findByRole('img', { name: 'Evolución de row_count' })
+    const chart = await screen.findByRole('img', { name: 'Evolución de Filas' })
+    expect(screen.getByRole('option', { name: 'Filas · Medición exacta v2' })).toBeInTheDocument()
+    expect(screen.getByText('100 filas')).toBeInTheDocument()
     const positions = [...chart.querySelectorAll('circle')].map(circle => Number(circle.getAttribute('cx')))
     // Six hours occupy a quarter of a 24-hour interval, regardless of sample count.
     expect((positions[1] - positions[0]) / (positions[2] - positions[0])).toBeCloseTo(0.25)

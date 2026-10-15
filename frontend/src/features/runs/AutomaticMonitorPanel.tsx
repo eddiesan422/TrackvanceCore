@@ -4,6 +4,7 @@ import { api, post } from '../../api/client'
 import type { RecordData } from '../../api/client'
 import { usePermission, useSession } from '../../app/session'
 import { date, ErrorState, Field, Loading, Notice } from '../../components/ui'
+import { exactValue, quantity } from './sentinelPresentation'
 
 function AutomaticEditor({ monitorId, data }: { monitorId: string; data: RecordData }) {
   const cache = useQueryClient(), session = useSession()
@@ -18,7 +19,7 @@ function AutomaticEditor({ monitorId, data }: { monitorId: string; data: RecordD
       <label><input type="checkbox" checked={assignSelf} disabled={!canConfigure || !canExecute} onChange={event => setAssignSelf(event.target.checked)}/> Asignarme como responsable</label>
       <p className="muted">Revisión {data.version} · próxima revisión ligera {date(data.next_review_at)}. Las reglas se ajustan mediante Nueva versión.</p>
       {save.error && <ErrorState error={save.error}/>}<div><button className="button secondary small" disabled={!canConfigure || save.isPending || enabled && (!canExecute || data.requires_executor_assignment && !assignSelf)}>{save.isPending ? 'Guardando…' : 'Guardar monitoreo automático'}</button></div>
-    </form>{data.reviews?.length > 0 && <details><summary>Revisiones ligeras recientes</summary><div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Estado</th><th>Edad (horas)</th><th>Versión</th></tr></thead><tbody>{(data.reviews as RecordData[]).map(review => <tr key={review.id}><td>{date(review.observed_at)}</td><td>{({ FRESH: 'Fresco', STALE: 'Antiguo', BLOCKED: 'Bloqueado', PAUSED: 'Pausado', WAITING_FIRST_VERSION: 'Esperando primera versión' } as Record<string, string>)[review.status] || review.status}{review.reason_code && <small className="reason-code">{review.reason_code}</small>}</td><td>{review.metrics?.age_hours == null ? 'No disponible' : String(review.metrics.age_hours)}</td><td className="mono">{review.dataset_version_id || '—'}</td></tr>)}</tbody></table></div></details>}
+    </form>{data.reviews?.length > 0 && <details><summary>Revisiones ligeras recientes</summary><div className="table-scroll"><table><thead><tr><th>Fecha</th><th>Estado</th><th>Edad (horas)</th><th>Versión</th></tr></thead><tbody>{(data.reviews as RecordData[]).map(review => <tr key={review.id}><td>{date(review.observed_at)}</td><td>{({ FRESH: 'Fresco', STALE: 'Antiguo', BLOCKED: 'Bloqueado', PAUSED: 'Pausado', WAITING_FIRST_VERSION: 'Esperando primera versión' } as Record<string, string>)[review.status] || review.status}{review.reason_code && <small className="reason-code">{review.reason_code}</small>}</td><td>{quantity(review.metrics?.age_hours, 'horas')}{review.metrics?.age_hours != null && <details><summary>Valor exacto</summary><code>{exactValue(review.metrics.age_hours)}</code></details>}</td><td className="mono">{review.dataset_version_id || '—'}</td></tr>)}</tbody></table></div></details>}
   </div>
 }
 

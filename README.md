@@ -5,8 +5,20 @@
 La implementación añade REST de entrada/salida, Sentinel automático con resumen
 visual por ejecución, calendario Intake y baja lógica, lectura de notificaciones
 por casilla y linaje gráfico autorizado. Conserva contratos e historia 0.8.5.
-Los gates de 0.9.0 permanecen abiertos hasta disponer de evidencia completa de
-pruebas pequeñas, millón de registros, CI del SHA final y actualización verificada.
+La entrega anterior quedó verificada en el commit
+[26826c1](https://github.com/eddiesan422/TrackvanceCore/commit/26826c1fc5a44ffd560d7998a20728d0b24dea30).
+El ciclo de interfaz del 15 de octubre conserva 0.9.0 y la edición técnica v1.1:
+paleta y logo Trackvance, navegación accesible, formularios y tablas adaptables,
+resumen Sentinel reconciliado y linaje de negocio con continuación por ramas.
+Sus pruebas y promoción se acreditan por separado en la
+[evidencia vigente](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/validation.md).
+
+El linaje usa una proyección de metadata que agrupa archivos, partes y payloads
+antes de consumir el presupuesto de recursos de negocio. Cada rama se continúa
+mediante un cursor firmado y finito, con permisos revalidados; la evidencia
+técnica permanece disponible bajo demanda. Sentinel presenta los controles,
+nulos, diversidad y evolución de la ejecución y versión seleccionadas sin nuevos
+scans, sin sumar incumplimientos superpuestos ni inventar una calidad global.
 
 ### Base conservada de 0.8.5
 

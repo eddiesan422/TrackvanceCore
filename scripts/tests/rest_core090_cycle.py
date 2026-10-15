@@ -22,7 +22,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 FIELDS = [("id", "STRING", False), ("ordinal", "INT64", False), ("amount", "DECIMAL", False),
           ("category", "STRING", False), ("optional", "STRING", True), ("observed_at", "TIMESTAMP", False)]
@@ -346,6 +346,72 @@ def lineage_proof(client, source_dataset_id, source_version_id, output_dataset_i
             "result": "PASS" if core_complete else "FAIL"}
 
 
+def business_lineage_proof(client, dataset_id, version_id, output_version_id,
+                           intake_run_id, delivery_run_id, destination_version_id, expected_batches):
+    """Follow the same source-root business pages exposed by the interface.
+
+    The technical legacy oracle above stays independent. No second dataset root,
+    larger global limit, local artifact filtering or invented edge can complete
+    this business path. Branch pages may be merged only through server cursors.
+    A browser check is a separate required receipt, never inferred from this API.
+    """
+    root = f"DATASET_VERSION:{version_id}"
+    output, intake = f"DATASET_VERSION:{output_version_id}", f"RUN:{intake_run_id}"
+    delivery, destination = f"RUN:{delivery_run_id}", f"DELIVERY_DESTINATION_VERSION:{destination_version_id}"
+    required = [(root, intake, "RUN_INPUT"), (intake, output, "RUN_OUTPUT"),
+                (root, output, "DERIVED_FROM"), (output, delivery, "DELIVERY_INPUT"),
+                (delivery, destination, "DELIVERED_TO")]
+    critical = {root, output, intake, delivery, destination}
+    nodes, edges, views, seen_cursors = {}, {}, [], set()
+    queue = [None]
+    def complete():
+        return critical <= nodes.keys() and all(any(
+            edge["source"] == source and edge["target"] == target
+            and relation in edge["stored_relations"]
+            and edge["state"] == ("CONFIRMED" if relation == "DELIVERED_TO" else "RECORDED")
+            for edge in edges.values()) for source, target, relation in required)
+    while queue and len(views) < 16:
+        cursor = queue.pop(0)
+        if cursor in seen_cursors:
+            continue
+        seen_cursors.add(cursor)
+        query = {"projection": "business", "version_id": version_id, "max_nodes": 100, "max_depth": 4}
+        if cursor:
+            query["cursor"] = cursor
+        graph = client.call(f"/catalog/datasets/{dataset_id}/lineage-graph?" + urlencode(query))
+        assert graph["projection"] == "business" and graph["root_id"] == root and graph["version_id"] == version_id
+        assert graph["limits"] == {"max_nodes": 100, "max_depth": 4, "adjacency_page_size": 80, "max_path": 64}
+        identities = {node["id"] for node in graph["nodes"]}
+        assert len(identities) == len(graph["nodes"]) <= 100
+        assert graph["anchor_id"] in identities
+        assert all(node["type"] != "ARTIFACT" and node["id"] == f"{node['type']}:{node['resource_id']}"
+                   for node in graph["nodes"])
+        assert all(edge["source"] in identities and edge["target"] in identities
+                   and edge["evidence_count"] == len(edge["evidence_ids"]) > 0 for edge in graph["edges"])
+        assert graph["complete"] == (not graph["pending_branches"])
+        for node in graph["nodes"]:
+            nodes[node["id"]] = node
+        for edge in graph["edges"]:
+            edges[edge["id"]] = edge
+        views.append({"root_id": graph["root_id"], "anchor_id": graph["anchor_id"], "nodes": len(identities),
+                      "edges": len(graph["edges"]), "complete": graph["complete"],
+                      "metadata_relationships_scanned": graph["metadata_relationships_scanned"],
+                      "metadata_sha256": hashlib.sha256(json.dumps(graph, sort_keys=True, separators=(",", ":")).encode()).hexdigest()})
+        if complete():
+            break
+        queue.extend(branch["cursor"] for branch in graph["branches"] if branch["direction"] in {"both", "downstream"})
+    assert complete(), "The interface's source-root business continuation must reach the actual confirmed destination"
+    assert nodes[intake]["status"] == "SUCCESS" and nodes[intake]["decision"] == "APPROVED"
+    assert nodes[delivery]["status"] == "SUCCESS" and nodes[delivery]["decision"] == "COMMITTED"
+    groups = nodes[delivery]["technical_groups"]
+    payloads = next(group["relationship_count"] for group in groups if group["relation"] == "REST_BATCH_PAYLOAD")
+    assert payloads == expected_batches
+    return {"result": "PASS", "proof_version": 1, "projection": "business", "single_source_root": True,
+            "view_count": len(views), "views": views, "core_links_complete": True,
+            "business_nodes": len(nodes), "artifact_nodes": 0, "grouped_batch_payloads": payloads,
+            "limits_per_page": {"max_nodes": 100, "max_depth": 4}, "browser_review": "SEPARATE_REQUIRED_EVIDENCE"}
+
+
 def certify(api_url, receiver_url, rows, evidence, timeout):
     project = require_codex()
     started = time.monotonic()
@@ -472,6 +538,8 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
                                           intake["output_version_id"], intake["id"], delivery["id"],
                                           destination["destination_version_id"])
         assert stages["lineage"]["result"] == "PASS"
+        stages["business_lineage"] = business_lineage_proof(client, dataset_id, source_id,
+            intake["output_version_id"], intake["id"], delivery["id"], destination["destination_version_id"], len(batches))
         report["result"] = "PASS"
     except Exception as error:
         report["result"], report["error_type"] = "FAIL", type(error).__name__

@@ -65,7 +65,7 @@ function DeleteDialog({ contract, close }: { contract: RecordData; close: () => 
       {!!impact.data?.open_exception_ids.length && <Notice>Bloqueado por {impact.data.open_exception_ids.length} excepciones abiertas.</Notice>}
       <Notice>Se conservan datasets, aprobaciones, revisiones, hashes, historial y evidencia. Las entregas ya registradas y los monitores Sentinel se conservan.</Notice>
       <Field label="Motivo de baja"><textarea required minLength={3} maxLength={2000} value={note} onChange={event => setNote(event.target.value)}/></Field>
-      {remove.error && <ErrorState error={remove.error}/>}<div className="modal-footer"><button type="button" className="button secondary" onClick={close} disabled={remove.isPending}>Cancelar</button><button className="button primary" disabled={!impact.data?.can_delete || impact.isFetching || remove.isPending || note.trim().length < 3}>{remove.isPending ? 'Eliminando…' : 'Confirmar baja lógica'}</button></div>
+      {remove.error && <ErrorState error={remove.error}/>}<div className="modal-footer"><button type="button" className="button secondary" onClick={close} disabled={remove.isPending}>Cancelar</button><button className="button danger" disabled={!impact.data?.can_delete || impact.isFetching || remove.isPending || note.trim().length < 3}>{remove.isPending ? 'Eliminando…' : 'Confirmar baja lógica'}</button></div>
     </form>}
   </Modal>
 }

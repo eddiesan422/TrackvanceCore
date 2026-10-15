@@ -93,10 +93,10 @@ function HealthTrend({ points }: { points: RecordData[] }) {
   const x = (index: number) => points.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (points.length - 1)
   const y = (score: number) => top + (100 - Math.max(0, Math.min(100, score))) * plotHeight / 100
   const series = [
-    { key: 'overall', label: 'General', color: '#294d5d', width: 3 },
-    { key: 'intake', label: 'Data Intake', color: '#168e7c', width: 2 },
-    { key: 'recon', label: 'ReconOps', color: '#6f91b8', width: 2 },
-    { key: 'sentinel', label: 'Sentinel', color: '#9b82b7', width: 2 },
+    { key: 'overall', label: 'General', color: '#1a3026', width: 3 },
+    { key: 'intake', label: 'Data Intake', color: '#08786f', width: 2 },
+    { key: 'recon', label: 'ReconOps', color: '#377f94', width: 2 },
+    { key: 'sentinel', label: 'Sentinel', color: '#578247', width: 2 },
   ]
   return <div className="health-trend"><div className="chart-legend">{series.map(item => <span key={item.key}><i style={{ background: item.color }}/>{item.label}</span>)}</div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Evolución de salud por módulo"><title>Evolución de la salud general, Data Intake, ReconOps y Sentinel</title>{[0, 25, 50, 75, 100].map(score => <g key={score}><line x1={left} x2={width - right} y1={y(score)} y2={y(score)} className="chart-grid-line"/><text x={left - 8} y={y(score) + 4} textAnchor="end" className="chart-axis-label">{score}%</text></g>)}{series.map(item => { const values = points.map((point, index) => ({ index, value: point[item.key] == null ? null : Number(point[item.key]) })).filter(point => point.value != null && Number.isFinite(point.value)); return <g key={item.key}><polyline points={values.map(point => `${x(point.index)},${y(Number(point.value))}`).join(' ')} fill="none" stroke={item.color} strokeWidth={item.width} strokeLinecap="round" strokeLinejoin="round"/>{values.map(point => <circle key={point.index} cx={x(point.index)} cy={y(Number(point.value))} r={item.key === 'overall' ? 3.5 : 2.5} fill="#fff" stroke={item.color} strokeWidth="2"><title>{item.label}: {number(point.value)}% · {chartDate(points[point.index].date)}</title></circle>)}</g>})}<text x={left} y={height - 8} className="chart-axis-label">{chartDate(points[0].date)}</text><text x={width - right} y={height - 8} textAnchor="end" className="chart-axis-label">{chartDate(points.at(-1)?.date)}</text></svg></div>
 }

@@ -28,6 +28,30 @@ function mockRun(status = 'SUCCESS') {
 }
 const renderRun = (permissions?: string[]) => renderApp(<RunDetail/>, { path: '/runs/run-123', route: '/runs/:id', permissions })
 
+it('opens completed Sentinel evidence visually and keeps readable, unit-aware results available', async () => {
+  const checks = [{ code: 'FRESHNESS', name: 'Actualización', status: 'FAIL', actual: 62.13, expected: { max_hours: 48 } },
+    { code: 'SCHEMA_REQUIRED', name: 'Estructura', status: 'PASS', actual: [], expected: [] },
+    { code: 'INFO', name: 'Observación de nulos', status: 'PASS', kind: 'OBSERVATION', actual: 0 }]
+  vi.mocked(api).mockImplementation(async path => path.endsWith('/visual-summary') ? {
+    run_id: 'run-123', dataset_version: 1, dataset_version_id: 'historical-version', indicators: { row_count: 100000 },
+    columns: [], checks, evolution: [], exact_metrics: [],
+  } : path.includes('/results?') ? { items: checks, total: checks.length } : {
+    id: 'run-123', name: 'Monitor histórico', module: 'sentinel', status: 'SUCCESS', decision: 'ALERT',
+    metrics: { row_count: 100000, total_checks: 2, failed_checks: 1, checks }, findings: [],
+  })
+  const user = userEvent.setup()
+  renderRun()
+  expect(await screen.findByRole('heading', { name: 'Resumen de esta ejecución' })).toBeInTheDocument()
+  expect(api).toHaveBeenCalledWith('/runs/run-123/visual-summary')
+  expect(screen.getByRole('button', { name: 'Resumen visual' })).toHaveClass('active')
+  await user.click(screen.getByRole('button', { name: 'Resultados' }))
+  expect(screen.getByText('62,13 horas')).toBeInTheDocument()
+  expect(screen.getByText('Máximo: 48 horas')).toBeInTheDocument()
+  expect(screen.getByText('Todas las columnas requeridas están presentes')).toBeInTheDocument()
+  expect(screen.getByText('Informativo')).toBeInTheDocument()
+  expect(screen.queryByText('{"max_hours":48}')).not.toBeInTheDocument()
+})
+
 describe('Run evidence actions', () => {
   beforeEach(() => { mockRun(); vi.mocked(download).mockResolvedValue(undefined) })
 

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api, post } from '../../api/client'
-import { ErrorState, Field, Modal, Notice } from '../../components/ui'
+import { ErrorState, Field, Modal, Notice, label } from '../../components/ui'
 
 type RestField = { name: string; path: string; logical_type: string; nullable: boolean }
 type Existing = { id: string; name: string; version: number; options: Record<string, unknown> }
@@ -60,11 +60,11 @@ export function RestEndpointDialog({ mode, existing, close, saved }: { mode: 'SO
       {mode === 'SOURCE' ? <><h3>Campos seleccionados</h3><div className="table-scroll"><table><thead><tr><th>Nombre</th><th>Ruta JSON</th><th>Tipo explícito</th><th>Admite nulos</th><th/></tr></thead><tbody>{fields.map((field, index) => <tr key={index}>
         <td><input aria-label={`Nombre campo ${index + 1}`} value={field.name} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))}/></td>
         <td><input aria-label={`Ruta campo ${index + 1}`} value={field.path} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, path: event.target.value } : item))}/></td>
-        <td><select aria-label={`Tipo campo ${index + 1}`} value={field.logical_type} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, logical_type: event.target.value } : item))}>{['STRING', 'INT64', 'DECIMAL', 'DATE', 'TIMESTAMP', 'BOOLEAN'].map(type => <option key={type}>{type}</option>)}</select></td>
+        <td><select aria-label={`Tipo campo ${index + 1}`} value={field.logical_type} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, logical_type: event.target.value } : item))}>{['STRING', 'INT64', 'DECIMAL', 'DATE', 'TIMESTAMP', 'BOOLEAN'].map(type => <option key={type} value={type}>{label(type)}</option>)}</select></td>
         <td><input type="checkbox" aria-label={`Nulos campo ${index + 1}`} checked={field.nullable} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, nullable: event.target.checked } : item))}/></td>
         <td><button type="button" className="text-button" disabled={fields.length === 1} onClick={() => { revision.current += 1; setTested(false); setFields(current => current.filter((_, i) => i !== index)) }}>Quitar</button></td>
       </tr>)}</tbody></table></div><button type="button" className="button secondary" disabled={fields.length >= 100} onClick={() => { revision.current += 1; setTested(false); setFields(current => [...current, { name: '', path: '', logical_type: 'STRING', nullable: true }]) }}>Añadir campo</button>
-      <Notice>Conserva STRING para identificadores y ceros iniciales. No se expanden arreglos. Una extracción fallida no publica versiones parciales.</Notice></> : <><label><input type="checkbox" checked={idempotent} onChange={event => setIdempotent(event.target.checked)}/> El receptor garantiza idempotencia real para la misma identidad y payload</label><Notice>La prueba usa HEAD y no envía filas. Cada lote requiere confirmación explícita. HTTP 202 y respuestas inciertas requieren revisión externa; no se reenvían automáticamente.</Notice></>}
+      <Notice>Conserva el tipo Texto (STRING) para identificadores y ceros iniciales. No se expanden arreglos. Una extracción fallida no publica versiones parciales.</Notice></> : <><label><input type="checkbox" checked={idempotent} onChange={event => setIdempotent(event.target.checked)}/> El receptor garantiza idempotencia real para la misma identidad y contenido</label><Notice>La prueba usa HEAD y no envía filas. Cada lote requiere confirmación explícita. HTTP 202 y respuestas inciertas requieren revisión externa; no se reenvían automáticamente.</Notice></>}
       {tested && <Notice success>Prueba de acceso completada con la configuración actual.</Notice>}{test.error && <ErrorState error={test.error}/>}{save.error && <ErrorState error={save.error}/>}
       <div className="modal-footer"><button type="button" className="button secondary" onClick={close} disabled={save.isPending}>Cancelar</button><button type="button" className="button secondary" onClick={() => test.mutate(revision.current)} disabled={!valid || test.isPending || save.isPending}>Probar {mode === 'SOURCE' ? 'lectura GET' : 'acceso HEAD'}</button><button className="button primary" disabled={!valid || !tested || test.isPending || save.isPending}>Guardar</button></div>
     </form>

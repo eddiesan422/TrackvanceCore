@@ -316,6 +316,35 @@ def metric_is_available(item: SentinelMetricHistory, profile: dict) -> bool:
     return denominator is not None and denominator > 0
 
 
+def check_category(check: dict) -> str:
+    """Project persisted outcomes, without changing decisions or counting observations."""
+    if check.get("kind") == "OBSERVATION":
+        return "OBSERVATION"
+    status = check.get("status")
+    if status == "PASS":
+        return "CONFORMING"
+    if status in {"WARN", "WARNING"} or status == "FAIL" and check.get("severity") == "WARNING":
+        return "WARNING"
+    if status == "FAIL":
+        return "FAILED"
+    return "NOT_EVALUATED"
+
+
+def check_projection(check: dict, config: dict) -> dict:
+    rules = config.get("rules", [])
+    rule = next((item for item in rules if check.get("rule_id") and item.get("rule_id") == check["rule_id"]), {})
+    return {**check, "visual_category": check_category(check), "rule_type": rule.get("type")}
+
+
+def null_threshold_checks(column: str, checks: list[dict]) -> list[dict]:
+    """A limit is shown only when the selected execution actually recorded that check."""
+    return [{"code": check.get("code"), "name": check.get("name"), "rule_id": check.get("rule_id"),
+             "expected": check.get("expected"), "visual_category": check["visual_category"]}
+            for check in checks if check.get("kind") != "OBSERVATION" and (
+                check.get("metric_key") == f"null_rate:{column}" or (
+                    check.get("code") == f"NULL_RATE_{column.upper()}" and check.get("name") == f"Nulos · {column}"))]
+
+
 @router.get("/runs/{run_id}/visual-summary")
 def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Read immutable execution evidence and compatible metadata only; never scan."""
@@ -335,13 +364,21 @@ def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depe
     monitor = db.get(Configuration, run.config_id)
     if monitor is None:
         raise ScheduleError(409, "MONITOR_CONFIGURATION_MISSING", "La revisión de esta ejecución no está disponible.")
+    checks_available = isinstance(metrics.get("checks"), list)
+    checks = [check_projection(item, monitor.config or {}) for item in metrics.get("checks", [])] if checks_available else []
+    distribution = {name: sum(item["visual_category"] == category for item in checks)
+                    for name, category in (("conforming", "CONFORMING"), ("warning", "WARNING"),
+                                           ("failed", "FAILED"), ("not_evaluated", "NOT_EVALUATED"),
+                                           ("observations", "OBSERVATION"))}
+    distribution["total_controls"] = len(checks) - distribution["observations"]
     columns = [{"name": item["name"], "null_count": item.get("null_count"),
         "null_rate": item.get("null_rate") if (ratio_denominator(profile, item, "null_rate") or 0) > 0 else None,
         "distinct_count": item.get("distinct_count"),
         "distinct_rate": item.get("distinct_rate") if (ratio_denominator(profile, item, "distinct_rate") or 0) > 0 else None,
         "uniqueness_ratio": item.get("uniqueness_ratio") if (ratio_denominator(profile, item, "uniqueness_ratio") or 0) > 0 else None,
         "logical_type": item.get("logical_type"), "null_denominator": profile.get("row_count"),
-        "distinct_denominator": ratio_denominator(profile, item, "distinct_rate")}
+        "distinct_denominator": ratio_denominator(profile, item, "distinct_rate"),
+        "null_threshold_checks": null_threshold_checks(item["name"], checks)}
         for item in profile.get("columns", [])]
     records = db.scalars(select(SentinelMetricHistory).where(SentinelMetricHistory.run_id == run.id,
         SentinelMetricHistory.organization_id == user.organization_id)).all()
@@ -372,17 +409,19 @@ def visual_summary(run_id: str, db: Session = Depends(get_db), user: User = Depe
             "observed_at": iso(item.observed_at), "exact_value": str(item.numeric_value) if item.numeric_value is not None else None,
             "value": chart_number(item.numeric_value)})
     return {"run_id": run.id, "configuration_id": run.config_id, "dataset_version_id": source.id,
+        "evaluated_configuration": {"id": monitor.id, "name": monitor.name, "version": monitor.version,
+                                    "config_hash": (run.execution_plan or {}).get("config_hash")},
         "dataset_version": source.version, "status": run.status, "decision": run.decision,
         "observed_at": iso(run.started_at), "profile_method": profile.get("metric_method"),
         "metric_definition_version": profile.get("metric_definition_version"), "scans": 0,
         "indicators": {"row_count": profile.get("row_count"), "column_count": profile.get("column_count"),
             "duplicate_row_count": profile.get("duplicate_row_count"), "distinct_row_count": profile.get("distinct_row_count"),
             "duplicate_definition": profile.get("row_duplicate_definition"), "total_checks": metrics.get("total_checks"),
-            "failed_checks": metrics.get("failed_checks"), "conforming_checks": metrics.get("conforming_checks")
-                if "conforming_checks" in metrics else metrics["total_checks"] - metrics["failed_checks"]
-                if "total_checks" in metrics and "failed_checks" in metrics else None,
+            "failed_checks": metrics.get("failed_checks"),
+            "conforming_checks": distribution["conforming"] if checks_available else None,
             "valid_rows": None}, "columns": columns,
-        "checks": metrics.get("checks", []), "exact_metrics": exact, "evolution": list(evolution.values()),
+        "checks_available": checks_available, "control_distribution": distribution if checks_available else None,
+        "checks": checks, "exact_metrics": exact, "evolution": list(evolution.values()),
         "evolution_truncated": len(history_rows) > 500, "evolution_limit": 500,
         "notes": ["Los controles conformes no equivalen a filas válidas.",
                   "Las reglas pueden superponerse; no se suman sus fallos como filas distintas.",

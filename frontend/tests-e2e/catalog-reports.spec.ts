@@ -236,7 +236,7 @@ async function deliverApprovedOutput(page: Page, destinationId: string, source: 
   await expect.poll(async () => (await (await page.request.get(`/api/v1/runs/${run.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
   const final = await (await page.request.get(`/api/v1/runs/${run.id}`)).json()
   expect(final.decision).toBe('COMMITTED')
-  await expect(page.getByRole('heading', { name: 'Receipt inmutable', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Comprobante inmutable', exact: true })).toBeVisible()
   const metadata = await (await page.request.get(`/api/v1/delivery/destinations/${destinationId}/table-metadata?schema_name=existing_delivery&table_name=${table}`)).json()
   expect(metadata.constraints.filter((constraint: { type: string }) => constraint.type === 'PRIMARY_KEY')).toEqual([expect.objectContaining({ columns: ['client_code'] })])
   expect(metadata.columns.find((column: { name: string }) => column.name === 'client_code').nullable).toBe(false)

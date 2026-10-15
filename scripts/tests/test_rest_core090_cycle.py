@@ -221,3 +221,62 @@ def test_lineage_refuses_product_response_above_existing_node_limit():
     source["nodes"].append({"id": "ARTIFACT:too-many", "type": "ARTIFACT", "resource_id": "too-many"})
     with pytest.raises(AssertionError):
         prove_views(source, output)
+
+
+def business_pages():
+    source, output = partial_lineage_views()
+    source_nodes = [item for item in source["nodes"] if item["type"] != "ARTIFACT"]
+    destination = next(item for item in output["nodes"] if item["type"] == "DELIVERY_DESTINATION_VERSION")
+    for item in source_nodes:
+        item["technical_groups"] = ([{"relation": "REST_BATCH_PAYLOAD", "relationship_count": 1000}]
+                                    if item["id"] == "RUN:delivery" else [])
+    def page(anchor, nodes, edges, pending):
+        return {"projection": "business", "root_id": "DATASET_VERSION:source", "anchor_id": anchor,
+                "version_id": "source", "nodes": nodes, "edges": [{**edge, "stored_relations": [edge["stored_relation"]],
+                    "evidence_count": 1, "evidence_ids": [edge["id"]]} for edge in edges],
+                "complete": not pending, "pending_branches": ["RUN:delivery"] if pending else [],
+                "branches": [{"node_id": "RUN:delivery", "direction": "downstream", "cursor": "signed-branch"}] if pending else [],
+                "limits": {"max_nodes": 100, "max_depth": 4, "adjacency_page_size": 80, "max_path": 64},
+                "metadata_relationships_scanned": len(edges)}
+    return [page("DATASET_VERSION:source", source_nodes, source["edges"], True),
+            page("RUN:delivery", [source_nodes[-1], destination], output["edges"][-1:], False)]
+
+
+def prove_business(pages):
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def call(self, path):
+            self.calls.append(path)
+            assert path.startswith("/catalog/datasets/source-dataset/lineage-graph?projection=business&version_id=source&")
+            assert "max_nodes=100&max_depth=4" in path
+            assert ("cursor=signed-branch" in path) == (len(self.calls) > 1)
+            return copy.deepcopy(pages[min(len(self.calls) - 1, len(pages) - 1)])
+    client = Client()
+    proof = cycle.business_lineage_proof(client, "source-dataset", "source", "output", "intake", "delivery", "destination", 1000)
+    return proof, client.calls
+
+
+def test_business_oracle_follows_real_branch_without_rerooting_or_increasing_global_limits():
+    proof, calls = prove_business(business_pages())
+    assert proof["result"] == "PASS" and proof["single_source_root"] is True
+    assert len(calls) == proof["view_count"] == 2
+    assert proof["grouped_batch_payloads"] == 1000 and proof["artifact_nodes"] == 0
+    assert proof["browser_review"] == "SEPARATE_REQUIRED_EVIDENCE"
+
+
+@pytest.mark.parametrize("damage", ["no-cursor", "wrong-root", "artifact-spends-budget", "unknown-delivery", "wrong-payload-count"])
+def test_business_oracle_refuses_incomplete_or_untruthful_interface_projection(damage):
+    pages = business_pages()
+    if damage == "no-cursor":
+        pages[0]["branches"] = []
+    elif damage == "wrong-root":
+        pages[1]["root_id"] = "DATASET_VERSION:output"
+    elif damage == "artifact-spends-budget":
+        pages[0]["nodes"].append({"id": "ARTIFACT:hidden", "type": "ARTIFACT", "resource_id": "hidden"})
+    elif damage == "unknown-delivery":
+        pages[1]["edges"][0]["state"] = "UNKNOWN"
+    else:
+        pages[0]["nodes"][-1]["technical_groups"][0]["relationship_count"] = 999
+    with pytest.raises(AssertionError):
+        prove_business(pages)

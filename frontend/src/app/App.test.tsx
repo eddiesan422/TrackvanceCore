@@ -41,7 +41,7 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.8\.5/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.9\.0/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
@@ -71,6 +71,22 @@ describe('App session', () => {
     expect(await screen.findByText('No tienes permiso para publicar configuraciones de entrega.')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Publicar configuración' })).not.toBeInTheDocument()
     expect(post).not.toHaveBeenCalled()
+  })
+
+  it('exposes the current identity and an accessible keyboard route through navigation', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), user = userEvent.setup()
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/datasets']}><App/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('heading', { name: 'Datasets' })).toBeVisible()
+    expect(screen.getByRole('img', { name: 'Trackvance' })).toHaveAttribute('src', '/trackvance-logo.png')
+    expect(screen.getByRole('link', { name: 'Ir al contenido principal' })).toHaveAttribute('href', '#main-content')
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'main-content')
+    expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible()
+    const menu = screen.getByRole('button', { name: 'Abrir navegación' })
+    await user.click(menu)
+    expect(menu).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard('{Escape}')
+    expect(menu).toHaveAttribute('aria-expanded', 'false')
+    expect(menu).toHaveFocus()
   })
 
   it('preserves destination permissions on a nested lazy deep link', async () => {
@@ -113,6 +129,7 @@ describe('App session', () => {
     window.dispatchEvent(new Event('trackvance:session-refresh'))
     expect(await screen.findByText(/Tu rol no permite consultar esta sección/)).toBeVisible()
     expect(screen.queryByRole('link', { name: 'Datasets' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Buscar datasets' })).not.toBeInTheDocument()
     expect(post).not.toHaveBeenCalledWith('/auth/logout')
   })
 })
