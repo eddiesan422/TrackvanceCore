@@ -72,6 +72,22 @@ async function executeRecon(
   return (await (await page.request.get(`/api/v1/runs/${run.id}`)).json()) as JsonRecord
 }
 
+
+async function proveSamePopulation(page: Page, datasetId: string, beforeVersion: string, afterVersion: string, headers: Record<string, string>) {
+  const response = await page.request.post(`/api/v1/datasets/${datasetId}/comparisons`, {
+    headers, data: { before_version_id: beforeVersion, after_version_id: afterVersion, keys: ['record_id'] },
+  })
+  expect(response.status()).toBe(202)
+  const comparison = await response.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()).status,
+    { timeout: 90_000, intervals: [250, 500, 1000] }).toBe('SUCCESS')
+  const report = await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()
+  expect(report.summary.mode).toBe('KEYED')
+  expect(report.summary.complete_population).toBe(true)
+  expect(report.summary.counts.ADDED).toBe(0)
+  expect(report.summary.counts.ABSENT).toBe(0)
+}
+
 async function saveManagementState(page: Page, state: 'INVESTIGATING' | 'PENDING_VALIDATION') {
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Estado de gestión', { exact: true }).selectOption(state)
@@ -150,6 +166,8 @@ test('una excepción requiere validación posterior y el cierre administrativo p
     correctedCsv,
     headers,
   )
+  // A different immutable version requires a complete declared-key population proof.
+  await proveSamePopulation(page, target.dataset.id, target.version.id, correctedVersion.id, headers)
   const validationRun = await executeRecon(page, control.id, source.version.id, correctedVersion.id, headers)
   expect(validationRun.decision).toBe('CONFORME')
   expect(validationRun.findings).toHaveLength(0)

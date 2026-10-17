@@ -112,6 +112,7 @@ def version_dto(v: DatasetVersion, db: Session | None = None) -> dict:
 
 
 DATASET_ORIGINS = {
+    "DOCUMENTS": ("DOCUMENTS", "Documentos"),
     "UPLOAD": ("MANUAL", "Manual"),
     "INTAKE_OUTPUT": ("DATA_INTAKE", "Data Intake"),
     "REPORTS": ("REPORTS", "Reportes"),

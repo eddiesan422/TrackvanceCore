@@ -16,6 +16,22 @@ async function administrator(page: Page) {
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 
+
+async function proveSamePopulation(page: Page, datasetId: string, beforeVersion: string, afterVersion: string, headers: Record<string, string>) {
+  const response = await page.request.post(`/api/v1/datasets/${datasetId}/comparisons`, {
+    headers, data: { before_version_id: beforeVersion, after_version_id: afterVersion, keys: ['record_id'] },
+  })
+  expect(response.status()).toBe(202)
+  const comparison = await response.json()
+  await expect.poll(async () => (await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()).status,
+    { timeout: 90_000, intervals: [250, 500, 1000] }).toBe('SUCCESS')
+  const report = await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()
+  expect(report.summary.mode).toBe('KEYED')
+  expect(report.summary.complete_population).toBe(true)
+  expect(report.summary.counts.ADDED).toBe(0)
+  expect(report.summary.counts.ABSENT).toBe(0)
+}
+
 test('alta visible una vez, primer login y regeneración revocan credenciales y sesiones sin persistir secretos', async ({ page, browser }) => {
   await administrator(page)
   const stamp = Date.now(), name = `E2E Identidad ${stamp}`, email = `local-${stamp}@example.test`, username = `local.${stamp}`
@@ -206,6 +222,8 @@ test('asignación, SLA, adjuntos, resolución automática y reapertura conservan
   await save()
   await page.screenshot({ path: testInfo.outputPath('case-assignment-sla-evidence.png'), fullPage: true })
   const corrected = await upload('record_id,amount\nA,10\nB,1\n')
+  // Preserve automatic resolution assertions, with an actual immutable population proof.
+  await proveSamePopulation(page, dataset.id, input.id, corrected.id, headers)
   const confirmed = await execute(corrected.id)
   const resolved = await (await page.request.get(`/api/v1/exceptions/${exception.id}`)).json()
   expect(resolved.state).toBe('RESOLVED')

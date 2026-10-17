@@ -3,8 +3,7 @@ import sqlite3
 import pytest
 
 from trackvance.operations_common import OperationError
-from trackvance.version_comparison import compare_rows, report_rows, scope_warnings
-from trackvance.version_comparison import tagged
+from trackvance.version_comparison import compare_rows, report_rows, scope_warnings, tagged
 
 
 def schema(**columns):

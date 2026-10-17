@@ -672,6 +672,11 @@ def check() -> dict:
                 "rest_delivery_batches", "sentinel_automatic_monitors", "sentinel_automatic_revisions",
                 "sentinel_version_evaluations", "sentinel_light_reviews", "intake_contract_states",
                 "intake_schedules", "intake_schedule_versions", "intake_occurrences",
+                "acquisition_name_reservations", "acquisition_source_configurations",
+                "acquisition_source_revisions", "acquisition_occurrences",
+                "document_families", "document_templates", "document_originals", "document_extractions",
+                "document_batches", "document_batch_members", "document_publication_claims",
+                "version_comparisons",
             }
             for name, historical in identity_rows.items():
                 actual = [dict(row) for row in connection.execute(

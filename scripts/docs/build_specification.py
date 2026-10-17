@@ -59,8 +59,8 @@ REPO: Path
 DOCS_ROOT: Path
 SOURCE: Path
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.9.0"
-EDITION_DATE = "14 octubre 2026"
+VERSION = "0.9.5"
+EDITION_DATE = "16 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 WIDTH, HEIGHT = letter if AUTHORING_IMPORT_ERROR is None else (612, 792)
 MARGIN = 43
@@ -158,9 +158,13 @@ class Diagram(Flowable):
         self.height = 188 if kind != "exceptions" else 195
         if kind == "create-credentials":
             self.height = 464
+        elif kind == "logical":
+            self.height = 205
+        elif kind == "local":
+            self.height = 410
         elif kind == "delivery-lanes":
-            self.height = 234
-        elif kind in {"local", "report-profiles", "acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
+            self.height = 335
+        elif kind in {"report-profiles", "acquisition", "xlsx-streaming", "automation", "spark", "delivery-preparation"}:
             self.height = 310
 
     def box(self, x, y, w, h, title, detail=""):
@@ -188,38 +192,42 @@ class Diagram(Flowable):
     def draw(self):
         w = CONTENT
         if self.kind == "logical":
-            self.box(0, 139, w, 43, "React / API / RBAC", "Interacción, identidad y contratos HTTP")
-            self.box(0, 75, w, 45, "Servicios y semántica de módulos", "Datasets · Intake · ReconOps · Sentinel · Delivery · Catálogo · Reportes · Audit")
+            self.box(0, 156, w, 43, "React / API / RBAC", "Interacción, identidad y contratos HTTP")
+            self.box(0, 82, w, 56, "Servicios y semántica de módulos", "Documentos · Datasets / Comparación · Intake · ReconOps · Sentinel · Delivery · Catálogo · Reportes · Operación / Excepciones · Auditoría")
             boundaries = ["DatasetSource", "DataSink", "StorageProvider", "ExecutionEngine", "JobQueue"]
             for i, title in enumerate(boundaries):
                 x = i * (w + 8) / 5
                 self.box(x, 8, (w - 32) / 5, 46, title, "Contrato + adaptador")
-                self.arrow(x + (w - 32) / 10, 74, x + (w - 32) / 10, 56)
-            self.arrow(w / 2, 139, w / 2, 121)
+                self.arrow(x + (w - 32) / 10, 81, x + (w - 32) / 10, 56)
+            self.arrow(w / 2, 155, w / 2, 140)
         elif self.kind == "local":
-            self.box(0, 248, 150, 50, "Web / navegador", "React + nginx")
-            self.box(188, 248, 150, 50, "API / RBAC", "HTTP + staging acotado")
-            self.box(376, 248, 150, 50, "PostgreSQL 16", "Metadata + cola + outbox")
-            self.arrow(152, 274, 185, 274)
-            self.arrow(340, 274, 374, 274)
+            self.box(0, 350, 150, 50, "Web / navegador", "React + nginx")
+            self.box(188, 350, 150, 50, "API / RBAC", "HTTP + staging acotado")
+            self.box(376, 350, 150, 50, "PostgreSQL 16", "Metadata + cola + outbox")
+            self.arrow(152, 376, 185, 376)
+            self.arrow(340, 376, 374, 376)
+            self.box(0, 310, w, 28, "Seis lanes independientes: claims y leases en PostgreSQL")
+            width = (w - 24) / 3
+            workers = [
+                ("ACQUISITION", "Sólo secretos de fuentes"),
+                ("DEFAULT", "Polars / PySpark local"),
+                ("DELIVERY", "Sólo secretos de destinos"),
+                ("REPORT", "SQL hijo aislado"),
+                ("DOCUMENT", "OCR hijo aislado"),
+                ("COMPARISON", "Informe completo en disco"),
+            ]
+            for i, (title, detail) in enumerate(workers):
+                row, column = divmod(i, 3)
+                self.box(column * (width + 12), 238 - row * 71, width, 57, title + " worker", detail)
             for i, (title, detail) in enumerate([
-                ("Acquisition worker", "Sólo secretos de fuentes"),
-                ("DEFAULT worker", "Polars / PySpark local"),
-                ("Delivery worker", "Sólo secretos de destinos"),
-                ("REPORT worker", "SQL hijo aislado"),
-            ]):
-                x = i * (w + 10) / 4
-                self.box(x, 156, (w - 30) / 4, 56, title, detail)
-                self.arrow(x + (w - 30) / 8, 214, 450, 246)
-            for i, (title, detail) in enumerate([
-                ("Scheduler", "Sentinel + Delivery: despacho"),
-                ("Events CHAINING", "Intake output exacto"),
+                ("Scheduler", "Sentinel / Delivery / fuentes / cortes"),
+                ("Events CHAINING", "Publicación y salida Intake exacta"),
                 ("Events NOTIFICATIONS", "Bandeja personal"),
             ]):
-                self.box(i * 188, 80, 150, 55, title, detail)
-            self.box(0, 5, w, 52, "StorageProvider / volumen de artefactos", "Snapshots + partes + descriptor + perfiles + resultados + manifiestos")
-            # The lightweight processes are independent peers coordinated by
-            # PostgreSQL, rather than the next stage of an individual worker.
+                self.box(i * (width + 12), 90, width, 58, title, detail)
+            self.box(0, 5, w, 61, "StorageProvider / volumen de artefactos", "Originales · extracciones · snapshots · partes · perfiles · resultados · informes · manifiestos")
+            # Workers and lightweight processes are independent peers; the grid
+            # does not imply a sequential execution pipeline between lanes.
         elif self.kind == "report-profiles":
             self.box(0, 246, w, 52, "Resolver fuentes conjuntamente", "Entrada + contrato + aprobación + salida + esquema + usuario: contexto congelado")
             titles = [("PREVIEW", "Muestra <= 10; sin escritura"), ("DOWNLOAD", "CSV / XLSX incremental; sin spool"), ("DATASET", "Job REPORT; staging propio acotado")]
@@ -310,18 +318,20 @@ class Diagram(Flowable):
             self.arrow(164, 70, 179, 70)
             self.arrow(345, 70, 360, 70)
         elif self.kind == "delivery-lanes":
-            self.box(0, 178, 247, 47, "API", "Autorización + snapshots + idempotencia")
-            self.box(279, 178, 247, 47, "Scheduler independiente", "Sólo despacho; no calcula datasets")
-            self.arrow(122, 177, 122, 168)
-            self.arrow(402, 177, 402, 168)
-            self.box(0, 120, w, 47, "JobQueue durable", "Lane + lease; un sujeto Run / AcquisitionRun / ReportExecution")
+            self.box(0, 281, 247, 47, "API", "Autorización + snapshots + idempotencia")
+            self.box(279, 281, 247, 47, "Scheduler independiente", "Sólo despacho; no calcula datasets")
+            self.arrow(122, 280, 122, 267)
+            self.arrow(402, 280, 402, 267)
+            self.box(0, 199, w, 65, "JobQueue durable: exactamente un sujeto", "Run / AcquisitionRun / ReportExecution / DocumentOriginal / VersionComparison; lane, owner y lease")
             workers = [("DEFAULT", "Intake / Recon / Sentinel"), ("DELIVERY", "Preflight + entrega"),
-                       ("ACQUISITION", "Lectura / perfil"), ("REPORT", "Dataset derivado")]
+                       ("ACQUISITION", "Lectura / perfil"), ("REPORT", "Dataset derivado"),
+                       ("DOCUMENT", "OCR / revisión"), ("COMPARISON", "Comparación completa")]
+            width = (w - 24) / 3
             for i, (lane, detail) in enumerate(workers):
-                x = i * (w + 12) / 4
-                self.box(x, 54, (w - 36) / 4, 53, "Worker " + lane, detail)
-                self.arrow(x + (w - 36) / 8, 119, x + (w - 36) / 8, 109)
-            self.box(0, 0, w, 45, "Metadata y StorageProvider compartidos", "No hay transacción distribuida con la base externa")
+                row, column = divmod(i, 3)
+                x, y = column * (width + 12), 129 - row * 66
+                self.box(x, y, width, 53, "Worker " + lane, detail)
+            self.box(0, 0, w, 45, "Metadata y StorageProvider compartidos", "Lanes independientes; sin transacción distribuida con el destino externo")
         elif self.kind == "delivery-states":
             self.box(173, 137, 180, 42, "STARTED", "Marcador persistido antes del remoto")
             outcomes = [("FAILED", "Fallo / rollback conocido"), ("COMMITTED", "Commit confirmado"),
@@ -591,7 +601,7 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Paragraph("Especificación técnica v1.1", ParagraphStyle("subtitle", fontName="Arial", fontSize=21, leading=28, textColor=NAVY)))
     story.append(Spacer(1, 25))
     cover_status = "Borrador: certificación consolidada en curso" if draft else "Estado funcional y evidencia de validación"
-    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · REST, AUTOMATIZACIÓN Y CICLO DE CONTRATOS"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
+    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · DOCUMENTOS, ADQUISICIÓN, COMPARACIÓN Y RESOLUCIÓN"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
     story.append(Spacer(1, 18))
     story.append(paragraph("Arquitectura local y evolución a producto", "h2"))
     story.append(paragraph("Monolito modular · Persistencia local · Reglas portables · Evidencia verificable"))

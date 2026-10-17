@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.cookiejar
+import itertools
 import json
 import os
 import re
@@ -293,7 +294,7 @@ def validate_owned(existing, config, value, *, unchanged_roles=None):
         require(set(row.get("NetworkSettings", {}).get("Networks", {})) <= {PROJECT + "_default"}, "SHARED_CODEX_RUNTIME_NETWORK")
         baseline = value.get("runtime_identities", {}).get(name)
         if baseline and (unchanged_roles is None or name in unchanged_roles):
-            require(baseline == runtime_identity(row), "FULL_CODEX_CONFIG_HOST_MOUNT_OR_ID_DRIFT")
+            require(runtime_identity_matches(baseline, row), "FULL_CODEX_CONFIG_HOST_MOUNT_OR_ID_DRIFT")
     for kind in ("volumes", "networks"):
         for row in existing[kind]:
             require(labels_owned(row.get("Labels") or {}) and row["Name"] in {entry["name"] for entry in config[kind].values()}, "FOREIGN_CODEX_RESOURCE_IDENTITY")
@@ -308,6 +309,27 @@ def validate_owned(existing, config, value, *, unchanged_roles=None):
 def runtime_identity(row):
     return {"id": row["Id"], "image": row["Image"], "config_sha256": canonical_hash(row["Config"]),
         "host_config_sha256": canonical_hash(row["HostConfig"]), "mounts": sorted(row["Mounts"], key=lambda m: m["Destination"])}
+
+
+def runtime_identity_matches(baseline, row):
+    """Docker may replace null DNS defaults with empty arrays on first start.
+
+    Compare every other byte of the full recorded identity unchanged. This
+    compatibility is limited to those three empty default fields; an explicit
+    DNS server, search domain, option, or any other HostConfig change is drift.
+    Keep the original raw hashes in receipts rather than rewriting evidence.
+    """
+    actual = runtime_identity(row)
+    if baseline == actual:
+        return True
+    host = row["HostConfig"]
+    empty_dns = [key for key in ("Dns", "DnsOptions", "DnsSearch")
+                 if key in host and (host[key] is None or host[key] == [])]
+    for replacements in itertools.product((None, []), repeat=len(empty_dns)):
+        candidate = {**host, **dict(zip(empty_dns, replacements, strict=True))}
+        if baseline == {**actual, "host_config_sha256": canonical_hash(candidate)}:
+            return True
+    return False
 
 
 def prepare(directory, value, values):
