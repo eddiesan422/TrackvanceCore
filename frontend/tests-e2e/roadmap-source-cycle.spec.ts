@@ -147,6 +147,21 @@ for (const [engine, engineLabel, host, tls] of [
     const refreshFinished = await (await page.request.get(`/api/v1/acquisitions/${refreshAcquisition.id}`)).json()
     expect(refreshFinished.output_version_id).not.toBe(originalVersion.id)
     await expect(page.getByText('Versión publicada después de leer y perfilar la fuente completa.').first()).toBeVisible()
+    // A fresh SQL snapshot must prove the same declared business population
+    // before its successful control can technically resolve the original case.
+    const comparisonHttp = await page.request.post(`/api/v1/datasets/${source.dataset.id}/comparisons`, {
+      headers: { 'X-CSRF-Token': session.csrf_token },
+      data: { before_version_id: acquired.output_version_id, after_version_id: refreshFinished.output_version_id, keys: ['record_id'] },
+    })
+    expect(comparisonHttp.status()).toBe(202)
+    const comparison = await comparisonHttp.json()
+    await expect.poll(async () => (await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()).status,
+      { timeout: 90_000 }).toBe('SUCCESS')
+    const population = await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()
+    expect(population.summary.mode).toBe('KEYED')
+    expect(population.summary.complete_population).toBe(true)
+    expect(population.summary.counts.ADDED).toBe(0)
+    expect(population.summary.counts.ABSENT).toBe(0)
     const corrected = await execute(page, contract.id)
     expect(corrected.decision).toBe('APPROVED')
     expect(corrected.dataset_version_id).not.toBe(originalVersion.id)
