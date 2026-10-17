@@ -44,10 +44,13 @@ def read_request(options, secret, *, deadline, check=None, report=None, transpor
             raise failure
         until = time.monotonic() + delay
         notify({**state, "status": "WAITING", "next_retry_at": iso(utcnow() + timedelta(seconds=delay))})
-        while time.monotonic() < until:
+        while True:
             checkpoint()
-            remaining = min(until, deadline) - time.monotonic()
-            if remaining <= 0:
+            moment = time.monotonic()
+            if moment >= deadline:
                 raise RestError("REST_TOTAL_TIMEOUT", "La adquisición agotó su tiempo máximo total durante la espera.")
+            if moment >= until:
+                break
+            remaining = min(until, deadline) - moment
             time.sleep(min(0.1, remaining))
     raise AssertionError("unreachable")

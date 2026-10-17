@@ -425,7 +425,7 @@ def certify_update_comparison(client, receiver_url, dataset_id, source_id, conne
     for keys in (["category"], []):
         registered = client.call(f"/datasets/{dataset_id}/comparisons", {"before_version_id": source_id,
             "after_version_id": repeated["output_version_id"], "keys": keys}, expected=202)
-        result = wait_for(lambda: client.call(f"/version-comparisons/{registered['id']}"), lambda item: item["status"] in TERMINAL,
+        result = wait_for(lambda comparison_id=registered["id"]: client.call(f"/version-comparisons/{comparison_id}"), lambda item: item["status"] in TERMINAL,
             timeout=timeout, label="full-ambiguous-key-comparison" if keys else "full-no-key-comparison")
         assert result["status"] == "SUCCESS" and result["summary"]["mode"] == "MULTISET"
         assert result["summary"]["complete_population"] is True

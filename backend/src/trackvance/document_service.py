@@ -411,6 +411,10 @@ def publish_batch(db: Session, batch: DocumentBatch, user: User, *, seal_only=Fa
             if not blockers:
                 claim = db.scalar(select(DocumentPublicationClaim).where(DocumentPublicationClaim.extraction_id == extraction.id))
                 if claim and claim.batch_id != batch.id:
+                    if batch.settings["correction"]:
+                        member.status, member.reason = "PENDING", "CORRECTION_REQUIRES_NEW_REVIEW"
+                        pending.append(member)
+                        continue
                     member.status, member.reason = "EXCLUDED", "ALREADY_PUBLISHED"
                     continue
                 member.extraction_id = extraction.id
@@ -418,9 +422,9 @@ def publish_batch(db: Session, batch: DocumentBatch, user: User, *, seal_only=Fa
             else:
                 member.status, member.reason = "PENDING", blockers[0]
                 pending.append(member)
-        if pending and batch.settings["close_policy"] == "STRICT":
-            batch.status = "BLOCKED" if utcnow() >= aware(batch.wait_until) else "WAITING"
-            batch.blocked_reason = "EXTRACTION_OR_REVIEW_REQUIRED"
+        if pending and (batch.settings["close_policy"] == "STRICT" or batch.settings["correction"]):
+            batch.status = "BLOCKED" if batch.settings["correction"] or utcnow() >= aware(batch.wait_until) else "WAITING"
+            batch.blocked_reason = "CORRECTION_REVIEW_REQUIRED" if batch.settings["correction"] else "EXTRACTION_OR_REVIEW_REQUIRED"
             return batch
         for member in pending:
             member.status, member.reason = "DEFERRED", member.reason

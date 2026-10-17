@@ -46,6 +46,32 @@ describe('Documentos guided operations', () => {
     expect(await screen.findByRole('link', { name: 'headers: abrir versión publicada' })).toHaveAttribute('href', '/datasets/stable-header?version=version-2')
     expect(screen.getByRole('link', { name: 'Ver linaje' })).toHaveAttribute('href', '/catalog/datasets/stable-header?section=lineage&version_id=version-2')
     expect(screen.getByText(/el original requiere permisos documentales independientes/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Corregir este lote' })).not.toBeInTheDocument()
+  })
+
+  it('requires explicit impact acknowledgement and preserves the exact published document set for correction', async () => {
+    const user = userEvent.setup()
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async path => path === '/documents/families/family/batches' ? {
+      items: [{ id: 'batch-1', template_id: 'frozen-template', status: 'PUBLISHED', settings: {}, published_versions: { headers: 'version-2' }, members: [
+        { document_id: 'original', extraction_id: 'old-extraction-1', status: 'PUBLISHED' },
+        { document_id: 'second-original', extraction_id: 'old-extraction-2', status: 'PUBLISHED' },
+        { document_id: 'deferred-original', status: 'DEFERRED' },
+      ] }], total: 1,
+    } : baseApi(path))
+    vi.mocked(post).mockResolvedValue({ id: 'correction-batch', status: 'BLOCKED' })
+    renderApp(<Documents/>, { path: '/documents/families/family?batch=batch-1', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:publish'] })
+    await user.click(await screen.findByRole('button', { name: 'Corregir este lote' }))
+    expect(screen.getByRole('dialog', { name: 'Corregir lote publicado' })).toBeVisible()
+    expect(screen.getByText(/mismos 2 documentos publicados/)).toBeVisible()
+    expect(screen.getByText(/no ejecuta Intake ni Delivery automáticamente/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Publicar corrección del lote' })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: /Revisar documento / })).toHaveLength(2)
+    await user.click(screen.getByRole('checkbox', { name: /Confirmo la revisión de todos los documentos/ }))
+    await user.click(screen.getByRole('button', { name: 'Publicar corrección del lote' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/families/family/batches', {
+      template_id: 'frozen-template', document_ids: ['original', 'second-original'], correction: true, idempotency_key: expect.any(String),
+    }))
   })
 
   it('keeps confidence distinct from human confirmation and requires original download permission', async () => {

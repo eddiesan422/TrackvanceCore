@@ -62,7 +62,8 @@ test('REST real: detectar → revisar ausencia → guardar → primera adquisici
   await dialog.getByRole('button', { name: 'Probar lectura GET', exact: true }).click()
   await expect(dialog.getByRole('alert')).toContainText('propiedad')
   await expect(dialog.getByRole('button', { name: 'Guardar', exact: true })).toBeDisabled()
-  const laterRow = dialog.locator('tr').filter({ has: dialog.locator('input[aria-label^="Nombre campo"][value="later"]') })
+  const laterRow = dialog.locator('tr').filter({ has: page.locator('input[aria-label^="Nombre campo"][value="later"]') })
+  await expect(laterRow).toBeVisible()
   await laterRow.locator('select[aria-label^="Ausencias campo"]').selectOption('NULL')
   await dialog.getByRole('button', { name: 'Probar lectura GET', exact: true }).click()
   await expect(dialog.getByText('Prueba de acceso completada con la configuración actual.', { exact: true })).toBeVisible()
@@ -155,6 +156,7 @@ test('REST real: reserva concurrente → cancelar espera → reutilizar nombre �
   await dialog.getByLabel('Filas por página', { exact: true }).fill('2')
   await dialog.getByLabel('Reintentos adicionales (0–5)', { exact: true }).fill('3')
   await dialog.getByLabel('Espera entre reintentos (segundos)', { exact: true }).fill(String(retryWait))
+  await dialog.getByLabel('Tiempo máximo total de adquisición (segundos)', { exact: true }).fill('180')
   await dialog.getByRole('button', { name: 'Probar lectura GET', exact: true }).click()
   await expect(dialog.getByText('Prueba de acceso completada con la configuración actual.', { exact: true })).toBeVisible()
   const connectionResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/connections')
@@ -239,7 +241,7 @@ test('REST real: reserva concurrente → cancelar espera → reutilizar nombre �
     expect(running.retry_state.status).toBe('WAITING')
     await mkdir(restartDirectory, { recursive: true })
     await writeFile(join(restartDirectory, `${nonce}-ready.json`), JSON.stringify({ acquisition_id: recovery.id, nonce, worker_role: 'acquisition-worker' }))
-    let receipt: Record<string, any> | null = null
+    let receipt: Record<string, unknown> | null = null
     await expect.poll(async () => {
       try { receipt = JSON.parse(await readFile(join(restartDirectory, `${nonce}-restart-receipt.json`), 'utf8')); return receipt?.status }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }

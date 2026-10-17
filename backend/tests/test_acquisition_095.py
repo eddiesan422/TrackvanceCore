@@ -388,6 +388,32 @@ def test_retry_timeout_success_exhaustion_total_budget_and_cancellation(monkeypa
     assert len(cancelled) == 1
 
 
+def test_retry_wait_checkpoint_crossing_wait_end_preserves_global_budget(monkeypatch):
+    timer = SimpleNamespace(now=0.0, waiting=False)
+    monkeypatch.setattr(rest_retry, "time", SimpleNamespace(monotonic=lambda: timer.now,
+        sleep=lambda seconds: setattr(timer, "now", timer.now + seconds)))
+    calls = []
+
+    def checkpoint():
+        if timer.waiting:
+            # A real DB cancellation/lease checkpoint can cross the local wait
+            # boundary while the complete acquisition still has ample time.
+            timer.now += 1.1
+            timer.waiting = False
+
+    def report(event):
+        if event["status"] == "WAITING":
+            timer.waiting = True
+
+    def send(*_args, **_kwargs):
+        calls.append(timer.now)
+        return (503, b'') if len(calls) == 1 else (200, b'[]')
+
+    assert rest_retry.read_request({"retries": 1, "retry_wait_seconds": 1}, "", deadline=30,
+        check=checkpoint, report=report, transport=send) == (200, b'[]')
+    assert calls == [0.0, 1.1]
+
+
 def test_retry_defaults_and_limits_remain_product_bounds(monkeypatch):
     monkeypatch.setenv("TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS", "http://fixture:80")
     validate_options({"url": "http://fixture", "retries": 5, "retry_wait_seconds": 10}, "", source=True)

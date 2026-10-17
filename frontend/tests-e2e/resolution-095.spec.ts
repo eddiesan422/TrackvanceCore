@@ -2,10 +2,20 @@ import { randomBytes } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import type { RecordData } from '../src/api/client'
+import { fillSecret } from './identity-helpers'
+
+const privateValues = new Set<string>()
+test.afterEach(async ({ page }, info) => {
+  for (const error of info.errors) for (const key of ['message', 'stack', 'snippet', 'value', 'errorContext'] as const) {
+    if (typeof error[key] === 'string') for (const secret of privateValues) error[key] = error[key]!.split(secret).join('[REDACTED]')
+  }
+  await page.evaluate(() => document.body.replaceChildren()).catch(() => undefined)
+  privateValues.clear()
+})
 
 // Only real HTTP/UI against an explicitly identified synthetic stack. The
 // credential-bearing login is never included in traces, screenshots or video.
-test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(300_000)
 test.skip(process.env.TV_CORE095_DOCUMENT_E2E !== 'true', 'Requires the guarded synthetic Core 0.9.5 environment')
 
@@ -19,7 +29,9 @@ async function signIn(page: Page) {
     if (!username || !password) throw new Error('Synthetic Codex credentials must be supplied through the environment')
     await page.getByRole('button', { name: 'Tengo una cuenta local', exact: true }).click()
     await page.getByLabel('Usuario o correo', { exact: true }).fill(username)
-    await page.getByLabel('Contraseña', { exact: true }).fill(password)
+    privateValues.add(password)
+    await fillSecret(page.getByLabel('Contraseña', { exact: true }), password)
+    expect(await page.getByLabel('Contraseña', { exact: true }).inputValue() === password, 'Password input is ready').toBe(true)
     await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
@@ -79,7 +91,14 @@ async function save(page: Page, id: string, state: string) {
 async function findOperation(page: Page, versionId: string, exceptionId: string, queue: string) {
   await page.goto(`/operations?queue=${queue}`)
   await expect(page.getByRole('heading', { name: 'Operación', exact: true })).toBeVisible()
+  const loaded = page.waitForResponse(r => {
+    const url = new URL(r.url())
+    return r.request().method() === 'GET' && url.pathname === '/api/v1/operations' && url.searchParams.get('queue') === queue && url.searchParams.get('search') === versionId
+  })
   await page.getByPlaceholder('Buscar por nombre, diagnóstico o identidad de seguimiento…', { exact: true }).fill(versionId)
+  const response = await loaded
+  expect(response.status()).toBe(200)
+  expect((await response.json()).items.some((item: RecordData) => item.id === `exception:${exceptionId}`)).toBe(true)
   const card = page.locator('article.operation-card').filter({ has: page.locator(`a[href="/exceptions?id=${exceptionId}"]`) })
   await expect(card).toHaveCount(1)
   return card
@@ -125,7 +144,7 @@ test('native resolution: assignment → waiting → correction → verified comp
   const correctedVersion = completed.output_version_id as string
   const correctedProfile = await (await page.request.get(`/api/v1/dataset-versions/${correctedVersion}/profile`)).json()
   expect(correctedProfile.row_count).toBe(2)
-  expect(correctedProfile.sample.map((row: RecordData) => [row.record_id, row.amount])).toEqual([['A', 10], ['B', 1]])
+  expect(correctedProfile.sample.map((row: RecordData) => [row.record_id, row.amount])).toEqual([['A', '10'], ['B', '1']])
   // Execute the exact original configuration through its normal browser dialog.
   await page.goto(`/intake?contract_id=${contract.id}`)
   await page.getByRole('button', { name: 'Nueva ejecución', exact: true }).click()
@@ -167,6 +186,11 @@ test('native resolution: assignment → waiting → correction → verified comp
   await expect(page).toHaveURL(new RegExp(`exception_id=${exception.id}`))
   await page.getByRole('link', { name: 'Volver a la incidencia y validar la corrección', exact: true }).click()
   dialog = page.getByRole('dialog')
+  const verified = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/v1/exceptions/${exception.id}/validate`)
+  await dialog.getByRole('button', { name: 'Validar corrección', exact: true }).click()
+  const verifiedResponse = await verified
+  expect(verifiedResponse.status()).toBe(200)
+  expect((await verifiedResponse.json()).technical_validation.validated).toBe(true)
   await expect(dialog.getByText('Validada técnicamente', { exact: true })).toBeVisible()
   const resolvedResponse = page.waitForResponse(r => r.request().method() === 'PATCH' && new URL(r.url()).pathname === `/api/v1/exceptions/${exception.id}`)
   await dialog.getByRole('button', { name: 'Resolver excepción', exact: true }).click()
@@ -253,7 +277,14 @@ test('native resolution: administrative close stays unverified and source conten
     expect(denied.status()).toBe(403)
     expect((await denied.json()).error.code).toBe('DATASET_BLOCKED')
     await page.goto('/operations?queue=intervention')
+    const loaded = page.waitForResponse(r => {
+      const url = new URL(r.url())
+      return r.request().method() === 'GET' && url.pathname === '/api/v1/operations' && url.searchParams.get('queue') === 'intervention' && url.searchParams.get('search') === version.id
+    })
     await page.getByPlaceholder('Buscar por nombre, diagnóstico o identidad de seguimiento…', { exact: true }).fill(version.id)
+    const feedResponse = await loaded
+    expect(feedResponse.status()).toBe(200)
+    expect((await feedResponse.json()).items).toEqual([])
     await expect(page.getByRole('heading', { name: 'Sin operaciones en esta vista', exact: true })).toBeVisible()
     await expect(page.locator('article.operation-card')).toHaveCount(0)
     // Content restriction does not silently grant content through the feed.

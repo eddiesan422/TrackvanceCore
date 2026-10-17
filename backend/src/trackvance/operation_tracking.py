@@ -8,7 +8,7 @@ from datetime import UTC
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import literal, select, union_all
+from sqlalchemy import case, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from .acquisition_models import AcquisitionRun
@@ -46,6 +46,29 @@ def operational_queue(kind: str, status: str, *, decision: str | None = None, st
     if stage in {"RETRY_WAIT", "WAITING_RETRY"} or status in {"QUEUED", "WAITING", "RETRY_WAIT"}:
         return "waiting"
     return "running" if status == "RUNNING" else "finished"
+
+
+def _queue_expression(kind, status, decision=None, stage=None):
+    """Filter native state metadata before loading and authorizing each item.
+
+    This mirrors operational_queue; authorization still happens before any item
+    is serialized. A busy history must not make a waiting view traverse every
+    completed run and its complete security ancestry.
+    """
+    if kind == "exception":
+        return case((status.in_(CLOSED), "finished"), (status == "WAITING_EXTERNAL", "waiting"),
+            (status == "INVESTIGATING", "running"), else_="intervention")
+    if kind == "document":
+        return case((status.in_({"PUBLISHED", "CANCELLED"}), "finished"), (status == "QUEUED", "waiting"),
+            (status == "RUNNING", "running"), else_="intervention")
+    if kind == "document_batch":
+        return case((status.in_({"PUBLISHED", "EMPTY"}), "finished"),
+            (status.in_({"OPEN", "WAITING"}), "waiting"), else_="intervention")
+    decision = literal(None) if decision is None else decision
+    stage = literal(None) if stage is None else stage
+    return case((or_(decision.in_({"UNKNOWN", "PARTIAL"}), status.in_({"UNKNOWN", "FAILED", "FAILED_PRECONDITION"})), "intervention"),
+        (or_(stage.in_({"RETRY_WAIT", "WAITING_RETRY"}), status.in_({"QUEUED", "WAITING", "RETRY_WAIT"})), "waiting"),
+        (status == "RUNNING", "running"), else_="finished")
 
 
 def _duration(record) -> float | None:
@@ -131,7 +154,11 @@ def _downstream_stages(db, user, version_id, grants):
     return stages, bool(pending)
 
 
-def _item(db, user, kind, identity, grants):
+def _matches_search(item, search):
+    return search.casefold() in f"{item['title']} {item['tracking_id']} {item.get('diagnosis') or ''}".casefold()
+
+
+def _item(db, user, kind, identity, grants, search=""):
     model = {"acquisition": AcquisitionRun, "run": Run, "exception": ExceptionCase,
              "document": DocumentOriginal, "document_batch": DocumentBatch}[kind]
     record = db.get(model, identity)
@@ -162,6 +189,8 @@ def _item(db, user, kind, identity, grants):
                 href += f"?document={identity}"
                 result.update(duration_seconds=_duration(record), error_code=record.error_code,
                     diagnosis=record.error_code or f"{family.name} · {record.progress}% de extracción")
+                if not _matches_search(result, search):
+                    return None
                 stages.append(_stage(kind, record, "Documento recibido", href))
                 extraction = db.get(DocumentExtraction, record.extraction_id) if record.extraction_id else None
                 if extraction and extraction.organization_id == user.organization_id:
@@ -178,6 +207,8 @@ def _item(db, user, kind, identity, grants):
                 href += f"?batch={identity}"
                 result.update(diagnosis=record.blocked_reason or record.status, window_start=iso(record.window_start),
                     window_end=iso(record.window_end), wait_until=iso(record.wait_until))
+                if not _matches_search(result, search):
+                    return None
                 stages.append(_stage("document-batch", record, "Lote documental", href))
                 for version_id in (record.published_versions or {}).values():
                     published = _version_stage(db, user, version_id, grants)
@@ -189,8 +220,6 @@ def _item(db, user, kind, identity, grants):
             if "datasets:read" not in grants:
                 return None
             dataset = db.get(Dataset, record.dataset_id) if record.dataset_id else None
-            if dataset:
-                authorize_dataset(db, user, dataset.id)
             pending = (record.source_snapshot or {}).get("pending_dataset") or {}
             result.update(title=f"Adquisición · {dataset.name if dataset else pending.get('name', record.filename)}",
                 tracking_id=f"acquisition:{identity}", state=record.status,
@@ -200,6 +229,10 @@ def _item(db, user, kind, identity, grants):
                 error_code=record.error_code, attempts=record.attempts,
                 impact="No existe una publicación parcial. Las versiones anteriores conservan su identidad." if record.status in {"FAILED", "CANCELLED"} else "La publicación depende de completar la lectura y los controles de esta adquisición.",
                 next_action="Revisa el diagnóstico y corrige la conexión o el origen antes de iniciar otra adquisición." if record.status == "FAILED" else "Consulta el progreso y la versión publicada cuando esté disponible.")
+            if not _matches_search(result, search):
+                return None
+            if dataset:
+                authorize_dataset(db, user, dataset.id)
             stages.append(_stage(kind, record, "Adquisición", f"/operations?acquisition={identity}"))
             actions.append({"title": "Ver adquisición", "href": f"/operations?acquisition={identity}"})
             snapshot = record.source_snapshot or {}
@@ -215,7 +248,6 @@ def _item(db, user, kind, identity, grants):
             run = record if kind == "run" else db.get(Run, record.run_id)
             if run is None or f"{run.module.lower()}:read" not in grants:
                 return None
-            authorize_run_content(db, user, run)
             version = db.get(DatasetVersion, run.dataset_version_id)
             result.update(tracking_id=_tracking(db, version, user.organization_id) or f"run:{run.id}",
                 title=record.title if kind == "exception" else run.name,
@@ -227,6 +259,9 @@ def _item(db, user, kind, identity, grants):
                 duration_seconds=_duration(run), diagnosis=record.root_cause if kind == "exception" else run.error or run.decision or run.progress_stage,
                 impact="El cierre de una excepción y la confirmación de una entrega son etapas independientes.",
                 next_action="Investiga el origen, documenta la corrección y valida la población afectada antes del cierre." if kind == "exception" else "Revisa el resultado y la evidencia de la ejecución.")
+            if not _matches_search(result, search):
+                return None
+            authorize_run_content(db, user, run)
             initial = _version_stage(db, user, run.dataset_version_id, grants)
             if initial:
                 stages.append(initial)
@@ -258,22 +293,29 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
     # explicit gate for direct service callers and future mounting changes.
     if "exceptions:read" not in grants:
         raise OperationError(403, "FORBIDDEN", "Tu rol no permite consultar la operación.")
-    sources = [select(literal(kind).label("kind"), model.id.label("identity"), model.created_at.label("created_at"))
+    models = (("acquisition", AcquisitionRun, _queue_expression("acquisition", AcquisitionRun.status, stage=AcquisitionRun.stage)),
+        ("run", Run, _queue_expression("run", Run.status, Run.decision, Run.progress_stage)),
+        ("exception", ExceptionCase, _queue_expression("exception", ExceptionCase.state)),
+        ("document", DocumentOriginal, _queue_expression("document", DocumentOriginal.status)),
+        ("document_batch", DocumentBatch, _queue_expression("document_batch", DocumentBatch.status)))
+    sources = [select(literal(kind).label("kind"), model.id.label("identity"), model.created_at.label("created_at"), queue_expression.label("queue"))
                .where(model.organization_id == user.organization_id)
-               for kind, model in (("acquisition", AcquisitionRun), ("run", Run), ("exception", ExceptionCase),
-                                   ("document", DocumentOriginal), ("document_batch", DocumentBatch))]
+               for kind, model, queue_expression in models]
     native = union_all(*sources).subquery()
-    candidates = db.execute(select(native).order_by(native.c.created_at.desc(), native.c.kind, native.c.identity)
+    metadata = select(native)
+    if queue != "all":
+        metadata = metadata.where(native.c.queue == queue)
+    candidates = db.execute(metadata.order_by(native.c.created_at.desc(), native.c.kind, native.c.identity)
         .offset(offset).limit(1001)).all()
     items, consumed = [], 0
     for candidate in candidates[:1000]:
         consumed += 1
-        item = _item(db, user, candidate.kind, candidate.identity, grants)
+        item = _item(db, user, candidate.kind, candidate.identity, grants, search)
         if item is None or (queue != "all" and item["queue"] != queue):
             continue
         if queue == "intervention" and item.get("assigned_user_id") not in {None, user.id}:
             continue
-        if search.casefold() not in f"{item['title']} {item['tracking_id']} {item.get('diagnosis') or ''}".casefold():
+        if not _matches_search(item, search):
             continue
         items.append(item)
         if len(items) == limit:

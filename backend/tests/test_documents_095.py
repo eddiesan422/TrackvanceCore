@@ -458,3 +458,56 @@ def test_guided_native_pipeline_and_frozen_automatic_policy(authenticated, datab
     with database() as db:
         for config_id in response.json()["intake_configuration_ids"].values():
             assert schedule_for(db, db.get(Configuration, config_id)).enabled
+
+
+@pytest.mark.parametrize("close_policy", ["STRICT", "READY_DEFER_PENDING"])
+def test_grouped_correction_blocks_incomplete_membership_then_preserves_population(authenticated, database, corpus, close_policy):
+    family, template, first = scheduled_ready(authenticated, corpus, "Grouped correction", close_policy)
+    second_source = pdf_file(corpus["digital"].with_name("second-known.pdf"), [([line.replace("000001", "000002") for line in LINES], None)])
+    second = upload(authenticated, family, template, second_source, False)
+    process_once()
+    second = confirm(authenticated, second)
+    original_ids = [first["id"], second["id"]]
+    response = authenticated.post(f"/api/v1/documents/families/{family['id']}/batches", json={
+        "template_id": template["id"], "document_ids": original_ids, "idempotency_key": "grouped-original"})
+    assert response.status_code == 200 and response.json()["status"] == "PUBLISHED", response.text
+    original_batch = response.json()
+    first = confirm(authenticated, first)
+    response = authenticated.post(f"/api/v1/documents/families/{family['id']}/batches", json={
+        "template_id": template["id"], "document_ids": original_ids, "idempotency_key": "grouped-correction", "correction": True})
+    assert response.status_code == 200, response.text
+    correction = response.json()
+    assert correction["status"] == "BLOCKED" and correction["blocked_reason"] == "CORRECTION_REVIEW_REQUIRED"
+    assert correction["published_versions"] == {}
+    assert {member["document_id"] for member in correction["members"]} == set(original_ids)
+    assert any(member["reason"] == "CORRECTION_REQUIRES_NEW_REVIEW" for member in correction["members"])
+    response = authenticated.post(f"/api/v1/documents/originals/{second['id']}/review", json={
+        "expected_extraction_id": second["extraction"]["id"], "changes": {"headers.0.date": "invalid-date"},
+        "confirmed": [], "reason": "Known invalid date must block the complete correction"})
+    assert response.status_code == 200
+    invalid = response.json()
+    assert invalid["issues"]
+    response = authenticated.post(f"/api/v1/documents/batches/{correction['id']}/publish")
+    assert response.status_code == 200 and response.json()["status"] == "BLOCKED"
+    with database() as db:
+        assert db.scalar(select(func.count()).select_from(DatasetVersion)) == 2
+    response = authenticated.post(f"/api/v1/documents/originals/{second['id']}/review", json={
+        "expected_extraction_id": invalid["extraction"]["id"], "changes": {"headers.0.date": "2026-10-01"},
+        "confirmed": ["headers.0.date"], "reason": "Corrected and confirmed against known original before grouped publication"})
+    assert response.status_code == 200 and not response.json()["issues"]
+    second = response.json()
+    response = authenticated.post(f"/api/v1/documents/batches/{correction['id']}/publish")
+    assert response.status_code == 200 and response.json()["status"] == "PUBLISHED", response.text
+    published = response.json()
+    assert {member["document_id"] for member in published["members"] if member["status"] == "PUBLISHED"} == set(original_ids)
+    assert {member["extraction_id"] for member in published["members"]} == {first["extraction"]["id"], second["extraction"]["id"]}
+    with database() as db:
+        for structure, version_id in published["published_versions"].items():
+            before = db.get(DatasetVersion, original_batch["published_versions"][structure])
+            after = db.get(DatasetVersion, version_id)
+            assert before.dataset_id == after.dataset_id and before.id != after.id
+            assert before.row_count == after.row_count == (2 if structure == "headers" else 4)
+            assert before.ingestion_metadata["population_scope"] == after.ingestion_metadata["population_scope"]
+            policy = after.ingestion_metadata["document_publication"]
+            assert policy["correction"] is True
+            assert policy["automatic_processing_allowed"] is False and policy["automatic_delivery_allowed"] is False

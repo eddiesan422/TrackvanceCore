@@ -540,7 +540,10 @@ def test_backup_ancestor_of_live_store_is_rejected_before_any_change(population_
 
 @pytest.mark.parametrize("consumer", ["source-configuration", "comparison", "document-family", "document-template", "document-batch"])
 def test_core095_evidence_protects_requested_dataset_without_adoption(population_fixture, consumer):
-    from trackvance.acquisition_schedule_models import AcquisitionSourceConfiguration, AcquisitionSourceRevision
+    from trackvance.acquisition_schedule_models import (
+        AcquisitionSourceConfiguration,
+        AcquisitionSourceRevision,
+    )
     from trackvance.comparison_models import VersionComparison
     from trackvance.document_models import DocumentBatch, DocumentFamily, DocumentTemplate
 

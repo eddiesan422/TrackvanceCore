@@ -1,10 +1,13 @@
 from datetime import timedelta
+from itertools import product
 
 import pytest
+from sqlalchemy import event, literal, select
 from test_exception_validation import make_case
 
 from trackvance.acquisition_models import AcquisitionRun
-from trackvance.db import utcnow
+from trackvance.db import engine, utcnow
+from trackvance.governance_models import DatasetBlock
 from trackvance.models import (
     DatasetVersion,
     ExceptionCase,
@@ -12,9 +15,10 @@ from trackvance.models import (
     ExternalConnectionVersion,
     Role,
     RolePermission,
+    Run,
     User,
 )
-from trackvance.operation_tracking import operational_queue
+from trackvance.operation_tracking import _queue_expression, operational_queue
 from trackvance.services import assess_exception_validation
 
 
@@ -32,6 +36,86 @@ from trackvance.services import assess_exception_validation
 ])
 def test_native_states_determine_operational_queue(kind, status, decision, stage, expected):
     assert operational_queue(kind, status, decision=decision, stage=stage) == expected
+
+
+def test_native_queue_sql_prefilter_matches_all_status_decision_and_retry_combinations(database):
+    statuses = {"QUEUED", "RUNNING", "SUCCESS", "FAILED", "FAILED_PRECONDITION", "UNKNOWN", "CANCELLED", "WAITING", "RETRY_WAIT",
+        "PUBLISHED", "EXTRACTED", "REVIEW_REQUIRED", "REVIEWED", "OPEN", "BLOCKED", "SEALED", "EMPTY", "WAITING_EXTERNAL",
+        "INVESTIGATING", "PENDING_VALIDATION", "RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE", "FALSE_POSITIVE"}
+    with database() as db:
+        for kind in ("exception", "document", "document_batch", "acquisition", "run"):
+            combinations = product(statuses, (None, "APPROVED", "UNKNOWN", "PARTIAL"), ("", "COMPLETED", "RETRY_WAIT", "WAITING_RETRY"))
+            for status, decision, stage in combinations:
+                sql_queue = db.scalar(select(_queue_expression(kind, literal(status), literal(decision), literal(stage))))
+                assert sql_queue == operational_queue(kind, status, decision=decision, stage=stage), (kind, status, decision, stage)
+
+
+def test_waiting_feed_query_growth_excludes_unrelated_completed_history(authenticated, database):
+    with database() as db:
+        case, config, _, _, version = make_case(db, "sentinel", candidate_decision="HEALTHY")
+        case.state, case.assigned_user_id = "WAITING_EXTERNAL", "test-user"
+        db.commit()
+        identity, config_id, version_id = case.id, config.id, version.id
+
+    def waiting_queries():
+        statements = []
+
+        def observe(connection, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", observe)
+        try:
+            response = authenticated.get("/api/v1/operations?queue=waiting")
+        finally:
+            event.remove(engine, "before_cursor_execute", observe)
+        assert response.status_code == 200, response.text
+        return response.json(), len(statements)
+
+    before, initial_queries = waiting_queries()
+    with database() as db:
+        db.add_all([Run(module="sentinel", name=f"Irrelevant completed history {index}", status="SUCCESS", decision="HEALTHY",
+            config_id=config_id, dataset_version_id=version_id, initiated_by="Test User") for index in range(250)])
+        db.commit()
+    after, expanded_queries = waiting_queries()
+    assert [item["id"] for item in before["items"]] == [f"exception:{identity}"]
+    assert [item["id"] for item in after["items"]] == [f"exception:{identity}"]
+    assert after["scanned_records"] == before["scanned_records"] == 1
+    assert expanded_queries <= initial_queries + 2
+
+
+def test_search_filters_before_full_projection_but_still_authorizes_matching_content(authenticated, database, monkeypatch):
+    from trackvance import operation_tracking
+
+    with database() as db:
+        case, config, _, _, version = make_case(db, "sentinel", candidate_decision="HEALTHY")
+        case.title = "Distinct synthetic search target"
+        case.state = "WAITING_EXTERNAL"
+        db.add_all([Run(module="sentinel", name=f"Unmatched waiting operation {index}", status="QUEUED",
+            config_id=config.id, dataset_version_id=version.id, initiated_by="Test User") for index in range(120)])
+        db.commit()
+        identity, origin_id, dataset_id = case.id, case.run_id, version.dataset_id
+    authorize = operation_tracking.authorize_run_content
+    authorized_ids = []
+
+    def observed_authorization(db, user, run):
+        authorized_ids.append(run.id)
+        authorize(db, user, run)
+
+    monkeypatch.setattr(operation_tracking, "authorize_run_content", observed_authorization)
+    path = "/api/v1/operations?queue=waiting&search=Distinct%20synthetic%20search%20target"
+    result = authenticated.get(path)
+    assert result.status_code == 200, result.text
+    assert [item["id"] for item in result.json()["items"]] == [f"exception:{identity}"]
+    assert authorized_ids == [origin_id]
+    with database() as db:
+        db.add(DatasetBlock(dataset_id=dataset_id, scope="CONTENT", reason="Synthetic source restriction", created_by_id="test-user"))
+        db.commit()
+    denied = authenticated.get(path)
+    assert denied.status_code == 200, denied.text
+    assert denied.json()["items"] == []
+    assert "Distinct synthetic search target" not in denied.text
+    assert authorized_ids == [origin_id, origin_id]
 
 
 def test_distinct_successful_lot_cannot_resolve_origin_population(database):
