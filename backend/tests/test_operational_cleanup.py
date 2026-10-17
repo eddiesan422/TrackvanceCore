@@ -266,6 +266,32 @@ def test_exceptions_remain_part_of_sealed_plan_hash(population_fixture, tmp_path
     assert all(path.exists() for path in paths) and not (tmp_path / "quarantine").exists()
 
 
+@pytest.mark.parametrize("active", ["source", "comparison", "document-cut", "broken-document-binding"])
+def test_core095_active_work_and_broken_document_references_fail_closed(population_fixture, active):
+    from trackvance.acquisition_schedule_models import AcquisitionSourceConfiguration
+    from trackvance.comparison_models import VersionComparison
+    from trackvance.document_models import DocumentFamily
+
+    database, storage, paths, org = population_fixture
+    with database() as db:
+        if active == "source":
+            db.add(AcquisitionSourceConfiguration(dataset_id="test-dataset", enabled=True, organization_id=org))
+        elif active == "comparison":
+            db.add(VersionComparison(before_version_id="test-version", after_version_id="test-version", actor_id="test-user",
+                                     settings={}, status="QUEUED", organization_id=org))
+        else:
+            db.add(DocumentFamily(name="Protected pending family", responsible_user_id="test-user", organization_id=org,
+                output_datasets={"headers": "nonexistent"} if active == "broken-document-binding" else {},
+                next_cut_at=utcnow() if active == "document-cut" else None))
+        db.commit()
+        with pytest.raises(OperationError) as caught:
+            create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)
+    expected = {"source": "CLEANUP_DISPATCH_ACTIVE", "comparison": "CLEANUP_NOT_QUIESCENT",
+                "document-cut": "CLEANUP_DISPATCH_ACTIVE", "broken-document-binding": "CLEANUP_REFERENTIAL_DRIFT"}
+    assert caught.value.code == expected[active]
+    assert all(path.exists() for path in paths)
+
+
 def test_abrupt_precommit_file_move_has_controlled_recovery(population_fixture, tmp_path):
     database, storage, paths, _ = population_fixture
     plan, _, _ = plan_and_backup(population_fixture, tmp_path)
@@ -510,3 +536,43 @@ def test_backup_ancestor_of_live_store_is_rejected_before_any_change(population_
         apply(database, plan, storage, tmp_path, verifier, tmp_path.parent / "outside-quarantine",
             restore_receipt={})
     assert caught.value.code == "CLEANUP_BACKUP_PROTECTED" and all(path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("consumer", ["source-configuration", "comparison", "document-family", "document-template", "document-batch"])
+def test_core095_evidence_protects_requested_dataset_without_adoption(population_fixture, consumer):
+    from trackvance.acquisition_schedule_models import AcquisitionSourceConfiguration, AcquisitionSourceRevision
+    from trackvance.comparison_models import VersionComparison
+    from trackvance.document_models import DocumentBatch, DocumentFamily, DocumentTemplate
+
+    database, storage, paths, org = population_fixture
+    with database() as db:
+        if consumer == "source-configuration":
+            configuration = AcquisitionSourceConfiguration(id="source-095", dataset_id="test-dataset", enabled=False, organization_id=org)
+            db.add(configuration)
+            db.flush()
+            db.add(AcquisitionSourceRevision(configuration_id=configuration.id, version=1, actor_id="test-user", settings={}, organization_id=org))
+        elif consumer == "comparison":
+            db.add(VersionComparison(before_version_id="test-version", after_version_id="test-version", actor_id="test-user",
+                                     settings={}, status="SUCCESS", organization_id=org))
+        else:
+            family = DocumentFamily(id="family-095", name="Protected document family", responsible_user_id="test-user",
+                                    output_datasets={"headers": "test-dataset"} if consumer == "document-family" else {}, organization_id=org)
+            db.add(family)
+            db.flush()
+            if consumer != "document-family":
+                template = DocumentTemplate(id="template-095", family_id=family.id, revision=1, created_by_id="test-user", definition_hash="a" * 64,
+                    definition={"publication": {"intake_configuration_ids": {"headers": "test-config"}}} if consumer == "document-template" else {}, organization_id=org)
+                db.add(template)
+                db.flush()
+                if consumer == "document-batch":
+                    db.add(DocumentBatch(family_id=family.id, template_id=template.id, idempotency_key="published-095", status="PUBLISHED",
+                        settings={}, published_versions={"headers": "test-version"}, actor_id="test-user", wait_until=utcnow(), organization_id=org))
+        db.commit()
+        plan = create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)
+    assert plan["scope"]["migration"] == "0025_comparison_095"
+    assert len(plan["scope"]["state_tables"]) == 77
+    assert not plan["scope"]["delete"]["datasets"]
+    assert not plan["scope"]["delete"]["dataset_versions"]
+    assert not plan["scope"]["files"]
+    assert all(path.exists() for path in paths)
+    assert plan["scope"]["exceptions"]

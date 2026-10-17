@@ -681,7 +681,10 @@ def build(candidate: Path, results: dict, draft: bool):
                 i += 1
             # Each line is a row: long JSON/examples may split across pages.
             block = Table([[item] for item in code], colWidths=[CONTENT])
-            block.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE), ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
+            block.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PALE), ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                                       # Keep an opening brace/command with its first
+                                       # lines, while long examples remain splittable.
+                                       ("NOSPLIT", (0, 0), (-1, min(2, len(code) - 1)))]))
             story.extend([block, Spacer(1, 10)])
         elif line.startswith("- ") or re.match(r"\d+\. ", line):
             story.append(paragraph(line, "bullet"))

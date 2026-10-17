@@ -44,6 +44,9 @@ TYPE_TABLE = {"DATASET": "datasets", "DATASET_VERSION": "dataset_versions", "RUN
     "REPORT_EXECUTION": "report_executions", "DELIVERY_ATTEMPT": "delivery_attempts",
     "MONITOR_OCCURRENCE": "monitor_occurrences", "DELIVERY_OCCURRENCE": "delivery_occurrences",
     "INTAKE_OCCURRENCE": "intake_occurrences",
+    "DOCUMENT_FAMILY": "document_families", "DOCUMENT_TEMPLATE": "document_templates",
+    "DOCUMENT": "document_originals", "DOCUMENT_EXTRACTION": "document_extractions",
+    "DOCUMENT_BATCH": "document_batches", "COMPARISON": "version_comparisons",
     "CONNECTION_VERSION": "external_connection_versions", "DELIVERY_DESTINATION": "delivery_destinations",
     "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions", "DELIVERY_TARGET_POLICY": "delivery_target_policies"}
 PATH_FIELDS = {"dataset_versions": ("original_path", "canonical_path"), "runs": ("result_path", "evidence_path"),
@@ -221,6 +224,8 @@ def population(db: Session) -> tuple[dict, dict, set[tuple]]:
                     edges.add((child, (fk.column.table.name, parent)))
             for column, target in (("parent_version_id", "dataset_versions"), ("source_run_id", "runs"),
                                    ("output_version_id", "dataset_versions"), ("configuration_id", "configurations")):
+                if any(fk.parent.name == column and fk.column.table.name != target for fk in table.foreign_keys):
+                    continue  # The explicit typed FK takes precedence over a historical alias.
                 value = row.get(column)
                 if value:
                     logical_parent = rows.get(target, {}).get(str(value))
@@ -246,6 +251,36 @@ def population(db: Session) -> tuple[dict, dict, set[tuple]]:
                 if polymorphic_parent is None or polymorphic_parent.get("organization_id") != row.get("organization_id"):
                     error("CLEANUP_REFERENTIAL_DRIFT", "Una referencia polimórfica está rota o pertenece a otra organización.")
                 edges.add((child, (polymorphic_target, value)))
+            # Document identities and evidence are protected consumers. Their
+            # JSON bindings are real references even where the model deliberately
+            # avoids an FK cycle. Never adopt them into a dataset removal scope.
+            logical_references: list[tuple[str, Any]] = []
+            publications: list[dict[str, Any]] = []
+            if name == "document_families":
+                logical_references.extend(("datasets", value) for value in (row.get("output_datasets") or {}).values())
+                logical_references.append(("document_templates", row.get("active_template_id")))
+            elif name == "document_templates":
+                publications.append((row.get("definition") or {}).get("publication") or {})
+                logical_references.append(("document_extractions", row.get("tested_extraction_id")))
+            elif name == "document_batches":
+                logical_references.extend(("dataset_versions", value) for value in (row.get("published_versions") or {}).values())
+                publications.append(row.get("settings") or {})
+                sealed = row.get("sealed_manifest") or {}
+                publications.append((sealed.get("definition") or {}).get("publication") or {})
+                for member in sealed.get("members", []):
+                    logical_references.extend((("document_originals", member.get("document_id")),
+                                               ("document_extractions", member.get("extraction_id"))))
+            for publication in publications:
+                for column, target in (("intake_configuration_ids", "configurations"),
+                                       ("delivery_automation_ids", "delivery_automations")):
+                    logical_references.extend((target, value) for value in (publication.get(column) or {}).values())
+            for target, value in logical_references:
+                if not value:
+                    continue
+                document_parent = rows[target].get(str(value))
+                if document_parent is None or document_parent.get("organization_id") != row.get("organization_id"):
+                    error("CLEANUP_REFERENTIAL_DRIFT", "Una referencia documental está rota o pertenece a otra organización.")
+                edges.add((child, (target, str(value))))
             if name in {"report_contexts", "report_revisions"}:
                 document = row.get("snapshot") if name == "report_contexts" else row.get("draft")
                 for source in (document or {}).get("sources", []):
@@ -298,12 +333,16 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         dataset = rows["datasets"].get(identity)
         if not dataset or dataset["organization_id"] != organization_id:
             error("CLEANUP_SCOPE_INVALID", "Un dataset solicitado no pertenece a la organización declarada.")
-    for name in ("runs", "jobs", "report_executions", "acquisition_runs", "event_consumptions"):
+    for name in ("runs", "jobs", "report_executions", "acquisition_runs", "event_consumptions",
+                 "version_comparisons", "document_originals", "acquisition_occurrences"):
         if any(item.get("status") in ACTIVE for item in rows[name].values()):
             error("CLEANUP_NOT_QUIESCENT", "Resuelve trabajos y leases activos antes del backup y la limpieza.")
-    for name in ("monitor_schedules", "delivery_automations", "intake_schedules", "sentinel_automatic_monitors"):
+    for name in ("monitor_schedules", "delivery_automations", "intake_schedules", "sentinel_automatic_monitors",
+                 "acquisition_source_configurations"):
         if any(item.get("enabled") for item in rows[name].values()):
             error("CLEANUP_DISPATCH_ACTIVE", "Pausa las programaciones antes del backup y del plan selectivo.")
+    if any(item.get("next_cut_at") is not None for item in rows["document_families"].values()):
+        error("CLEANUP_DISPATCH_ACTIVE", "Desactiva los cortes documentales futuros antes del backup y del plan selectivo.")
     selected = {("datasets", identity) for identity in dataset_ids}
     uncertain = set()
     # Scope-sensitive records cannot be adopted merely because one FK matches.
@@ -434,8 +473,8 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         files_by_path[entry["path"]] = entry
     files = sorted(files_by_path.values(), key=lambda item: item["path"])
     revisions = list(db.scalars(text("SELECT version_num FROM alembic_version")))
-    if revisions != ["0022_intake_automation_deletion"]:
-        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.0 requiere exactamente la revisión 0022 y su modelo completo.")
+    if revisions != ["0025_comparison_095"] or len(rows) != 77:
+        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.5 requiere exactamente la revisión 0025 y sus 77 tablas completas.")
     revision = revisions[0]
     return {"project": project, "organization_id": organization_id, "dataset_ids": sorted(dataset_ids),
         "migration": revision, "schema_sha256": digest(schema), "population_sha256": digest(rows),
@@ -607,7 +646,7 @@ def _recover_locked(db: Session, quarantine: Path, storage: Path, *, project: st
             error("CLEANUP_RECOVERY_INVALID", "El marcador de commit no corresponde al journal sellado.")
         return {"status": "METADATA_COMMITTED_FILES_QUARANTINED", "files_restored": 0}
     rows, _, _ = population(db)
-    if journal.get("migration") != "0022_intake_automation_deletion" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
+    if journal.get("migration") != "0025_comparison_095" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
         error("CLEANUP_SCHEMA_DRIFT", "La recuperación requiere la misma revisión certificada del journal.")
     live = {(Path(row[field]) if Path(row[field]).is_absolute() else storage / row[field]).resolve()
             for name, items in rows.items() for row in items.values() for field in PATH_FIELDS.get(name, ())

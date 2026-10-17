@@ -44,8 +44,8 @@ def helper_options(project: str, image: str, source_commit: str, state: dict, qu
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image) or not re.fullmatch(r"[a-f0-9]{40}", source_commit):
         raise ValueError("An immutable certified image and source commit are required.")
     labels = inspect_one("image", image).get("Config", {}).get("Labels") or {}
-    if labels.get("org.opencontainers.image.version") != "0.9.0" or labels.get("org.opencontainers.image.revision") != source_commit:
-        raise ValueError("The helper image is not the specified certified 0.9.0 commit.")
+    if labels.get("org.opencontainers.image.version") not in {"0.9.0", "0.9.5"} or labels.get("org.opencontainers.image.revision") != source_commit:
+        raise ValueError("The helper image is not the specified certified 0.9.0/0.9.5 commit.")
     postgres = docker_state._container_for(state, "postgres")
     detail = inspect_one("container", str(postgres["id"]))
     values = dict(item.split("=", 1) for item in detail["Config"]["Env"] if "=" in item)

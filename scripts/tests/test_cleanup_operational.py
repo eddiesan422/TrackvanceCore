@@ -39,11 +39,12 @@ def test_live_quiescence_requires_only_postgres_and_exact_resource_ids(monkeypat
         cleanup.require_quiescence("trackvance-synthetic", baseline)
 
 
-def test_helper_has_finite_limits_certified_digest_and_no_secret_mounts(monkeypatch, tmp_path):
+@pytest.mark.parametrize("version", ["0.9.0", "0.9.5"])
+def test_helper_has_finite_limits_certified_digest_and_no_secret_mounts(monkeypatch, tmp_path, version):
     digest, sha = "sha256:" + "a" * 64, "b" * 40
     def inspect(kind, identity):
         if kind == "image":
-            return {"Config": {"Labels": {"org.opencontainers.image.version": "0.9.0", "org.opencontainers.image.revision": sha}}}
+            return {"Config": {"Labels": {"org.opencontainers.image.version": version, "org.opencontainers.image.revision": sha}}}
         if identity == "id-postgres":
             return {"Config": {"Env": ["POSTGRES_USER=synthetic", "POSTGRES_DB=synthetic", "POSTGRES_PASSWORD=private+secret"]}}
         return {"Mounts": [{"Type": "volume", "Name": "owned-trackvance_data", "Destination": "/var/lib/trackvance"}]}
