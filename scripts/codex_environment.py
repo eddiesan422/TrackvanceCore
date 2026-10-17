@@ -506,12 +506,16 @@ def execute_stage(args, directory, value, values, sha):
     require(set(selected) <= set(ACTIVE + OPTIONAL), "EXACT_CODEX_SERVICE_SELECTION_REQUIRED")
     intent = {"stage": args.stage, "source_sha": sha, "images": json.loads(json.dumps(value["images"])), "selected_services": selected,
         "budget": budgets, "protected_inventory_sha256": canonical_hash(protected), "configuration_sha256": canonical_hash(config)}
+    stop_timeout = getattr(args, "stop_timeout", 30)
+    require(type(stop_timeout) is int and 1 <= stop_timeout <= 30, "BOUNDED_CODEX_STOP_TIMEOUT_REQUIRED")
+    if args.stage == "stop":
+        intent["stop_timeout_seconds"] = stop_timeout
     receipt = directory / ("operation-" + args.stage + "-" + uuid4().hex + ".json")
     intent_path = receipt.with_suffix(".intent.json")
     save(intent_path, {"status": "INTENT", **intent})
     try:
         if args.stage == "stop":
-            command([*prefix, "stop", "--timeout", "30", *selected], environment=environment, timeout=180)
+            command([*prefix, "stop", "--timeout", str(stop_timeout), *selected], environment=environment, timeout=180)
         elif args.stage in {"start", "update"}:
             if args.stage == "start":
                 require(not change["changed_components"], "UPDATE_CHANGED_COMPONENTS_BEFORE_START")
@@ -674,6 +678,8 @@ def main():
     parser.add_argument("--image-source-sha"); parser.add_argument("--engine-id")
     parser.add_argument("--web-port", type=int, default=3205); parser.add_argument("--api-port", type=int, default=3206)
     parser.add_argument("--services", nargs="+"); parser.add_argument("--build-changed", action="store_true")
+    parser.add_argument("--stop-timeout", type=int, choices=range(1, 31), default=30,
+                        help="Bounded grace period for an explicitly selected Codex worker restart drill (default: 30s).")
     parser.add_argument("--schema-upgrade-backup", type=Path)
     parser.add_argument("--schema-upgrade-restore-receipt", type=Path)
     args = parser.parse_args(); directory = private_directory(args.directory)

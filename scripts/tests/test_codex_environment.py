@@ -2,6 +2,7 @@
 import copy
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import codex_environment as codex
@@ -280,6 +281,32 @@ def test_update_unchanged_component_bytes_is_verified_noop(fixture, monkeypatch)
     args = SimpleNamespace(stage="update", services=None, build_changed=False, backend_image=None, web_image=None, image_source_sha=None)
     result = codex.execute_stage(args, directory, value, values, OLD)
     assert result["status"] == "PASS_NOOP" and len(calls) == 1 and value["images"]["backend"]["source_sha"] == OLD
+
+
+def test_bounded_restart_drill_stops_only_explicit_worker_and_records_grace(fixture, monkeypatch):
+    directory, value, values, defaults = fixture
+    config = resolved(values)
+    existing = runtime(config, defaults)
+    empty = {"containers": [], "volumes": [], "networks": []}
+    monkeypatch.setattr(codex, "prepare", lambda *_args: (["docker", "compose"], {}, config, existing, codex.stable_inventory(empty), {}))
+    monkeypatch.setattr(codex, "inventory", lambda project, _env: existing if project == codex.PROJECT else empty)
+    calls = []
+    def command(argv, **kwargs):
+        calls.append(argv)
+        if "config" in argv:
+            return json.dumps(config)
+        assert argv == ["docker", "compose", "stop", "--timeout", "1", "acquisition-worker"]
+        for row in existing["containers"]:
+            if row["Config"]["Labels"]["com.docker.compose.service"] == "acquisition-worker":
+                row["State"]["Running"] = False
+        return ""
+    monkeypatch.setattr(codex, "command", command)
+    args = SimpleNamespace(stage="stop", services=["acquisition-worker"], stop_timeout=1)
+    result = codex.execute_stage(args, directory, value, values, OLD)
+    receipt = json.loads(Path(result["receipt"]["path"]).read_text(encoding="utf-8"))
+    assert receipt["stop_timeout_seconds"] == 1
+    assert receipt["selected_services"] == ["acquisition-worker"]
+    assert len(calls) == 2
 
 
 def schema_upgrade_evidence(tmp_path, value, existing):

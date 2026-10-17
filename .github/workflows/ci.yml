@@ -140,8 +140,8 @@ jobs:
         with:
           python: 'true'
           cache-mode: ${{ env.CI_CACHE_MODE }}
-      - name: Install syscall verification tools
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y strace libseccomp2
+      - name: Install syscall and local document processing tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y strace libseccomp2 poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa
       - name: Run all existing backend checks
         run: python scripts/ci/run_suite.py --profile functional --group backend
       - uses: actions/upload-artifact@v7
