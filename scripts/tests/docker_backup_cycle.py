@@ -582,7 +582,7 @@ def validate_case_after_correction(api: RecoveryApi, historical: dict[str, Any],
     ensure(current["state"] == "PENDING_VALIDATION" and current["auto_resolve_enabled"] is False,
            "Una política automática deshabilitada no debe cerrar el caso.")
     ensure(current["technical_validation"]["validated"] is True and current["validation_run_id"] == run_id,
-           "La excepción no conserva la validación técnica de la nueva ejecución.")
+           "La excepción no conserva la validación técnica de la nueva ejecución.", code="RECOVERY_CORRECTION_NOT_VALIDATED")
     for key in ("origin_run_id", "configuration_id", "finding_id", "assigned_user_id", "priority", "sla_hours", "due_at", "attachments"):
         ensure(current[key] == historical[key], f"La trazabilidad del caso cambió: {key}.")
     ensure(current["events"][:len(historical["events"])] == historical["events"]
@@ -595,6 +595,39 @@ def validate_case_after_correction(api: RecoveryApi, historical: dict[str, Any],
             "attachment_artifact_id": attachment["artifact_id"], "attachment_sha256": attachment_hash(api, current),
             "technical_validation": "VALIDATED", "auto_resolve_enabled": False,
             "historical_timeline_preserved": True}
+
+
+def prove_corrected_population(api: RecoveryApi, dataset_id: str, before_id: str,
+                               after_id: str) -> dict[str, Any]:
+    """Use the native complete comparator before validating the repaired control.
+
+    This fixture changes only record 002's amount. Dataset identity and four
+    rows alone do not establish that the original population was repaired.
+    """
+    comparison = api.json("POST", f"/datasets/{dataset_id}/comparisons", {
+        "before_version_id": before_id, "after_version_id": after_id, "keys": ["record_id"],
+    }, expected=202)
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        comparison = api.json("GET", f"/version-comparisons/{comparison['id']}")
+        if comparison["status"] in {"SUCCESS", "FAILED", "CANCELLED"}:
+            ensure(comparison["status"] == "SUCCESS", "La comparación completa no terminó correctamente.",
+                   code="RECOVERY_COMPARISON_NOT_SUCCESS")
+            break
+        time.sleep(0.5)
+    else:
+        raise RecoveryCheckError("La comparación completa no terminó a tiempo.", "RECOVERY_COMPARISON_TIMEOUT")
+    summary = comparison["summary"]
+    ensure(summary["mode"] == "KEYED" and summary["complete_population"] is True
+           and summary["keys"] == ["record_id"] and summary["before_rows"] == summary["after_rows"] == 4
+           and summary["counts"] == {"ADDED": 0, "ABSENT": 0, "MODIFIED": 1, "UNCHANGED": 3},
+           "La comparación no acredita las cuatro identidades y la única corrección esperada.",
+           code="RECOVERY_COMPARISON_POPULATION_MISMATCH")
+    report = api.request("GET", f"/version-comparisons/{comparison['id']}/download")
+    ensure(report.startswith(b"SQLite format 3\x00"), "El informe persistente no es SQLite.",
+           code="RECOVERY_COMPARISON_REPORT_INVALID")
+    return {"id": comparison["id"], "before_version_id": before_id, "after_version_id": after_id,
+            "summary": summary, "report_sha256": hashlib.sha256(report).hexdigest()}
 
 
 def capture_original(api: RecoveryApi, password: str,
@@ -1043,7 +1076,9 @@ def validate_delivery_restoration(
 
 def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[str],
                       environment: dict[str, str], credentials: tuple[str, ...]) -> dict[str, Any]:
+    api.recovery_stage = "IDENTITY"
     identity_report = validate_identity_restoration(api, original)
+    api.recovery_stage = "HISTORICAL_CONNECTION_AND_ARTIFACTS"
     connection_id, dataset_id = original["connection_id"], original["dataset_id"]
     # No password after recovery: prove restored ciphertext AND master key work.
     test = api.json("POST", f"/connections/{connection_id}/test", {})
@@ -1067,11 +1102,15 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
     restored_case = api.json("GET", f"/exceptions/{original['exception']['id']}")
     ensure(restored_case == original["exception"], "La excepción y su historial cambiaron durante el restore.")
     attachment_hash(api, restored_case)
+    api.recovery_stage = "HISTORICAL_MONITOR"
     monitor_report = validate_monitor_restoration(api, original["monitor"])
+    api.recovery_stage = "OPERATIONAL_DELIVERY"
     operational_delivery_report = validate_operational_delivery_restoration(
         api, original["delivery_operations"], compose, environment, credentials)
+    api.recovery_stage = "RESTORED_DELIVERY"
     delivery_report = validate_delivery_restoration(
         api, original, compose, environment, credentials)
+    api.recovery_stage = "CORRECTED_SOURCE_ACQUISITION"
     execute([*compose, "exec", "-T", DATABASE_SERVICE, "psql", "-U", "recovery_admin",
              "-d", "recovery_source", "-v", "ON_ERROR_STOP=1"], environment,
             input_text="UPDATE recovery_data.transactions SET amount=2.00 WHERE record_id='002';",
@@ -1085,6 +1124,9 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
                for item in refreshed["lineage"]), "Falta el linaje entre snapshots.")
     refreshed_hash = artifact_hash(api, refreshed)
     ensure(refreshed_hash != original["canonical_sha256"], "El refresh no leyó la corrección externa.")
+    api.recovery_stage = "COMPLETE_POPULATION_COMPARISON"
+    comparison_report = prove_corrected_population(api, dataset_id, restored_version["id"], refreshed["id"])
+    api.recovery_stage = "CORRECTED_INTAKE"
     run = wait_run(api, original["contract_id"], refreshed["id"])
     ensure(run["decision"] == "APPROVED" and run["metrics"]["error_rows"] == 0
            and run["metrics"]["total_rows"] == 4,
@@ -1100,7 +1142,9 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
            "La nueva ejecución modificó el resultado original.")
     new_manifest = api.request("GET", f"/runs/{run['id']}/evidence")
     ensure(isinstance(json.loads(new_manifest), dict), "La nueva ejecución no tiene un manifest válido.")
+    api.recovery_stage = "EXCEPTION_VALIDATION"
     case_report = validate_case_after_correction(api, original["exception"], run["id"])
+    api.recovery_stage = "HISTORICAL_MONITOR_RECHECK"
     validate_monitor_restoration(api, original["monitor"])
     return {
         "connection_test": "SUCCESS", "connection_id": connection_id,
@@ -1115,6 +1159,7 @@ def validate_restored(api: RecoveryApi, original: dict[str, Any], compose: list[
         "restored_credential_used": True,
         "restored_destination_credential_used": True,
         "exception": case_report, "sentinel": monitor_report, "delivery": delivery_report,
+        "correction_population_comparison": comparison_report,
         "delivery_operations": operational_delivery_report,
         "identity": identity_report,
     }
@@ -1174,6 +1219,7 @@ def main() -> int:
     claimed: list[str] = []
     main_before = None
     source_api = None
+    target_api = None
     result: dict[str, Any] = {
         "status": "FAIL", "schema_version": 4, "source_project": source,
         "target_project": target, "external_database_project": database,
@@ -1286,8 +1332,9 @@ def main() -> int:
                 target_environment, credentials=credentials)
         attach_external_network(target, database, target_environment)
         stage = "functional_recovery"
+        target_api = RecoveryApi(target_port, credentials)
         result["recovery"] = validate_restored(
-            RecoveryApi(target_port, credentials), original, fixture, target_environment, credentials)
+            target_api, original, fixture, target_environment, credentials)
         stage = "doctor_and_logs"
         execute([sys.executable, str(ROOT / "scripts" / "doctor.py"), "--base-url",
                  f"http://127.0.0.1:{target_port}", "--docker", "--project", target,
@@ -1310,6 +1357,11 @@ def main() -> int:
             result['error_code'] = error.code
         if source_api is not None and hasattr(source_api, 'last_request'):
             result['source_last_request'] = source_api.last_request
+        if target_api is not None:
+            if hasattr(target_api, 'last_request'):
+                result['target_last_request'] = target_api.last_request
+            if hasattr(target_api, 'recovery_stage'):
+                result['functional_stage'] = target_api.recovery_stage
         if isinstance(error, DeliveryEvidenceError):
             result["error_code"] = error.code
         if isinstance(error, RecoveryCommandError):

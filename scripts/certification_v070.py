@@ -110,17 +110,20 @@ def init(suite, port):
     override["services"]["web"] = {"image": images['web'] if images else "trackvance-v070-isolated:web", "pids_limit": 128,
                                      "mem_limit": "128m", "cpus": 0.5}
     override["services"]["postgres"] = {"pids_limit": 256, "mem_limit": "512m", "cpus": 1}
-    if images:
-        # Historical scenarios do not enqueue report work. Keep the inherited
-        # definition bounded without adding it to the explicitly started set.
-        override["services"]["report-worker"] = {
-            "image": images['backend'], "mem_limit": '256m', 'cpus': 0.25, 'pids_limit': 128,
-            "environment": {"PYTHONPATH": "/app/backend/src", "TRACKVANCE_CERTIFICATION_PROJECT": project},
-            "volumes": [{"type": "bind", "source": str(ROOT / relative),
-                         "target": '/app/' + relative, "read_only": True}
-                        for relative in ('backend/src', 'backend/migrations', 'scripts')]}
+    # Historical scenarios do not enqueue report work. Keep the inherited
+    # definition bounded without adding it to the explicitly started set.
+    override["services"]["report-worker"] = {
+        "image": context["image"], "mem_limit": '256m', 'cpus': 0.25, 'pids_limit': 128,
+        "environment": {"PYTHONPATH": "/app/backend/src", "TRACKVANCE_CERTIFICATION_PROJECT": project},
+        "volumes": [{"type": "bind", "source": str(ROOT / relative),
+                     "target": '/app/' + relative, "read_only": True}
+                    for relative in ('backend/src', 'backend/migrations', 'scripts')]}
     from ci.local_resources import apply_limits
     apply_limits(override, project)
+    # These suites select the historical lanes explicitly. Keep inherited new
+    # definitions owned and bounded without consuming the active stack budget.
+    from ci.certification_lanes import inactive_core095_lanes
+    override["services"].update(inactive_core095_lanes(ROOT, project, context["image"]))
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
     print(json.dumps({"context": str(directory), "project": project, "port": port}))

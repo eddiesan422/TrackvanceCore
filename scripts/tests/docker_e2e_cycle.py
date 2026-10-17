@@ -161,6 +161,8 @@ def main() -> int:
     outcome = 1
     result = {"version": "0.9.5", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
+    (evidence / "isolation.json").write_text(json.dumps({"project": project}), encoding="utf-8")
+    stage = "docker"
     inventory_run = lambda arguments: execute(arguments, environment=environment, capture=True)
     main_before = None
     try:
@@ -192,10 +194,12 @@ def main() -> int:
         execute(up, environment=environment)
         execute([*compose, 'exec', '-T', 'api', 'python', '-c',
                  "import trackvance; assert trackvance.__version__ == '0.9.5'"], environment=environment)
+        stage = "doctor"
         execute(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],
             environment=environment,
         )
+        stage = "postgres_migrations"
         for script in ("check_postgres_migrations.py", "verify_storage.py", "physical_schema_guard.py"):
             execute([*compose, "cp", "scripts/" + script, "api:/tmp/" + script], environment=environment)
         migrations = execute(
@@ -205,9 +209,11 @@ def main() -> int:
         )
         (evidence / "migrations.json").write_text(migrations, encoding="utf-8")
         if not options.clean_demo:
+            stage = "regression_smoke"
             execute([sys.executable, "scripts/smoke_test.py", "--base-url", base_url],
                     environment=environment)
         if not options.skip_playwright:
+            stage = "browser"
             pnpm = shutil.which("pnpm")
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
@@ -218,11 +224,14 @@ def main() -> int:
                                   environment=environment, evidence=evidence)
             result["browser"] = browser
 
+        stage = "storage_snapshot"
         before = evidence / "before.json"
         after = evidence / "after.json"
         execute([*compose, 'stop', 'web', 'scheduler', 'events-notifications', 'events-chaining',
-                 'worker', 'delivery-worker', 'acquisition-worker'], environment=environment)
+                 'worker', 'delivery-worker', 'acquisition-worker', 'document-worker',
+                 'comparison-worker', 'report-worker'], environment=environment)
         before.write_text(storage_snapshot(compose, environment), encoding="utf-8")
+        stage = "restart_readiness"
         execute([*compose, "restart", 'api', 'postgres'], environment=environment)
         execute([*compose, "up", "-d", "--wait", 'api', 'postgres'], environment=environment)
         after.write_text(storage_snapshot(compose, environment), encoding="utf-8")
@@ -262,8 +271,9 @@ def main() -> int:
             flush=True,
         )
         outcome = 0
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
-        result["error_type"] = type(error).__name__
+    except (OSError, RuntimeError, ValueError, AssertionError, subprocess.CalledProcessError) as error:
+        from ci.failure_diagnostics import capture_runner_frames
+        result.update(error_type=type(error).__name__, failed_stage=stage, failure_frames=capture_runner_frames(error))
         print("ERROR: falló la certificación aislada; consultar el resumen saneado.", file=sys.stderr, flush=True)
     finally:
         if started:

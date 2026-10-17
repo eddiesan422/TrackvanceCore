@@ -21,7 +21,7 @@ ERROR_TYPES = {'AssertionError', 'RuntimeError', 'ValueError', 'TimeoutError', '
                'FileNotFoundError', 'ConnectionError', 'HTTPError', 'URLError', 'IncompleteRead',
                'EvidenceError', 'PermissionError', 'OSError', 'KeyError', 'TypeError', 'MemoryError',
                'RecoveryCheckError', 'RecoveryCommandError', 'DeliveryEvidenceError',
-               'ImportError', 'ModuleNotFoundError', 'ComposePreflightError'}
+               'ImportError', 'ModuleNotFoundError', 'ComposePreflightError', 'CalledProcessError'}
 ERROR_CODES = {'REPORT_TIMEOUT', 'REPORT_RESULT_LIMIT', 'REPORT_JOIN_LIMIT', 'REPORT_JOIN_EXPANSION',
                'REPORT_MEMORY_LIMIT', 'REPORT_DISK_LIMIT', 'REPORT_ENGINE_FAILED', 'REPORT_ENGINE_ERROR',
                'REPORT_SOURCE_CHANGED', 'REPORT_CONTEXT_EXPIRED', 'REPORT_CANCELLED',
@@ -52,6 +52,10 @@ RECOVERY_PHASES = {'freshness_guards', 'external_postgresql', 'source_trackvance
     'authentic_archive', 'authentic_source_start', 'historical_fixtures', 'authentic_backup',
     'destroy_authentic_source', 'restore_080_stopped', 'multipart_fixture', 'native_backup',
     'fresh_restore', 'restored_multipart', 'native', 'legacy'}
+RECOVERY_FUNCTIONAL_STAGES = {'IDENTITY', 'HISTORICAL_CONNECTION_AND_ARTIFACTS',
+    'HISTORICAL_MONITOR', 'OPERATIONAL_DELIVERY', 'RESTORED_DELIVERY',
+    'CORRECTED_SOURCE_ACQUISITION', 'COMPLETE_POPULATION_COMPARISON', 'CORRECTED_INTAKE',
+    'EXCEPTION_VALIDATION', 'HISTORICAL_MONITOR_RECHECK'}
 RECOVERY_CODES = {'RECOVERY_API_UNEXPECTED_HTTP', 'RECOVERY_RUN_NOT_SUCCESS',
     'INITIAL_DATASET_MUST_BE_PROVISIONAL',
     'RECOVERY_ACQUISITION_NOT_PUBLISHED', 'CANONICAL_ARTIFACT_HASH_MISMATCH',
@@ -63,7 +67,12 @@ RECOVERY_CODES = {'RECOVERY_API_UNEXPECTED_HTTP', 'RECOVERY_RUN_NOT_SUCCESS',
     'SOURCE_INTAKE_DECISION_MISMATCH', 'DELIVERY_EVIDENCE_NOT_COMMITTED',
     'DELIVERY_EVIDENCE_PENDING_REPAIR', 'DELIVERY_EVIDENCE_TIMEOUT'}
 RECOVERY_CODES |= PREFLIGHT_CODES
+RECOVERY_CODES |= {'RECOVERY_COMPARISON_POPULATION_MISMATCH', 'RECOVERY_CORRECTION_NOT_VALIDATED',
+    'RECOVERY_COMPARISON_NOT_SUCCESS', 'RECOVERY_COMPARISON_REPORT_INVALID'}
 COMPOSE_FAILURES = {'CONTAINER_UNHEALTHY', 'BUILD_FAILED', 'PORT_BIND_FAILED', 'OTHER_COMPOSE_FAILURE'}
+COMPOSE_PHASES = {'docker', 'doctor', 'postgres_migrations', 'regression_smoke', 'browser',
+    'storage_snapshot', 'restart_readiness', 'source_fixture', 'source_streaming',
+    'source_certification', 'source_temporal', 'post_restart_source_check', 'credential_privacy'}
 RUNTIME_SERVICES = {'postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
                     'document-worker', 'comparison-worker',
                     'report-worker', 'scheduler', 'events-notifications', 'events-chaining',
@@ -224,6 +233,9 @@ def extract_log_facts(path: Path, sources: set[str]):
         text = stream.read(MAX_BYTES).decode('utf-8', errors='replace')
     frames, tests, types, codes, progress = [], set(), set(), set(), []
     for line in text.splitlines():
+        short = re.fullmatch(r'\s*((?:[A-Za-z]:)?[^:\r\n\0]+\.py):([0-9]{1,7}):[^\r\n\0]*', line)
+        if short and (frame := trusted_short_python_frame(short[1], int(short[2]), sources)) and frame not in frames:
+            frames.append(frame)
         match = re.fullmatch(r'\s*File "([^"]+)", line ([0-9]{1,7}), in ([A-Za-z_][A-Za-z0-9_]*|<module>)\s*', line)
         if match:
             raw, line_number, function = match.groups()
@@ -266,6 +278,34 @@ def extract_log_facts(path: Path, sources: set[str]):
                 pass
     return {'frames': frames[-20:], 'test_names': sorted(tests)[:30],
             'error_types': sorted(types), 'error_codes': sorted(codes), 'progress': progress[-10:]}
+
+
+def trusted_short_python_frame(raw, line, sources):
+    """Resolve pytest short trace locations solely to bounded tracked Python."""
+    if any(token in raw for token in ('://', '?', '#', '\n', '\r', '\0')):
+        return None
+    relative = posixpath.normpath(raw.replace('\\', '/'))
+    while relative.startswith('../'):
+        relative = relative[3:]
+    matches = [source for source in sources if source.endswith('.py')
+        and (relative == source or relative.endswith('/' + source) or source.endswith('/' + relative))]
+    if len(matches) != 1:
+        return None
+    path = ROOT / matches[0]
+    if (not path.is_file() or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+                                for part in (path, *path.parents))):
+        return None
+    try:
+        content = path.read_text(encoding='utf-8')
+        if not 1 <= line <= len(content.splitlines()):
+            return None
+        tree = ast.parse(content)
+    except (OSError, UnicodeError, SyntaxError):
+        return None
+    functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.lineno <= line <= (node.end_lineno or node.lineno)]
+    function = max(functions, key=lambda node: node.lineno).name if functions else '<module>'
+    return {'file': matches[0], 'line': line, 'function': function}
 
 
 def collect_child_failure(group: str, before: set[Path], *, root: Path = ROOT, sources=None, source_sha=None, ci=None):
@@ -407,7 +447,21 @@ def _write_runner_failure(runner, error, context, *, phase=None):
             or runner == 'identity-sso' and not allowed(phase, IDENTITY_FAILURE_PHASES)):
         return
     prefix = SAFE_FAILURE_RUNNERS[runner][3]
-    sources = trusted_sources()
+    frames = capture_runner_frames(error)
+    path = context.parent / (prefix.lower() + '-failure-safe.json')
+    with path.open('x', encoding='utf-8') as stream:
+        json.dump({'schema_version': 1, 'kind': prefix + '_FAILURE_SAFE', 'status': 'FAIL',
+                   'context_sha256': hashlib.sha256(context.read_bytes()).hexdigest(),
+                   'error_type': type(error).__name__ if type(error).__name__ in ERROR_TYPES else 'RuntimeError',
+                   'frames': frames, **({'phase': phase} if runner == 'identity-sso' else {})}, stream)
+
+
+def capture_runner_frames(error):
+    """Capture tracked traceback locations without any exception/source text."""
+    try:
+        sources = trusted_sources()
+    except (OSError, subprocess.SubprocessError):
+        return []
     frames = []
     for frame in traceback.extract_tb(error.__traceback__)[-20:]:
         source = Path(frame.filename)
@@ -423,12 +477,30 @@ def _write_runner_failure(runner, error, context, *, phase=None):
             continue
         frames.append({'file': name, 'line': frame.lineno, 'function': frame.name,
                        'source_sha256': hashlib.sha256(raw).hexdigest()})
-    path = context.parent / (prefix.lower() + '-failure-safe.json')
-    with path.open('x', encoding='utf-8') as stream:
-        json.dump({'schema_version': 1, 'kind': prefix + '_FAILURE_SAFE', 'status': 'FAIL',
-                   'context_sha256': hashlib.sha256(context.read_bytes()).hexdigest(),
-                   'error_type': type(error).__name__ if type(error).__name__ in ERROR_TYPES else 'RuntimeError',
-                   'frames': frames, **({'phase': phase} if runner == 'identity-sso' else {})}, stream)
+    return frames
+
+
+def sanitize_runner_frames(value, sources, root=ROOT):
+    if not isinstance(value, list):
+        return []
+    frames = []
+    for frame in value[:20]:
+        if not isinstance(frame, dict) or frame.get('file') not in sources:
+            continue
+        path = root / frame['file']
+        if (not path.is_file() or not path.resolve().is_relative_to(root.resolve())
+                or any(part.is_symlink() or getattr(part, 'is_junction', lambda: False)() for part in (path, *path.parents))):
+            continue
+        raw = path.read_bytes()
+        line, function = frame.get('line'), frame.get('function')
+        if (frame.get('source_sha256') != hashlib.sha256(raw).hexdigest()
+                or type(line) is not int or not 1 <= line <= len(raw.decode('utf-8').splitlines())
+                or not isinstance(function, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*|<module>', function)):
+            continue
+        if function != '<module>' and not re.search(r'\b(?:def|function)\s+' + re.escape(function) + r'\b', raw.decode('utf-8')):
+            continue
+        frames.append({'file': frame['file'], 'line': line, 'function': function, 'source_sha256': frame['source_sha256']})
+    return frames
 
 
 def collect_delivery_failure(before, *, root=ROOT, sources=None, source_sha=None, ci=None):
@@ -720,11 +792,11 @@ def sanitize_catalog_http(value):
 
 
 def sanitize_recovery_summary(value):
-    """Closed runner diagnostics only; never include a request, message or row."""
+    """Closed runner diagnostics and public route metadata; no bodies or rows."""
     if not isinstance(value, dict):
         return {}
     result = {'status': value['status']} if allowed(value.get('status'), {'PASS', 'FAIL'}) else {}
-    for key, choices in (('failed_stage', RECOVERY_PHASES), ('error_type', ERROR_TYPES),
+    for key, choices in (('failed_stage', RECOVERY_PHASES), ('functional_stage', RECOVERY_FUNCTIONAL_STAGES), ('error_type', ERROR_TYPES),
                          ('error_code', RECOVERY_CODES),
                          ('error_category', {'CONNECTION', 'SQL', 'UNHEALTHY', 'BUILD', 'UNKNOWN'}),
                          ('source_version', {'0.5.1', '0.6.0', '0.6.1', '0.7.0', '0.8.0', '0.8.5', '0.9.0', '0.9.5'}),
@@ -737,7 +809,32 @@ def sanitize_recovery_summary(value):
         result['exit_code'] = value['exit_code']
     if number(value.get('duration_seconds')):
         result['duration_seconds'] = value['duration_seconds']
+    request = sanitize_public_request_metadata(value.get('target_last_request'))
+    if request:
+        result['target_last_request'] = request
     return result
+
+
+def sanitize_public_request_metadata(value):
+    """Match a method and normalized route against the committed API contract."""
+    if not isinstance(value, dict) or value.get('method') not in {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}:
+        return {}
+    path = value.get('path')
+    if not isinstance(path, str) or any(token in path for token in ('?', '#', '\n', '\r', '\0', '://')):
+        return {}
+    try:
+        contract = json.loads((ROOT / 'backend/openapi.json').read_text(encoding='utf-8'))
+        routes = {(method.upper(), re.sub(r'\{[^{}]+\}', '{id}', route.removeprefix('/api/v1')))
+            for route, operations in contract['paths'].items() for method in operations
+            if method in {'get', 'post', 'put', 'patch', 'delete', 'head', 'options'}}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    if (value['method'], path) not in routes:
+        return {}
+    status = value.get('http_status')
+    if status is not None and (type(status) is not int or not 100 <= status <= 599):
+        return {}
+    return {'method': value['method'], 'path': path, 'http_status': status}
 
 
 def collect_async_failure(group: str, before: set[Path], *, root: Path = ROOT):
@@ -925,7 +1022,7 @@ def collect_compose_failure(group, before, *, root=ROOT, sources=None):
         if not isinstance(value, dict) or value.get('status') != 'FAIL' or value.get('project') != context.name:
             continue
         summary = {'status': 'FAIL'}
-        for key, choices in (('error_type', ERROR_TYPES), ('failed_stage', {'docker', 'storage_snapshot', 'restart_readiness'}),
+        for key, choices in (('error_type', ERROR_TYPES), ('failed_stage', COMPOSE_PHASES),
                              ('compose_failure', COMPOSE_FAILURES), ('cleanup', {'PASS', 'FAIL', 'NOT_STARTED'}),
                              ('main_inventory', {'UNCHANGED', 'CHANGED_OR_UNVERIFIABLE'})):
             if allowed(value.get(key), choices):
@@ -936,6 +1033,9 @@ def collect_compose_failure(group, before, *, root=ROOT, sources=None):
             summary['duration_seconds'] = value['duration_seconds']
         if type(value.get('demo_seed_enabled')) is bool:
             summary['demo_seed_enabled'] = value['demo_seed_enabled']
+        frames = sanitize_runner_frames(value.get('failure_frames'), trusted_sources() if sources is None else sources, root)
+        if frames:
+            summary['failure_frames'] = frames
         runtime = sanitize_runtime_diagnostics(value.get('runtime_diagnostics'))
         runtime_path = context / 'runtime-diagnostics.json'
         if (not runtime and runtime_path.is_file() and runtime_path.resolve() not in before

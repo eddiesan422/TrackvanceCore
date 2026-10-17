@@ -1,5 +1,9 @@
 """Small mandatory browser coverage must keep ownership and an independent oracle."""
+import hashlib
 import json
+import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import browser_evidence
@@ -62,3 +66,30 @@ def test_receiver_checks_full_row_values_multiplicity_and_header_detail_link():
     assert receiver.receipt(oracle, wrong)["status"] == "INCOMPLETE"
     wrong = [("headers", {"document_id": "document", **oracle[0], "invoice": "1"}), *rows[1:]]
     assert receiver.receipt(oracle, wrong)["status"] == "INCOMPLETE"
+
+
+def test_document_receiver_counts_rejected_duplicate_posts_as_attempts(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKVANCE_CERTIFICATION_PROJECT", "trackvance-codex")
+    monkeypatch.setenv("TRACKVANCE_DOCUMENT_FIXTURE_DIR", str(tmp_path))
+    server = receiver.serve(0, str(tmp_path / "documents-095-0123456789ab.sqlite"), serve_forever=False)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/documents/0123456789ab"
+    try:
+        body = receiver.canonical({"documents": [{"invoice": "000001", "total": "1234.50", "date": "2026-10-01"}]})
+        with urllib.request.urlopen(urllib.request.Request(base + "/oracle", data=body, headers={"Content-Type": "application/json"}), timeout=5) as response:
+            assert response.status == 201
+        body = receiver.canonical({"batch_id": "known-batch", "records": [{"document_id": "document", "invoice": "000001", "total": "1234.50", "date": "2026-10-01"}]})
+        headers = {"Content-Type": "application/json", "Idempotency-Key": "known-batch", "X-Trackvance-Payload-SHA256": hashlib.sha256(body).hexdigest()}
+        with urllib.request.urlopen(urllib.request.Request(base + "/headers", data=body, headers=headers), timeout=5) as response:
+            assert response.status == 200
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(urllib.request.Request(base + "/headers", data=body, headers=headers), timeout=5)
+        assert error.value.code == 409
+        with urllib.request.urlopen(base + "/receipt", timeout=5) as response:
+            result = json.load(response)
+        assert result["post_attempts"] == 2 and result["header_rows"] == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)

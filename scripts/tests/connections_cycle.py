@@ -491,6 +491,7 @@ def main() -> int:
                "-f", "deploy/docker/compose.connections-test.yml"]
     evidence = args.evidence_dir or ROOT / ".codex-local" / "connections-e2e" / project
     evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / "isolation.json").write_text(json.dumps({"project": project}), encoding="utf-8")
     compose = isolate_compose(compose, environment, evidence, project)
     # Small connector/browser fixtures still exercise all nine real processes.
     # Their private limits leave room for the separate, idle core installation.
@@ -521,6 +522,7 @@ def main() -> int:
     started = False
     checks = smoke.Checks()
     streaming = None
+    stage = "docker"
     try:
         command(["docker", "info", "--format", "{{.OSType}}"])
         existing = command(["docker", "ps", "-aq", "--filter",
@@ -533,6 +535,7 @@ def main() -> int:
             raise RuntimeError(f"El proyecto {project} ya tiene recursos; utiliza otro nombre.")
         started = True
         run(["up", "-d", "--wait", "--wait-timeout", "300", "source-postgres", "source-sqlserver"])
+        stage = "source_fixture"
         postgres_sql = (FIXTURES / "connections-postgresql.sql").read_text(encoding="utf-8")
         sqlserver_sql = (FIXTURES / "connections-sqlserver.sql").read_text(encoding="utf-8")
         run(["exec", "-T", "source-postgres", "psql", "-U", "source_admin", "-d",
@@ -546,13 +549,16 @@ def main() -> int:
         up = ["up", "-d", "--wait", "--wait-timeout", "300"]
         if not args.skip_build:
             up.append("--build")
+        stage = "docker"
         run(up)
+        stage = "postgres_migrations"
         run(["exec", "-T", "api", "alembic", "check"])
         migration_result = run(["exec", "-T", "api", "python", "-"],
                                input_text=migration_stdin_source(),
                                capture=True)
         checks.verify(json.loads(migration_result)["roundtrip"] == "PASS",
                       "Migraciones PostgreSQL: ida/vuelta, historial y paridad de modelos")
+        stage = "source_streaming"
         streaming_probe = (ROOT / "scripts/tests/connections_streaming_probe.py").read_text(encoding="utf-8")
         streaming = json.loads(run(["exec", "-T", "api", "python", "-"],
             input_text=streaming_probe + "\nprint(json.dumps(certify_sqlserver_streaming("
@@ -568,25 +574,32 @@ def main() -> int:
         api.request("GET", "/api/v1/connections", expected=(401,))
         auth = api.post("/api/v1/auth/demo", {}, expected=(200,))
         api.csrf = auth["csrf_token"]
+        stage = "source_certification"
         results = [certify_source(api, checks, source, password, credentials, run)
                    for source in ["POSTGRESQL", "SQLSERVER"]]
+        stage = "source_temporal"
         temporal_results = [certify_temporal_snapshots(api, checks, item["source_type"],
             item["connection_id"], admin_password, run) for item in results]
         if not args.skip_regression:
+            stage = "regression_smoke"
             command([sys.executable, "scripts/smoke_test.py", "--base-url", base_url])
         if not args.skip_playwright:
+            stage = "browser"
             pnpm = shutil.which("pnpm")
             if not pnpm:
                 raise RuntimeError("pnpm no está disponible para ejecutar Playwright.")
             browser_args = [] if args.full_playwright else ["tests-e2e/connections.spec.ts"]
             run_browser(pnpm, browser_args, root=ROOT, project=project, environment=environment, evidence=evidence)
+        stage = "restart_readiness"
         run(["restart", "postgres", "api", "worker", "delivery-worker", "web"])
         run(["up", "-d", "--wait", "--wait-timeout", "180"])
+        stage = "post_restart_source_check"
         for result in results:
             tested = api.post(f"/api/v1/connections/{result['connection_id']}/test", {}, expected=(200,))
             preserved = api.get(f"/api/v1/runs/{result['run_id']}")
             checks.verify(tested["status"] == "SUCCESS" and preserved["status"] == "SUCCESS",
                           f"{result['source_type']}: conserva credenciales cifradas y runs tras reinicio")
+        stage = "credential_privacy"
         logs = run(["logs", "--no-color", "api", "worker", "delivery-worker"], capture=True)
         assert_no_credentials(logs, credentials, "Secreto en logs de la aplicación")
         database_dump = run(["exec", "-T", "postgres", "pg_dump", "-U", environment["POSTGRES_USER"],
@@ -603,9 +616,12 @@ def main() -> int:
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(f"OK: {len(checks.completed)} comprobaciones de conectores reales.", flush=True)
         return 0
-    except (OSError, RuntimeError, KeyError, smoke.SmokeFailure) as error:
+    except (OSError, RuntimeError, ValueError, AssertionError, KeyError, smoke.SmokeFailure) as error:
+        from ci.failure_diagnostics import capture_runner_frames
         print("ERROR: " + redact(str(error), credentials), file=sys.stderr, flush=True)
         (evidence / "result.json").write_text(json.dumps({"status": "FAIL", "project": project,
+                                                        "error_type": type(error).__name__, "failed_stage": stage,
+                                                        "failure_frames": capture_runner_frames(error),
                                                         "checks": checks.completed,
                                                         "sqlserver_streaming_probe": streaming,
                                                         "error": redact(str(error), credentials)},

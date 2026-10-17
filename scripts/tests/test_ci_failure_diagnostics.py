@@ -73,6 +73,36 @@ def test_unknown_or_fabricated_source_function_is_not_retained(tmp_path):
     assert not facts['frames'] and not facts['error_types'] and 'secret' not in json.dumps(facts)
 
 
+@pytest.mark.parametrize('raw', ['backend/tests/test_ocr.py', 'tests/test_ocr.py',
+    '/runner/work/repo/backend/tests/test_ocr.py', r'backend\tests\test_ocr.py'])
+def test_pytest_short_location_has_real_source_line_and_function_without_message(tmp_path, monkeypatch, raw):
+    source = tmp_path / 'backend/tests/test_ocr.py'
+    source.parent.mkdir(parents=True)
+    source.write_text('def test_local_ocr():\n    return None\n')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    log = tmp_path / 'private.log'
+    log.write_text(f'{raw}:2: TypeError: SECRET_TOKEN PRIVATE_ROW\n'
+        f'{raw}:0: SECRET_TOKEN\n{raw}:9999999: PRIVATE_ROW\n')
+    facts = diagnostics.extract_log_facts(log, {'backend/tests/test_ocr.py'})
+    assert facts['frames'] == [{'file': 'backend/tests/test_ocr.py', 'line': 2, 'function': 'test_local_ocr'}]
+    assert all(secret not in json.dumps(facts) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+
+
+def test_pytest_short_location_rejects_ambiguous_untracked_and_linked_sources(tmp_path, monkeypatch):
+    sources = {'backend/tests/shared.py', 'scripts/tests/shared.py'}
+    for name in sources:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('def test_case():\n    return None\n')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    assert diagnostics.trusted_short_python_frame('tests/shared.py', 2, sources) is None
+    assert diagnostics.trusted_short_python_frame('private.py', 1, sources) is None
+    assert diagnostics.trusted_short_python_frame('backend/tests/shared.py?SECRET_TOKEN', 2, sources) is None
+    actual = Path.is_symlink
+    monkeypatch.setattr(Path, 'is_symlink', lambda path: path == tmp_path / 'backend/tests/shared.py' or actual(path))
+    assert diagnostics.trusted_short_python_frame('backend/tests/shared.py', 2, sources) is None
+
+
 @pytest.mark.parametrize('raw,expected', [
     ('tests/test_api.py', 'backend/tests/test_api.py'),
     ('./tests/test_api.py', 'backend/tests/test_api.py'),
@@ -419,6 +449,29 @@ def test_recovery_summary_unknown_phases_codes_types_categories_and_payloads_are
             'error_type': 'RecoveryCommandError', 'error_category': 'UNHEALTHY', 'exit_code': 1}
 
 
+def test_recovery_summary_preserves_only_fixed_functional_stage_and_public_target_route():
+    assert diagnostics.sanitize_recovery_summary({'status': 'FAIL',
+        'functional_stage': 'COMPLETE_POPULATION_COMPARISON',
+        'target_last_request': {'method': 'GET', 'path': '/version-comparisons/{id}',
+            'http_status': 200, 'body': 'PRIVATE_ROW', 'headers': {'Authorization': 'SECRET_TOKEN'}},
+        'source_last_request': {'method': 'GET', 'path': '/SECRET_TOKEN'}}) == {
+            'status': 'FAIL', 'functional_stage': 'COMPLETE_POPULATION_COMPARISON',
+            'target_last_request': {'method': 'GET', 'path': '/version-comparisons/{id}', 'http_status': 200}}
+
+
+@pytest.mark.parametrize('metadata', [
+    {'method': 'GET', 'path': '/datasets/SECRET_TOKEN', 'http_status': 200},
+    {'method': 'GET', 'path': '/datasets/{id}?token=SECRET_TOKEN', 'http_status': 200},
+    {'method': 'SECRET_TOKEN', 'path': '/datasets/{id}', 'http_status': 200},
+    {'method': 'GET', 'path': '/datasets/{id}', 'http_status': True},
+    {'method': 'GET', 'path': '/datasets/{id}', 'http_status': 999},
+    {'method': 'POST', 'path': '/version-comparisons/{id}', 'http_status': 200},
+])
+def test_public_target_request_rejects_unknown_routes_values_and_methods(metadata):
+    assert diagnostics.sanitize_recovery_summary({'status': 'FAIL', 'functional_stage': 'SECRET_TOKEN',
+        'target_last_request': metadata}) == {'status': 'FAIL'}
+
+
 @pytest.mark.parametrize('unsafe', ['context-link', 'result-link', 'oversized', 'malformed', 'baseline'])
 def test_recovery_collection_drops_links_oversized_malformed_and_archived_results(tmp_path, monkeypatch, unsafe):
     path = recovery_result(tmp_path)
@@ -610,6 +663,26 @@ def test_compose_partial_unknown_stage_category_type_and_runtime_are_not_publish
     assert all(secret not in json.dumps(result) for secret in ('SECRET_TOKEN', 'PRIVATE_ROW'))
     assert 'failed_stage' not in result and 'compose_failure' not in result and 'error_type' not in result
     assert 'runtime' not in result
+
+
+def test_compose_partial_keeps_verified_source_frames_and_closed_lifecycle_stage(tmp_path):
+    source = tmp_path / 'scripts/tests/docker_e2e_cycle.py'
+    source.parent.mkdir(parents=True)
+    source.write_text('def main():\n    return 1\n')
+    frame = {'file': 'scripts/tests/docker_e2e_cycle.py', 'line': 2, 'function': 'main',
+        'source_sha256': diagnostics.hashlib.sha256(source.read_bytes()).hexdigest(),
+        'message': 'SECRET_TOKEN PRIVATE_ROW'}
+    result = compose_failure_result(tmp_path, 'compose-critical', failed_stage='postgres_migrations',
+        error_type='CalledProcessError', failure_frames=[frame])
+    summary = diagnostics.collect_child_failure('compose-critical', set(), root=tmp_path,
+        sources={'scripts/tests/docker_e2e_cycle.py'})[0]['result']
+    assert summary['failed_stage'] == 'postgres_migrations' and summary['error_type'] == 'CalledProcessError'
+    assert summary['failure_frames'] == [{key: frame[key] for key in ('file', 'line', 'function', 'source_sha256')}]
+    assert 'SECRET_TOKEN' not in json.dumps(summary) and 'PRIVATE_ROW' not in json.dumps(summary)
+    source.write_text('def main():\n    return 2\n')
+    assert 'failure_frames' not in diagnostics.collect_child_failure('compose-critical', set(),
+        root=tmp_path, sources={'scripts/tests/docker_e2e_cycle.py'})[0]['result']
+    assert result.is_file()
 
 
 @pytest.mark.parametrize('unsafe', ['linked-context', 'linked-result', 'malformed', 'oversized', 'baseline'])

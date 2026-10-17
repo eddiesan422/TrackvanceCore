@@ -221,6 +221,8 @@ def init(suite: str, port: int, main_project: str | None) -> Path:
         override["services"][name] = service
     from ci.local_resources import apply_limits
     apply_limits(override, project)
+    from ci.certification_lanes import inactive_core095_lanes
+    override["services"].update(inactive_core095_lanes(ROOT, project, context["image"]))
     (directory / "compose.json").write_text(json.dumps(override, indent=2), encoding="utf-8")
     (directory / "isolation.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
     preflight(directory, context)
@@ -246,7 +248,7 @@ def main() -> None:
     if args.action == "start":
         config = json.loads(command([*compose_args(directory, context), "config", "--format", "json"]))
         services = args.services or list(CORE_SERVICES)
-        if not set(services).issubset(config["services"]):
+        if not set(services).issubset(CORE_SERVICES) or not set(services).issubset(config["services"]):
             raise IsolationError("Servicios desconocidos.")
         command([*compose_args(directory, context), "up", "--no-build", "--detach", "--wait",
                  "--wait-timeout", "180", *services])

@@ -42,8 +42,7 @@ def test_fixture_populates_complete_referential_graph_without_remote_io(authenti
     assert authenticated.post("/api/v1/governance/people", json={"name": "Fixture shared contact"}).status_code == 201
     result = fixture.build(project)
     with database() as db:
-        db.execute(text("UPDATE alembic_version SET version_num='0022_intake_automation_deletion'"))
-        db.commit()
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "0025_comparison_095"
         rows, _schema, _edges = population(db)
         from trackvance.models import ArtifactLink, DatasetVersion, Run
         from trackvance.services import backfill_artifacts

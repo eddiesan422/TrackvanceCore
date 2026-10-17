@@ -131,8 +131,10 @@ test('REST real: detectar → revisar ausencia → guardar → primera adquisici
   const comparisonDone = await (await page.request.get(`/api/v1/version-comparisons/${comparison.id}`)).json()
   expect(comparisonDone.summary.counts).toEqual({ ADDED: 0, ABSENT: 0, MODIFIED: 0, UNCHANGED: 3 })
   await page.goto(`/operations?queue=finished&acquisition=${acquisition.id}`)
+  const tracking = page.getByRole('dialog', { name: 'Seguimiento de adquisición', exact: true })
+  await expect(tracking).toContainText('Versión publicada después de leer y perfilar la fuente completa.')
+  await tracking.getByRole('button', { name: 'Cerrar ventana', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Operación', exact: true })).toBeVisible()
-  await expect(page.getByRole('dialog', { name: 'Seguimiento de adquisición', exact: true })).toContainText('Versión publicada después de leer y perfilar la fuente completa.')
   await info.attach('acquisition-095-native-evidence.json', { body: JSON.stringify({ nonce, connection_id: connection.id, acquisition_id: acquisition.id,
     dataset_id: acquisition.dataset_id, first_version_id: acquisition.output_version_id, proposed_rows: proposed.sampled_rows,
     source_receipt: receipt, comparison: comparisonDone, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })

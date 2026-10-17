@@ -58,6 +58,7 @@ def serve(port, database, *, serve_forever=True):
     with sqlite3.connect(target) as db:
         db.execute("CREATE TABLE IF NOT EXISTS oracles(nonce TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, nonce TEXT NOT NULL, structure TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS delivery_calls(seq INTEGER PRIMARY KEY AUTOINCREMENT, nonce TEXT NOT NULL, structure TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS acquisition_fixtures(nonce TEXT PRIMARY KEY, failures INTEGER NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS acquisition_calls(seq INTEGER PRIMARY KEY AUTOINCREMENT, nonce TEXT NOT NULL, page INTEGER NOT NULL, page_size INTEGER NOT NULL, status INTEGER NOT NULL)")
     guard = threading.Lock()
@@ -124,7 +125,8 @@ def serve(port, database, *, serve_forever=True):
                     return
                 rows = [(structure, row) for structure, payload in db.execute("SELECT structure,payload FROM batches WHERE nonce=? ORDER BY id", [match[1]])
                         for row in json.loads(payload)]
-            self.respond(200, receipt(json.loads(oracle[0]), rows, project))
+                attempts = db.execute("SELECT COUNT(*) FROM delivery_calls WHERE nonce=?", [match[1]]).fetchone()[0]
+            self.respond(200, {**receipt(json.loads(oracle[0]), rows, project), "post_attempts": attempts})
 
         def do_POST(self):
             arm = re.fullmatch(r"/acquisition/([a-f0-9]{12})/(arm|faults)", urlsplit(self.path).path)
@@ -158,6 +160,9 @@ def serve(port, database, *, serve_forever=True):
             if not match:
                 self.respond(404, {"code": "NOT_FOUND"})
                 return
+            if match[2] != "oracle":
+                with guard, sqlite3.connect(target) as db:
+                    db.execute("INSERT INTO delivery_calls(nonce,structure) VALUES (?,?)", [match[1], match[2]])
             try:
                 count = int(self.headers.get("Content-Length", "0"))
                 if not 1 <= count <= 1024 * 1024:

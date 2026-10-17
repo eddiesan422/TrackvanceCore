@@ -551,6 +551,41 @@ def test_corrected_case_requires_technical_validation_but_cannot_close_automatic
         assert validated["historical_timeline_preserved"] is True
 
 
+@pytest.mark.parametrize("damage", [None, "missing_key", "added", "wrong_total", "failed", "invalid_report"])
+def test_recovery_population_proof_requires_complete_native_keyed_report(monkeypatch, damage):
+    summary = {"mode": "KEYED", "complete_population": True, "keys": ["record_id"],
+               "before_rows": 4, "after_rows": 4,
+               "counts": {"ADDED": 0, "ABSENT": 0, "MODIFIED": 1, "UNCHANGED": 3}}
+    if damage == "missing_key":
+        summary["keys"] = []
+    if damage == "added":
+        summary["counts"].update(ADDED=1, UNCHANGED=2)
+    if damage == "wrong_total":
+        summary["before_rows"] = 3
+    calls = []
+
+    def response(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload, kwargs))
+        if method == "POST":
+            return {"id": "comparison", "status": "QUEUED"}
+        return {"id": "comparison", "status": "FAILED" if damage == "failed" else "SUCCESS", "summary": summary}
+
+    report = b"invalid" if damage == "invalid_report" else b"SQLite format 3\x00fixture"
+    api = SimpleNamespace(json=response, request=lambda method, path: report)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: pytest.fail("Terminal comparator must not be polled again"))
+    if damage:
+        with pytest.raises(runner.RecoveryCheckError):
+            runner.prove_corrected_population(api, "dataset", "before", "after")
+    else:
+        proof = runner.prove_corrected_population(api, "dataset", "before", "after")
+        assert proof["report_sha256"] == hashlib.sha256(report).hexdigest()
+        assert proof["summary"]["counts"]["MODIFIED"] == 1
+    assert calls == [
+        ("POST", "/datasets/dataset/comparisons", {"before_version_id": "before", "after_version_id": "after", "keys": ["record_id"]}, {"expected": 202}),
+        ("GET", "/version-comparisons/comparison", None, {}),
+    ]
+
+
 def test_destroy_verifies_source_absent_and_external_database_alive(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(runner, "cleanup", lambda project, path: calls.append(("destroy", project)))
