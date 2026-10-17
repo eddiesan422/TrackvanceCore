@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.5 — en desarrollo, NO CERRADA
+
+- Familias, plantillas y extracciones documentales versionadas, OCR CPU local,
+  revisión humana, lotes sellados y datasets de salida estables con procedencia.
+- Primera adquisición externa provisional hasta v1, reserva de nombre y evidencia
+  persistente; actualizaciones manuales/programadas con políticas de publicación.
+- Retries de lectura REST con deadline global y diagnósticos, descubrimiento de
+  estructura de borradores y políticas explícitas de nulos/ausencias versionadas.
+- Comparación completa persistente con claves verificadas o multiplicidad,
+  controles de acceso de ambas versiones, paginación, cancelación y recuperación.
+- Inicio/menú con logo suministrado y animación accesible; seguimiento de estados
+  nativos y validación de excepciones ligada a la población afectada.
+- Migraciones aditivas 0023–0025 y preservación verificable del estado histórico
+  10 mediante proyección desde el estado 11. Los gates y el despliegue se registran
+  por separado; este encabezado no declara certificación ni promoción.
+
 ## 0.9.0 - 2026-10-15 - Correcciones de interfaz sobre la implementación vigente
 
 - Conserva implementación 0.9.0 y especificación v1.1, contratos históricos,

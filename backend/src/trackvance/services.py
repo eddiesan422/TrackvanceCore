@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import sqlite3
 import time
 from collections import Counter
 from collections.abc import Iterator
@@ -258,6 +259,110 @@ def _valid_rule_counts(rule: dict) -> bool:
                for key in ("evaluated_count", "failed_count"))
 
 
+def _comparison_population_proof(db: Session, left: DatasetVersion, right: DatasetVersion) -> dict | None:
+    """Reuse a sealed native comparator report, including its actual metadata.
+
+    No row population is returned to the browser. A metadata-only DB summary
+    cannot authorize closure if it differs from the SHA-verified report.
+    """
+    from .comparison_models import VersionComparison
+    from .version_comparison import scope_warnings
+
+    if any(warning.startswith("INDEPENDENT_SCOPES") for warning in scope_warnings(left.ingestion_metadata or {}, right.ingestion_metadata or {})):
+        return None
+    for key in ("document_publication",):
+        old, new = (left.ingestion_metadata or {}).get(key), (right.ingestion_metadata or {}).get(key)
+        if old or new:
+            return None  # Documentary corrections must use their frozen DOCUMENT_SET identity.
+    for key in ("window_start", "window_end", "batch_id", "document_batch_id"):
+        old, new = (left.ingestion_metadata or {}).get(key), (right.ingestion_metadata or {}).get(key)
+        if (old or new) and old != new:
+            return None
+    comparisons = db.scalars(select(VersionComparison).where(
+        VersionComparison.organization_id == left.organization_id,
+        VersionComparison.before_version_id == left.id, VersionComparison.after_version_id == right.id,
+        VersionComparison.status == "SUCCESS", VersionComparison.artifact_id.is_not(None))
+        .order_by(VersionComparison.created_at.desc(), VersionComparison.id).limit(10)).all()
+    for comparison in comparisons:
+        summary, settings = comparison.summary or {}, comparison.settings or {}
+        if not isinstance(summary, dict) or not isinstance(settings, dict):
+            continue
+        keys = settings.get("keys")
+        counts = summary.get("counts") or {}
+        if (not isinstance(keys, list) or not keys or any(not isinstance(key, str) for key in keys) or len(keys) != len(set(keys))
+                or not isinstance(counts, dict)
+                or settings.get("algorithm_version") != 1
+                or summary.get("keys") != keys or summary.get("mode") != "KEYED" or summary.get("complete_population") is not True
+                or summary.get("before_scope") != (left.ingestion_metadata or {}) or summary.get("after_scope") != (right.ingestion_metadata or {})
+                or any(not isinstance(counts.get(kind), int) or isinstance(counts[kind], bool) or counts[kind] < 0
+                       for kind in ("ADDED", "ABSENT", "MODIFIED", "UNCHANGED"))
+                or counts["ADDED"] != 0 or counts["ABSENT"] != 0
+                or summary.get("before_rows") != left.row_count or summary.get("after_rows") != right.row_count
+                or left.row_count <= 0 or left.row_count != right.row_count
+                or counts["MODIFIED"] + counts["UNCHANGED"] != left.row_count):
+            continue
+        old_schema = {column["name"]: column.get("logical_type", "STRING") for column in left.schema_json}
+        new_schema = {column["name"]: column.get("logical_type", "STRING") for column in right.schema_json}
+        if any(key not in old_schema or old_schema[key] != new_schema.get(key) for key in keys):
+            continue
+        artifact = db.get(Artifact, comparison.artifact_id)
+        if artifact is None or artifact.organization_id != left.organization_id or artifact.kind != "COMPARISON_REPORT":
+            continue
+        expected = {"summary": summary, "settings": settings, "before_version_id": left.id, "after_version_id": right.id}
+        try:
+            path = artifact_store.verify(artifact)
+            with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1) as report:
+                sizes = report.execute("SELECT key,length(value) FROM report_metadata LIMIT 5").fetchall()
+                if len(sizes) != 4 or {row[0] for row in sizes} != set(expected) or any(row[1] > 4 * 1024**2 for row in sizes):
+                    continue
+                metadata = {key: json.loads(value) for key, value in report.execute("SELECT key,value FROM report_metadata")}
+            if metadata != expected:
+                continue
+        except (ArtifactIntegrityError, OSError, ValueError, sqlite3.DatabaseError):
+            continue
+        return {"method": "VERIFIED_COMPLETE_COMPARISON_KEY_SET", "comparison_id": comparison.id,
+            "artifact_id": artifact.id, "artifact_sha256": artifact.sha256, "before_version_id": left.id,
+            "after_version_id": right.id, "keys": keys, "counts": counts, "complete_population": True,
+            "report_metadata_verified": True}
+    return None
+
+
+def _same_validation_population(db: Session, origin: Run, candidate: Run, proofs: list | None = None) -> bool:
+    """A passing independent cut cannot establish repair of an earlier population.
+
+    Exact versions retain their historical semantics. Changed versions require
+    an explicit frozen population identity and membership digest, supplied by
+    their producer; dataset identity or similar row counts alone are insufficient.
+    """
+    for left_id, right_id in ((origin.dataset_version_id, candidate.dataset_version_id),
+                              (origin.target_version_id, candidate.target_version_id)):
+        if left_id == right_id:
+            continue
+        left, right = db.get(DatasetVersion, left_id) if left_id else None, db.get(DatasetVersion, right_id) if right_id else None
+        if left is None or right is None or left.dataset_id != right.dataset_id or left.organization_id != right.organization_id:
+            return False
+        scope = (left.ingestion_metadata or {}).get("population_scope")
+        revised = (right.ingestion_metadata or {}).get("population_scope")
+        if (not isinstance(scope, dict) or scope != revised or scope.get("schema_version") != 1
+                or scope.get("kind") not in {"DOCUMENT_SET", "BUSINESS_KEY_SET"}
+                or not isinstance(scope.get("identity"), str) or not scope["identity"]
+                or not isinstance(scope.get("membership_sha256"), str) or len(scope["membership_sha256"]) != 64):
+            # Existing source snapshots can establish the same complete key set
+            # through the user's explicit native comparison. A declared but
+            # different frozen scope is never reinterpreted by this bridge.
+            if scope or revised:
+                return False
+            proof = _comparison_population_proof(db, left, right)
+            if proof is None:
+                return False
+            if proofs is not None:
+                proofs.append(proof)
+        elif proofs is not None:
+            proofs.append({"method": "FROZEN_POPULATION_SCOPE", "before_version_id": left.id,
+                "after_version_id": right.id, "population_scope": scope})
+    return True
+
+
 def assess_exception_validation(
     db: Session,
     case: ExceptionCase,
@@ -337,7 +442,15 @@ def assess_exception_validation(
     validated = False
     criterion = ""
     rule_evaluation = None
-    if origin_finding is None:
+    origin_run = db.get(Run, case.run_id)
+    population_proofs: list[dict] = []
+    population_match = bool(origin_run and _same_validation_population(db, origin_run, candidate, population_proofs))
+    if not population_match:
+        reason = ("La ejecución posterior corresponde a otra población o lote, o no conserva una identidad de población "
+                  "comprobable. Compara las versiones completas con claves de negocio explícitas y únicas; no debe haber "
+                  "incorporaciones ni ausencias. Un lote independiente no demuestra corrección.")
+        criterion = "VALIDATION_POPULATION_MISMATCH"
+    elif origin_finding is None:
         reason = "La excepción histórica no conserva un hallazgo técnico que pueda volver a evaluarse."
         criterion = "ORIGIN_FINDING_REQUIRED"
     elif case.module == "intake":
@@ -397,6 +510,9 @@ def assess_exception_validation(
         reason = "El módulo de la excepción no tiene una política de validación técnica compatible."
         criterion = "UNSUPPORTED_MODULE"
 
+    if validated and any(proof.get("method") == "VERIFIED_COMPLETE_COMPARISON_KEY_SET" for proof in population_proofs):
+        reason += " La misma población fue acreditada por un informe íntegro de comparación completa con claves de negocio únicas."
+
     validation_status = "VALIDATED" if validated else "FAILED"
     stored_evidence = case.validation_evidence or {}
     same_persisted_check = (
@@ -422,6 +538,10 @@ def assess_exception_validation(
         "origin_finding_fingerprint": origin_finding.fingerprint if origin_finding else None,
         "validation_run_id": candidate.id,
         "validation_run_decision": candidate.decision,
+        "origin_dataset_version_id": origin_run.dataset_version_id if origin_run else None,
+        "validation_dataset_version_id": candidate.dataset_version_id,
+        "population_match": population_match,
+        "population_proofs": population_proofs,
         "checked_at": checked_at,
     }
     if rule_evaluation is not None:
@@ -460,7 +580,26 @@ def exception_dto(db: Session, c: ExceptionCase) -> dict:
                                 "uploaded_by_id": attachment.uploaded_by_id,
                                 "created_at": iso(attachment.created_at)})
     terminal = c.state in {"RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE", "FALSE_POSITIVE"}
+    source_version = db.get(DatasetVersion, origin_run.dataset_version_id) if origin_run else None
+    source_metadata = (source_version.ingestion_metadata or {}) if source_version else {}
+    document_publication = source_metadata.get("document_publication") or {}
+    from .operation_tracking import _tracking
+    tracking_id = _tracking(db, source_version, c.organization_id) if source_version else None
+    correction = ("Corrige la extracción creando una revisión y conserva el original." if source_version and source_version.source_type in {"DOCUMENT", "DOCUMENTS", "DOCUMENT_OCR", "OCR"}
+                  else "Corrige el origen y realiza una nueva adquisición; Trackvance no escribe implícitamente en la fuente externa." if source_version and source_version.source_type in {"REST", "POSTGRESQL", "SQLSERVER", "SOURCE_SNAPSHOT"}
+                  else "Corrige los datos afectados y conserva la versión de origen para revisar los cambios.")
+    resolution_context = {"tracking_id": tracking_id or f"run:{c.run_id}",
+        "diagnosis": c.root_cause or "Revisa el hallazgo y su evidencia antes de registrar la causa raíz.",
+        "correction_guidance": correction,
+        "rule_guidance": "Cambiar o desactivar una regla no prueba que los datos fueron corregidos. La validación conserva el mismo control y población.",
+        "impact": "La excepción afecta la población de la ejecución de origen. Su resolución no acredita ni repite una entrega.",
+        "dataset_id": source_version.dataset_id if source_version else None,
+        "dataset_version_id": source_version.id if source_version else None,
+        "document_id": source_metadata.get("document_id"),
+        "family_id": source_metadata.get("family_id") or document_publication.get("family_id"),
+        "batch_id": document_publication.get("batch_id")}
     return {"id": c.id, "display_id": c.display_id, "finding_id": c.finding_id,
+            "resolution_context": resolution_context,
             "run_id": c.run_id, "origin_run_id": c.run_id,
             "configuration_id": c.configuration_id,
             "configuration_name": config.name if config else None,

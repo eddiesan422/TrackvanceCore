@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Database, FileBox, Focus, GitBranch, Maximize2, Minus, Plus, Send, Server, ShieldCheck, Workflow } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Database, FileBox, Files, Focus, GitBranch, GitCompareArrows, Layers, Maximize2, Minus, Plus, ScanLine, Send, Server, ShieldCheck, Workflow } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Badge, Empty, ErrorState, Field, label, Loading, Notice } from '../../components/ui'
@@ -8,8 +8,9 @@ import { CARD_WIDTH, layoutLineage, lineagePath, mergeLineage, routeLineage, typ
 import './lineage.css'
 
 const types: Record<string, string> = { DATASET_VERSION: 'Versión de datos', RUN: 'Proceso', CONFIGURATION: 'Contrato publicado', ACQUISITION: 'Adquisición', CONNECTION_VERSION: 'Fuente', DELIVERY_DESTINATION_VERSION: 'Destino', DELIVERY_TARGET_POLICY: 'Política de destino', DELIVERY_ATTEMPT: 'Intento de entrega', REPORT_EXECUTION: 'Ejecución de Reportes', REPORT_REVISION: 'Definición de Reportes', REPORT_DEFINITION: 'Reporte', ARTIFACT: 'Evidencia técnica' }
+Object.assign(types, { DOCUMENT: 'Documento original · metadata', DOCUMENT_EXTRACTION: 'Extracción y revisión', DOCUMENT_BATCH: 'Lote documental', DOCUMENT_FAMILY: 'Familia documental', DOCUMENT_TEMPLATE: 'Revisión de plantilla', VERSION_COMPARISON: 'Comparación de versiones' })
 function nodeType(node: LineageNode) { return node.module === 'sentinel' ? 'Sentinel · monitoreo' : node.module === 'recon' ? 'ReconOps · conciliación' : node.module === 'intake' ? 'Intake · validación' : node.module?.toLowerCase() === 'delivery' ? 'Delivery · entrega' : types[node.type] || 'Recurso registrado' }
-function NodeIcon({ node }: { node: LineageNode }) { const Icon = node.module === 'sentinel' ? ShieldCheck : node.module?.toLowerCase() === 'delivery' ? Send : node.type === 'DATASET_VERSION' ? Database : node.type.includes('CONNECTION') || node.type.includes('DESTINATION') ? Server : node.type === 'ARTIFACT' ? FileBox : Workflow; return <Icon size={16} aria-hidden="true"/> }
+function NodeIcon({ node }: { node: LineageNode }) { const Icon = node.module === 'sentinel' ? ShieldCheck : node.module?.toLowerCase() === 'delivery' ? Send : node.type === 'DATASET_VERSION' ? Database : node.type.includes('CONNECTION') || node.type.includes('DESTINATION') ? Server : node.type === 'ARTIFACT' ? FileBox : node.type === 'DOCUMENT' ? Files : node.type === 'DOCUMENT_EXTRACTION' ? ScanLine : node.type === 'DOCUMENT_BATCH' ? Layers : node.type === 'VERSION_COMPARISON' ? GitCompareArrows : Workflow; return <Icon size={16} aria-hidden="true"/> }
 function confirmation(state: string) { return ({ CONFIRMED: 'Confirmada', PARTIAL: 'Entrega parcial: no acredita entrega completa', UNKNOWN: 'Confirmación incierta: sin reenvío automático', UNCONFIRMED: 'Sin confirmación de entrega completa' } as Record<string, string>)[state] || 'Relación registrada' }
 
 export function LineageGraph({ datasetId, initialVersion }: { datasetId: string; initialVersion?: string }) {

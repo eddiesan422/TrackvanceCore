@@ -255,7 +255,7 @@ def test_snapshot_refresh_and_intake_preserve_exact_source_lineage(authenticated
     assert {c["name"]: c["logical_type"] for c in first["schema"]}["amount"] == "STRING"
     origin = first["ingestion_metadata"]["source"]
     assert origin["connection_version_id"] == connection["connection_version_id"]
-    assert {link["relation"] for link in first["lineage"]} == {"SOURCE_SNAPSHOT"}
+    assert {link["relation"] for link in first["lineage"]} == {"SOURCE_SNAPSHOT", "ACQUISITION_OUTPUT"}
     assert authenticated.patch(
         f"/api/v1/connections/{connection['id']}",
         json={"version": 1, "host": "replacement-host", "password": "replacement-password"},

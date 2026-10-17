@@ -55,6 +55,7 @@ _mssql_lock = threading.RLock()  # FreeTDS timeouts are process-wide.
 class SourceError(Exception):
     def __init__(self, code: str, message: str):
         self.code, self.message = code, message
+        self.details: dict | None = None
         super().__init__(message)
 
 

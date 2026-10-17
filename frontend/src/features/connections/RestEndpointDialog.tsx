@@ -2,8 +2,9 @@ import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api, post } from '../../api/client'
 import { ErrorState, Field, Modal, Notice, label } from '../../components/ui'
+import { RestDiscovery } from './RestDiscovery'
+import type { RestField } from './RestDiscovery'
 
-type RestField = { name: string; path: string; logical_type: string; nullable: boolean }
 type Existing = { id: string; name: string; version: number; options: Record<string, unknown> }
 
 export function RestEndpointDialog({ mode, existing, close, saved }: { mode: 'SOURCE' | 'DESTINATION'; existing?: Existing; close: () => void; saved: (id: string) => void }) {
@@ -13,18 +14,20 @@ export function RestEndpointDialog({ mode, existing, close, saved }: { mode: 'SO
   const [secret, setSecret] = useState(''), [collection, setCollection] = useState(String(opts.collection || 'records'))
   const [fields, setFields] = useState<RestField[]>((opts.fields as RestField[] | undefined) || [{ name: 'id', path: 'id', logical_type: 'STRING', nullable: false }])
   const paging = (opts.pagination || {}) as Record<string, unknown>
-  const [pagination, setPagination] = useState(String(paging.mode || 'PAGE')), [parameter, setParameter] = useState(String(paging.parameter || 'page'))
+  const [pagination, setPagination] = useState(String(paging.mode || 'NONE')), [parameter, setParameter] = useState(String(paging.parameter || 'page'))
   const [sizeParameter, setSizeParameter] = useState(String(paging.size_parameter || 'page_size')), [nextCursor, setNextCursor] = useState(String(paging.next_cursor_path || 'next_cursor'))
   const [pageSize, setPageSize] = useState(Number(opts.page_size || 1000)), [idempotent, setIdempotent] = useState(Boolean(opts.idempotency_supported))
   const [maxRows, setMaxRows] = useState(Number(opts.max_rows || 5_000_000)), [maxPages, setMaxPages] = useState(Number(opts.max_pages || 10000))
   const [maxBytes, setMaxBytes] = useState(Number(opts.max_bytes || 2 * 1024 ** 3)), [timeout, setTimeout] = useState(Number(opts.total_timeout_seconds || 1800))
   const [tested, setTested] = useState(false)
+  const [requestTimeout, setRequestTimeout] = useState(Number(opts.timeout_seconds || 15)), [retries, setRetries] = useState(Number(opts.retries || 0)), [retryWait, setRetryWait] = useState(Number(opts.retry_wait_seconds || 10))
+  const [mappingVersion, setMappingVersion] = useState(Number(opts.mapping_version || (existing ? 1 : 2)))
   const revision = useRef(0)
   const root = mode === 'SOURCE' ? '/connections' : '/delivery/destinations'
   function payload() {
-    const options = { url, auth, api_key_header: header, timeout_seconds: 15, ...(mode === 'SOURCE' ? {
-      collection, fields, pagination: { mode: pagination, ...(pagination !== 'NONE' ? { parameter, size_parameter: sizeParameter, start: pagination === 'PAGE' ? 1 : 0 } : {}), ...(pagination === 'CURSOR' ? { next_cursor_path: nextCursor } : {}) },
-      page_size: pageSize, max_rows: maxRows, max_pages: maxPages, max_bytes: maxBytes, total_timeout_seconds: timeout,
+    const options = { url, auth, api_key_header: header, timeout_seconds: requestTimeout, ...(mode === 'SOURCE' ? {
+      collection, mapping_version: mappingVersion, fields: mappingVersion === 2 ? fields.map(field => ({ ...field, null_policy: field.nullable ? field.null_policy || 'ALLOW' : 'ERROR', missing_policy: field.missing_policy || 'ERROR' })) : fields, pagination: { mode: pagination, ...(pagination !== 'NONE' ? { parameter, size_parameter: sizeParameter, start: pagination === 'PAGE' ? 1 : 0 } : {}), ...(pagination === 'CURSOR' ? { next_cursor_path: nextCursor } : {}) },
+      page_size: pageSize, max_rows: maxRows, max_pages: maxPages, max_bytes: maxBytes, total_timeout_seconds: timeout, retries, retry_wait_seconds: retryWait,
     } : { idempotency_supported: idempotent, idempotency_header: 'Idempotency-Key' }) }
     return { name, ...(mode === 'SOURCE' ? { source_type: 'REST' } : { sink_type: 'REST' }), options, ...(secret ? { password: secret } : {}) }
   }
@@ -46,6 +49,7 @@ export function RestEndpointDialog({ mode, existing, close, saved }: { mode: 'SO
         <Field label="Autenticación"><select value={auth} onChange={event => setAuth(event.target.value)}><option value="NONE">Ninguna</option><option value="API_KEY">API key en encabezado</option><option value="BEARER">Bearer token</option></select></Field>
         {auth === 'API_KEY' && <Field label="Encabezado API key"><input value={header} onChange={event => setHeader(event.target.value)}/></Field>}
         {auth !== 'NONE' && <Field label="Credencial" hint="Se guarda cifrada; vuelve a indicarla al cambiar URL o autenticación."><input type="password" autoComplete="new-password" value={secret} onChange={event => setSecret(event.target.value)}/></Field>}
+        <Field label="Tiempo máximo por petición REST (segundos)"><input type="number" min={1} max={60} value={requestTimeout} onChange={event => setRequestTimeout(Number(event.target.value))}/></Field>
         {mode === 'SOURCE' && <><Field label="Colección JSON" hint="Ruta de objeto; vacía para un arreglo en la raíz."><input value={collection} onChange={event => setCollection(event.target.value)}/></Field>
           <Field label="Paginación"><select value={pagination} onChange={event => { setPagination(event.target.value); setParameter(event.target.value === 'OFFSET' ? 'offset' : event.target.value === 'CURSOR' ? 'cursor' : 'page'); setSizeParameter(event.target.value === 'PAGE' ? 'page_size' : 'limit') }}><option value="NONE">Sin paginación</option><option value="PAGE">Por página</option><option value="OFFSET">Por desplazamiento</option><option value="CURSOR">Por cursor</option></select></Field>
           {pagination !== 'NONE' && <><Field label="Parámetro de página, offset o cursor"><input value={parameter} onChange={event => setParameter(event.target.value)}/></Field><Field label="Parámetro de tamaño"><input value={sizeParameter} onChange={event => setSizeParameter(event.target.value)}/></Field></>}
@@ -54,14 +58,18 @@ export function RestEndpointDialog({ mode, existing, close, saved }: { mode: 'SO
           <Field label="Máximo de filas"><input type="number" min={1} max={5000000} value={maxRows} onChange={event => setMaxRows(Number(event.target.value))}/></Field>
           <Field label="Máximo de páginas"><input type="number" min={1} max={100000} value={maxPages} onChange={event => setMaxPages(Number(event.target.value))}/></Field>
           <Field label="Máximo de bytes"><input type="number" min={1024} max={2147483648} value={maxBytes} onChange={event => setMaxBytes(Number(event.target.value))}/></Field>
-          <Field label="Tiempo máximo total (segundos)"><input type="number" min={1} max={1800} value={timeout} onChange={event => setTimeout(Number(event.target.value))}/></Field>
+          <Field label="Tiempo máximo total de adquisición (segundos)"><input type="number" min={1} max={1800} value={timeout} onChange={event => setTimeout(Number(event.target.value))}/></Field>
+          <Field label="Reintentos adicionales (0–5)"><input type="number" min={0} max={5} value={retries} onChange={event => setRetries(Number(event.target.value))}/></Field>
+          <Field label="Espera entre reintentos (segundos)"><input type="number" min={1} max={60} value={retryWait} onChange={event => setRetryWait(Number(event.target.value))}/></Field>
         </>}
       </div></fieldset>
-      {mode === 'SOURCE' ? <><h3>Campos seleccionados</h3><div className="table-scroll"><table><thead><tr><th>Nombre</th><th>Ruta JSON</th><th>Tipo explícito</th><th>Admite nulos</th><th/></tr></thead><tbody>{fields.map((field, index) => <tr key={index}>
+      {mode === 'SOURCE' && <RestDiscovery draft={{ ...payload(), name: name || 'Borrador REST', ...(existing ? { connection_id: existing.id } : {}) }} fields={fields} apply={(value, selected) => { setCollection(value); setFields(selected); setMappingVersion(2); revision.current += 1; setTested(false) }}/ >}
+      {mode === 'SOURCE' ? <><h3>Campos seleccionados</h3><div className="table-scroll"><table><thead><tr><th>Nombre</th><th>Ruta JSON</th><th>Tipo explícito</th><th>Admite nulos</th>{mappingVersion === 2 && <th>Propiedad ausente</th>}<th/></tr></thead><tbody>{fields.map((field, index) => <tr key={index}>
         <td><input aria-label={`Nombre campo ${index + 1}`} value={field.name} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, name: event.target.value } : item))}/></td>
         <td><input aria-label={`Ruta campo ${index + 1}`} value={field.path} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, path: event.target.value } : item))}/></td>
         <td><select aria-label={`Tipo campo ${index + 1}`} value={field.logical_type} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, logical_type: event.target.value } : item))}>{['STRING', 'INT64', 'DECIMAL', 'DATE', 'TIMESTAMP', 'BOOLEAN'].map(type => <option key={type} value={type}>{label(type)}</option>)}</select></td>
         <td><input type="checkbox" aria-label={`Nulos campo ${index + 1}`} checked={field.nullable} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, nullable: event.target.checked } : item))}/></td>
+        {mappingVersion === 2 && <td><select aria-label={`Ausencias campo ${index + 1}`} value={field.missing_policy || 'ERROR'} onChange={event => setFields(current => current.map((item, i) => i === index ? { ...item, missing_policy: event.target.value } : item))}><option value="ERROR">Diagnosticar error</option><option value="NULL">Admitir como nulo</option></select></td>}
         <td><button type="button" className="text-button" disabled={fields.length === 1} onClick={() => { revision.current += 1; setTested(false); setFields(current => current.filter((_, i) => i !== index)) }}>Quitar</button></td>
       </tr>)}</tbody></table></div><button type="button" className="button secondary" disabled={fields.length >= 100} onClick={() => { revision.current += 1; setTested(false); setFields(current => [...current, { name: '', path: '', logical_type: 'STRING', nullable: true }]) }}>Añadir campo</button>
       <Notice>Conserva el tipo Texto (STRING) para identificadores y ceros iniciales. No se expanden arreglos. Una extracción fallida no publica versiones parciales.</Notice></> : <><label><input type="checkbox" checked={idempotent} onChange={event => setIdempotent(event.target.checked)}/> El receptor garantiza idempotencia real para la misma identidad y contenido</label><Notice>La prueba usa HEAD y no envía filas. Cada lote requiere confirmación explícita. HTTP 202 y respuestas inciertas requieren revisión externa; no se reenvían automáticamente.</Notice></>}

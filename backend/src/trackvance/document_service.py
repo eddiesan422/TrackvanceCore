@@ -1,0 +1,625 @@
+"""Document lifecycle, immutable reviews, reservations and native publications."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+from datetime import datetime, timedelta
+
+import polars as pl
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
+
+from .artifactstore import link_artifact, storage_provider
+from .dataset_readers import DatasetReadResult
+from .db import iso, require_record, utcnow
+from .document_engine import validate_value
+from .document_models import (
+    DocumentBatch,
+    DocumentBatchMember,
+    DocumentExtraction,
+    DocumentFamily,
+    DocumentOriginal,
+    DocumentPublicationClaim,
+    DocumentTemplate,
+)
+from .document_schemas import DocumentDefinition, structures
+from .models import Configuration, Dataset, User
+from .operations_common import OperationError
+from .permissions import effective_permissions
+from .scheduler import aware
+from .services import audit, create_version
+
+MAX_BYTES = 32 * 1024**2
+MAX_BATCH_DOCUMENTS = 1000
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def owned(db, model, identity, user):
+    item = db.get(model, identity)
+    if item is None or item.organization_id != user.organization_id:
+        raise OperationError(404, "DOCUMENT_NOT_FOUND", "No se encontró el recurso documental.")
+    return item
+
+
+def permission(db, user, action):
+    if f"documents:{action}" not in effective_permissions(db, user):
+        raise OperationError(403, "DOCUMENT_FORBIDDEN", "Tu rol no permite esta operación documental.")
+
+
+def lock_family(db, family):
+    # A physical write serializes SQLite too; PostgreSQL takes the row lock.
+    db.execute(update(DocumentFamily).where(DocumentFamily.id == family.id).values(lock_version=DocumentFamily.lock_version + 1))
+    db.refresh(family)
+
+
+def definition_for(db, original):
+    template = db.get(DocumentTemplate, original.template_id)
+    if template is None or digest(template.definition) != template.definition_hash:
+        raise OperationError(409, "DOCUMENT_TEMPLATE_INTEGRITY", "No se puede verificar la plantilla congelada.")
+    return template
+
+
+def extraction_for(db, original):
+    item = require_record(db, DocumentExtraction, original.extraction_id) if original.extraction_id else None
+    if item and digest(item.payload) != item.payload_hash:
+        raise OperationError(409, "DOCUMENT_EXTRACTION_INTEGRITY", "La extracción perdió su integridad.")
+    return item
+
+
+def issues(extraction, definition):
+    if extraction is None:
+        return ["EXTRACTION_PENDING"]
+    payload = extraction.payload
+    policy = definition["publication"]
+    result = []
+    for name, fields in structures(definition).items():
+        rows = [payload["fields"]] if name == "headers" else payload["tables"].get(name, [])
+        table = next((t for t in definition["tables"] if t["name"] == name), None)
+        if not rows and table and table["required"]:
+            result.append(f"TABLE_REQUIRED:{name}")
+        if payload.get("table_unparsed", {}).get(name):
+            result.append(f"TABLE_ROWS_UNRECOGNIZED:{name}")
+        for row_index, row in enumerate(rows):
+            for field in fields:
+                cell = row.get(field["name"])
+                path = f"{name}.{row_index}.{field['name']}"
+                if not cell or cell.get("validity") != "VALID":
+                    result.append("VALUE_INVALID:" + path)
+                    continue
+                confidence = cell.get("confidence")
+                needs_review = (policy["review_policy"] == "ALL" or field["critical"]
+                                or confidence is not None and confidence < policy["minimum_confidence"])
+                if needs_review and not cell.get("reviewed"):
+                    result.append("REVIEW_REQUIRED:" + path)
+    return result
+
+
+def template_dto(item):
+    return {"id": item.id, "revision": item.revision, "definition": item.definition,
+            "sha256": item.definition_hash, "tested_extraction_id": item.tested_extraction_id,
+            "created_at": iso(item.created_at)}
+
+
+def original_dto(db, original, *, detail=False):
+    extraction = extraction_for(db, original)
+    result = {"id": original.id, "family_id": original.family_id, "template_id": original.template_id,
+              "filename": original.filename, "sha256": original.sha256, "received_at": iso(original.received_at),
+              "status": original.status, "progress": original.progress, "error_code": original.error_code,
+              "duplicate_of_id": original.duplicate_of_id, "correction_of_id": original.correction_of_id,
+              "is_example": original.is_example, "extraction_id": original.extraction_id,
+              "started_at": iso(original.started_at), "finished_at": iso(original.finished_at)}
+    if detail:
+        result["template"] = template_dto(definition_for(db, original))
+        result["extraction"] = extraction_dto(extraction) if extraction else None
+        result["issues"] = issues(extraction, result["template"]["definition"])
+        result["revisions"] = [{"id": e.id, "revision": e.revision, "reviewed": e.reviewed,
+                                "actor_id": e.actor_id, "reason": e.reason, "created_at": iso(e.created_at)}
+                               for e in db.scalars(select(DocumentExtraction).where(DocumentExtraction.document_id == original.id)
+                                                   .order_by(DocumentExtraction.revision))]
+        claims = db.scalars(select(DocumentPublicationClaim).where(DocumentPublicationClaim.document_id == original.id)).all()
+        result["publications"] = [{"batch_id": c.batch_id, "extraction_id": c.extraction_id,
+                                    "versions": db.get(DocumentBatch, c.batch_id).published_versions} for c in claims]
+    return result
+
+
+def extraction_dto(item):
+    return {"id": item.id, "revision": item.revision, "previous_id": item.previous_id,
+            "payload": item.payload, "sha256": item.payload_hash, "engine": item.engine,
+            "reviewed": item.reviewed, "actor_id": item.actor_id, "reason": item.reason,
+            "created_at": iso(item.created_at), "artifact_id": item.artifact_id}
+
+
+def preserve_extraction(db, extraction):
+    temporary = storage_provider.temporary_path(".json")
+    try:
+        temporary.write_text(json.dumps({"schema_version": 1, "extraction_id": extraction.id,
+            "document_id": extraction.document_id, "template_id": extraction.template_id,
+            "revision": extraction.revision, "previous_id": extraction.previous_id,
+            "payload": extraction.payload, "payload_hash": extraction.payload_hash, "engine": extraction.engine,
+            "actor_id": extraction.actor_id, "reason": extraction.reason}, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        artifact = storage_provider.put_file(db, temporary, "DOCUMENT_EXTRACTION", extraction.organization_id,
+                                           "extraction.json", media_type="application/json")
+        extraction.artifact_id = artifact.id
+        link_artifact(db, extraction.organization_id, "DOCUMENT_EXTRACTION_RESULT", "DOCUMENT_EXTRACTION", extraction.id, "ARTIFACT", artifact.id)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def family_dto(db, family):
+    template = db.get(DocumentTemplate, family.active_template_id) if family.active_template_id else None
+    return {"id": family.id, "name": family.name, "description": family.description,
+            "responsible_user_id": family.responsible_user_id, "active_template_id": family.active_template_id,
+            "output_datasets": family.output_datasets, "next_cut_at": iso(family.next_cut_at),
+            "publication": template.definition["publication"] if template else None,
+            "document_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id)),
+            "pending_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id,
+                                          DocumentOriginal.status.in_(["QUEUED", "RUNNING", "REVIEW_REQUIRED", "FAILED"])))}
+
+
+def create_template(db, family, definition, user):
+    permission(db, user, "configure")
+    lock_family(db, family)
+    normalized = DocumentDefinition.model_validate(definition).model_dump(mode="json")
+    revision = (db.scalar(select(func.max(DocumentTemplate.revision)).where(DocumentTemplate.family_id == family.id)) or 0) + 1
+    item = DocumentTemplate(organization_id=user.organization_id, family_id=family.id, revision=revision,
+                            definition=normalized, definition_hash=digest(normalized), created_by_id=user.id)
+    db.add(item)
+    db.flush()
+    audit(db, "DOCUMENT_TEMPLATE_CREATED", "document_template", item.id, "Revisión de plantilla creada", user.name,
+          user.organization_id, {"family_id": family.id, "revision": revision, "sha256": item.definition_hash})
+    return item
+
+
+def activate_template(db, family, template, test_extraction_id, user):
+    permission(db, user, "configure")
+    lock_family(db, family)
+    test = owned(db, DocumentExtraction, test_extraction_id, user)
+    original = owned(db, DocumentOriginal, test.document_id, user)
+    if template.family_id != family.id or test.template_id != template.id or not original.is_example or issues(test, template.definition):
+        raise OperationError(422, "DOCUMENT_TEMPLATE_TEST_REQUIRED", "Prueba y revisa un ejemplo completo con esta revisión antes de activarla.")
+    current = db.get(DocumentTemplate, family.active_template_id) if family.active_template_id else None
+    signature = lambda value: {name: [(f["name"], f["logical_type"]) for f in fields] for name, fields in structures(value).items()}
+    if current and signature(current.definition) != signature(template.definition):
+        raise OperationError(422, "DOCUMENT_FAMILY_SCHEMA", "La familia debe conservar un esquema común; crea otra familia para estructuras incompatibles.")
+    settings = template.definition["publication"]
+    required = set(structures(template.definition))
+    if settings["stop_after"] != "PUBLICATION" and set(settings["intake_configuration_ids"]) != required:
+        raise OperationError(422, "DOCUMENT_INTAKE_STRUCTURES", "Cada estructura requiere contrato Intake nativo.")
+    for name, config_id in settings["intake_configuration_ids"].items():
+        permission(db, user, "publish")
+        config = owned(db, Configuration, config_id, user)
+        if config.module != "intake" or config.dataset_id != family.output_datasets.get(name):
+            raise OperationError(422, "DOCUMENT_INTAKE_CONFIGURATION", "Vincula un contrato del dataset estable de esta estructura.")
+    if settings["automatic_delivery"]:
+        from .automation_models import DeliveryAutomation, DeliveryAutomationVersion
+        if not {"delivery:configure", "delivery:schedule", "intake:execute"}.issubset(effective_permissions(db, user)):
+            raise OperationError(403, "DOCUMENT_DELIVERY_PERMISSION", "La entrega automática requiere permisos nativos de Intake y Delivery.")
+        for name, automation_id in settings["delivery_automation_ids"].items():
+            automation = owned(db, DeliveryAutomation, automation_id, user)
+            revision = db.scalar(select(DeliveryAutomationVersion).where(DeliveryAutomationVersion.automation_id == automation.id)
+                                 .order_by(DeliveryAutomationVersion.version.desc()))
+            if not revision or revision.settings.get("mode") != "CHAINED" or revision.settings.get("intake_configuration_id") != settings["intake_configuration_ids"].get(name):
+                raise OperationError(422, "DOCUMENT_DELIVERY_CONFIGURATION", "La automatización debe consumir la salida aprobada del contrato vinculado.")
+    template.tested_extraction_id = test.id
+    family.active_template_id = template.id
+    family.next_cut_at = datetime.fromisoformat(settings["starts_at"]) + timedelta(seconds=settings["interval_seconds"]) if settings["mode"] == "SCHEDULED" else None
+    if settings["stop_after"] != "PUBLICATION":
+        from .intake_automation import IntakeScheduleSettings, save_schedule, schedule_for
+        if not {"intake:schedule", "intake:configure", "intake:execute"}.issubset(effective_permissions(db, user)):
+            raise OperationError(403, "DOCUMENT_INTAKE_PERMISSION", "La activación del flujo exige permisos nativos para configurar, programar y ejecutar Intake.")
+        for config_id in settings["intake_configuration_ids"].values():
+            config = owned(db, Configuration, config_id, user)
+            schedule = schedule_for(db, config)
+            save_schedule(db, config, user, IntakeScheduleSettings(mode="EVENT", timezone=settings["timezone"], starts_at=utcnow()),
+                          enabled=True, responsible_user_id=family.responsible_user_id,
+                          expected_version=schedule.version if schedule else None)
+    audit(db, "DOCUMENT_TEMPLATE_ACTIVATED", "document_family", family.id, "Plantilla probada activada para nuevas recepciones", user.name,
+          user.organization_id, {"template_id": template.id, "test_extraction_id": test.id})
+
+
+def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bindings, automatic_delivery):
+    """Create/link native contracts; return a new template, still requiring a test."""
+    permission(db, user, "configure")
+    if not family.active_template_id or not family.output_datasets:
+        raise OperationError(422, "DOCUMENT_PIPELINE_INITIAL_PUBLICATION", "Publica primero un documento revisado para crear los datasets estables.")
+    grants = effective_permissions(db, user)
+    if stop_after != "PUBLICATION" and "intake:configure" not in grants:
+        raise OperationError(403, "DOCUMENT_INTAKE_PERMISSION", "Se requiere permiso nativo para configurar Intake.")
+    definition = copy.deepcopy(db.get(DocumentTemplate, family.active_template_id).definition)
+    bindings = {}
+    if stop_after != "PUBLICATION":
+        from .config_semantics import validate_config
+        for name, fields in structures(definition).items():
+            config_id = intake_bindings.get(name)
+            if config_id:
+                config = owned(db, Configuration, config_id, user)
+                if config.module != "intake" or config.dataset_id != family.output_datasets[name]:
+                    raise OperationError(422, "DOCUMENT_INTAKE_CONFIGURATION", "El contrato debe usar el dataset estable de su estructura.")
+            else:
+                keys = [f["name"] for f in fields if f["business_key"]]
+                config = Configuration(organization_id=user.organization_id, module="intake",
+                    name=f"{family.name} · {name} · validación"[:160], dataset_id=family.output_datasets[name], owner=user.name,
+                    description="Contrato nativo creado desde el asistente documental; revisar reglas antes de activar.",
+                    config=validate_config("intake", {"schema_version": 2, "rules": [], "transforms": [],
+                        "required_columns": [f["name"] for f in fields if f["required"]],
+                        "unique_columns": keys if len(keys) == 1 and name == "headers" else [],
+                        "numeric_columns": [f["name"] for f in fields if f["logical_type"] in {"DECIMAL", "INT64"}],
+                        "positive_columns": [], "max_error_rate": 0}))
+                db.add(config)
+                db.flush()
+                audit(db, "CONFIGURATION_PUBLISHED", "configuration", config.id, "Contrato Intake creado por asistente documental", user.name,
+                      user.organization_id, {"module": "intake", "family_id": family.id, "structure": name, "version": 1})
+            bindings[name] = config.id
+    definition["publication"].update(stop_after=stop_after, intake_configuration_ids=bindings,
+        delivery_automation_ids=delivery_bindings, automatic_delivery=automatic_delivery)
+    return create_template(db, family, definition, user)
+
+
+def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None):
+    permission(db, user, "review")
+    family = owned(db, DocumentFamily, original.family_id, user)
+    lock_family(db, family)
+    db.refresh(original)
+    previous = extraction_for(db, original)
+    if not previous or previous.id != expected_extraction_id:
+        raise OperationError(409, "DOCUMENT_REVIEW_CONFLICT", "La extracción cambió; actualiza antes de revisar.")
+    if not reason.strip():
+        raise OperationError(422, "DOCUMENT_REVIEW_REASON", "Registra el motivo de la revisión.")
+    definition = definition_for(db, original).definition
+    payload = copy.deepcopy(previous.payload)
+    for name, rows in (table_rows or {}).items():
+        table = next((t for t in definition["tables"] if t["name"] == name), None)
+        if not table or len(rows) > 10000 or any(set(row) != {f["name"] for f in table["fields"]} for row in rows):
+            raise OperationError(422, "DOCUMENT_REVIEW_TABLE", "La tabla corregida debe conservar sus columnas y hasta 10000 filas.")
+        corrected = []
+        for row in rows:
+            cells = {}
+            for field in table["fields"]:
+                raw = row[field["name"]]
+                if raw is not None and (not isinstance(raw, str) or len(raw) > 65536):
+                    raise OperationError(422, "DOCUMENT_REVIEW_VALUE", "Conserva texto exacto en las celdas corregidas.")
+                value, validity = validate_value(raw, field)
+                cells[field["name"]] = {"value": value, "validity": validity, "observed": None,
+                    "origin": None, "confidence": None, "reviewed": validity == "VALID", "corrected": True}
+            corrected.append(cells)
+        payload["tables"][name] = corrected
+        payload.setdefault("table_unparsed", {})[name] = []
+    all_cells = {}
+    for name, fields in structures(definition).items():
+        rows = [payload["fields"]] if name == "headers" else payload["tables"].get(name, [])
+        for index, row in enumerate(rows):
+            for field in fields:
+                all_cells[f"{name}.{index}.{field['name']}"] = (row, field)
+    if (set(changes) | set(confirmed)) - set(all_cells):
+        raise OperationError(422, "DOCUMENT_REVIEW_PATH", "La revisión contiene una celda inexistente.")
+    for path, (row, field) in all_cells.items():
+        cell = row[field["name"]]
+        if path in changes:
+            raw = changes[path]
+            if raw is not None and (not isinstance(raw, str) or len(raw) > 65536):
+                raise OperationError(422, "DOCUMENT_REVIEW_VALUE", "Las correcciones conservan texto exacto hasta 65536 caracteres.")
+            value, validity = validate_value(raw, field)
+            cell.update(value=value, validity=validity, reviewed=False)
+            # The region proves the observed source, never a newly invented value.
+            cell["corrected"] = value != cell.get("observed")
+        if path in confirmed:
+            if cell["validity"] != "VALID":
+                raise OperationError(422, "DOCUMENT_REVIEW_INVALID", "Corrige o completa los valores inválidos antes de confirmarlos.")
+            cell["reviewed"] = True
+            if cell.get("alternatives"):
+                cell["alternatives"] = []
+    item = DocumentExtraction(organization_id=user.organization_id, document_id=original.id, template_id=original.template_id,
+                              revision=previous.revision + 1, previous_id=previous.id, payload=payload, payload_hash=digest(payload),
+                              engine=previous.engine, actor_id=user.id, reason=reason.strip(), reviewed=True)
+    if definition.get("business_period_field"):
+        field = definition["business_period_field"]
+        payload["business_period"] = {"field": field, **payload["fields"][field]}
+        item.payload_hash = digest(payload)
+    db.add(item)
+    db.flush()
+    preserve_extraction(db, item)
+    original.extraction_id = item.id
+    original.status = "REVIEW_REQUIRED" if issues(item, definition) else "REVIEWED"
+    audit(db, "DOCUMENT_REVIEW_RECORDED", "document_extraction", item.id, "Revisión humana inmutable registrada", user.name,
+          user.organization_id, {"document_id": original.id, "previous_id": previous.id,
+                                 "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reason": reason})
+    return item
+
+
+def batch_dto(db, batch):
+    return {"id": batch.id, "family_id": batch.family_id, "template_id": batch.template_id, "status": batch.status,
+            "idempotency_key": batch.idempotency_key, "window_start": iso(batch.window_start), "window_end": iso(batch.window_end),
+            "settings": batch.settings, "wait_until": iso(batch.wait_until), "blocked_reason": batch.blocked_reason,
+            "scope": "PUBLICATION_BATCH_ONLY", "published_versions": batch.published_versions,
+            "manifest_hash": batch.manifest_hash,
+            "members": [{"document_id": m.document_id, "extraction_id": m.extraction_id, "status": m.status, "reason": m.reason}
+                        for m in db.scalars(select(DocumentBatchMember).where(DocumentBatchMember.batch_id == batch.id))]}
+
+
+def open_batch(db, family, template, user, key, *, document_ids=None, start=None, end=None, correction=False):
+    permission(db, user, "publish")
+    lock_family(db, family)
+    existing = db.scalar(select(DocumentBatch).where(DocumentBatch.family_id == family.id, DocumentBatch.idempotency_key == key))
+    request_hash = digest({"template_id": template.id, "documents": sorted(document_ids) if document_ids is not None else None,
+                           "start": iso(start), "end": iso(end), "correction": correction})
+    if existing:
+        if existing.settings.get("request_hash") != request_hash:
+            raise OperationError(409, "DOCUMENT_IDEMPOTENCY_CONFLICT", "La clave de publicación ya pertenece a otra composición.")
+        return existing
+    query = select(DocumentOriginal).where(DocumentOriginal.family_id == family.id, DocumentOriginal.template_id == template.id,
+                                           DocumentOriginal.is_example.is_(False), DocumentOriginal.duplicate_of_id.is_(None))
+    if document_ids is not None:
+        query = query.where(DocumentOriginal.id.in_(document_ids))
+    elif start is not None and end is not None:
+        query = query.where(DocumentOriginal.received_at >= start, DocumentOriginal.received_at < end)
+    else:
+        raise OperationError(422, "DOCUMENT_BATCH_SELECTION", "Selecciona documentos o una ventana explícita.")
+    originals = db.scalars(query.order_by(DocumentOriginal.received_at, DocumentOriginal.id).limit(MAX_BATCH_DOCUMENTS + 1)).all()
+    if len(originals) > MAX_BATCH_DOCUMENTS:
+        raise OperationError(422, "DOCUMENT_BATCH_LIMIT", "El lote excede 1000 documentos; reduce la ventana.")
+    if document_ids is not None and len(originals) != len(set(document_ids)):
+        raise OperationError(422, "DOCUMENT_BATCH_MEMBERS", "Hay documentos incompatibles, ejemplos o duplicados idénticos en la selección.")
+    settings = copy.deepcopy(template.definition["publication"])
+    batch = DocumentBatch(organization_id=user.organization_id, family_id=family.id, template_id=template.id,
+                          idempotency_key=key, window_start=start, window_end=end,
+                          settings={**settings, "correction": correction, "timezone": settings["timezone"], "request_hash": request_hash},
+                          actor_id=user.id, wait_until=utcnow() + timedelta(seconds=settings["wait_seconds"]))
+    db.add(batch)
+    db.flush()
+    for original in originals:
+        previous = db.scalar(select(DocumentPublicationClaim.id).where(DocumentPublicationClaim.document_id == original.id).limit(1))
+        if previous and not correction:
+            continue
+        if (previous or original.correction_of_id) and not correction:
+            raise OperationError(409, "DOCUMENT_CORRECTION_EXPLICIT", "La corrección exige publicación manual explícita y revisión de impacto en Delivery.")
+        db.add(DocumentBatchMember(organization_id=user.organization_id, batch_id=batch.id, document_id=original.id))
+    db.flush()
+    audit(db, "DOCUMENT_BATCH_CREATED", "document_batch", batch.id, "Composición de documentos reservada", user.name,
+          user.organization_id, {"family_id": family.id, "window_start": iso(start), "window_end": iso(end), "correction": correction})
+    return batch
+
+
+def publish_batch(db: Session, batch: DocumentBatch, user: User, *, seal_only=False):
+    permission(db, user, "publish")
+    if "datasets:write" not in effective_permissions(db, user):
+        raise OperationError(403, "DOCUMENT_DATASET_PERMISSION", "La publicación requiere permiso de creación de datasets.")
+    family = owned(db, DocumentFamily, batch.family_id, user)
+    lock_family(db, family)
+    db.refresh(batch)
+    if batch.status in {"PUBLISHED", "EMPTY"}:
+        return batch
+    template = db.get(DocumentTemplate, batch.template_id)
+    if template is None or digest(template.definition) != template.definition_hash:
+        raise OperationError(409, "DOCUMENT_TEMPLATE_INTEGRITY", "No se pudo verificar la plantilla.")
+    members = db.scalars(select(DocumentBatchMember).where(DocumentBatchMember.batch_id == batch.id).order_by(DocumentBatchMember.document_id)).all()
+    ready, pending = [], []
+    if batch.sealed_manifest:
+        if digest(batch.sealed_manifest) != batch.manifest_hash:
+            raise OperationError(409, "DOCUMENT_BATCH_INTEGRITY", "La composición sellada perdió integridad.")
+        ready = [m for m in members if m.status == "RESERVED"]
+    else:
+        for member in members:
+            original = require_record(db, DocumentOriginal, member.document_id)
+            extraction = extraction_for(db, original)
+            blockers = issues(extraction, template.definition)
+            if original.status in {"FAILED", "CANCELLED", "QUEUED", "RUNNING"}:
+                blockers = [original.error_code or original.status] + blockers
+            if not blockers:
+                claim = db.scalar(select(DocumentPublicationClaim).where(DocumentPublicationClaim.extraction_id == extraction.id))
+                if claim and claim.batch_id != batch.id:
+                    member.status, member.reason = "EXCLUDED", "ALREADY_PUBLISHED"
+                    continue
+                member.extraction_id = extraction.id
+                ready.append(member)
+            else:
+                member.status, member.reason = "PENDING", blockers[0]
+                pending.append(member)
+        if pending and batch.settings["close_policy"] == "STRICT":
+            batch.status = "BLOCKED" if utcnow() >= aware(batch.wait_until) else "WAITING"
+            batch.blocked_reason = "EXTRACTION_OR_REVIEW_REQUIRED"
+            return batch
+        for member in pending:
+            member.status, member.reason = "DEFERRED", member.reason
+        if not ready:
+            batch.status, batch.blocked_reason = ("EMPTY", "NO_READY_DOCUMENTS") if not pending else ("BLOCKED", "NO_READY_DOCUMENTS")
+            return batch
+        # Business duplicate detection is complete across this batch and prior publications.
+        key_fields = [field["name"] for field in template.definition["fields"] if field["business_key"]]
+        keys = {}
+        if key_fields and not batch.settings["correction"]:
+            previous = db.scalars(select(DocumentPublicationClaim).join(DocumentOriginal, DocumentOriginal.id == DocumentPublicationClaim.document_id)
+                                  .where(DocumentOriginal.family_id == family.id)).all()
+            for claim in previous:
+                payload = require_record(db, DocumentExtraction, claim.extraction_id).payload
+                keys[tuple(payload["fields"][k]["value"] for k in key_fields)] = claim.document_id
+        for member in ready:
+            extraction = require_record(db, DocumentExtraction, member.extraction_id)
+            if key_fields:
+                key = tuple(extraction.payload["fields"][k]["value"] for k in key_fields)
+                if key in keys and keys[key] != member.document_id:
+                    batch.status, batch.blocked_reason = "BLOCKED", "BUSINESS_DUPLICATE_REQUIRES_DECISION"
+                    return batch
+                keys[key] = member.document_id
+        manifest = {"schema_version": 1, "family_id": family.id, "template_id": template.id,
+                    "template_hash": template.definition_hash, "definition": template.definition,
+                    "settings": batch.settings, "scope": "PUBLICATION_BATCH_ONLY",
+                    "members": [{"document_id": m.document_id, "extraction_id": m.extraction_id,
+                                  "payload_hash": require_record(db, DocumentExtraction, m.extraction_id).payload_hash} for m in ready]}
+        batch.sealed_manifest, batch.manifest_hash = manifest, digest(manifest)
+        for member in ready:
+            member.status, member.reason = "RESERVED", None
+            db.add(DocumentPublicationClaim(organization_id=user.organization_id, document_id=member.document_id,
+                                           extraction_id=member.extraction_id, batch_id=batch.id))
+        batch.status, batch.blocked_reason = "SEALED", None
+        db.flush()
+    if seal_only:
+        return batch
+    outputs = dict(family.output_datasets)
+    published = {}
+    total_rows = total_cells = total_content_bytes = 0
+    for name, fields in structures(template.definition).items():
+        records = []
+        provenance = []
+        for member in ready:
+            extraction = require_record(db, DocumentExtraction, member.extraction_id)
+            if extraction is None or digest(extraction.payload) != extraction.payload_hash:
+                raise OperationError(409, "DOCUMENT_EXTRACTION_INTEGRITY", "La revisión sellada perdió integridad.")
+            rows = [extraction.payload["fields"]] if name == "headers" else extraction.payload["tables"].get(name, [])
+            for index, row in enumerate(rows):
+                total_rows += 1
+                total_cells += len(fields) + 4
+                total_content_bytes += sum(len(str(row[f["name"]]["value"] or "").encode()) for f in fields)
+                if total_rows > 100000 or total_cells > 500000 or total_content_bytes > MAX_BYTES:
+                    raise OperationError(422, "DOCUMENT_PUBLICATION_LIMIT", "La publicación excede 100000 filas, 500000 celdas o 32 MiB de contenido; requiere una composición menor.")
+                records.append({"document_id": member.document_id, "extraction_id": extraction.id, "batch_id": batch.id,
+                                **({"row_number": str(index + 1)} if name != "headers" else {}),
+                                **{field["name"]: row[field["name"]]["value"] for field in fields}})
+                provenance.append({"record_number": len(records), "document_id": member.document_id,
+                                   "extraction_id": extraction.id, "source_row": index,
+                                   "fields": {f["name"]: row[f["name"]].get("origin") for f in fields}})
+        column_names = ["document_id", "extraction_id", "batch_id"] + (["row_number"] if name != "headers" else []) + [f["name"] for f in fields]
+        frame = pl.DataFrame(records, schema={column: pl.String for column in column_names})
+        dataset = db.get(Dataset, outputs.get(name)) if name in outputs else None
+        if dataset is None:
+            dataset = Dataset(organization_id=user.organization_id, name=f"{family.name} · {name}",
+                              description="Registros de cada publicación documental; no acumulado histórico.", owner=user.name)
+            db.add(dataset)
+            db.flush()
+            outputs[name] = dataset.id
+        from .governance import authorize_dataset
+        authorize_dataset(db, user, dataset.id)
+        metadata = {"document_publication": {"family_id": family.id, "batch_id": batch.id, "manifest_hash": batch.manifest_hash,
+                    "structure": name, "scope": "PUBLICATION_BATCH_ONLY", "window_start": iso(batch.window_start),
+                    "window_end": iso(batch.window_end), "timezone": batch.settings["timezone"],
+                    "business_periods": {m.document_id: require_record(db, DocumentExtraction, m.extraction_id).payload.get("business_period") for m in ready},
+                    "correction": batch.settings["correction"],
+                    "automatic_processing_allowed": not batch.settings["correction"] and batch.settings["stop_after"] != "PUBLICATION",
+                    "automatic_delivery_allowed": not batch.settings["correction"] and batch.settings["stop_after"] == "DELIVERY" and batch.settings["automatic_delivery"],
+                    "group_structures": list(structures(template.definition)), "row_provenance": provenance}}
+        membership = sorted(m.document_id for m in ready)
+        metadata["population_scope"] = {"schema_version": 1, "kind": "DOCUMENT_SET",
+            "identity": digest({"family_id": family.id, "structure": name, "documents": membership}),
+            "membership_sha256": digest(membership)}
+        read_result = DatasetReadResult(frame, "DOCUMENTS", "Extracción documental", "application/json", "PUBLICATION_ROW_1_BASED", metadata=metadata)
+        overrides = {f["name"]: {"logical_type": f["logical_type"], "semantic_tag": "IDENTIFIER" if f["business_key"] and f["logical_type"] == "STRING" else None} for f in fields}
+        for identity_column in column_names[:3]:
+            overrides[identity_column] = {"logical_type": "STRING", "semantic_tag": "IDENTIFIER"}
+        version = create_version(db, dataset, None, f"{name}.parquet", user.name, "DOCUMENTS", read_result=read_result, column_overrides=overrides)
+        published[name] = version.id
+        link_artifact(db, user.organization_id, "DOCUMENT_PUBLICATION", "DOCUMENT_BATCH", batch.id, "DATASET_VERSION", version.id)
+    family.output_datasets = outputs
+    batch.published_versions, batch.status = published, "PUBLISHED"
+    for member in ready:
+        member.status = "PUBLISHED"
+        original = require_record(db, DocumentOriginal, member.document_id)
+        if original.extraction_id == member.extraction_id:
+            original.status = "PUBLISHED"
+        extraction = require_record(db, DocumentExtraction, member.extraction_id)
+        link_artifact(db, user.organization_id, "DOCUMENT_BATCH_MEMBER", "DOCUMENT", original.id, "DOCUMENT_BATCH", batch.id)
+        link_artifact(db, user.organization_id, "DOCUMENT_EXTRACTION", "DOCUMENT", original.id, "DOCUMENT_EXTRACTION", extraction.id)
+        link_artifact(db, user.organization_id, "EXTRACTION_BATCH", "DOCUMENT_EXTRACTION", extraction.id, "DOCUMENT_BATCH", batch.id)
+    audit(db, "DOCUMENT_BATCH_PUBLISHED", "document_batch", batch.id, "Lote y estructuras publicados consistentemente", user.name,
+          user.organization_id, {"manifest_hash": batch.manifest_hash, "versions": published, "scope": "PUBLICATION_BATCH_ONLY"})
+    return batch
+
+
+def publish_durable(db, batch, user):
+    """Persist reservations/composition before materialization; retries reuse it.
+
+    This orchestration boundary deliberately commits its own lifecycle. It does
+    not encompass external destinations and never promises a distributed commit.
+    """
+    publish_batch(db, batch, user, seal_only=True)
+    db.commit()
+    if batch.status == "SEALED":
+        publish_batch(db, batch, user)
+    return batch
+
+
+def dispatch_individual(db, original, user):
+    template = definition_for(db, original)
+    if original.is_example or original.duplicate_of_id or original.correction_of_id or template.definition["publication"]["mode"] != "INDIVIDUAL":
+        return
+    if issues(extraction_for(db, original), template.definition):
+        return
+    if db.scalar(select(DocumentPublicationClaim.id).where(DocumentPublicationClaim.document_id == original.id).limit(1)):
+        return  # A review of a published document is an explicit correction.
+    family = db.get(DocumentFamily, original.family_id)
+    batch = open_batch(db, family, template, user, "document:" + original.id, document_ids=[original.id])
+    publish_durable(db, batch, user)
+
+
+def dispatch_due(db, now=None, limit=20):
+    instant = aware(now or utcnow())
+    count = 0
+    families = db.scalars(select(DocumentFamily).where(DocumentFamily.next_cut_at <= instant).limit(limit)).all()
+    for family in families:
+        lock_family(db, family)
+        if not family.next_cut_at or aware(family.next_cut_at) > instant:
+            continue
+        template = db.get(DocumentTemplate, family.active_template_id)
+        user = db.get(User, family.responsible_user_id)
+        settings = template.definition["publication"]
+        end = aware(family.next_cut_at)
+        start = end - timedelta(seconds=settings["interval_seconds"])
+        try:
+            batch = open_batch(db, family, template, user, f"window:{template.id}:{iso(start)}:{iso(end)}", start=start, end=end)
+            # Deferred originals retain their original window in their previous member.
+            prior_deferred = db.scalars(select(DocumentBatchMember.document_id).join(DocumentBatch, DocumentBatchMember.batch_id == DocumentBatch.id)
+                                       .where(DocumentBatch.family_id == family.id, DocumentBatchMember.status == "DEFERRED")).all()
+            current = set(db.scalars(select(DocumentBatchMember.document_id).where(DocumentBatchMember.batch_id == batch.id)))
+            for identity in set(prior_deferred) - current:
+                original = require_record(db, DocumentOriginal, identity)
+                if original.template_id == template.id and not db.scalar(select(DocumentPublicationClaim.id).where(DocumentPublicationClaim.document_id == identity).limit(1)):
+                    db.add(DocumentBatchMember(organization_id=family.organization_id, batch_id=batch.id, document_id=identity,
+                                               reason="DEFERRED_FROM_ORIGINAL_WINDOW"))
+            db.flush()
+            publish_durable(db, batch, user)
+            family.next_cut_at = end + timedelta(seconds=settings["interval_seconds"])
+            count += 1
+        except OperationError as error:
+            audit(db, "DOCUMENT_SCHEDULE_BLOCKED", "document_family", family.id, "El corte documental requiere intervención", "Scheduler",
+                  family.organization_id, {"code": error.code, "planned_at": iso(end)})
+    # Receipts pin the template/settings in force at reception. Activating a new
+    # revision must not strand old documents or reinterpret their calendar.
+    outstanding = db.scalars(select(DocumentOriginal).where(
+        DocumentOriginal.is_example.is_(False), DocumentOriginal.duplicate_of_id.is_(None),
+        DocumentOriginal.correction_of_id.is_(None),
+        ~select(DocumentPublicationClaim.id).where(DocumentPublicationClaim.document_id == DocumentOriginal.id).exists()
+    ).order_by(DocumentOriginal.received_at).limit(1000)).all()
+    windows: set[tuple[str, str | None, str | None]] = set()
+    for original in outstanding:
+        template = db.get(DocumentTemplate, original.template_id)
+        settings = template.definition["publication"]
+        family = db.get(DocumentFamily, original.family_id)
+        if settings["mode"] != "SCHEDULED" or family.active_template_id == template.id:
+            continue
+        starts = datetime.fromisoformat(settings["starts_at"])
+        interval = settings["interval_seconds"]
+        slot = max(0, int((aware(original.received_at) - starts).total_seconds() // interval))
+        start = starts + timedelta(seconds=slot * interval)
+        end = start + timedelta(seconds=interval)
+        key = (template.id, iso(start), iso(end))
+        if end > instant or key in windows or len(windows) >= limit:
+            continue
+        windows.add(key)
+        user = db.get(User, family.responsible_user_id)
+        try:
+            batch = open_batch(db, family, template, user, f"window:{template.id}:{iso(start)}:{iso(end)}", start=start, end=end)
+            publish_durable(db, batch, user)
+            count += 1
+        except OperationError as error:
+            audit(db, "DOCUMENT_SCHEDULE_BLOCKED", "document_family", family.id, "La revisión anterior conserva documentos pendientes", "Scheduler",
+                  family.organization_id, {"code": error.code, "template_id": template.id})
+    # Strict membership is frozen at reception; missing extraction/review may later complete.
+    for batch in db.scalars(select(DocumentBatch).where(DocumentBatch.status.in_(["OPEN", "WAITING"])).limit(limit)):
+        user = db.get(User, batch.actor_id)
+        try:
+            publish_durable(db, batch, user)
+        except OperationError:
+            continue
+    return count

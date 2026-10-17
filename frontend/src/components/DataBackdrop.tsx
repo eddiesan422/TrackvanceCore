@@ -1,0 +1,4 @@
+/** Decorative data flow; never represents live or example operational results. */
+export function DataBackdrop() {
+  return <div className="data-backdrop" aria-hidden="true"><div className="data-grid"/><svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="data-route" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#129bdf"/><stop offset="1" stopColor="#68e6be"/></linearGradient></defs>{[0, 1, 2, 3, 4].map(index => <g key={index} style={{ animationDelay: `${index * -3}s` }}><path d={`M ${-180 + index * 120} 820 L ${220 + index * 120} 420 L ${220 + index * 120} 280 L ${620 + index * 120} -120`}/><circle r="5"><animateMotion dur={`${18 + index * 3}s`} repeatCount="indefinite" path={`M ${-180 + index * 120} 820 L ${220 + index * 120} 420 L ${220 + index * 120} 280 L ${620 + index * 120} -120`}/></circle></g>)}</svg><div className="data-glow"/></div>
+}

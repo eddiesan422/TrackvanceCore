@@ -63,7 +63,7 @@ def ci_restore_target(monkeypatch, tmp_path, request):
         fixture["inspected"].append(image)
         return json.dumps([{"Id": image, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": {
             "org.opencontainers.image.revision": fixture.get("image_sha", sha),
-            "org.opencontainers.image.version": "0.9.0"}}}])
+            "org.opencontainers.image.version": "0.9.5"}}}])
 
     def execute(arguments, **_kwargs):
         fixture["readonly"].append(arguments)
@@ -191,7 +191,7 @@ def test_ci_restore_uses_original_private_receipt_context_through_verified_stagi
     _manifest, expected = write_pre_corrections_backup(source)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES})
     state = modern_inventory()
     state["project"] = target["project"]
     monkeypatch.setattr(docker_state, "inventory", lambda _: state)
@@ -633,7 +633,7 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     _manifest, expected = write_pre_corrections_backup(root)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES})
     restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
     state = modern_inventory()
     state["project"] = "trackvance-restore-test"
@@ -667,7 +667,7 @@ def test_restore_v6_refuses_changed_or_missing_historical_projection(tmp_path, d
     manifest, expected = write_pre_corrections_backup(tmp_path / "backup")
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES})
     projected = json.loads(json.dumps(expected))
     if damage == "normalized_hash":
         projected["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64
@@ -966,7 +966,7 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
                     migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES})
     restored["tables"]["delivery_reviews"] = {}
     restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES | docker_state.ASYNC_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
@@ -1198,7 +1198,7 @@ def test_report_attempt_staging_excluded_only_from_data_backup(tmp_path, logical
     assert "published/report-staging" in entries
 
 
-def test_schema9_backup_remains_valid_and_projection_is_required_for_schema10_restore(tmp_path):
+def test_schema9_backup_remains_valid_and_projection_is_required_for_current_restore(tmp_path):
     root = tmp_path / "backup-085"
     manifest, expected = write_delivery_backup(root, current=True)
     expected.update(schema_version=9, migration=docker_state.PEOPLE_MIGRATION)
@@ -1207,8 +1207,8 @@ def test_schema9_backup_remains_valid_and_projection_is_required_for_schema10_re
     rewrite_legacy_state(root, manifest, expected)
     assert docker_state.verify_backup(root) == manifest
     restored = json.loads(json.dumps(expected))
-    restored.update(schema_version=10, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CORE090_STATE_TABLES})
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES})
     # Native additions can be present; only the separately validated v9 report
     # proves exact preservation of every preexisting row and approval.
     restored["tables"]["sentinel_automatic_monitors"] = {"bootstrap": "a" * 64}

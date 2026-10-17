@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.9.0",
+  "version": "0.9.5",
   "legacy_workflow_instances": 16,
   "groups": [
     {
@@ -349,7 +349,7 @@
           "id": "backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.0"
+          "version": "0.9.5"
         },
         {
           "id": "backup-authentic051",
@@ -689,7 +689,8 @@
             "tests-e2e/local-identity-exceptions.spec.ts",
             "tests-e2e/multiformat-navigation.spec.ts",
             "tests-e2e/rule-builders.spec.ts",
-            "tests-e2e/sentinel-schedule.spec.ts"
+            "tests-e2e/sentinel-schedule.spec.ts",
+            "tests-e2e/documents-095.spec.ts"
           ]
         }
       ],
@@ -734,7 +735,7 @@
           "id": "functional-backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.0"
+          "version": "0.9.5"
         }
       ],
       "timeout_minutes": 25,
@@ -940,6 +941,14 @@
             "functional-backup-native080",
             "crash-lease-120-shared",
             "unread-api-restart-functional"
+          ]
+        },
+        "documents_ocr": {
+          "scenario_ids": [
+            "functional-compose-browser-persistence"
+          ],
+          "browser_specs": [
+            "tests-e2e/documents-095.spec.ts"
           ]
         }
       },

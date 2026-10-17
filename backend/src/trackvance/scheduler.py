@@ -241,11 +241,15 @@ def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) 
 
 def tick() -> int:
     with SessionLocal() as db:
+        from .acquisition_schedule import dispatch_due as dispatch_acquisition_due
+        from .document_service import dispatch_due as dispatch_documents_due
         from .intake_automation import dispatch_due as dispatch_intake_due
         from .sentinel_auto import dispatch_daily
         count = dispatch_due(db)
         count += dispatch_intake_due(db)
         count += dispatch_daily(db)
+        count += dispatch_acquisition_due(db)
+        count += dispatch_documents_due(db)
         db.commit()
         return count
 

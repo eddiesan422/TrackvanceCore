@@ -1,4 +1,4 @@
-"""Build authentic historical installations and certify isolated 0.9.0 restores."""
+"""Build authentic historical installations and certify isolated 0.9.5 restores."""
 from __future__ import annotations
 
 import argparse
@@ -32,7 +32,7 @@ SOURCES = {
     "0.6.0": ("587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5),
     "0.6.1": ("6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5),
 }
-TARGET_VERSION = "0.9.0"
+TARGET_VERSION = "0.9.5"
 
 
 def health_version(port: int) -> str:
@@ -267,13 +267,13 @@ def main() -> int:
         os.environ.update(environment)
         run([*target_compose, "up", "-d", "--wait", "api", "web"])
         if health_version(target_port) != TARGET_VERSION:
-            raise ValueError("La restauración no ejecuta 0.9.0.")
+            raise ValueError("La restauración no ejecuta 0.9.5.")
         restored = docker_state.inventory(target)
         api_container = next(item for item in restored["containers"] if item["service"] == "api")
         after = docker_state._copy_snapshot(str(api_container["id"]), evidence / "restored-state.json")
         if (after["migration"] != docker_state.CURRENT_MIGRATION or after["schema_version"] != docker_state.VERIFY_SCHEMA_VERSION
                 or set(after["tables"]) != docker_state.CURRENT_STATE_TABLES):
-            raise ValueError("El restore histórico no contiene el inventario nativo completo de 0.9.0.")
+            raise ValueError("El restore histórico no contiene el inventario nativo completo de 0.9.5.")
         normalized = docker_state._copy_snapshot(str(api_container["id"]), evidence / "legacy-state.json",
             command="snapshot-legacy-v5" if expected_state == 5 else "snapshot-legacy-v4")
         if normalized != before:

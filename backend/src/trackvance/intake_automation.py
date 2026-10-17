@@ -322,6 +322,24 @@ def dispatch_occurrence(db, schedule, revision, trigger_key, planned_at, *, sour
         authorize_responsible(db, revision.responsible_user_id, config.organization_id,
                               source, revision.settings["effective_parameters"])
         if source is not None:
+            visited: set[str] = set()
+            pending = [source]
+            while pending:
+                ancestor = pending.pop()
+                if ancestor.id in visited:
+                    continue
+                if len(visited) >= 128:
+                    raise AutomationError(412, "DOCUMENT_LINEAGE_REVIEW_REQUIRED", "El linaje requiere revisión antes de automatizar Intake.")
+                visited.add(ancestor.id)
+                policy = (ancestor.ingestion_metadata or {}).get("document_publication", {})
+                if policy.get("correction") or policy.get("automatic_processing_allowed") is False:
+                    raise AutomationError(412, "DOCUMENT_AUTOMATION_NOT_AUTHORIZED",
+                        "La publicación documental finaliza en publicación o requiere revisión de su corrección; no autoriza Intake automático.")
+                if ancestor.parent_version_id:
+                    parent = db.get(DatasetVersion, ancestor.parent_version_id)
+                    if parent is None or parent.organization_id != source.organization_id:
+                        raise AutomationError(412, "DOCUMENT_LINEAGE_REVIEW_REQUIRED", "La procedencia requiere revisión antes de automatizar.")
+                    pending.append(parent)
             if origin == "SCHEDULED" and db.scalar(select(Run.id).where(
                     Run.config_id == config.id, Run.dataset_version_id == source.id,
                     Run.status == "SUCCESS", Run.decision == "REJECTED").limit(1)):

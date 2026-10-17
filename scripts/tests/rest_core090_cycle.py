@@ -55,6 +55,30 @@ def batch_metadata_digest(batches):
     return digest.hexdigest()
 
 
+def source_request_proof(value, rows, page_size):
+    """Independent durable HTTP sequence: every page accepted exactly once."""
+    assert value["complete"] is True and value["transient_faults"] is True
+    requests = [item for item in value["requests"] if item["endpoint"] == "/source"]
+    pages = (rows + page_size - 1) // page_size
+    expected = []
+    for page in range(1, pages + 2):
+        failures = (1 if page == 2 else 2 if page == 5 else 0) if page <= pages else 0
+        expected.extend((page, 503) for _ in range(failures))
+        expected.append((page, 200))
+    assert [(item["page"], item["status"]) for item in requests] == expected
+    assert all(item["page_size"] == page_size and item["at"] for item in requests)
+    assert len({item["seq"] for item in requests}) == len(requests)
+    return {"result": "PASS", "requests": requests, "successful_pages": pages + 1,
+        "transient_failures": sum(status == 503 for _, status in expected),
+        "same_page_retried_without_skip": True, "terminal_empty_page": pages + 1,
+        "oracle": "DURABLE_RECEIVER_EXACT_PAGE_STATUS_AND_PARAMETERS"}
+
+
+def receiver_json(base, path, *, timeout=120):
+    with urllib.request.urlopen(base + path, timeout=timeout) as response:
+        return json.load(response)
+
+
 def version_snapshot(version, rows):
     """Persist exact metadata, without treating a sample as population proof."""
     assert version["row_count"] == rows and version["column_count"] == len(FIELDS)
@@ -90,7 +114,7 @@ def require_codex():
     return "trackvance-codex"
 
 
-def receiver(rows, port, db_path, *, serve_forever=True):
+def receiver(rows, port, db_path, *, serve_forever=True, transient_faults=False):
     require_codex()
     fixture_root = Path(os.getenv("TRACKVANCE_REST_FIXTURE_DIR", "/fixture")).resolve()
     database_path = Path(db_path).resolve()
@@ -105,6 +129,11 @@ def receiver(rows, port, db_path, *, serve_forever=True):
         if "payload_bytes" not in {column[1] for column in db.execute("PRAGMA table_info(batches)")}:
             raise RuntimeError("El receptor anterior no conserva bytes; usa un archivo rest-core090-* nuevo para la evidencia completa.")
         db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, digest TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS source_requests (seq INTEGER PRIMARY KEY AUTOINCREMENT, endpoint TEXT NOT NULL, page INTEGER NOT NULL, page_size INTEGER NOT NULL, status INTEGER NOT NULL, at TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS source_faults (page INTEGER PRIMARY KEY, remaining INTEGER NOT NULL, configured INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS post_requests (seq INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT NOT NULL, at TEXT NOT NULL)")
+        if transient_faults:
+            db.executemany("INSERT OR IGNORE INTO source_faults VALUES (?,?,?)", [(2, 1, 1), (5, 2, 2)])
         db.execute("CREATE TABLE IF NOT EXISTS identity (rows INTEGER NOT NULL)")
         prior = db.execute("SELECT rows FROM identity").fetchone()
         if prior and prior[0] != rows:
@@ -144,11 +173,37 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                     return
                 count = min(rows, 25) if parsed.path == "/bootstrap" else rows
                 first = (page - 1) * size + 1
+                with guard, sqlite3.connect(db_path) as db:
+                    failure = db.execute("SELECT remaining FROM source_faults WHERE page=?", [page]).fetchone() if transient_faults and parsed.path == "/source" and first <= count else None
+                    status = 503 if failure and failure[0] > 0 else 200
+                    if status == 503:
+                        db.execute("UPDATE source_faults SET remaining=remaining-1 WHERE page=?", [page])
+                    db.execute("INSERT INTO source_requests(endpoint,page,page_size,status,at) VALUES (?,?,?,?,?)",
+                        [parsed.path, page, size, status, datetime.now(UTC).isoformat()])
+                if status == 503:
+                    self.respond(503, {"error": "CONTROLLED_TRANSIENT_GET"})
+                    return
                 self.respond(200, {"records": [synthetic_row(index) for index in range(first, min(count + 1, first + size))]})
+            elif parsed.path == "/source-receipt":
+                try:
+                    after = int(parse_qs(parsed.query).get("after_seq", [0])[0])
+                    if after < 0:
+                        raise ValueError()
+                except ValueError:
+                    self.respond(422, {"error": "INVALID_RECEIPT_CURSOR"})
+                    return
+                with guard, sqlite3.connect(db_path) as db:
+                    requests = [{"seq": seq, "endpoint": endpoint, "page": page, "page_size": size, "status": status, "at": at}
+                        for seq, endpoint, page, size, status, at in db.execute("SELECT seq,endpoint,page,page_size,status,at FROM source_requests WHERE seq>? ORDER BY seq LIMIT 5000", [after])]
+                    last = db.execute("SELECT coalesce(max(seq),0) FROM source_requests").fetchone()[0]
+                    faults = [{"page": page, "remaining": remaining, "configured": configured} for page, remaining, configured in db.execute("SELECT page,remaining,configured FROM source_faults ORDER BY page")]
+                self.respond(200, {"requests": requests, "last_seq": last, "faults": faults, "transient_faults": transient_faults,
+                    "complete": not requests or requests[-1]["seq"] == last})
             elif parsed.path == "/receipt":
                 with guard, sqlite3.connect(db_path) as db:
                     count = db.execute("SELECT count(*) FROM records").fetchone()[0]
                     batch_count = db.execute("SELECT count(*) FROM batches").fetchone()[0]
+                    post_calls = db.execute("SELECT count(*) FROM post_requests").fetchone()[0]
                     metadata_digest = hashlib.sha256()
                     confirmed_rows, payload_bytes = 0, 0
                     # Build from the receiver's durable data rather than from
@@ -170,7 +225,7 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                         expected.update(f"{row['id']}:{hashlib.sha256(canonical_row(row)).hexdigest()}\n".encode())
                 usage = resource.getrusage(resource.RUSAGE_SELF)
                 self.respond(200, {"project": "trackvance-codex", "expected_rows": rows, "received_rows": count,
-                    "batches": batch_count, "population_sha256": aggregate.hexdigest(),
+                    "batches": batch_count, "post_calls": post_calls, "population_sha256": aggregate.hexdigest(),
                     "batch_metadata_sha256": metadata_digest.hexdigest(), "confirmed_rows": confirmed_rows,
                     "payload_bytes": payload_bytes, "batch_metadata_order": "ID_ASCENDING_UTF8_JSON_SORTED_KEYS_LF",
                     "expected_population_sha256": expected.hexdigest(), "expected_rows_serialized_sha256": oracle,
@@ -178,7 +233,7 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                     "receiver_seconds": time.monotonic() - started, "max_rss_kib": usage.ru_maxrss,
                     "cpu_seconds": usage.ru_utime + usage.ru_stime})
             elif parsed.path == "/health":
-                self.respond(200, {"status": "READY", "rows": rows, "project": "trackvance-codex"})
+                self.respond(200, {"status": "READY", "rows": rows, "project": "trackvance-codex", "transient_faults": transient_faults})
             else:
                 self.respond(404, {"error": "NOT_FOUND"})
 
@@ -209,6 +264,7 @@ def receiver(rows, port, db_path, *, serve_forever=True):
                     verified.append((row["id"], hashlib.sha256(canonical_row(row)).hexdigest()))
                 with guard, sqlite3.connect(db_path) as db:
                     db.execute("BEGIN IMMEDIATE")
+                    db.execute("INSERT INTO post_requests(batch_id,at) VALUES (?,?)", [identity, datetime.now(UTC).isoformat()])
                     prior = db.execute("SELECT hash,count,payload_bytes FROM batches WHERE id=?", [identity]).fetchone()
                     if prior:
                         if prior != (digest, len(records), size):
@@ -256,6 +312,78 @@ class Client:
         if isinstance(value, dict) and "csrf_token" in value:
             self.csrf = value["csrf_token"]
         return value
+
+    def download_digest(self, path):
+        digest, size = hashlib.sha256(), 0
+        with self.opener.open(self.base + "/api/v1" + path, timeout=120) as response:
+            assert response.status == 200
+            while block := response.read(65536):
+                digest.update(block)
+                size += len(block)
+        assert size > 0
+        return {"sha256": digest.hexdigest(), "bytes": size, "scope": "COMPLETE_PERSISTED_REPORT_STREAM"}
+
+
+def certify_update_comparison(client, receiver_url, dataset_id, source_id, connection_id, contract_id,
+                              automation_id, actor_id, rows, nonce, timeout, original_receipt):
+    """Use native pause/version/policy/compare APIs; never repeat external writes."""
+    automation = client.call(f"/delivery/automations/{automation_id}")
+    paused_delivery = client.call(f"/delivery/automations/{automation_id}/versions", {
+        "configuration_id": automation["configuration_id"], "name": automation["name"], "enabled": False,
+        "responsible_user_id": automation["responsible_user_id"], "settings": automation["settings"],
+        "expected_version": automation["version"]}, expected=201)
+    assert paused_delivery["enabled"] is False
+    schedule = client.call(f"/intake/contracts/{contract_id}/schedule")
+    paused_intake = client.call(f"/intake/contracts/{contract_id}/schedule", {"enabled": False,
+        "responsible_user_id": schedule["responsible_user_id"], "settings": schedule["settings"], "expected_version": schedule["version"]})
+    assert paused_intake["enabled"] is False
+    existing = client.call(f"/datasets/{dataset_id}/source-settings")
+    body = {"expected_version": existing["version"], "connection_id": connection_id, "schema_name": "REST",
+        "object_name": "collection", "column_overrides": {}, "responsible_user_id": actor_id,
+        "interval_seconds": 86400, "timezone": "America/Bogota", "enabled": False,
+        "publication_policy": "ON_CHANGE", "empty_policy": "BLOCK"}
+    settings = client.call(f"/datasets/{dataset_id}/source-settings", body, method="PUT")
+    versions_before = client.call(f"/datasets/{dataset_id}")["versions"]
+    run = client.call(f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202, key=f"unchanged-{nonce}")
+    unchanged = wait_for(lambda: client.call(f"/acquisitions/{run['id']}"), lambda result: result["status"] in TERMINAL,
+        timeout=timeout, label="same-full-on-change")
+    assert unchanged["status"] == "SUCCESS" and unchanged["stage"] == "UNCHANGED" and unchanged["output_version_id"] is None
+    assert unchanged["total_rows"] == rows and len(client.call(f"/datasets/{dataset_id}")["versions"]) == len(versions_before)
+    body.update(expected_version=settings["version"], publication_policy="EVERY_CUT")
+    client.call(f"/datasets/{dataset_id}/source-settings", body, method="PUT")
+    run = client.call(f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202, key=f"same-cut-{nonce}")
+    repeated = wait_for(lambda: client.call(f"/acquisitions/{run['id']}"), lambda result: result["status"] in TERMINAL,
+        timeout=timeout, label="same-full-every-cut")
+    assert repeated["status"] == "SUCCESS" and repeated["output_version_id"] and repeated["output_version_id"] != source_id
+    assert repeated["published_rows"] == rows
+    versions = client.call(f"/datasets/{dataset_id}")["versions"]
+    assert len(versions) == len(versions_before) + 1
+    second_version = next(item for item in versions if item["id"] == repeated["output_version_id"])
+    second_snapshot = version_snapshot(second_version, rows)
+    queued = client.call(f"/datasets/{dataset_id}/comparisons", {"before_version_id": source_id,
+        "after_version_id": repeated["output_version_id"], "keys": ["id"]}, expected=202)
+    compared = wait_for(lambda: client.call(f"/version-comparisons/{queued['id']}"), lambda result: result["status"] in TERMINAL,
+        timeout=timeout, label="full-snapshot-comparison")
+    assert compared["status"] == "SUCCESS", compared.get("error_code")
+    summary = compared["summary"]
+    assert summary["complete_population"] is True and summary["mode"] == "KEYED"
+    assert summary["before_rows"] == summary["after_rows"] == rows
+    assert summary["counts"] == {"ADDED": 0, "ABSENT": 0, "MODIFIED": 0, "UNCHANGED": rows}
+    assert summary["schema_changes"] == []
+    details = client.call(f"/version-comparisons/{queued['id']}/rows?kind=UNCHANGED&offset=0&limit=1")
+    assert details["records"] == rows and details["total"] == rows and len(details["items"]) == 1
+    first = details["items"][0]
+    assert first["before"] == first["after"] and first["before"]["id"] == "000000001" and first["changed_columns"] == []
+    report = client.download_digest(f"/version-comparisons/{queued['id']}/download")
+    final_receipt = receiver_json(receiver_url, "/receipt")
+    for key in ("received_rows", "post_calls", "batches", "population_sha256", "batch_metadata_sha256", "confirmed_rows", "payload_bytes"):
+        assert final_receipt[key] == original_receipt[key]
+    return {"result": "PASS", "population": rows, "paused_intake_version": paused_intake["version"],
+        "paused_delivery_version": paused_delivery["version"], "on_change": {"id": unchanged["id"], "stage": unchanged["stage"],
+        "duration_seconds": unchanged["duration_seconds"], "output_version_id": None},
+        "every_cut": {"id": repeated["id"], "duration_seconds": repeated["duration_seconds"], "version": second_snapshot},
+        "comparison": {"id": compared["id"], "artifact_id": compared["artifact_id"], "summary": summary, "report": report},
+        "no_additional_delivery_posts": True, "receiver_post_calls": final_receipt["post_calls"]}
 
 
 def wait_for(callback, predicate, *, timeout, label):
@@ -412,7 +540,7 @@ def business_lineage_proof(client, dataset_id, version_id, output_version_id,
             "limits_per_page": {"max_nodes": 100, "max_depth": 4}, "browser_review": "SEPARATE_REQUIRED_EVIDENCE"}
 
 
-def certify(api_url, receiver_url, rows, evidence, timeout):
+def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False):
     project = require_codex()
     started = time.monotonic()
     cpu_started = resource.getrusage(resource.RUSAGE_SELF)
@@ -431,16 +559,21 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         with urllib.request.urlopen(receiver_url + "/health", timeout=30) as response:
             health = json.load(response)
         assert health["project"] == project and health["rows"] == rows
+        if core095:
+            assert health["transient_faults"] is True
         options = {"url": receiver_url + "/bootstrap", "auth": "NONE", "collection": "records",
             "fields": [{"name": name, "logical_type": logical, "nullable": nullable} for name, logical, nullable in FIELDS],
             "pagination": {"mode": "PAGE"}, "page_size": 1000, "max_pages": 10000}
+        if core095:
+            options.update(retries=3, retry_wait_seconds=1)
         connection = client.call("/connections", {"name": f"R090 synthetic source {nonce}", "source_type": "REST", "options": options}, expected=201)
         registered = client.call(f"/connections/{connection['id']}/acquisitions", {"name": f"R090 population {nonce}",
             "description": f"Synthetic-only REST oracle {nonce}", "schema_name": "REST", "object_name": "collection"}, expected=202, key=f"bootstrap-{nonce}")
-        dataset_id = registered["dataset"]["id"]
+        assert registered["dataset"] is None and registered["acquisition"]["dataset_id"] is None
         acquisition = wait_for(lambda: client.call(f"/acquisitions/{registered['acquisition']['id']}"),
             lambda result: result["status"] in TERMINAL, timeout=timeout, label="bootstrap-acquisition")
         assert acquisition["status"] == "SUCCESS", acquisition.get("error_code")
+        dataset_id = acquisition["dataset_id"]
         bootstrap_version = acquisition["output_version_id"]
         contract = client.call("/intake/contracts", {"name": f"R090 Intake automatic {nonce}", "dataset_id": dataset_id,
             "config": {"required_columns": [name for name, _, nullable in FIELDS if not nullable], "max_error_rate": 0}}, expected=201)
@@ -461,11 +594,14 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
                          "source_policy": "INTAKE_OUTPUT", "intake_configuration_id": contract["id"]}}, expected=201)
         options["url"] = receiver_url + "/source"
         client.call(f"/connections/{connection['id']}", {"version": connection["version"], "options": options}, method="PATCH")
+        source_start = receiver_json(receiver_url, "/source-receipt")["last_seq"] if core095 else None
         refreshed = client.call(f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202, key=f"million-{nonce}")
         acquisition = wait_for(lambda: client.call(f"/acquisitions/{refreshed['id']}"), lambda result: result["status"] in TERMINAL,
             timeout=timeout, label="full-rest-acquisition")
         assert acquisition["status"] == "SUCCESS", acquisition.get("error_code")
         assert acquisition["published_rows"] == rows
+        if core095:
+            stages["source_retries"] = source_request_proof(receiver_json(receiver_url, f"/source-receipt?after_seq={source_start}"), rows, 1000)
         source_id = acquisition["output_version_id"]
         source_version = next(version for version in client.call(f"/datasets/{dataset_id}")["versions"] if version["id"] == source_id)
         assert source_version["source_type"] == "REST"
@@ -529,6 +665,8 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert receipt["batches"] == len(batches) and receipt["duplicate_ids"] == 0
         assert receipt["batch_metadata_sha256"] == batch_digest
         assert receipt["confirmed_rows"] == rows and receipt["payload_bytes"] == payload_bytes
+        if core095:
+            assert receipt["post_calls"] == len(batches)
         stages["delivery"] = {"run_id": delivery["id"], "automation_id": automation["id"], "rows": rows, "batch_count": len(batches),
             "destination_version_id": destination["destination_version_id"],
             "batch_metadata_sha256": batch_digest, "batch_metadata_order": receipt["batch_metadata_order"],
@@ -540,6 +678,9 @@ def certify(api_url, receiver_url, rows, evidence, timeout):
         assert stages["lineage"]["result"] == "PASS"
         stages["business_lineage"] = business_lineage_proof(client, dataset_id, source_id,
             intake["output_version_id"], intake["id"], delivery["id"], destination["destination_version_id"], len(batches))
+        if core095:
+            stages["update_and_comparison"] = certify_update_comparison(client, receiver_url, dataset_id, source_id,
+                connection["id"], contract["id"], automation["id"], actor["id"], rows, nonce, timeout, receipt)
         report["result"] = "PASS"
     except Exception as error:
         report["result"], report["error_type"] = "FAIL", type(error).__name__
@@ -564,13 +705,15 @@ def main():
     parser.add_argument("--receiver", default="http://rest-fixture:18090")
     parser.add_argument("--evidence", default="/evidence/rest-core090.json")
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--transient-faults", action="store_true", help="Inject only source GET failures on pages 2 and 5.")
+    parser.add_argument("--core095", action="store_true", help="Require retry, no-change, every-cut and full comparison evidence.")
     args = parser.parse_args()
     if not 1 <= args.rows <= 1000000:
         raise ValueError("Las poblaciones del harness están acotadas a un millón; no cambia límites de producto.")
     if args.mode == "serve":
-        receiver(args.rows, args.port, args.db)
+        receiver(args.rows, args.port, args.db, transient_faults=args.transient_faults)
     else:
-        certify(args.api, args.receiver, args.rows, args.evidence, args.timeout)
+        certify(args.api, args.receiver, args.rows, args.evidence, args.timeout, core095=args.core095)
 
 
 if __name__ == "__main__":

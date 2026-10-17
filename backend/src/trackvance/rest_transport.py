@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 class RestError(Exception):
     def __init__(self, code, message, *, uncertain=False):
         self.code, self.message, self.uncertain = code, message, uncertain
+        self.details: dict | None = None
         super().__init__(message)
 
 
@@ -57,7 +58,7 @@ def endpoint(url: str):
 def validate_options(options: dict, secret: str, *, source: bool):
     allowed = {"url", "auth", "api_key_header", "timeout_seconds"}
     if source:
-        allowed |= {"collection", "fields", "pagination", "page_size", "max_pages", "max_rows", "max_bytes", "total_timeout_seconds"}
+        allowed |= {"collection", "fields", "pagination", "page_size", "max_pages", "max_rows", "max_bytes", "total_timeout_seconds", "retries", "retry_wait_seconds", "mapping_version"}
     else:
         allowed |= {"idempotency_supported", "idempotency_header"}
     if set(options) - allowed:
@@ -77,7 +78,8 @@ def validate_options(options: dict, secret: str, *, source: bool):
         raise RestError("REST_INVALID_HEADER", "La credencial y la identidad idempotente requieren encabezados separados.")
     bounds = {"timeout_seconds": (1, 60, 15), "max_pages": (1, 100000, 10000),
               "page_size": (1, 10000, 1000), "max_rows": (1, 5000000, 5000000),
-              "max_bytes": (1024, 2 * 1024**3, 2 * 1024**3), "total_timeout_seconds": (1, 1800, 1800)}
+              "max_bytes": (1024, 2 * 1024**3, 2 * 1024**3), "total_timeout_seconds": (1, 1800, 1800),
+              "retries": (0, 5, 0), "retry_wait_seconds": (1, 60, 10), "mapping_version": (1, 2, 1)}
     for name, (lower, upper, default) in bounds.items():
         value = options.get(name, default)
         if type(value) is not int or not lower <= value <= upper:
@@ -86,7 +88,7 @@ def validate_options(options: dict, secret: str, *, source: bool):
         raise RestError("REST_INVALID_OPTIONS", "Declara explícitamente el soporte real de idempotencia del receptor.")
 
 
-def exact_json(data: bytes):
+def exact_json(data: bytes, *, distinguish_integers: bool = False):
     def pairs(items):
         result = {}
         for key, value in items:
@@ -95,7 +97,7 @@ def exact_json(data: bytes):
             result[key] = value
         return result
     try:
-        return json.loads(data.decode("utf-8-sig"), parse_float=Decimal, parse_int=Decimal,
+        return json.loads(data.decode("utf-8-sig"), parse_float=Decimal, parse_int=int if distinguish_integers else Decimal,
                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError()), object_pairs_hook=pairs)
     except (ValueError, UnicodeError, RecursionError):
         raise RestError("REST_INVALID_JSON", "La respuesta debe ser JSON UTF-8 válido, sin claves repetidas ni valores no finitos.") from None
@@ -209,6 +211,10 @@ def request(options: dict, secret: str, method: str, *, query="", payload=None,
             connection.close()
     except RestError:
         raise
+    except ssl.SSLError:
+        raise RestError("REST_TLS_FAILURE", "No se pudo verificar el transporte TLS del destino REST.", uncertain=method == "POST") from None
+    except TimeoutError:
+        raise RestError("REST_TIMEOUT", "La petición REST excedió su tiempo máximo.", uncertain=method == "POST") from None
     except (OSError, http.client.HTTPException, ValueError):
         if deadline is not None and time.monotonic() >= deadline:
             raise RestError("REST_TIMEOUT", "La operación REST excedió su tiempo máximo.", uncertain=method == "POST") from None

@@ -1,0 +1,13 @@
+.version-comparison .panel { margin-block: 1rem; min-width: 0; }
+.version-comparison .table-wrap { max-width: 100%; overflow-x: auto; }
+.version-comparison pre { max-width: 30rem; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.version-comparison fieldset { border: 1px solid var(--border, #dbe7ef); border-radius: .75rem; margin-block: 1rem; padding: 1rem; }
+.version-comparison .button-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-block: .75rem; }
+.version-comparison .button-row label { display: inline-flex; align-items: center; gap: .4rem; }
+.version-comparison progress { display: block; width: 100%; accent-color: #008f9c; }
+.version-comparison details { margin-block: 1rem; }
+.version-comparison li { overflow-wrap: anywhere; margin-block: .5rem; }
+@media (max-width: 640px) {
+  .version-comparison pre { max-width: 15rem; }
+  .version-comparison .form-grid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -51,6 +51,23 @@ function mockExceptionApi(detail: Record<string, unknown>) {
 }
 
 describe('Exception technical resolution flow', () => {
+  it('shows the population, comparison and a recorded wait instead of treating a rule change as a repair', async () => {
+    const user = userEvent.setup()
+    mockExceptionApi({ ...baseException, state: 'INVESTIGATING', resolution_context: {
+      dataset_id: 'dataset-origin', dataset_version_id: 'version-origin', tracking_id: 'acquisition:source',
+      correction_guidance: 'Corrige el origen y realiza una nueva adquisición.',
+      rule_guidance: 'Desactivar una regla no demuestra corrección.',
+    } })
+    renderApp(<ExceptionsPage/>, { path: '/exceptions?id=case-1', route: '/exceptions' })
+    expect(await screen.findByText('Desactivar una regla no demuestra corrección.')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Revisar cambios entre versiones' })).toHaveAttribute('href', '/datasets/dataset-origin/versions/compare?from=version-origin&exception_id=case-1')
+    await user.selectOptions(screen.getByLabelText('Estado de gestión'), 'WAITING_EXTERNAL')
+    expect(screen.getByText('Registra en el comentario la dependencia externa y la acción necesaria para continuar.')).toBeVisible()
+    await user.type(screen.getByLabelText('Comentario para el historial'), 'Esperando corrección de la fuente')
+    await user.click(screen.getByRole('button', { name: 'Guardar gestión' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/exceptions/case-1', expect.objectContaining({ method: 'PATCH', body: expect.stringContaining('"state":"WAITING_EXTERNAL"') })))
+  })
+
   it('blocks next edits until the saved revision finishes refreshing', async () => {
     const user = userEvent.setup()
     const original = { ...baseException, state: 'OPEN' }

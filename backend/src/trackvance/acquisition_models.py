@@ -42,13 +42,14 @@ class AcquisitionRun(Record, Base):
         CheckConstraint("(source_type = 'UPLOAD' AND upload_id IS NOT NULL AND connection_version_id IS NULL) OR (source_type IN ('POSTGRESQL','SQLSERVER','REST') AND upload_id IS NULL AND connection_version_id IS NOT NULL)", name="ck_acquisition_source_identity"),
         Index("ix_acquisition_org_dataset_created", "organization_id", "dataset_id", "created_at"),
     )
-    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), index=True)
+    dataset_id: Mapped[str | None] = mapped_column(ForeignKey("datasets.id"), index=True, nullable=True)
     upload_id: Mapped[str | None] = mapped_column(ForeignKey("acquisition_uploads.id"), nullable=True, unique=True)
     connection_version_id: Mapped[str | None] = mapped_column(ForeignKey("external_connection_versions.id"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(30))
     filename: Mapped[str] = mapped_column(String(240))
     source_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     reader_options: Mapped[dict] = mapped_column(JSON, default=dict)
+    retry_state: Mapped[dict] = mapped_column(JSON, default=dict)
     column_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
     effective_limits: Mapped[dict] = mapped_column(JSON, default=dict)
     request_hash: Mapped[str] = mapped_column(String(64))
@@ -71,4 +72,12 @@ class AcquisitionRun(Record, Base):
     error_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AcquisitionNameReservation(Record, Base):
+    """Only active initial reads reserve a name; the run retains permanent evidence."""
+    __tablename__ = "acquisition_name_reservations"
+    __table_args__ = (UniqueConstraint("organization_id", "name"),)
+    name: Mapped[str] = mapped_column(String(160))
+    acquisition_id: Mapped[str] = mapped_column(ForeignKey("acquisition_runs.id"), unique=True)
 

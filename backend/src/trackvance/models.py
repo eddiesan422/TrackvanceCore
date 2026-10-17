@@ -305,11 +305,13 @@ class Job(Record, Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_lane_status_created_at", "lane", "status", "created_at"),
-        CheckConstraint("(run_id IS NOT NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND report_execution_id IS NULL AND lane = 'ACQUISITION') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NOT NULL AND lane = 'REPORT')", name="ck_job_subject_lane"),
+        CheckConstraint("(run_id IS NOT NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND document_id IS NULL AND comparison_id IS NULL AND lane IN ('DEFAULT','DELIVERY')) OR (run_id IS NULL AND acquisition_id IS NOT NULL AND report_execution_id IS NULL AND document_id IS NULL AND comparison_id IS NULL AND lane = 'ACQUISITION') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NOT NULL AND document_id IS NULL AND comparison_id IS NULL AND lane = 'REPORT') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND document_id IS NOT NULL AND comparison_id IS NULL AND lane = 'DOCUMENT') OR (run_id IS NULL AND acquisition_id IS NULL AND report_execution_id IS NULL AND document_id IS NULL AND comparison_id IS NOT NULL AND lane = 'COMPARISON')", name="ck_job_subject_lane"),
     )
     run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=True)
     acquisition_id: Mapped[str | None] = mapped_column(ForeignKey("acquisition_runs.id"), unique=True, nullable=True)
     report_execution_id: Mapped[str | None] = mapped_column(ForeignKey("report_executions.id"), unique=True, nullable=True)
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("document_originals.id"), unique=True, nullable=True)
+    comparison_id: Mapped[str | None] = mapped_column(ForeignKey("version_comparisons.id"), unique=True, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
     lane: Mapped[str] = mapped_column(String(20), default="DEFAULT", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -515,7 +517,10 @@ class MonitorOccurrence(Record, Base):
 # module (rather than an attribute) so direct imports of acquisition_models are
 # also safe during SQLAlchemy metadata discovery.
 from . import acquisition_models as _acquisition_models  # noqa: F401
+from . import acquisition_schedule_models as _acquisition_schedule_models  # noqa: F401
 from . import automation_models as _automation_models  # noqa: F401
+from . import comparison_models as _comparison_models  # noqa: F401
+from . import document_models as _document_models  # noqa: F401
 from . import governance_models as _governance_models  # noqa: F401
 from . import intake_automation_models as _intake_automation_models  # noqa: F401
 from . import report_models as _report_models  # noqa: F401

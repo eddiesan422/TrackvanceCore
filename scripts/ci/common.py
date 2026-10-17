@@ -15,7 +15,7 @@ MANIFEST = Path(__file__).with_name("scenarios.json")
 FUNCTIONAL_MODULES = frozenset({
     "identity_rbac", "acquisitions_multiformat", "transformations", "connections",
     "delivery_audit", "automations", "catalog_governance", "joins", "reports",
-    "dataset_generation", "basic_recovery",
+    "dataset_generation", "basic_recovery", "documents_ocr",
 })
 
 

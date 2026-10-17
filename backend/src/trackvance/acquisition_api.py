@@ -29,7 +29,7 @@ from .acquisition import (
 )
 from .acquisition_config import AcquisitionLimits
 from .acquisition_errors import AcquisitionReadError, processing_diagnostic
-from .acquisition_models import AcquisitionRun, AcquisitionUpload
+from .acquisition_models import AcquisitionNameReservation, AcquisitionRun, AcquisitionUpload
 from .artifactstore import artifact_store, storage_provider
 from .batch_readers import inspect_file
 from .connections_service import owned_connection, require_source_selection, saved_source
@@ -73,9 +73,44 @@ class SourceAcquisitionBody(BaseModel):
         return value.strip()
 
 
+class SourceSettingsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int | None = Field(default=None, ge=1)
+    connection_id: str = Field(min_length=1, max_length=64)
+    schema_name: str = Field(min_length=1, max_length=128)
+    object_name: str = Field(min_length=1, max_length=128)
+    column_overrides: dict = Field(default_factory=dict)
+    responsible_user_id: str = Field(min_length=1, max_length=64)
+    interval_seconds: int = Field(default=86400, ge=60, le=2678400)
+    timezone: str = Field(default="America/Bogota", max_length=80)
+    enabled: bool = False
+    publication_policy: Literal["ON_CHANGE", "EVERY_CUT"] = "ON_CHANGE"
+    empty_policy: Literal["BLOCK", "PRESERVE"] = "BLOCK"
+
+
+@router.get("/datasets/{dataset_id}/source-settings")
+def get_source_settings(dataset_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .acquisition_schedule import source_settings_dto
+    return source_settings_dto(db, _dataset(db, user, dataset_id))
+
+
+@router.put("/datasets/{dataset_id}/source-settings")
+def put_source_settings(dataset_id: str, body: SourceSettingsBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .acquisition_schedule import save_settings, source_settings_dto
+    if "connections:use" not in effective_permissions(db, user):
+        raise AcquisitionOperationError(403, "FORBIDDEN", "Se requiere permiso para utilizar conexiones.")
+    dataset = _dataset(db, user, dataset_id)
+    save_settings(db, dataset, user, settings=body.model_dump(exclude={"expected_version"}), expected_version=body.expected_version)
+    db.commit()
+    return source_settings_dto(db, dataset)
+
+
 class AcquisitionResponse(BaseModel):
     id: str
-    dataset_id: str
+    dataset_id: str | None
+    pending_dataset_name: str | None = None
+    tracking_id: str
+    retry_state: dict
     source_type: Literal["UPLOAD", "POSTGRESQL", "SQLSERVER", "REST"]
     filename: str
     status: Literal["QUEUED", "RUNNING", "SUCCESS", "FAILED", "CANCELLED"]
@@ -291,36 +326,36 @@ def acquire_source(connection_id: str, body: SourceAcquisitionBody, idempotency_
     if {"schema_name", "object_name"} - body.model_fields_set:
         require_source_selection(owned_connection(db, connection_id, user), body.model_fields_set)
     request_identity = {"operation": "REGISTER_SOURCE", "connection_id": connection_id, **body.model_dump()}
+    from .acquisition import lock_dataset_name
+    lock_dataset_name(db, user.organization_id, body.name)
     existing = _idempotent(db, user, idempotency_key, _request_hash(request_identity))
     if existing:
-        return {"dataset": dataset_dto(db, _dataset(db, user, existing.dataset_id)), "acquisition": acquisition_dto(existing)}
+        return {"dataset": dataset_dto(db, _dataset(db, user, existing.dataset_id)) if existing.dataset_id else None, "acquisition": acquisition_dto(existing)}
     connection = owned_connection(db, connection_id, user, lock=True)
     source, _ = saved_source(db, connection)
     selected = next((item for item in source.objects(body.schema_name) if item["name"] == body.object_name), None)
     if selected is None:
         raise AcquisitionOperationError(422, "SOURCE_OBJECT_UNAVAILABLE", "La tabla o vista seleccionada no está disponible.")
     found = db.scalar(select(Dataset).where(Dataset.organization_id == user.organization_id, Dataset.name == body.name))
-    if found:
+    if found or db.scalar(select(AcquisitionNameReservation.id).where(AcquisitionNameReservation.organization_id == user.organization_id,
+            AcquisitionNameReservation.name == body.name)):
         raise AcquisitionOperationError(409, "DATASET_NAME_EXISTS", "El nombre ya corresponde a un dataset; utiliza Actualizar desde fuente.")
     from .governance import validate_classification
     validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     dataset = Dataset(id=uid(), organization_id=user.organization_id, name=body.name,
                       domain=body.domain, description=body.description, owner=user.name,
                       macro_domain_id=body.macro_domain_id, domain_id=body.domain_id)
-    db.add(dataset)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        raise AcquisitionOperationError(409, "DATASET_NAME_EXISTS", "El nombre ya corresponde a otro dataset.") from None
     binding = DatasetSourceBinding(organization_id=user.organization_id, dataset_id=dataset.id,
         connection_id=connection.id, schema_name=body.schema_name, object_name=body.object_name,
         object_kind=selected["kind"], column_overrides=body.column_overrides)
-    db.add(binding)
-    run = register_source(db, user, connection, binding, dataset, idempotency_key=idempotency_key,
-                          request_identity=request_identity)
-    db.commit()
-    return {"dataset": dataset_dto(db, dataset), "acquisition": acquisition_dto(run)}
+    try:
+        run = register_source(db, user, connection, binding, dataset, idempotency_key=idempotency_key,
+                              request_identity=request_identity, initial=True)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise AcquisitionOperationError(409, "DATASET_NAME_RESERVED", "Otra adquisición reservó este nombre; espera su resultado.") from None
+    return {"dataset": None, "acquisition": acquisition_dto(run)}
 
 
 @router.post("/datasets/{dataset_id}/acquisitions/refresh", status_code=202, response_model=AcquisitionResponse)
@@ -329,13 +364,9 @@ def refresh_source(dataset_id: str, idempotency_key: str | None = Header(default
     if "datasets:write" not in effective_permissions(db, user):
         raise AcquisitionOperationError(403, "FORBIDDEN", "Se requiere permiso para registrar una versión adquirida.")
     dataset = _dataset(db, user, dataset_id)
-    binding = db.scalar(select(DatasetSourceBinding).where(DatasetSourceBinding.dataset_id == dataset.id,
-                         DatasetSourceBinding.organization_id == user.organization_id))
-    if binding is None:
-        raise AcquisitionOperationError(409, "DATASET_HAS_NO_SOURCE", "El dataset no tiene una fuente externa registrada.")
-    connection = owned_connection(db, binding.connection_id, user, lock=True)
-    run = register_source(db, user, connection, binding, dataset, idempotency_key=idempotency_key,
-                          request_identity={"operation": "REFRESH_SOURCE", "dataset_id": dataset_id})
+    from .acquisition_schedule import enqueue_update
+    run = enqueue_update(db, dataset, user, idempotency_key=idempotency_key,
+                         request_identity={"operation": "REFRESH_SOURCE", "dataset_id": dataset_id})
     db.commit()
     return acquisition_dto(run)
 

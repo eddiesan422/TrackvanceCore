@@ -12,7 +12,9 @@ import { AcquisitionLimits, getAcquisitionLimits, limitFormat, limitsKey, limitV
 import type { EffectiveLimits } from './AcquisitionLimits'
 
 export type Acquisition = {
-  id: string; dataset_id: string; source_type: string; filename: string
+  id: string; dataset_id: string | null; source_type: string; filename: string
+  pending_dataset_name?: string | null; tracking_id?: string
+  retry_state?: { attempt?: number; maximum_attempts?: number; status?: string; cause?: string; at?: string; next_retry_at?: string | null }
   status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'; stage: string
   attempts: number; processed_rows: number; processed_bytes: number
   total_rows: number | null; total_bytes: number | null; duration_seconds: number | null
@@ -32,7 +34,7 @@ type Inspection = {
 type Received = { upload: { id: string; filename: string; size_bytes: number; transfer_complete: boolean }; inspection: Inspection }
 type Overrides = Record<string, { logical_type?: string; semantic_tag?: 'IDENTIFIER' | null }>
 const terminal = (run?: Acquisition) => !!run && ['SUCCESS', 'FAILED', 'CANCELLED'].includes(run.status)
-const stages: Record<string, string> = { QUEUED: 'En cola', READING: 'Leyendo fuente', MATERIALIZING: 'Materializando partes', PROFILING: 'Perfilando toda la población', PUBLISHING: 'Publicando versión', COMPLETED: 'Completada', FAILED: 'Fallida', CANCELLED: 'Cancelada' }
+const stages: Record<string, string> = { QUEUED: 'En cola', READING: 'Leyendo fuente', RETRY_WAIT: 'Esperando reintento', UNCHANGED: 'Sin cambios', EMPTY_PRESERVED: 'Consulta vacía; versión conservada', MATERIALIZING: 'Materializando partes', PROFILING: 'Perfilando toda la población', PUBLISHING: 'Publicando versión', COMPLETED: 'Completada', FAILED: 'Fallida', CANCELLED: 'Cancelada' }
 const bytes = (value: number) => value >= 1024 * 1024 ? `${number(value / (1024 * 1024))} MiB` : `${number(value / 1024)} KiB`
 
 function AcquisitionDiagnostic({ run }: { run: Acquisition }) {
@@ -45,7 +47,7 @@ function AcquisitionCounters({ run }: { run: Acquisition }) {
   return <>{run.received_bytes != null && <>{bytes(run.received_bytes)} recibidos · </>}{number(run.materialized_rows ?? run.processed_rows)} registros materializados · {bytes(run.materialized_bytes ?? run.processed_bytes)} materializados{run.status === 'SUCCESS' && run.published_rows != null && <> · {number(run.published_rows)} registros publicados</>}</>
 }
 
-export function AcquisitionStatus({ id, onCompleted, onFinished }: { id: string; onCompleted?: (versionId: string) => void; onFinished?: () => void }) {
+export function AcquisitionStatus({ id, onCompleted, onFinished, onDatasetReady }: { id: string; onCompleted?: (versionId: string) => void; onFinished?: () => void; onDatasetReady?: (datasetId: string) => void }) {
   const cache = useQueryClient(), canWrite = usePermission('datasets:write')
   const notified = useRef<string | null>(null)
   const state = useQuery({ queryKey: ['acquisition', id], queryFn: () => api<Acquisition>(`/acquisitions/${id}`), refetchInterval: query => terminal(query.state.data) ? false : 2000 })
@@ -60,13 +62,17 @@ export function AcquisitionStatus({ id, onCompleted, onFinished }: { id: string;
         cache.invalidateQueries({ queryKey: ['datasets'] })
         cache.invalidateQueries({ queryKey: ['dashboard'] })
         onCompleted?.(run.output_version_id)
+        if (run.dataset_id) onDatasetReady?.(run.dataset_id)
       }
     }
-  }, [run, cache, onCompleted, onFinished])
+  }, [run, cache, onCompleted, onFinished, onDatasetReady])
   if (state.error) return <ErrorState error={state.error} retry={() => state.refetch()}/>
   if (!run) return <Loading text="Consultando adquisición…"/>
   return <div aria-live="polite"><p><Badge value={run.status}/> <strong>{stages[run.stage] || run.stage}</strong> · <AcquisitionCounters run={run}/>{run.duration_seconds != null && <> · {number(run.duration_seconds)} s</>}</p>
-    {run.status === 'SUCCESS' && <Notice success>Versión publicada después de leer y perfilar la fuente completa.</Notice>}
+    {!run.dataset_id && run.pending_dataset_name && <Notice>Primera adquisición de «{run.pending_dataset_name}». El dataset se creará al publicar su primera versión completa.</Notice>}
+    {run.retry_state?.attempt != null && <p>Intento {run.retry_state.attempt} de {run.retry_state.maximum_attempts}{run.retry_state.status === 'WAITING' && <> · Reintentando en {Math.max(0, Math.ceil((Date.parse(run.retry_state.next_retry_at || '') - Date.now()) / 1000))} s</>}{run.retry_state.status === 'EXHAUSTED' && ' · Reintentos agotados'}{run.retry_state.cause && <> · {run.retry_state.cause}</>}<small> · {date(run.retry_state.at)}</small></p>}
+    {run.status === 'SUCCESS' && <Notice success>{run.output_version_id ? 'Versión publicada después de leer y perfilar la fuente completa.' : 'Consulta completa exitosa. Se conserva la versión vigente sin una nueva publicación ni entrega redundante.'}</Notice>}
+    {run.status === 'SUCCESS' && run.dataset_id && <Link className="text-link" to={`/datasets/${run.dataset_id}`}>Ver dataset</Link>}
     <AcquisitionDiagnostic run={run}/>
     {terminal(run) && run.route_limits && <details><summary>Límites de este intento</summary><AcquisitionLimits limits={run.route_limits}/></details>}
     {terminal(run) && run.route_limits === null && <p className="muted">No hay un descriptor de límites histórico disponible para este intento. Se conservan su resultado y su diagnóstico originales.</p>}

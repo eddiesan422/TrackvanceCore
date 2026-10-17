@@ -90,6 +90,18 @@ services:
     cpus: 0.0625
     mem_limit: 128m
     profiles: [codex-automatic]
+  document-worker:
+    <<: *codex-backend
+    build: !reset null
+    cpus: 0.5
+    mem_limit: 768m
+    profiles: [codex-automatic]
+  comparison-worker:
+    <<: *codex-backend
+    build: !reset null
+    cpus: 0.5
+    mem_limit: 512m
+    profiles: [codex-automatic]
   events-chaining:
     <<: *codex-backend
     build: !reset null

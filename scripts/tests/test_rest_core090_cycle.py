@@ -102,6 +102,63 @@ def test_source_pagination_preserves_complete_population_and_empty_terminal_page
     assert observed == [cycle.synthetic_row(i) for i in range(1, 26)]
 
 
+def test_core095_controlled_get_faults_have_durable_same_page_sequence_and_exact_population(monkeypatch, tmp_path):
+    monkeypatch.setenv("TRACKVANCE_CERTIFICATION_PROJECT", "trackvance-codex")
+    monkeypatch.setenv("TRACKVANCE_REST_FIXTURE_DIR", str(tmp_path))
+    http = cycle.receiver(25, 0, str(tmp_path / "rest-core090-faults.sqlite"), serve_forever=False, transient_faults=True)
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    base, population = f"http://127.0.0.1:{http.server_port}", []
+    try:
+        page = 1
+        while True:
+            try:
+                with urllib.request.urlopen(base + f"/source?page={page}&page_size=5", timeout=5) as response:
+                    records = json.load(response)["records"]
+            except urllib.error.HTTPError as error:
+                assert error.code == 503
+                error.close()
+                continue
+            if not records:
+                break
+            population.extend(records)
+            page += 1
+        assert population == [cycle.synthetic_row(i) for i in range(1, 26)]
+        value = cycle.receiver_json(base, "/source-receipt")
+        proof = cycle.source_request_proof(value, 25, 5)
+        assert proof["transient_failures"] == 3 and proof["successful_pages"] == 6
+        assert [item["page"] for item in proof["requests"]] == [1, 2, 2, 3, 4, 5, 5, 5, 6]
+        assert value["faults"] == [{"page": 2, "remaining": 0, "configured": 1}, {"page": 5, "remaining": 0, "configured": 2}]
+        source_cursor = value["last_seq"]
+        assert cycle.receiver_json(base, f"/source-receipt?after_seq={source_cursor}")["requests"] == []
+        # Fault state is consumed durably; a new logical read does not inject a new write or reset it.
+        with urllib.request.urlopen(base + "/source?page=2&page_size=5", timeout=5) as response:
+            assert response.status == 200
+        assert receipt(base)["post_calls"] == 0
+    finally:
+        http.shutdown(); http.server_close(); thread.join(timeout=2)
+
+
+@pytest.mark.parametrize("damage", ["skip", "repeat_success", "parameters", "truncated", "false_faults"])
+def test_core095_page_oracle_rejects_skips_duplicates_parameter_changes_or_incomplete_logs(damage):
+    requests = [{"seq": index, "endpoint": "/source", "page": page, "page_size": 10, "status": status, "at": "2026-10-16T12:00:00Z"}
+        for index, (page, status) in enumerate([(1, 200), (2, 503), (2, 200), (3, 200), (4, 200)], 1)]
+    value = {"complete": True, "transient_faults": True, "requests": requests}
+    cycle.source_request_proof(value, 25, 10)
+    if damage == "skip":
+        del requests[2]
+    elif damage == "repeat_success":
+        requests.append({**requests[-1], "seq": 6})
+    elif damage == "parameters":
+        requests[1]["page_size"] = 20
+    elif damage == "truncated":
+        value["complete"] = False
+    else:
+        value["transient_faults"] = False
+    with pytest.raises(AssertionError):
+        cycle.source_request_proof(value, 25, 10)
+
+
 def committed_batches(server):
     result = []
     for identity, first, last in (("z-first", 1, 11), ("a-last", 11, 26)):

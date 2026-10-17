@@ -31,7 +31,8 @@ from ci.local_resources import (
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "trackvance-codex"
 ACTIVE = ("postgres", "api", "web", "worker", "acquisition-worker", "delivery-worker", "report-worker", "events-notifications", "test-postgres")
-OPTIONAL = ("scheduler", "events-chaining")
+OPTIONAL = ("scheduler", "events-chaining", "document-worker", "comparison-worker")
+SPECIALIZED = frozenset({"document-worker", "comparison-worker"})
 BACKEND = frozenset(set(ACTIVE + OPTIONAL) - {"postgres", "web", "test-postgres"})
 APP_VOLUMES = ("postgres_data", "trackvance_data", "connection_credentials", "connection_keys", "delivery_credentials", "delivery_keys")
 VOLUMES = (*APP_VOLUMES, "test_destination_data")
@@ -219,7 +220,8 @@ def validate_resolved(config, values, protected):
         require(not service.get("privileged") and not service.get("cap_add") and not service.get("devices")
             and not service.get("network_mode") and not service.get("pid") and not service.get("env_file"), "UNSAFE_CODEX_HOST_OR_ENVIRONMENT_ACCESS")
         require(float(service["cpus"]) > 0 and memory_bytes(service["mem_limit"]) > 0 and 0 < int(service["pids_limit"]) <= 128, "FINITE_CODEX_SERVICE_BUDGET_REQUIRED")
-        cpu += float(service["cpus"]); memory += memory_bytes(service["mem_limit"])
+        if name not in SPECIALIZED:
+            cpu += float(service["cpus"]); memory += memory_bytes(service["mem_limit"])
         for mount in service.get("volumes", []):
             require(mount["type"] == "volume" and mount["source"] in VOLUMES, "CODEX_BIND_OR_SHARED_MOUNT_FORBIDDEN")
         for port in service.get("ports", []):
@@ -235,6 +237,19 @@ def validate_resolved(config, values, protected):
             require(not service.get("ports") and service["environment"] == {"POSTGRES_USER": "tv_codex_destination", "POSTGRES_DB": "tv_codex_destination", "POSTGRES_PASSWORD": values["CODEX_DESTINATION_PASSWORD"]}, "SEPARATE_SYNTHETIC_DELIVERY_DESTINATION_REQUIRED")
     require(cpu <= 4 and memory <= 6 * 1024**3, "AGGREGATE_CODEX_BUDGET_EXCEEDED")
     return {"all_services_cpus": cpu, "all_services_memory_bytes": memory}
+
+
+def validate_active_budget(config, selected):
+    """Specialized lanes share the existing 4 CPU/6 GiB envelope.
+
+    Activating them requires pausing other roles first when their simultaneous
+    allocation would exceed that envelope. No product limit is raised for tests.
+    """
+    require(set(selected) <= set(ACTIVE + OPTIONAL), "EXACT_CODEX_SERVICE_SELECTION_REQUIRED")
+    cpu = sum(float(config["services"][name]["cpus"]) for name in selected)
+    memory = sum(memory_bytes(config["services"][name]["mem_limit"]) for name in selected)
+    require(cpu <= 4 and memory <= 6 * 1024**3, "ACTIVE_CODEX_BUDGET_EXCEEDED_PAUSE_OTHER_ROLES_FIRST")
+    return {"cpus": cpu, "memory_bytes": memory, "services": sorted(selected)}
 
 
 def validate_owned(existing, config, value, *, unchanged_roles=None):
@@ -403,7 +418,7 @@ def validate_schema_upgrade(args, value, sha, existing):
     require(restored_at.tzinfo is not None and datetime.now(UTC) - timedelta(hours=24) <= restored_at <= datetime.now(UTC) + timedelta(minutes=1),
         "RECENT_SCHEMA_UPGRADE_RESTORE_RECEIPT_REQUIRED")
     require(manifest.get("source_project") == PROJECT and manifest.get("application_only_codex") is True
-        and manifest.get("migration") == docker_state.PEOPLE_MIGRATION
+        and manifest.get("migration") in {docker_state.PEOPLE_MIGRATION, docker_state.CORE090_MIGRATION}
         and manifest.get("images", {}).get("api") == value["images"]["backend"]["id"]
         and receipt.get("source_manifest_sha256") == reference(backup / "backup-manifest.json")["sha256"]
         and receipt.get("verified_state_sha256") == reference(backup / "state.json")["sha256"]
@@ -445,10 +460,13 @@ def verify_schema_upgrade(environment, proof, directory):
     apis = [row for row in actual["containers"] if row["Config"]["Labels"]["com.docker.compose.service"] == "api"]
     require(len(apis) == 1 and apis[0]["State"]["Running"], "EXACT_MIGRATED_CODEX_API_REQUIRED")
     after_path = directory / ("schema-after-" + uuid4().hex + ".json")
-    projection_path = after_path.with_name(after_path.stem + "-legacy-v9.json")
+    legacy_schema = proof["source_state"]["schema_version"]
+    require(legacy_schema in {9, 10}, "EXACT_SUPPORTED_SOURCE_PROJECTION_REQUIRED")
+    projection_path = after_path.with_name(after_path.stem + f"-legacy-v{legacy_schema}.json")
     after = docker_state._copy_snapshot(apis[0]["Id"], after_path)
-    projected = docker_state._copy_snapshot(apis[0]["Id"], projection_path, command="snapshot-legacy-v9")
-    require(after["migration"] == docker_state.CURRENT_MIGRATION and projected == proof["source_state"],
+    projected = docker_state._copy_snapshot(apis[0]["Id"], projection_path, command=f"snapshot-legacy-v{legacy_schema}")
+    require(after["migration"] == docker_state.CURRENT_MIGRATION and after["schema_version"] == docker_state.VERIFY_SCHEMA_VERSION
+            and projected == proof["source_state"],
             "CODEX_SCHEMA_UPGRADE_HISTORICAL_STATE_PRESERVATION_FAILED")
     return {"current": reference(after_path), "historical_projection": reference(projection_path),
             "historical_state_preserved": True}
@@ -458,6 +476,11 @@ def execute_stage(args, directory, value, values, sha):
     change = plan(value, sha)
     prefix, environment, config, existing, protected, budgets = prepare(directory, value, values)
     selected = tuple(args.services or ACTIVE)
+    running_services = {row["Config"]["Labels"]["com.docker.compose.service"]
+                        for row in existing["containers"] if row["State"]["Running"]}
+    projected_services = (running_services - set(selected) if args.stage == "stop" else
+                          running_services | set(selected) if args.stage == "start" else running_services)
+    validate_active_budget(config, projected_services)
     require(set(selected) <= set(ACTIVE + OPTIONAL), "EXACT_CODEX_SERVICE_SELECTION_REQUIRED")
     intent = {"stage": args.stage, "source_sha": sha, "images": json.loads(json.dumps(value["images"])), "selected_services": selected,
         "budget": budgets, "protected_inventory_sha256": canonical_hash(protected), "configuration_sha256": canonical_hash(config)}

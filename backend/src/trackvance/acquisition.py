@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import time
+from dataclasses import replace
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,13 +16,13 @@ from typing import cast
 
 import duckdb
 import polars as pl
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from .acquisition_config import AcquisitionLimits
 from .acquisition_errors import AcquisitionReadError, limit_error, processing_diagnostic
-from .acquisition_models import AcquisitionRun, AcquisitionUpload
+from .acquisition_models import AcquisitionNameReservation, AcquisitionRun, AcquisitionUpload
 from .artifactstore import ArtifactIntegrityError, artifact_store, link_artifact
 from .audit_context import Actor
 from .batch_readers import RECORD_NUMBER_COLUMN, DatasetBatch, FileBatchReader, inspect_file
@@ -83,7 +84,8 @@ def acquisition_dto(run: AcquisitionRun) -> dict:
         header_row=run.source_snapshot.get("physical_header_row_number"))
     error = {"code": run.error_code, "message": run.error_message, "details": run.error_details,
              "reference": run.error_reference} if run.error_code else None
-    return {"id": run.id, "dataset_id": run.dataset_id, "source_type": run.source_type,
+    return {"id": run.id, "dataset_id": run.dataset_id, "pending_dataset_name": (run.source_snapshot.get("pending_dataset") or {}).get("name"),
+            "tracking_id": f"acquisition:{run.id}", "retry_state": run.retry_state, "source_type": run.source_type,
             "filename": run.filename, "status": run.status, "stage": run.stage,
             "attempt_id": run.attempt_id, "attempts": run.attempts,
             "initiated_by_id": run.initiated_by_id, "initiated_by": run.initiated_by_name,
@@ -111,6 +113,17 @@ def owned_acquisition(db: Session, identifier: str, user: User, *, lock=False) -
 
 def _request_hash(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def lock_dataset_name(db: Session, organization_id: str, name: str):
+    """One cross-table name lock shared by normal creation and initial reservations."""
+    if db.get_bind().dialect.name == "postgresql":
+        key = int.from_bytes(hashlib.sha256((organization_id + "\0" + name).encode()).digest()[:8], "big", signed=True)
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+    else:
+        # SQLite has a single writer; obtain its write reservation before checking
+        # Dataset and name-reservation tables, without changing stored values.
+        db.execute(update(User).where(User.organization_id == organization_id).values(name=User.name))
 
 
 def _idempotent(db: Session, user: User, key: str | None, request_hash: str) -> AcquisitionRun | None:
@@ -178,7 +191,8 @@ def register_upload(db: Session, user: User, dataset: Dataset, upload_id: str, *
 
 def register_source(db: Session, user: User, connection: ExternalConnection,
                     binding: DatasetSourceBinding, dataset: Dataset, *,
-                    idempotency_key: str | None = None, request_identity: dict | None = None) -> AcquisitionRun:
+                    idempotency_key: str | None = None, request_identity: dict | None = None,
+                    initial: bool = False, update_policy: dict | None = None) -> AcquisitionRun:
     if dataset.organization_id != user.organization_id or binding.organization_id != user.organization_id:
         raise AcquisitionOperationError(404, "NOT_FOUND", "No se encontró la selección solicitada.")
     version = current_version(db, connection)
@@ -188,6 +202,11 @@ def register_source(db: Session, user: User, connection: ExternalConnection,
     existing = _idempotent(db, user, idempotency_key, digest)
     if existing:
         return existing
+    if not initial:
+        db.scalar(select(Dataset).where(Dataset.id == dataset.id).with_for_update())
+        if db.scalar(select(AcquisitionRun.id).where(AcquisitionRun.dataset_id == dataset.id,
+                AcquisitionRun.status.in_(["QUEUED", "RUNNING"]))):
+            raise AcquisitionOperationError(409, "ACQUISITION_DATASET_BUSY", "El dataset ya tiene una adquisición en curso.")
     source, version = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
     columns = source.columns(binding.schema_name, binding.object_name)
     overrides = dict(binding.column_overrides)
@@ -201,18 +220,73 @@ def register_source(db: Session, user: User, connection: ExternalConnection,
         "config_hash": version.config_hash, "schema_name": binding.schema_name, "object_name": binding.object_name,
         "object_kind": binding.object_kind, "source_native_schema": columns,
         "previous_version_id": previous.id if previous else None}
+    source_snapshot["update_policy"] = update_policy or {"publication": "EVERY_CUT", "empty": "BLOCK", "schema": "BLOCK_INCOMPATIBLE"}
+    if initial:
+        source_snapshot["pending_dataset"] = {"id": dataset.id, "name": dataset.name, "description": dataset.description,
+            "domain": dataset.domain, "owner": dataset.owner, "macro_domain_id": dataset.macro_domain_id, "domain_id": dataset.domain_id}
     limits = AcquisitionLimits.configured()
-    run = AcquisitionRun(id=uid(), organization_id=user.organization_id, dataset_id=dataset.id,
+    run = AcquisitionRun(id=uid(), organization_id=user.organization_id, dataset_id=None if initial else dataset.id,
         source_type=connection.source_type, connection_version_id=version.id,
         filename=f"{binding.schema_name}.{binding.object_name}.parquet"[:240], source_snapshot=source_snapshot,
         reader_options={}, column_overrides=overrides, effective_limits=limits.as_dict(),
         request_hash=digest, idempotency_key=idempotency_key, initiated_by_id=user.id, initiated_by_name=user.name)
     db.add(run)
     db.flush()
+    if initial:
+        db.add(AcquisitionNameReservation(organization_id=user.organization_id, name=dataset.name, acquisition_id=run.id))
+        db.flush()
     job_queue.submit_acquisition(db, run)
     audit(db, "ACQUISITION_REGISTERED", "acquisition", run.id, "Lectura de fuente registrada en segundo plano",
           user.name, user.organization_id, {"dataset_id": dataset.id, "source_type": connection.source_type,
                                           "connection_version_id": version.id})
+    return run
+
+
+def release_reservation(db: Session, run: AcquisitionRun):
+    reservation = db.scalar(select(AcquisitionNameReservation).where(AcquisitionNameReservation.acquisition_id == run.id).with_for_update())
+    if reservation:
+        db.delete(reservation)
+
+
+def record_legacy_source_attempt(db: Session, user: User, *, snapshot: dict, column_overrides: dict,
+                                started_at: datetime, version: DatasetVersion | None = None,
+                                error: Exception | None = None) -> AcquisitionRun:
+    """Correlate the bounded synchronous compatibility route with native evidence.
+
+    The caller rolls back a failed Dataset/Binding transaction before recording
+    failure, or commits success with the single already materialized version.
+    No queue entry, new publication or parallel case system is manufactured.
+    """
+    from .config import MAX_ROWS
+    from .dataset_sources import MAX_SNAPSHOT_BYTES
+    code, message, details = None, None, None
+    if isinstance(error, ProcessingError):
+        diagnostic = processing_diagnostic(error)
+        code, message, details = diagnostic.code, diagnostic.message, diagnostic.details
+    elif isinstance(error, (SourceError, ConnectionOperationError)):
+        code, message, details = error.code, error.message, getattr(error, "details", None)
+    limits = replace(AcquisitionLimits.configured(), max_rows=MAX_ROWS, max_observed_bytes=MAX_SNAPSHOT_BYTES)
+    rows = version.row_count if version else 0
+    run = AcquisitionRun(id=uid(), organization_id=user.organization_id,
+        dataset_id=version.dataset_id if version else None, connection_version_id=snapshot["connection_version_id"],
+        source_type=snapshot["source_type"], filename=f"{snapshot['schema_name']}.{snapshot['object_name']}.parquet"[:240],
+        source_snapshot={**snapshot, "route": "LEGACY_SYNCHRONOUS_SOURCE"}, reader_options={},
+        column_overrides=dict(column_overrides), effective_limits=limits.as_dict(), request_hash=_request_hash(snapshot),
+        initiated_by_id=user.id, initiated_by_name=user.name, status="SUCCESS" if version else "FAILED",
+        stage="COMPLETED" if version else "FAILED", attempts=1, processed_rows=rows,
+        total_rows=rows if version else None, processed_bytes=0, output_version_id=version.id if version else None,
+        started_at=started_at, finished_at=utcnow(), error_code=code, error_message=message, error_details=details)
+    db.add(run)
+    db.flush()
+    if error:
+        run.error_reference = run.id
+    if version:
+        link_artifact(db, user.organization_id, "ACQUISITION_OUTPUT", "ACQUISITION", run.id, "DATASET_VERSION", version.id)
+        version.ingestion_metadata = {**version.ingestion_metadata, "acquisition_id": run.id}
+    audit(db, "ACQUISITION_COMPLETED" if version else "ACQUISITION_FAILED", "acquisition", run.id,
+        "Adquisición síncrona compatible completada" if version else message or "Adquisición síncrona compatible fallida",
+        user.name, user.organization_id, {"dataset_id": run.dataset_id, "connection_version_id": run.connection_version_id,
+            "source_type": run.source_type, "error_code": code, "row_count": rows if version else None})
     return run
 
 
@@ -226,6 +300,7 @@ def cancel_acquisition(db: Session, user: User, identifier: str) -> AcquisitionR
         run.status, run.stage, run.finished_at = "CANCELLED", "CANCELLED", utcnow()
         if job:
             job.status, job.lease_until = "CANCELLED", None
+        release_reservation(db, run)
     audit(db, "ACQUISITION_CANCEL_REQUESTED", "acquisition", run.id, "Cancelación de adquisición solicitada",
           user.name, user.organization_id, {"dataset_id": run.dataset_id})
     return run
@@ -305,12 +380,21 @@ def cleanup_abandoned_acquisitions(db: Session, *, now=None, limit: int = 100,
 
 
 def _authorize(db: Session, run: AcquisitionRun) -> tuple[User, Dataset]:
-    user, dataset = db.get(User, run.initiated_by_id), db.get(Dataset, run.dataset_id)
-    if user is None or dataset is None or user.organization_id != run.organization_id or dataset.organization_id != run.organization_id:
+    user, dataset = db.get(User, run.initiated_by_id), db.get(Dataset, run.dataset_id) if run.dataset_id else None
+    if run.dataset_id is None and run.source_snapshot.get("pending_dataset"):
+        dataset = Dataset(organization_id=run.organization_id, **run.source_snapshot["pending_dataset"])
+    if user is None or dataset is None or not user.active or user.deleted or user.organization_id != run.organization_id or dataset.organization_id != run.organization_id:
         raise AcquisitionStopped("ACQUISITION_ACTOR_UNAVAILABLE", "No se puede resolver al usuario o dataset de la adquisición.")
     required = {"datasets:write"} | ({"connections:use"} if run.source_type != "UPLOAD" else set())
     if not required <= set(effective_permissions(db, user)):
         raise AcquisitionStopped("ACQUISITION_PERMISSION_REVOKED", "El usuario ya no tiene los permisos necesarios para adquirir estos datos.")
+    if run.dataset_id:
+        from .governance import authorize_dataset
+        from .operations_common import OperationError
+        try:
+            authorize_dataset(db, user, run.dataset_id, "CONTENT")
+        except OperationError as error:
+            raise AcquisitionStopped(error.code, error.message) from None
     return user, dataset
 
 
@@ -323,6 +407,8 @@ def execute_acquisition(identifier: str, owner: str) -> None:
             raise LookupError("La adquisición no existe.")
         _authorize(db, run)
         limits = AcquisitionLimits(**run.effective_limits)
+        elapsed = max(0, (utcnow() - run.started_at.replace(tzinfo=UTC)).total_seconds()) if run.started_at else 0
+        started -= elapsed
         attempt = run.attempt_id
         if not attempt:
             raise AcquisitionStopped("ACQUISITION_LEASE_LOST", "La adquisición no tiene un intento vigente.")
@@ -350,17 +436,18 @@ def execute_acquisition(identifier: str, owner: str) -> None:
 
     work = artifact_store.create_directory("tmp", "acquisitions", identifier, attempt)
     last_state_check = 0.0
+    deadline = started + min(limits.timeout_seconds, source.settings.options.get("total_timeout_seconds", limits.timeout_seconds) if source_type == "REST" else limits.timeout_seconds)
 
-    def checkpoint(*, stage: str | None = None, rows: int | None = None, size: int | None = None):
+    def checkpoint(*, stage: str | None = None, rows: int | None = None, size: int | None = None, retry: dict | None = None):
         nonlocal last_state_check
         moment = time.monotonic()
-        if moment - started > limits.timeout_seconds:
-            raise AcquisitionReadError("ACQUISITION_TIMEOUT", "La adquisición excedió su tiempo efectivo.", {"maximum_seconds": limits.timeout_seconds})
+        if moment >= deadline:
+            raise AcquisitionReadError("REST_TOTAL_TIMEOUT" if source_type == "REST" else "ACQUISITION_TIMEOUT", "La adquisición excedió su tiempo máximo total, incluidos lectura, reintentos y procesamiento.", {"maximum_seconds": deadline - started})
         # A narrow, byte-bounded SQL fetch can contain only a handful of rows.
         # Probe its persisted cancellation/lease at most four times per second;
         # every materialization/progress/stage boundary still probes immediately.
         # Final publication additionally holds and verifies the authoritative locks.
-        if stage is None and rows is None and size is None and moment - last_state_check < 0.25:
+        if stage is None and rows is None and size is None and retry is None and moment - last_state_check < 0.25:
             return
         if shutil.disk_usage(work).free < limits.min_free_bytes:
             raise AcquisitionStopped("RESOURCE_DISK_INSUFFICIENT", "No queda la reserva de disco requerida para completar la adquisición.")
@@ -381,7 +468,17 @@ def execute_acquisition(identifier: str, owner: str) -> None:
                 acquisition.processed_rows = rows
             if size is not None:
                 acquisition.processed_bytes = size
-            if stage is not None or rows is not None or size is not None:
+            if retry is not None:
+                history = acquisition.retry_state.get("history", [])[-29:]
+                acquisition.retry_state = {**retry, "history": [*history, retry]}
+                acquisition.stage = "RETRY_WAIT" if retry["status"] == "WAITING" else "READING"
+                if retry["status"] in {"WAITING", "EXHAUSTED"} or retry["status"] == "SUCCEEDED" and retry["attempt"] > 1:
+                    audit(state, "ACQUISITION_REST_RETRY", "acquisition", acquisition.id,
+                        "Intento REST y próximo reintento registrados", Actor("WORKER", owner, "Worker adquisición"),
+                        acquisition.organization_id, {"dataset_id": acquisition.dataset_id, "status": retry["status"],
+                            "attempt": retry["attempt"], "attempts": retry["maximum_attempts"], "error_code": retry.get("cause"),
+                            "captured_at": retry["at"], "planned_at": retry.get("next_retry_at")})
+            if stage is not None or rows is not None or size is not None or retry is not None:
                 state.commit()
             last_state_check = moment
 
@@ -391,7 +488,8 @@ def execute_acquisition(identifier: str, owner: str) -> None:
     else:
         # The frozen source adapter uses the same cooperative checks between
         # fetches. No source credential is forwarded to a quality/Spark worker.
-        iterable = source.read_batches(limits=limits, check=checkpoint)
+        extra = {"retry_report": lambda event: checkpoint(retry=event), "deadline": deadline} if source_type == "REST" else {}
+        iterable = source.read_batches(limits=limits, check=checkpoint, **extra)
     paths: list[Path] = []
     total_rows = total_bytes = 0
     native: dict = {}
@@ -429,6 +527,16 @@ def execute_acquisition(identifier: str, owner: str) -> None:
                 raise limit_error("ACQUISITION_TEMP_DISK_LIMIT", "temporary_bytes", limits.xlsx_temp_bytes, used)
         profiled = profile_paths(paths, column_overrides=overrides, native_types=native, limits=limits, check=checkpoint,
                                  temp_byte_limit=spill_limit)
+        policy, no_change, compared_version_id = snapshot.get("update_policy", {}), False, None
+        if source_type != "UPLOAD" and policy.get("publication") == "ON_CHANGE" and total_rows:
+            from .acquisition_updates import unchanged
+            # The complete scan must not hold the publication/cancellation locks
+            # or prevent the heartbeat from renewing the worker's lease.
+            with SessionLocal() as comparison_db:
+                prior = comparison_db.get(DatasetVersion, snapshot.get("previous_version_id")) if snapshot.get("previous_version_id") else None
+                if prior:
+                    compared_version_id = prior.id
+                    no_change = unchanged(comparison_db, prior, paths, profiled[0], work, checkpoint)
         checkpoint(stage="PUBLISHING")
         with SessionLocal() as db:
             run = db.scalar(select(AcquisitionRun).where(AcquisitionRun.id == identifier).with_for_update())
@@ -438,6 +546,35 @@ def execute_acquisition(identifier: str, owner: str) -> None:
             if run.cancel_requested:
                 raise AcquisitionStopped("ACQUISITION_CANCELLED", "La adquisición fue cancelada antes de publicar.")
             _, dataset = _authorize(db, run)
+            if run.dataset_id:
+                db.scalar(select(Dataset).where(Dataset.id == run.dataset_id).with_for_update())
+            previous = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version.desc()))
+            if compared_version_id and (previous is None or previous.id != compared_version_id):
+                raise AcquisitionStopped("ACQUISITION_BASE_CHANGED", "La versión vigente cambió durante la consulta; registra una actualización nueva.")
+            if source_type != "UPLOAD" and total_rows == 0 and policy.get("empty", "BLOCK") == "BLOCK":
+                raise AcquisitionStopped("ACQUISITION_EMPTY_BLOCKED", "La consulta resultó vacía. Se conserva la versión anterior y no se envía un vaciado al destino.")
+            if source_type != "UPLOAD" and previous and [(c["name"], c["logical_type"]) for c in previous.schema_json] != [(c["name"], c["logical_type"]) for c in profiled[0]]:
+                raise AcquisitionStopped("ACQUISITION_SCHEMA_INCOMPATIBLE", "El esquema completo es incompatible con la versión publicada; revisa el mapping antes de actualizar.")
+            if source_type != "UPLOAD" and (no_change or total_rows == 0 and policy.get("empty") == "PRESERVE"):
+                if run.dataset_id is None:
+                    raise AcquisitionStopped("ACQUISITION_EMPTY_BLOCKED", "La primera adquisición requiere al menos un registro para crear un dataset operativo.")
+                run.status, run.stage, run.finished_at = "SUCCESS", "UNCHANGED" if no_change else "EMPTY_PRESERVED", utcnow()
+                run.total_rows, run.processed_rows, run.processed_bytes = total_rows, total_rows, total_bytes
+                job.status, job.lease_until, job.last_error = "SUCCESS", None, None
+                audit(db, "ACQUISITION_NO_PUBLICATION", "acquisition", run.id, "Consulta completa exitosa sin nueva publicación", Actor("WORKER", owner, "Worker adquisición"),
+                    run.organization_id, {"dataset_id": run.dataset_id, "reason": run.stage, "previous_version_id": previous.id if previous else None})
+                db.commit()
+                return
+            if run.dataset_id is None:
+                reservation = db.scalar(select(AcquisitionNameReservation).where(AcquisitionNameReservation.acquisition_id == run.id).with_for_update())
+                if reservation is None:
+                    raise AcquisitionStopped("ACQUISITION_RESERVATION_LOST", "La reserva inicial ya no está vigente; no se publica.")
+                db.add(dataset)
+                db.flush()
+                run.dataset_id = dataset.id
+                db.add(DatasetSourceBinding(organization_id=run.organization_id, dataset_id=dataset.id,
+                    connection_id=snapshot["connection_id"], schema_name=snapshot["schema_name"], object_name=snapshot["object_name"],
+                    object_kind=snapshot["object_kind"], column_overrides=overrides))
             if source_type != "UPLOAD":
                 assert run.connection_version_id is not None
                 connection = db.get(ExternalConnection, snapshot["connection_id"])
@@ -452,7 +589,9 @@ def execute_acquisition(identifier: str, owner: str) -> None:
             version = publish_materialized_version(db, dataset, paths, filename=filename,
                 actor=Actor("WORKER", owner, "Worker adquisición"), source_type=source_type, column_overrides=overrides,
                 native_types=native, metadata=metadata, original=original, original_media_type=media_type,
-                limits=limits, profiled=profiled)
+                limits=limits, profiled=profiled, check=checkpoint)
+            if time.monotonic() >= deadline:
+                raise AcquisitionStopped("REST_TOTAL_TIMEOUT" if source_type == "REST" else "ACQUISITION_TIMEOUT", "El presupuesto total venció durante la publicación; no se publicó la versión.")
             if job.lease_until.replace(tzinfo=UTC) <= utcnow():
                 raise AcquisitionStopped("ACQUISITION_LEASE_LOST", "El lease venció durante la publicación; la versión no se publicó.")
             if source_type != "UPLOAD":
@@ -464,6 +603,7 @@ def execute_acquisition(identifier: str, owner: str) -> None:
                                   "DATASET_VERSION", snapshot["previous_version_id"])
             link_artifact(db, run.organization_id, "ACQUISITION_OUTPUT", "ACQUISITION", run.id, "DATASET_VERSION", version.id)
             run.output_version_id, run.status, run.stage, run.finished_at = version.id, "SUCCESS", "COMPLETED", utcnow()
+            release_reservation(db, run)
             run.total_rows, run.processed_rows, run.processed_bytes = total_rows, total_rows, total_bytes
             # total_bytes describes transfer bytes; processed_bytes are observed
             # UTF-8 values. Unknown SQL transfer totals remain null.
@@ -513,6 +653,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
             if run.status == "FAILED":
                 run.error_code, run.error_message = "ACQUISITION_ATTEMPTS_EXHAUSTED", "La adquisición agotó los intentos tras interrupciones del worker."
             candidate.status, candidate.lease_until = run.status, None
+            release_reservation(db, run)
             db.commit()
             return True
         candidate.attempts += 1
@@ -531,6 +672,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
         details = None
         if isinstance(exc, (AcquisitionStopped, SourceError)):
             code, message = exc.code, exc.message
+            details = getattr(exc, "details", None)
         elif isinstance(exc, ArtifactIntegrityError):
             code, message = "ARTIFACT_INTEGRITY_ERROR", "La integridad de los datos de adquisición no coincide."
         elif isinstance(exc, ProcessingError):
@@ -555,6 +697,7 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
                 run.stage, run.finished_at = run.status, utcnow()
                 run.error_code, run.error_message = code, message
                 run.error_details, run.error_reference = details, run.id
+                release_reservation(db, run)
                 job.status, job.last_error, job.lease_until = run.status, message, None
                 audit(db, "ACQUISITION_" + run.status, "acquisition", run.id, message,
                       Actor("WORKER", owner, "Worker adquisición"), run.organization_id,

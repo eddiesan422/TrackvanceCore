@@ -238,6 +238,48 @@ services:
       start_period: 20s
       retries: 4
 
+  document-worker:
+    <<: *backend
+    cpus: 1
+    mem_limit: 1g
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: ['python', '-m', 'trackvance.document_worker']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_WORKER_LANE: DOCUMENT
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('DOCUMENT')['status'] == 'RUNNING' else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+  comparison-worker:
+    <<: *backend
+    cpus: 1
+    mem_limit: 768m
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: ['python', '-m', 'trackvance.comparison_worker']
+    environment:
+      <<: *backend-env
+      TRACKVANCE_WORKER_LANE: COMPARISON
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', "from trackvance.worker import worker_status; raise SystemExit(0 if worker_status('COMPARISON')['status'] == 'RUNNING' else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
   scheduler:
     <<: *backend
     cpus: 0.25

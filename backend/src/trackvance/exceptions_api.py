@@ -52,6 +52,18 @@ def assert_version(case: ExceptionCase, version: int) -> None:
         raise OperationError(409, "VERSION_CONFLICT", "Otra persona modificó esta excepción. Actualiza los datos.")
 
 
+def authorize_validation_candidate(db: Session, user: User, assessment: dict) -> None:
+    """The actual caller must still have content access to every candidate input."""
+    identity = assessment.get("candidate_run_id")
+    if not identity:
+        return
+    candidate = db.get(Run, identity)
+    if candidate is None or candidate.organization_id != user.organization_id:
+        raise OperationError(403, "SOURCE_ACCESS_DENIED", "La ejecución de validación ya no está disponible para este usuario.")
+    from .governance import authorize_run_content
+    authorize_run_content(db, user, candidate)
+
+
 def actor_of(user: User) -> Actor:
     return Actor("USER", user.id, user.name)
 
@@ -67,7 +79,7 @@ class CaseInput(BaseModel):
 
 class CasePatch(CaseInput):
     version: int = Field(ge=1)
-    state: Literal["OPEN", "ASSIGNED", "INVESTIGATING", "PENDING_VALIDATION", "RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE", "REOPENED"] | None = None
+    state: Literal["OPEN", "ASSIGNED", "INVESTIGATING", "PENDING_VALIDATION", "RESOLVED", "DISCARDED", "ACCEPTED", "NOT_APPLICABLE", "REOPENED", "WAITING_EXTERNAL"] | None = None
     owner: str | None = Field(default=None, min_length=1, max_length=120)
     assigned_user_id: str | None = Field(default=None, min_length=1, max_length=64)
     priority: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"] | None = None
@@ -101,11 +113,21 @@ class CommentBody(CaseInput):
 @router.get("")
 def exceptions(state: str | None = None, module: str | None = None, severity: str | None = None,
                priority: str | None = None, assigned_user_id: str | None = None, overdue: bool | None = None,
-               search: str = "", offset: int = 0, limit: int = 500,
+               queue: Literal["all", "intervention", "running", "waiting", "finished"] = "all",
+               search: str = "", offset: int = 0, limit: int = 25,
                db: Session = Depends(get_db), user: User = Depends(current_user)):
     if offset < 0 or limit < 1 or limit > 1000 or len(search) > 200:
         raise OperationError(422, "INVALID_FILTER", "Los filtros o límites no son válidos.")
     query = select(ExceptionCase).where(ExceptionCase.organization_id == user.organization_id)
+    if queue == "intervention":
+        query = query.where(ExceptionCase.state.in_(["OPEN", "ASSIGNED", "REOPENED", "PENDING_VALIDATION"]),
+            or_(ExceptionCase.assigned_user_id.is_(None), ExceptionCase.assigned_user_id == user.id))
+    elif queue == "running":
+        query = query.where(ExceptionCase.state == "INVESTIGATING")
+    elif queue == "waiting":
+        query = query.where(ExceptionCase.state == "WAITING_EXTERNAL")
+    elif queue == "finished":
+        query = query.where(ExceptionCase.state.in_(CLOSED))
     for field, value in (("state", state), ("module", module), ("severity", severity),
                          ("priority", priority), ("assigned_user_id", assigned_user_id)):
         if value:
@@ -147,6 +169,7 @@ def validate(case_id: str, body: ValidationBody, db: Session = Depends(get_db), 
     if case.state != "PENDING_VALIDATION":
         raise OperationError(422, "VALIDATION_STATE_REQUIRED", "Pasa la excepción a Pendiente de validación antes de verificar la corrección.")
     assessment = assess_exception_validation(db, case, body.validation_run_id)
+    authorize_validation_candidate(db, user, assessment)
     if assessment["status"] == "INVALID_RUN":
         raise OperationError(409, "VALIDATION_RUN_OUTDATED", assessment["reason"], {"latest_run_id": assessment["candidate_run_id"]})
     if assessment["status"] == "NO_LATER_RUN":
@@ -172,16 +195,18 @@ def update_case(case_id: str, body: CasePatch, db: Session = Depends(get_db), us
         ("auto_resolve_enabled" in changes and changes["auto_resolve_enabled"] != case.auto_resolve_enabled)) and "exceptions:close" not in permissions:
         raise OperationError(403, "FORBIDDEN", "No tienes permiso para cerrar excepciones o cambiar su resolución automática.")
     transitions = {
-        "OPEN": {"ASSIGNED", "INVESTIGATING", *ADMINISTRATIVE},
-        "ASSIGNED": {"INVESTIGATING", *ADMINISTRATIVE},
-        "INVESTIGATING": {"ASSIGNED", "PENDING_VALIDATION", *ADMINISTRATIVE},
-        "PENDING_VALIDATION": {"INVESTIGATING", "RESOLVED", *ADMINISTRATIVE},
-        "REOPENED": {"ASSIGNED", "INVESTIGATING", *ADMINISTRATIVE},
+        "OPEN": {"ASSIGNED", "INVESTIGATING", "WAITING_EXTERNAL", *ADMINISTRATIVE},
+        "ASSIGNED": {"INVESTIGATING", "WAITING_EXTERNAL", *ADMINISTRATIVE},
+        "INVESTIGATING": {"ASSIGNED", "PENDING_VALIDATION", "WAITING_EXTERNAL", *ADMINISTRATIVE},
+        "PENDING_VALIDATION": {"INVESTIGATING", "RESOLVED", "WAITING_EXTERNAL", *ADMINISTRATIVE},
+        "REOPENED": {"ASSIGNED", "INVESTIGATING", "WAITING_EXTERNAL", *ADMINISTRATIVE},
         "WAITING_EXTERNAL": {"INVESTIGATING", "PENDING_VALIDATION", *ADMINISTRATIVE},
         **{value: {"OPEN", "REOPENED"} for value in CLOSED},
     }
     if state != case.state and state not in transitions.get(case.state, set()):
         raise OperationError(422, "INVALID_TRANSITION", "La transición de estado no está permitida.")
+    if state == "WAITING_EXTERNAL" and state != case.state and not body.comment:
+        raise OperationError(422, "WAIT_REASON_REQUIRED", "Registra en el comentario qué dependencia externa bloquea la continuación.")
     if case.state in CLOSED and state == case.state and changes:
         raise OperationError(422, "CASE_CLOSED", "Reabre el caso antes de modificar su gestión.")
     if "assigned_user_id" in changes:
@@ -212,6 +237,7 @@ def update_case(case_id: str, body: CasePatch, db: Session = Depends(get_db), us
         if not changes.get("root_cause", case.root_cause).strip() or not changes.get("resolution", case.resolution).strip():
             raise OperationError(422, "RESOLUTION_REQUIRED", "Para resolver, registra causa raíz y resolución.")
         assessment = assess_exception_validation(db, case)
+        authorize_validation_candidate(db, user, assessment)
         if not assessment["can_resolve"]:
             raise OperationError(422, "TECHNICAL_VALIDATION_REQUIRED", assessment["reason"], assessment)
         changes.update(validation_run_id=assessment["validation_run_id"], validated_at=now,

@@ -830,12 +830,12 @@ def core090_bootstrap_rows():
 
 def test_core090_projection_proves_only_allowed_bootstrap_and_restains_schema9():
     before, rows = core090_bootstrap_rows()
-    report = verify_storage.legacy_v9_report(rows, [], current_migration=verify_storage.CURRENT_MIGRATION,
+    report = verify_storage.legacy_v9_report(rows, [], current_migration=verify_storage.CORE090_MIGRATION,
         verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0)
     assert report["schema_version"] == 9 and report["migration"] == "0019_governance_people"
     assert report["tables"] == verify_storage._table_hashes(before)
     assert rows["configurations"] and rows["sentinel_automatic_monitors"]  # The projection never mutates persisted input.
-    assert len(verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]) == 65
+    assert len(verify_storage.FINGERPRINT_TABLES[verify_storage.CORE090_MIGRATION]) == 65
     assert len(verify_storage.FINGERPRINT_TABLES[verify_storage.PEOPLE_MIGRATION]) == 56
 
 

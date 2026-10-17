@@ -245,10 +245,12 @@ def save_connection(
 
 def acquire_snapshot(
     db: Session, user: User, connection: ExternalConnection, binding: DatasetSourceBinding,
-    dataset: Dataset,
+    dataset: Dataset, *, require_nonempty: bool = False,
 ) -> DatasetVersion:
     source, configuration = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
     result = source.read()
+    if require_nonempty and result.frame.height == 0:
+        raise SourceError("ACQUISITION_EMPTY_BLOCKED", "La primera adquisición resultó vacía; no se creó un dataset operativo.")
     overrides = dict(binding.column_overrides)
     if connection.source_type == "REST":
         from .rest_source import declared_overrides

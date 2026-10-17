@@ -16,7 +16,8 @@ from .permissions import effective_permissions
 router = APIRouter(prefix="/api/v1/catalog", tags=["Linaje gráfico"])
 REVERSE = frozenset({"DERIVED_FROM", "INTAKE_ACCEPTED_FROM", "SOURCE_SNAPSHOT", "REFRESH_OF",
                      "RUN_INPUT", "RUN_REFERENCE", "USES_CONFIGURATION", "REPORT_SOURCE",
-                     "REPORT_APPROVAL", "REPORT_REVISION", "EXPORT_OF", "EVIDENCE_OF"})
+                     "REPORT_APPROVAL", "REPORT_REVISION", "EXPORT_OF", "EVIDENCE_OF",
+                     "COMPARISON_INPUT", "COMPARISON_EVIDENCE"})
 
 
 def _artifact_is_authorized(db, user, artifact, grants):
@@ -39,6 +40,8 @@ def _artifact_is_authorized(db, user, artifact, grants):
         .limit(129)).all()
     if len(versions) > 128:
         return False
+    if versions and "artifacts:download" not in grants:
+        return False
     for version in versions:
         authorize_dataset_content(db, user, version)
     relationships = db.scalars(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,
@@ -49,17 +52,53 @@ def _artifact_is_authorized(db, user, artifact, grants):
         .limit(129)).all()
     if len(relationships) > 128:
         return False
+    if relationships and "artifacts:download" not in grants:
+        return False
     for link in relationships:
         run_id = link.source_id if link.source_type == "RUN" else link.target_id
         run = db.get(Run, run_id)
         if run is None or run.organization_id != user.organization_id or f"{run.module.lower()}:read" not in grants:
             return False
         authorize_run_content(db, user, run)
-    return bool(versions or relationships)
+    from .comparison_api import authorize_comparison
+    from .comparison_models import VersionComparison
+    from .document_models import DocumentOriginal
+
+    originals = db.scalars(select(DocumentOriginal).where(DocumentOriginal.organization_id == user.organization_id,
+        DocumentOriginal.artifact_id.in_(identities)).limit(129)).all()
+    document_links = db.scalars(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,
+        ArtifactLink.source_type.in_(["DOCUMENT", "DOCUMENT_EXTRACTION"]),
+        ArtifactLink.target_type == "ARTIFACT", ArtifactLink.target_id.in_(identities)).limit(129)).all()
+    comparisons = db.scalars(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,
+        ArtifactLink.source_type == "ARTIFACT", ArtifactLink.source_id.in_(identities),
+        ArtifactLink.target_type == "VERSION_COMPARISON", ArtifactLink.relation == "COMPARISON_EVIDENCE").limit(129)).all()
+    if max(len(originals), len(document_links), len(comparisons)) > 128:
+        return False
+    if (originals or document_links) and not {"documents:read", "documents:download"} <= grants:
+        return False
+    for link in document_links:
+        if _node(db, user, link.source_type, link.source_id, grants) is None:
+            return False
+    for link in comparisons:
+        if "artifacts:download" not in grants:
+            return False
+        comparison = db.get(VersionComparison, link.target_id)
+        if comparison is None:
+            return False
+        authorize_comparison(db, comparison, user)
+    return bool(versions or relationships or originals or document_links or comparisons)
 
 
 def _node(db, user, kind, identity, grants):
     from .acquisition_models import AcquisitionRun
+    from .comparison_models import VersionComparison
+    from .document_models import (
+        DocumentBatch,
+        DocumentExtraction,
+        DocumentFamily,
+        DocumentOriginal,
+        DocumentTemplate,
+    )
     from .models import (
         DeliveryAttempt,
         DeliveryDestination,
@@ -76,7 +115,10 @@ def _node(db, user, kind, identity, grants):
               "DELIVERY_DESTINATION_VERSION": DeliveryDestinationVersion,
               "DELIVERY_TARGET_POLICY": DeliveryTargetPolicy, "DELIVERY_ATTEMPT": DeliveryAttempt,
               "REPORT_DEFINITION": ReportDefinition, "REPORT_REVISION": ReportRevision,
-              "REPORT_EXECUTION": ReportExecution}
+              "REPORT_EXECUTION": ReportExecution, "DOCUMENT": DocumentOriginal,
+              "DOCUMENT_EXTRACTION": DocumentExtraction, "DOCUMENT_BATCH": DocumentBatch,
+              "DOCUMENT_FAMILY": DocumentFamily, "DOCUMENT_TEMPLATE": DocumentTemplate,
+              "VERSION_COMPARISON": VersionComparison}
     model = models.get(kind)
     record = db.get(model, identity) if model else None
     if record is None or record.organization_id != user.organization_id:
@@ -114,9 +156,45 @@ def _node(db, user, kind, identity, grants):
                     href=href, module=record.module,
                     status=record.status)
         elif kind == "ACQUISITION":
-            authorize_dataset(db, user, record.dataset_id, "METADATA")
+            if "datasets:read" not in grants:
+                return None
+            if record.dataset_id:
+                authorize_dataset(db, user, record.dataset_id, "METADATA")
             result.update(label="Adquisición", status=record.status,
-                href=f"/datasets/{record.dataset_id}?acquisition={identity}")
+                href=f"/operations?acquisition={identity}")
+        elif kind.startswith("DOCUMENT"):
+            if "documents:read" not in grants:
+                return None
+            original = db.get(DocumentOriginal, record.document_id) if kind == "DOCUMENT_EXTRACTION" else record if kind == "DOCUMENT" else None
+            if kind == "DOCUMENT_EXTRACTION" and original is None:
+                return None
+            family_id = original.family_id if original else record.id if kind == "DOCUMENT_FAMILY" else record.family_id
+            family = db.get(DocumentFamily, family_id)
+            if not family or family.organization_id != user.organization_id or (original and original.organization_id != user.organization_id):
+                return None
+            href = f"/documents/families/{family.id}"
+            if kind in {"DOCUMENT", "DOCUMENT_EXTRACTION"}:
+                if original is None:
+                    return None
+                href += f"?document={original.id}"
+                result.update(label=original.filename if kind == "DOCUMENT" else f"Extracción · r{record.revision}",
+                    href=href, status=record.status if kind == "DOCUMENT" else "REVIEWED" if record.reviewed else "EXTRACTED",
+                    sha256=record.sha256 if kind == "DOCUMENT" else record.payload_hash,
+                    revision=record.revision if kind == "DOCUMENT_EXTRACTION" else None, role="DOCUMENT_METADATA")
+            elif kind == "DOCUMENT_BATCH":
+                result.update(label=f"{family.name} · lote", href=f"{href}?batch={identity}", status=record.status,
+                    sha256=record.manifest_hash, role="DOCUMENT_PUBLICATION")
+            else:
+                result.update(label=family.name if kind == "DOCUMENT_FAMILY" else f"{family.name} · plantilla r{record.revision}", href=href,
+                    role="DOCUMENT_CONFIGURATION")
+        elif kind == "VERSION_COMPARISON":
+            from .comparison_api import authorize_comparison
+            if "datasets:read" not in grants:
+                return None
+            versions = authorize_comparison(db, record, user)
+            result.update(label=f"Comparación · v{versions[0].version} → v{versions[1].version}",
+                href=f"/datasets/{versions[0].dataset_id}/versions/compare?report={identity}", status=record.status,
+                role="COMPARISON_EVIDENCE")
         elif kind == "CONNECTION_VERSION":
             if "connections:read" not in grants:
                 return None
@@ -158,7 +236,7 @@ def _node(db, user, kind, identity, grants):
                 result.update(label=definition.name + (f" · r{record.version}" if kind == "REPORT_REVISION" else ""),
                               href=f"/reports/definitions/{definition.id}")
         elif kind == "ARTIFACT":
-            if "artifacts:download" not in grants or not _artifact_is_authorized(db, user, record, grants):
+            if not ({"artifacts:download", "documents:download"} & grants) or not _artifact_is_authorized(db, user, record, grants):
                 return None
             # Paths, locators and file content never enter graph metadata.
             result.update(label=record.name, sha256=record.sha256, artifact_kind=record.kind,

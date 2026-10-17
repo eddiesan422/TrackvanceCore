@@ -46,7 +46,8 @@ describe('REST endpoint controls', () => {
     expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
     expect(post).toHaveBeenCalledTimes(1)
     const payload = vi.mocked(post).mock.calls[0][1] as { options: Record<string, unknown> }
-    expect(payload.options.fields).toEqual([{ name: 'id', path: 'id', logical_type: 'STRING', nullable: false }])
+    expect(payload.options.mapping_version).toBe(2)
+    expect(payload.options.fields).toEqual([{ name: 'id', path: 'id', logical_type: 'STRING', nullable: false, null_policy: 'ERROR', missing_policy: 'ERROR' }])
   })
 })
 

@@ -11,9 +11,10 @@ from trackvance.permissions import ENDPOINT_MATRIX, catalog_dto
 ROOT = Path(__file__).resolve().parents[1]
 HERE = ROOT / "docs" / "specification"
 NEW_TABLES = {
-    "rest_delivery_batches", "sentinel_automatic_monitors", "sentinel_automatic_revisions",
-    "sentinel_version_evaluations", "sentinel_light_reviews", "intake_contract_states",
-    "intake_schedules", "intake_schedule_versions", "intake_occurrences",
+    "acquisition_name_reservations", "acquisition_source_configurations", "acquisition_source_revisions",
+    "acquisition_occurrences", "document_families", "document_templates", "document_originals",
+    "document_extractions", "document_batches", "document_batch_members", "document_publication_claims",
+    "version_comparisons",
 }
 
 
@@ -33,7 +34,7 @@ def main():
         inventory["entities"].append({
             "table": name,
             "evolution": ("NEW" if name in NEW_TABLES else "MODIFIED" if name in
-                          {"acquisition_runs"} else "PRESERVED"),
+                          {"acquisition_runs", "jobs"} else "PRESERVED"),
             "columns": [{"name": c.name, "type": str(c.type), "nullable": c.nullable,
                          "primary_key": c.primary_key,
                          "references": sorted(str(f.target_fullname) for f in c.foreign_keys)}

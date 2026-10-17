@@ -115,7 +115,7 @@ def cleanup(directory, context, evidence):
 
 def image_id(tag, role):
     if role not in {"backend", "web"} or tag != "trackvance-v080-isolated:" + role:
-        raise ValueError("La recuperación sólo admite imágenes privadas 0.9.0.")
+        raise ValueError("La recuperación sólo admite imágenes privadas 0.9.5.")
     from ci_images import verified_images
     images = verified_images()
     if images:
@@ -232,7 +232,7 @@ def prepare_native(context, environment, *, people=True):
 
 def assert_native_state(state):
     if state["schema_version"] != docker_state.VERIFY_SCHEMA_VERSION or state["migration"] != docker_state.CURRENT_MIGRATION or set(state["tables"]) != docker_state.CURRENT_STATE_TABLES:
-        raise ValueError("La huella no corresponde a un runtime nativo 0.9.0 completo.")
+        raise ValueError("La huella no corresponde a un runtime nativo 0.9.5 completo.")
     if any(not state["tables"].get(table) for table in docker_state.CATALOG_STATE_TABLES):
         raise ValueError("La recuperación nativa exige fixtures reales en las trece entidades nuevas.")
     if not state["tables"].get("governance_people"):
@@ -360,7 +360,7 @@ def native_cycle(directory, context, evidence):
         source_state = stop_quiescent_population(directory, context, environment)
         source_stopped = True
         restored = restore_compare(context, environment, backup, evidence, fixture=fixture)
-        result = {"status": "PASS", "source_version": "0.9.0", "target_version": "0.9.0", "fixture": fixture,
+        result = {"status": "PASS", "source_version": "0.9.5", "target_version": "0.9.5", "fixture": fixture,
                   "backup_privacy": privacy, "all_thirteen_new_entities_populated": True, "source_final_state": source_state, **restored}
         return result
     finally:
@@ -468,7 +468,7 @@ def legacy_cycle(parent, evidence, *, source_version="0.7.0"):
         claimed = False
         docker_state.ensure_fresh_project(source["project"])
         result = restore_compare(parent, environment, backup, evidence, legacy=True, legacy_version=source_version, fixture=fixture)
-        return {"status": "PASS", "source_version": source_version, "target_version": "0.9.0", "baseline_commit": baseline_commit,
+        return {"status": "PASS", "source_version": source_version, "target_version": "0.9.5", "baseline_commit": baseline_commit,
                 "source_destroyed_before_restore": True, "authentic_worker_diagnostics": "PASS", "backup_privacy": privacy, **result}
     finally:
         docker_state.compose = old_compose

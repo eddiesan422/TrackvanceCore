@@ -33,7 +33,8 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 10
+VERIFY_SCHEMA_VERSION = 11
+CORE090_VERIFY_SCHEMA_VERSION = 10
 PEOPLE_VERIFY_SCHEMA_VERSION = 9
 CATALOG_VERIFY_SCHEMA_VERSION = 8
 CORRECTIONS_VERIFY_SCHEMA_VERSION = 7
@@ -50,12 +51,13 @@ LEGACY_VERIFY_SCHEMA_VERSION = 2
 LEGACY_MIGRATION = "0007_monitor_scheduling"
 CATALOG_MIGRATION = "0017_catalog_reports"
 PEOPLE_MIGRATION = "0019_governance_people"
-CURRENT_MIGRATION = "0022_intake_automation_deletion"
+CORE090_MIGRATION = "0022_intake_automation_deletion"
+CURRENT_MIGRATION = "0025_comparison_095"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
 PRIMARY_SERVICES = LEGACY_PRIMARY_SERVICES | {"acquisition-worker", "scheduler", "events-notifications", "events-chaining"}
-OPTIONAL_SERVICES = frozenset({"scheduler", "spark-master", "spark-worker", "report-worker"})
+OPTIONAL_SERVICES = frozenset({"scheduler", "spark-master", "spark-worker", "report-worker", "document-worker", "comparison-worker"})
 PRIMARY_VOLUMES = frozenset(
     {
         "postgres_data",
@@ -145,7 +147,12 @@ PEOPLE_STATE_TABLES = CATALOG_STATE_TABLES_ALL | {"governance_people"}
 CORE090_STATE_TABLES = frozenset({"rest_delivery_batches", "sentinel_automatic_monitors",
     "sentinel_automatic_revisions", "sentinel_version_evaluations", "sentinel_light_reviews",
     "intake_contract_states", "intake_schedules", "intake_schedule_versions", "intake_occurrences"})
-CURRENT_STATE_TABLES = PEOPLE_STATE_TABLES | CORE090_STATE_TABLES
+CORE090_STATE_TABLES_ALL = PEOPLE_STATE_TABLES | CORE090_STATE_TABLES
+CORE095_STATE_TABLES = frozenset({"acquisition_name_reservations", "acquisition_source_configurations",
+    "acquisition_source_revisions", "acquisition_occurrences", "document_families", "document_templates",
+    "document_originals", "document_extractions", "document_batches", "document_batch_members",
+    "document_publication_claims", "version_comparisons"})
+CURRENT_STATE_TABLES = CORE090_STATE_TABLES_ALL | CORE095_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -498,7 +505,7 @@ def _stop_services(state: Mapping[str, Any], services: Iterable[str]) -> list[st
 
 
 def _restart_containers(state: Mapping[str, Any], identifiers: set[str]) -> None:
-    order = ("postgres", "api", "worker", "delivery-worker", "acquisition-worker", "report-worker", "scheduler", "events-notifications", "events-chaining", "web")
+    order = ("postgres", "api", "worker", "delivery-worker", "acquisition-worker", "report-worker", "document-worker", "comparison-worker", "scheduler", "events-notifications", "events-chaining", "web")
     for service in order:
         for container in state["containers"]:
             if container["service"] == service and container["id"] in identifiers:
@@ -542,7 +549,7 @@ def snapshot_stdin_source() -> str:
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     bootstrap = snapshot_bootstrap()
     for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
@@ -610,7 +617,7 @@ def backup(project: str, destination: Path, *, application_only_codex=False) -> 
     if not postgres["running"] or not api["running"]:
         raise OperationError("PostgreSQL y API deben estar activos para tomar el respaldo.")
     try:
-        _stop_services(state, ("web", "scheduler", "events-chaining", "events-notifications", "acquisition-worker", "delivery-worker", "report-worker", "worker"))
+        _stop_services(state, ("web", "scheduler", "events-chaining", "events-notifications", "acquisition-worker", "delivery-worker", "report-worker", "document-worker", "comparison-worker", "worker"))
         snapshot_state = _copy_snapshot(str(api["id"]), destination / "state.json")
         _stop_services(state, ("api",))
 
@@ -756,6 +763,7 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         CORRECTIONS_VERIFY_SCHEMA_VERSION: CORRECTIONS_MIGRATION,
         CATALOG_VERIFY_SCHEMA_VERSION: CATALOG_MIGRATION,
         PEOPLE_VERIFY_SCHEMA_VERSION: PEOPLE_MIGRATION,
+        CORE090_VERIFY_SCHEMA_VERSION: CORE090_MIGRATION,
         VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
     if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
             or state.get("migration") != expected_migrations[state["schema_version"]]):
@@ -773,6 +781,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         if state.get("schema_version") == CATALOG_VERIFY_SCHEMA_VERSION
         else PEOPLE_STATE_TABLES
         if state.get("schema_version") == PEOPLE_VERIFY_SCHEMA_VERSION
+        else CORE090_STATE_TABLES_ALL
+        if state.get("schema_version") == CORE090_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -887,6 +897,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = CATALOG_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == PEOPLE_MIGRATION:
         expected_state_schema = PEOPLE_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == CORE090_MIGRATION:
+        expected_state_schema = CORE090_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -949,6 +961,13 @@ def validate_restored_state(
     schema_version = manifest.get("schema_version")
     validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == CORE090_MIGRATION:
+            if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                    or restored_state.get("migration") != CURRENT_MIGRATION
+                    or normalized_legacy_state != expected_state
+                    or any(restored_state["tables"].get(name) != {} for name in CORE095_STATE_TABLES)):
+                raise OperationError("La huella v10 normalizada no coincide con el respaldo 0.9.0.")
+            return
         if manifest.get("migration") == PEOPLE_MIGRATION:
             if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                     or restored_state.get("migration") != CURRENT_MIGRATION
@@ -1264,6 +1283,8 @@ def _restore_verified(
             if manifest.get("migration") == CATALOG_MIGRATION
             else "snapshot-legacy-v9"
             if manifest.get("migration") == PEOPLE_MIGRATION
+            else "snapshot-legacy-v10"
+            if manifest.get("migration") == CORE090_MIGRATION
             else None
         )
         if legacy_command:

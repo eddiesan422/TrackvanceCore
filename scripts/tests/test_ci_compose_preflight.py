@@ -50,8 +50,9 @@ def validate(fixture, **kwargs):
                             main_inventory=baseline, root=root, **kwargs)
 
 
-def test_complete_nine_service_config_and_owned_restart_are_accepted(resolved):
-    assert len(resolved[0]["services"]) == 9
+def test_complete_eleven_service_config_and_owned_restart_are_accepted(resolved):
+    assert len(resolved[0]["services"]) == 11
+    assert {"document-worker", "comparison-worker"} <= set(resolved[0]["services"])
     existing = {"containers": [{"Name": "/" + PROJECT + "-api-1", "Config": {
                     "Labels": {"com.docker.compose.project": PROJECT, "com.docker.compose.service": "api"},
                     "Env": ["TRACKVANCE_CERTIFICATION_PROJECT=" + PROJECT]}}],

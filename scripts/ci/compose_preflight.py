@@ -28,6 +28,7 @@ PROJECT = re.compile(
     r"|(?:connections-e2e|delivery-e2e|bench|delivery-bench)-[a-f0-9]{12}"
     r"|(?:e2e|identity-e2e)-[a-f0-9]{8,32})")
 APP_SERVICES = {"api", "worker", "acquisition-worker", "delivery-worker", "report-worker",
+                "document-worker", "comparison-worker",
                 "scheduler", "events-notifications", "events-chaining"}
 PREFLIGHT_CODES = frozenset({
     "AMBIENT_ENV_FILE", "APP_PROJECT_MARKER", "AUTOMATIC_RESTART", "COMPOSE_ARGUMENTS",

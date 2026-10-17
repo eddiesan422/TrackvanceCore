@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 CI_OPT_IN_SPECS = {
+    "tests-e2e/documents-095.spec.ts": ("TV_CORE095_DOCUMENT_E2E", "compose-functional"),
     "tests-e2e/automation.spec.ts": ("TV_AUTOMATION_E2E", "async-volume-100"),
     "tests-e2e/volume.spec.ts": ("TV_VOLUME_E2E", "async-volume-100"),
     "tests-e2e/corrections-volume.spec.ts": ("TV_CORRECTIONS_E2E", "corrections-browser"),

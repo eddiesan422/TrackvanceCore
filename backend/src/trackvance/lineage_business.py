@@ -33,6 +33,10 @@ RELATION_LABELS = {
     "MONITOREA": "Monitorea", "ENTREGA_CONFIRMADA": "Entrega confirmada",
     "DESTINO_PREVISTO": "Destino previsto", "ENTREGA_PARCIAL": "Entrega parcial",
     "ENTREGA_INCIERTA": "Confirmación incierta",
+    "DOCUMENT_ORIGINAL": "Original documental", "DOCUMENT_EXTRACTION": "Extracción y revisión",
+    "DOCUMENT_BATCH_MEMBER": "Pertenece al lote", "EXTRACTION_BATCH": "Revisión publicada en lote",
+    "DOCUMENT_PUBLICATION": "Publicación del lote", "COMPARISON_INPUT": "Versión comparada",
+    "COMPARISON_EVIDENCE": "Informe de comparación",
 }
 EVIDENCE_LABELS = {
     "REST_BATCH_PAYLOAD": "Payloads de lotes REST", "DATASET_PART": "Partes Parquet",
@@ -40,6 +44,8 @@ EVIDENCE_LABELS = {
     "REPORT_OUTPUT": "Archivos del reporte", "EXPORT_OF": "Exportaciones",
     "EVIDENCE_OF": "Evidencias", "DELIVERY_RECEIPT": "Comprobantes de entrega",
     "CANONICAL_REFERENCE": "Archivo canónico de la versión", "ORIGINAL_REFERENCE": "Archivo original de la versión",
+    "DOCUMENT_ORIGINAL": "Originales documentales", "DOCUMENT_EXTRACTION_RESULT": "Resultados de extracción",
+    "COMPARISON_EVIDENCE": "Informes de comparación",
 }
 
 
@@ -110,7 +116,8 @@ def _adjacency(user, key, direction="both", technical=False):
 
 
 def _technical_groups(db, user, key, grants):
-    if "artifacts:download" not in grants:
+    documentary = key.startswith(("DOCUMENT:", "DOCUMENT_EXTRACTION:")) and "documents:download" in grants
+    if "artifacts:download" not in grants and not documentary:
         return []
     if key.startswith("DATASET_VERSION:"):
         try:

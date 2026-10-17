@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 SERVICES = ('postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
+            'document-worker', 'comparison-worker',
             'scheduler', 'events-notifications', 'events-chaining', 'web')
 MAIN_PROJECT = 'trackvance-certification'
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,7 +59,11 @@ def isolate_compose(compose: list[str], environment: dict[str, str], evidence: P
     images = verified_images(environment)
     services = {}
     for name in (*SERVICES, *(('report-worker',) if images else ())):
-        if name == 'report-worker':
+        if name == 'document-worker':
+            limits = {'cpus': 1, 'mem_limit': '1g', 'pids_limit': 128}
+        elif name == 'comparison-worker':
+            limits = {'cpus': 1, 'mem_limit': '768m', 'pids_limit': 128}
+        elif name == 'report-worker':
             # CI reuses images, but keeps the REPORT runtime bounds from the
             # previously passing base Compose definition.
             limits = {'cpus': 2, 'mem_limit': '3g', 'pids_limit': 128}

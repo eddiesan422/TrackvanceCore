@@ -139,6 +139,7 @@ def test_sql_registration_freezes_revision_selection_and_publication_lineage(aut
     assert response.status_code == 202, response.text
     run = response.json()['acquisition']
     assert run['status'] == 'QUEUED' and run['source_snapshot']['object_kind'] == 'VIEW'
+    assert run['dataset_id'] is None and response.json()['dataset'] is None
     assert run['source_snapshot']['connection_version'] == 1
     assert 'password' not in response.text and 'first-secret' not in response.text
     assert authenticated.post(url + '/acquisitions', json=body, headers={'Idempotency-Key': 'source-retry'}).json()['acquisition']['id'] == run['id']
@@ -146,6 +147,7 @@ def test_sql_registration_freezes_revision_selection_and_publication_lineage(aut
     assert acquisition.process_once('sql-worker')
     finished = authenticated.get(f'/api/v1/acquisitions/{run["id"]}').json()
     assert finished['status'] == 'SUCCESS', finished
+    run['dataset_id'] = finished['dataset_id']
     assert sql_source.settings[-1].password == 'first-secret-password'
     with database() as db:
         version = db.get(DatasetVersion, finished['output_version_id'])

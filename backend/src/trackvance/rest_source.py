@@ -34,7 +34,7 @@ class RestDatasetSource(DatabaseDatasetSource):
             raise SourceError("REST_FIELDS_REQUIRED", "Selecciona explícitamente de 1 a 100 campos y sus tipos; no se infieren conversiones.")
         names = set()
         for field in fields:
-            if (not isinstance(field, dict) or set(field) - {"name", "path", "logical_type", "nullable"}
+            if (not isinstance(field, dict) or set(field) - {"name", "path", "logical_type", "nullable", "null_policy", "missing_policy"}
                     or not isinstance(field.get("name"), str) or not field["name"].strip()
                     or len(field["name"]) > 128 or field["name"].startswith("__tv_")
                     or field["name"] in names or field.get("logical_type", "STRING") not in TYPES
@@ -42,6 +42,8 @@ class RestDatasetSource(DatabaseDatasetSource):
                     or type(field.get("nullable", True)) is not bool):
                 raise SourceError("REST_INVALID_FIELDS", "El mapping REST requiere nombres únicos, rutas de objeto y tipos admitidos.")
             names.add(field["name"])
+            if self.options.get("mapping_version", 1) == 2 and (field.get("null_policy") not in {"ALLOW", "ERROR"} or field.get("missing_policy") not in {"NULL", "ERROR"}):
+                raise SourceError("REST_INVALID_FIELDS", "El mapping v2 requiere políticas explícitas de nulos y ausencias por campo.")
         pagination = self.options.get("pagination", {"mode": "NONE"})
         if (not isinstance(pagination, dict) or pagination.get("mode", "NONE") not in {"NONE", "PAGE", "OFFSET", "CURSOR"}
                 or set(pagination) - {"mode", "parameter", "size_parameter", "start", "next_cursor_path"}):
@@ -81,7 +83,7 @@ class RestDatasetSource(DatabaseDatasetSource):
     def _cell(self, value, field):
         from .data_sinks import DeliveryError, convert_value
         if value is None:
-            if not field.get("nullable", True):
+            if not field.get("nullable", True) or self.options.get("mapping_version", 1) == 2 and field["null_policy"] == "ERROR":
                 raise SourceError("REST_NULL_NOT_ALLOWED", "Un campo REST obligatorio contiene nulos.")
             return None
         if isinstance(value, (dict, list)):
@@ -100,7 +102,24 @@ class RestDatasetSource(DatabaseDatasetSource):
             raise SourceError("SOURCE_SIZE_LIMIT", "Una celda REST supera el límite de 64 KiB.")
         return rendered
 
-    def read_batches(self, *, limits=None, check=None, preview_limit=None):
+    def _mapped_cell(self, row, field):
+        value = row
+        parts = field.get("path", field["name"]).split(".")
+        for position, name in enumerate(parts):
+            if not isinstance(value, dict):
+                raise SourceError("REST_FIELD_STRUCTURE", "Una ruta seleccionada atraviesa un valor que no es un objeto.")
+            if self.options.get("mapping_version", 1) == 2 and position + 1 < len(parts) and ".".join(parts[position:]) in value:
+                raise SourceError("REST_AMBIGUOUS_PATH", "Una clave literal con puntos hace ambigua la ruta seleccionada.")
+            if name not in value:
+                if self.options.get("mapping_version", 1) == 2 and field["missing_policy"] == "NULL":
+                    if not field.get("nullable", True):
+                        raise SourceError("REST_MISSING_NOT_ALLOWED", "La propiedad ausente no puede producir nulos en este campo obligatorio.")
+                    return None
+                raise SourceError("REST_FIELD_MISSING", "Una propiedad seleccionada está ausente en la población completa.")
+            value = value[name]
+        return self._cell(value, field)
+
+    def read_batches(self, *, limits=None, check=None, preview_limit=None, retry_report=None, deadline=None):
         limits = limits or AcquisitionLimits.configured()
         checkpoint = check or (lambda: None)
         opts, fields = self.options, self.options["fields"]
@@ -109,7 +128,7 @@ class RestDatasetSource(DatabaseDatasetSource):
         page_size = opts.get("page_size", 1000)
         max_rows = min(opts.get("max_rows", 5000000), limits.max_rows)
         max_bytes = min(opts.get("max_bytes", 2 * 1024**3), limits.max_observed_bytes)
-        deadline = time.monotonic() + min(opts.get("total_timeout_seconds", 1800), limits.timeout_seconds)
+        deadline = min(deadline or float("inf"), time.monotonic() + min(opts.get("total_timeout_seconds", 1800), limits.timeout_seconds))
         page = pagination.get("start", 1 if mode == "PAGE" else 0)
         cursor, seen = None, set()
         total_rows = total_bytes = observed = 0
@@ -125,8 +144,10 @@ class RestDatasetSource(DatabaseDatasetSource):
                     query[pagination.get("parameter", "page" if mode == "PAGE" else "offset")] = page
                 elif mode == "CURSOR" and cursor is not None:
                     query[pagination.get("parameter", "cursor")] = cursor
-                status, body = request(opts, self.settings.password, "GET", query="?" + urlencode(query) if query else "",
-                                       max_bytes=min(8 * 1024**2, max_bytes - total_bytes), deadline=deadline, check=checkpoint)
+                from .rest_retry import read_request
+                status, body = read_request(opts, self.settings.password, query="?" + urlencode(query) if query else "",
+                                       max_bytes=min(8 * 1024**2, max_bytes - total_bytes), deadline=deadline, check=checkpoint,
+                                       report=retry_report, transport=request)
                 total_bytes += len(body)
                 if status != 200:
                     raise SourceError("REST_READ_FAILED", "La lectura REST requiere una respuesta HTTP 200.")
@@ -135,7 +156,8 @@ class RestDatasetSource(DatabaseDatasetSource):
                 if not isinstance(collection, list) or any(not isinstance(row, dict) for row in collection):
                     raise SourceError("REST_NOT_TABULAR", "La colección REST debe ser un arreglo de objetos JSON.")
                 for row in collection:
-                    values = [self._cell(json_path(row, f.get("path", f["name"])), f) for f in fields]
+                    checkpoint()
+                    values = [self._mapped_cell(row, f) for f in fields]
                     size = sum(len(v.encode()) for v in values if v is not None)
                     observed += size
                     total_rows += 1
@@ -170,7 +192,9 @@ class RestDatasetSource(DatabaseDatasetSource):
             if pending or total_rows == 0:
                 yield self._result(pending)
         except RestError as error:
-            raise SourceError(error.code, error.message) from None
+            failure = SourceError(error.code, error.message)
+            failure.details = getattr(error, "details", None)
+            raise failure from None
 
     def read(self, options=None, *, inspect=False):
         from .config import MAX_ROWS

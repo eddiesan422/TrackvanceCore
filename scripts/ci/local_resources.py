@@ -174,7 +174,7 @@ def begin_image_build(path: Path, execution: str, project: str, source_sha: str,
     value = initialize_image_registry(path, execution, command)
     if (not re.fullmatch(r"trackvance-[a-z0-9-]+-[a-f0-9]{12}", project)
             or not re.fullmatch(r"[a-f0-9]{40}", source_sha)
-            or version not in {"0.5.1", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.8.5", "0.9.0"}
+            or version not in {"0.5.1", "0.6.0", "0.6.1", "0.7.0", "0.8.0", "0.8.5", "0.9.0", "0.9.5"}
             or role not in {"backend", "web", "backend-tests"}):
         raise ValueError("Image intent needs authentic source/version and explicit project ownership")
     if not (reference == f"{project}:{role}" or re.fullmatch(

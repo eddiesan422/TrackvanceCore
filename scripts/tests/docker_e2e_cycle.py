@@ -79,12 +79,38 @@ def validated_project_name(value: str) -> str:
     return value
 
 
+def add_document_fixture(compose, environment, evidence, project):
+    """One explicit synthetic receiver, sharing only this disposable project."""
+    validated_project_name(project)
+    from ci_images import verified_images
+    images = verified_images(environment)
+    receiver_port = available_port()
+    image = images["backend"] if images else f"{project}:backend"
+    overlay = evidence / "private-document-compose.json"
+    internal = "http://document-fixture:18095"
+    overlay.write_text(json.dumps({"services": {
+        "document-fixture": {"image": image, "cpus": 0.25, "mem_limit": "128m", "pids_limit": 32,
+            "command": ["python", "/app/scripts/tests/documents_095_receiver.py", "--port", "18095", "--database", f"/tmp/documents-095-fixture/documents-095-{project[-12:]}.sqlite"],
+            "environment": {"TRACKVANCE_CERTIFICATION_PROJECT": project},
+            "volumes": [{"type": "bind", "source": str(ROOT / "scripts"), "target": "/app/scripts", "read_only": True}],
+            "ports": [f"127.0.0.1:{receiver_port}:18095"], "restart": "no",
+            "healthcheck": {"test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18095/health',timeout=2).read()"], "interval": "2s", "timeout": "3s", "retries": 20}},
+        "api": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}},
+        "delivery-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}}
+    }}, indent=2), encoding="utf-8")
+    environment.update(TV_CORE095_DOCUMENT_E2E="true", TV_CORE095_TEST_PROJECT=project,
+        TV_CORE095_DOCUMENT_RECEIVER_URL=internal,
+        TV_CORE095_DOCUMENT_RECEIVER_CONTROL_URL=f"http://127.0.0.1:{receiver_port}")
+    return [*compose, "-f", str(overlay)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=0, help="Puerto web; 0 busca uno libre.")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--clean-demo", action="store_true", help="Certifica acceso demo sin datos sembrados.")
     parser.add_argument("--skip-playwright", action="store_true")
+    parser.add_argument("--documents", action="store_true", help="Run mandatory small native document browser + independent Delivery oracle.")
     parser.add_argument("--browser-spec", action="append", default=[],
                         help="Explicit tests-e2e/*.spec.ts paths; empty runs the full browser matrix")
     parser.add_argument("--evidence-dir", type=Path, help="Directorio para las instantáneas de persistencia.")
@@ -123,11 +149,15 @@ def main() -> int:
     evidence = options.evidence_dir or ROOT / ".codex-local" / "v070" / project
     evidence.mkdir(parents=True, exist_ok=True)
     environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
+    documents_enabled = not options.clean_demo and not options.skip_playwright and (
+        options.documents or not options.browser_spec or "tests-e2e/documents-095.spec.ts" in options.browser_spec)
+    if documents_enabled:
+        compose = add_document_fixture(compose, environment, evidence, project)
     compose = isolate_compose(compose, environment, evidence, project)
     started = False
     began = time.monotonic()
     outcome = 1
-    result = {"version": "0.9.0", "status": "FAIL", "project": project, "port": port,
+    result = {"version": "0.9.5", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
     inventory_run = lambda arguments: execute(arguments, environment=environment, capture=True)
     main_before = None
@@ -159,7 +189,7 @@ def main() -> int:
         started = True
         execute(up, environment=environment)
         execute([*compose, 'exec', '-T', 'api', 'python', '-c',
-                 "import trackvance; assert trackvance.__version__ == '0.9.0'"], environment=environment)
+                 "import trackvance; assert trackvance.__version__ == '0.9.5'"], environment=environment)
         execute(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],
             environment=environment,

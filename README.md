@@ -1,5 +1,20 @@
 # Trackvance Core
 
+## Trackvance Core 0.9.5 — candidato en desarrollo
+
+La línea 0.9.5 añade familias documentales y extracción local con revisión,
+actualización de fuentes y descubrimiento REST, comparación completa de versiones
+y seguimiento operativo sobre los componentes nativos. Las migraciones aditivas
+0023–0025 conservan la historia 0.9.0. La especificación técnica mantiene edición
+v1.1 y su fuente oficial permanece en TrackvanceCore-docs.
+
+**NO CERRADA**: implementación, certificación y actualización son etapas distintas.
+Las pruebas parciales o de versiones anteriores no acreditan los criterios del
+ciclo. No ejecutar seeds, reset ni pruebas sobre la instalación del usuario.
+Las lanes DOCUMENT y COMPARISON usan workers propios y artefactos canónicos; en
+Codex se activan explícitamente dentro del presupuesto original, pausando otros
+roles cuando sea necesario. Una corrección documental no autoriza entrega automática.
+
 ## Trackvance Core 0.9.0
 
 La implementación añade REST de entrada/salida, Sentinel automático con resumen

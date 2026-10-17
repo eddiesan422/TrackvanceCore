@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import STORAGE_DIR
 
 COMPONENTS = frozenset({"scheduler", "events-notifications", "events-chaining"})
-WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT"})
+WORKER_LANES = frozenset({"DEFAULT", "DELIVERY", "ACQUISITION", "REPORT", "DOCUMENT", "COMPARISON"})
 
 
 def worker_status(lane: str = "DEFAULT", *, now: datetime | None = None,

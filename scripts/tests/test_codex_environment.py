@@ -136,6 +136,17 @@ def test_compose_reset_tag_is_explicit_on_every_backend_service():
         assert reset.tag == "!reset" and reset.value == "null"
 
 
+def test_specialized_workers_share_original_active_budget(fixture):
+    _directory, _value, values, _defaults = fixture
+    config = resolved(values)
+    with pytest.raises(ValueError, match="ACTIVE_CODEX_BUDGET_EXCEEDED"):
+        codex.validate_active_budget(config, set(codex.ACTIVE) | {"document-worker", "comparison-worker"})
+    selected = (set(codex.ACTIVE) - {"report-worker"}) | {"comparison-worker"}
+    budget = codex.validate_active_budget(config, selected)
+    assert budget["cpus"] <= 4 and budget["memory_bytes"] <= 6 * 1024**3
+    assert "report-worker" not in budget["services"]
+
+
 @pytest.mark.parametrize("compose_key, runtime_key, code", [
     ("command", "Cmd", "CODEX_RUNTIME_COMMAND_DRIFT"),
     ("entrypoint", "Entrypoint", "CODEX_RUNTIME_PROCESS_IDENTITY_DRIFT"),

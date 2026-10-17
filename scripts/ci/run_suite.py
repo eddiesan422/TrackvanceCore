@@ -152,7 +152,7 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ("types", [*uv, "mypy", "src/trackvance", "--check-untyped-defs", "--ignore-missing-imports"], ROOT / "backend"),
             ("contracts", [*uv, "python", "../scripts/export_contracts.py"], ROOT / "backend"),
             ("contracts-diff", ["git", "diff", "--exit-code", "--", "backend/openapi.json",
-                "docs/specification/model_contract_0.9.0.json", "docs/specification/permission_contract_0.9.0.json",
+                "docs/specification/model_contract_0.9.5.json", "docs/specification/permission_contract_0.9.5.json",
                 "docs/development/permission-matrix.md"], ROOT),
             *[("migration-" + name, [*uv, "alembic", *args], ROOT / "backend")
               for name, args in (("upgrade", ["upgrade", "head"]), ("check", ["check"]),
@@ -192,10 +192,10 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ".codex-local/v070/spark/ci-standalone", "--rows", "1000000"])],
     }
     functional_specs = ("advanced-rules", "corrections", "exception-validation", "local-identity-exceptions",
-                        "multiformat-navigation", "rule-builders", "sentinel-schedule")
+                        "multiformat-navigation", "rule-builders", "sentinel-schedule", "documents-095")
     suites["compose-functional"] = [
         ("clean-demo", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--clean-demo"]),
-        ("browser-persistence", [python, tests + "docker_e2e_cycle.py", "--skip-build",
+        ("browser-persistence", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--documents",
             *[token for name in functional_specs for token in ("--browser-spec", f"tests-e2e/{name}.spec.ts")]])]
     suites["connections-functional"] = [("connections", [python, tests + "connections_cycle.py", "--skip-build", "--streaming-rows", "1028"])]
     suites["backup-basic"] = [("native", [python, tests + "docker_backup_cycle.py", "--skip-build"])]

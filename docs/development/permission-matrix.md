@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.9.0
+# Matriz de permisos HTTP y catálogo 0.9.5
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 60 códigos; la matriz tiene 186 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 215 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -31,6 +31,12 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | `destinations:manage` | Destinos | destinations:read | Sí |
 | `destinations:read` | Destinos | — | Sí |
 | `destinations:use` | Destinos | destinations:read | Sí |
+| `documents:configure` | Documentos | documents:read | Sí |
+| `documents:download` | Documentos | documents:read | Sí |
+| `documents:publish` | Documentos | documents:read | Sí |
+| `documents:read` | Documentos | — | Sí |
+| `documents:review` | Documentos | documents:read | Sí |
+| `documents:write` | Documentos | documents:read | Sí |
 | `domains:manage` | Dominios | domains:read | Sí |
 | `domains:read` | Dominios | datasets:read | Sí |
 | `exceptions:close` | Excepciones | exceptions:read, exceptions:write | Sí |
@@ -105,7 +111,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/datasets` | `datasets:read` |
 | GET | `/datasets/uploads/{id}/inspect` | `datasets:write` |
 | GET | `/datasets/{id}` | `datasets:read` |
+| GET | `/datasets/{id}/comparisons` | `datasets:read` |
 | GET | `/datasets/{id}/schema` | `datasets:read` |
+| GET | `/datasets/{id}/source-settings` | `datasets:read` |
 | GET | `/delivery/automations` | `delivery:read` |
 | GET | `/delivery/automations/{id}` | `delivery:read` |
 | GET | `/delivery/automations/{id}/occurrences` | `delivery:read` |
@@ -123,6 +131,15 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/delivery/runs/{id}/reviews` | `delivery:read` |
 | GET | `/delivery/validations` | `delivery:read` |
 | GET | `/delivery/validations/{id}` | `delivery:read` |
+| GET | `/documents/batches/{id}` | `documents:read` |
+| GET | `/documents/families` | `documents:read` |
+| GET | `/documents/families/{id}` | `documents:read` |
+| GET | `/documents/families/{id}/batches` | `documents:read` |
+| GET | `/documents/limits` | `documents:read` |
+| GET | `/documents/originals` | `documents:read` |
+| GET | `/documents/originals/{id}` | `documents:read` |
+| GET | `/documents/originals/{id}/file` | `documents:download` |
+| GET | `/documents/originals/{id}/pages/{page}` | `documents:download` |
 | GET | `/exceptions` | `exceptions:read` |
 | GET | `/exceptions/assignees` | `exceptions:read` |
 | GET | `/exceptions/{id}` | `exceptions:read` |
@@ -151,6 +168,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/notifications/inbox` | `notifications:read` |
 | GET | `/notifications/status` | `notifications:read` |
 | GET | `/notifications/unread-count` | `notifications:read` |
+| GET | `/operations` | `exceptions:read` |
 | GET | `/recon/controls` | `recon:read` |
 | GET | `/recon/runs/{id}/results` | `recon:read` |
 | GET | `/reports/definitions` | `reports:read` |
@@ -176,6 +194,9 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/users` | `users:read` |
 | GET | `/users/roles` | `users:read` |
 | GET | `/users/{id}` | `users:read` |
+| GET | `/version-comparisons/{id}` | `datasets:read` |
+| GET | `/version-comparisons/{id}/download` | `artifacts:download` |
+| GET | `/version-comparisons/{id}/rows` | `datasets:read` |
 | PATCH | `/catalog/blocks/{id}` | `blocks:manage` |
 | PATCH | `/catalog/datasets/{id}/columns` | `governance:write` |
 | PATCH | `/catalog/domains/{id}` | `domains:manage` |
@@ -197,6 +218,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/catalog/domains` | `domains:manage` |
 | POST | `/catalog/macrodomains` | `domains:manage` |
 | POST | `/connections` | `connections:manage` |
+| POST | `/connections/discover-rest` | `connections:manage` |
 | POST | `/connections/test` | `connections:manage` |
 | POST | `/connections/{id}/acquisitions` | `connections:use` |
 | POST | `/connections/{id}/datasets` | `connections:use` |
@@ -206,6 +228,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/datasets/uploads/stage` | `datasets:write` |
 | POST | `/datasets/{id}/acquisitions` | `datasets:write` |
 | POST | `/datasets/{id}/acquisitions/refresh` | `connections:use` |
+| POST | `/datasets/{id}/comparisons` | `datasets:read` |
 | POST | `/datasets/{id}/refresh-source` | `connections:use` |
 | POST | `/datasets/{id}/versions/upload` | `datasets:write` |
 | POST | `/delivery/automations` | `delivery:schedule` |
@@ -224,6 +247,16 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/delivery/runs/{id}/reviews` | `delivery:review_unknown` |
 | POST | `/delivery/validations` | `delivery:configure` |
 | POST | `/delivery/validations/{id}/cancel` | `delivery:configure` |
+| POST | `/documents/batches/{id}/publish` | `documents:publish` |
+| POST | `/documents/families` | `documents:configure` |
+| POST | `/documents/families/{id}/batches` | `documents:publish` |
+| POST | `/documents/families/{id}/originals` | `documents:write` |
+| POST | `/documents/families/{id}/pipeline` | `documents:configure` |
+| POST | `/documents/families/{id}/templates` | `documents:configure` |
+| POST | `/documents/families/{id}/templates/{template_id}/activate` | `documents:configure` |
+| POST | `/documents/originals/{id}/cancel` | `documents:write` |
+| POST | `/documents/originals/{id}/retry` | `documents:write` |
+| POST | `/documents/originals/{id}/review` | `documents:review` |
 | POST | `/exceptions/{id}/attachments` | `exceptions:write` |
 | POST | `/exceptions/{id}/comments` | `exceptions:write` |
 | POST | `/exceptions/{id}/validate` | `exceptions:write` |
@@ -261,5 +294,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/users/{id}/regenerate-credentials` | `users:manage` |
 | POST | `/users/{id}/resend-credentials` | `users:manage` |
 | POST | `/users/{id}/reset-password` | `users:manage` |
+| POST | `/version-comparisons/{id}/cancel` | `datasets:read` |
+| PUT | `/datasets/{id}/source-settings` | `datasets:write` |
 
 La inbox aplica usuario destinatario y permisos actuales del módulo a lista, contador y lectura. El responsable de programación se revalida al despachar y antes de STARTED; SYSTEM no es una cuenta ejecutora.

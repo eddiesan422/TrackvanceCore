@@ -42,6 +42,7 @@ from .artifactstore import ArtifactIntegrityError, storage_provider
 from .audit_context import Actor, actor_context, request_id_context
 from .automation import AutomationError
 from .automation_api import router as automation_router
+from .comparison_api import router as comparison_router
 from .config import (
     DEMO_ACCESS_ENABLED,
     DEMO_SEED_ENABLED,
@@ -88,6 +89,7 @@ from .models import (
     uid,
 )
 from .notifications_api import router as notifications_router
+from .operation_tracking import router as operation_tracking_router
 from .operations_common import OperationError
 from .permissions import (
     PUBLIC_ENDPOINTS,
@@ -169,7 +171,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Trackvance Core", version=__version__, lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([WEB_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"])), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"])
+app.add_middleware(CORSMiddleware, allow_origins=list(dict.fromkeys([WEB_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"])), allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"])
 
 
 @app.middleware("http")
@@ -712,7 +714,15 @@ def datasets(db: Session = Depends(get_db), user: User = Depends(current_user)):
 
 @router.post("/datasets", status_code=201)
 def new_dataset(body: DatasetBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .acquisition import lock_dataset_name
+    lock_dataset_name(db, user.organization_id, body.name)
+    from .acquisition_models import AcquisitionNameReservation
     from .governance import validate_classification
+    reservation = db.scalar(select(AcquisitionNameReservation).where(
+        AcquisitionNameReservation.organization_id == user.organization_id,
+        AcquisitionNameReservation.name == body.name))
+    if reservation:
+        raise APIError(409, "DATASET_NAME_RESERVED", "El nombre está reservado por una primera adquisición en curso.")
     validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
     existing = db.scalar(select(Dataset).where(
         Dataset.organization_id == user.organization_id,
@@ -1254,6 +1264,16 @@ def evidence(run_id: str, db: Session = Depends(get_db), user: User = Depends(cu
 def artifact_download(artifact_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     from .exports import XLSX_MIME_TYPE, export_filename
     artifact = owned(db, Artifact, artifact_id, user)
+    if artifact.kind == "COMPARISON_REPORT":
+        from .comparison_api import authorize_comparison
+        from .comparison_models import VersionComparison
+        comparison = db.scalar(select(VersionComparison).where(VersionComparison.artifact_id == artifact.id))
+        if comparison is None:
+            raise APIError(403, "SOURCE_ACCESS_DENIED", "La procedencia del informe está incompleta.")
+        authorize_comparison(db, comparison, user)
+    if (artifact.kind in {"DOCUMENT_ORIGINAL", "DOCUMENT_EXTRACTION", "DOCUMENT_PREVIEW"}
+            and not {"documents:read", "documents:download"}.issubset(effective_permissions(db, user))):
+        raise APIError(403, "DOCUMENT_ORIGINAL_PERMISSION", "El original documental requiere permiso independiente de consulta y descarga.")
     links = db.scalars(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id)).all()
     related = {link.source_id for link in links if link.source_type == "RUN" and link.target_type == "ARTIFACT" and link.target_id == artifact.id}
     related |= {link.target_id for link in links if link.target_type == "RUN" and link.source_type == "ARTIFACT" and link.source_id == artifact.id}
@@ -1478,7 +1498,7 @@ def engines():
     from .dispatcher import component_status
     from .spark_engine import runtime_status
     from .worker import worker_status
-    workers = {lane: worker_status(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION", "REPORT")}
+    workers = {lane: worker_status(lane) for lane in ("DEFAULT", "DELIVERY", "ACQUISITION", "REPORT", "DOCUMENT", "COMPARISON")}
     acquisition = AcquisitionLimits.configured()
     delivery = DeliveryLimits.configured()
     spark = runtime_status()
@@ -1598,6 +1618,8 @@ def preview_execution(body: PlanPreviewBody, db: Session = Depends(get_db), user
 
 app.include_router(router)
 app.include_router(connections_router)
+app.include_router(comparison_router)
+app.include_router(operation_tracking_router)
 app.include_router(delivery_router)
 app.include_router(identity_router)
 app.include_router(exceptions_router)
@@ -1648,3 +1670,7 @@ def openapi_contract():
 
 
 app.openapi = openapi_contract  # type: ignore[method-assign]  # FastAPI's documented schema customization hook.
+
+from .document_api import router as document_router
+
+app.include_router(document_router)

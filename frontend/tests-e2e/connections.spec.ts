@@ -63,11 +63,14 @@ for (const [source, label, host, tls] of [
     await page.getByRole('button', { name: 'Crear dataset y adquirir fuente', exact: true }).click()
     const imported = await importResponse
     expect(imported.status()).toBe(202)
-    const { dataset, acquisition } = await imported.json()
+    const { dataset: provisionalDataset, acquisition } = await imported.json()
+    expect(provisionalDataset).toBeNull()
+    expect(acquisition.dataset_id).toBeNull()
     expect(acquisition.status).toBe('QUEUED')
     expect(acquisition.output_version_id).toBeNull()
     await expect.poll(async () => (await (await page.request.get(`/api/v1/acquisitions/${acquisition.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
     const finished = await (await page.request.get(`/api/v1/acquisitions/${acquisition.id}`)).json()
+    const dataset = { id: finished.dataset_id }
     const version = await (await page.request.get(`/api/v1/dataset-versions/${finished.output_version_id}/profile`)).json()
     expect(version.source_type).toBe(source)
     expect(version.original_artifact_id).toBeNull()

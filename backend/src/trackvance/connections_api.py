@@ -63,7 +63,7 @@ class ConnectionInput(BaseModel):
     @classmethod
     def safe_options(cls, value):
         # Never accept opaque connection strings, credentials or driver callbacks.
-        if value is not None and set(value) - {"connect_timeout", "query_timeout", "sslmode", "encryption", "url", "auth", "api_key_header", "timeout_seconds", "collection", "fields", "pagination", "page_size", "max_pages", "max_rows", "max_bytes", "total_timeout_seconds"}:
+        if value is not None and set(value) - {"connect_timeout", "query_timeout", "sslmode", "encryption", "url", "auth", "api_key_header", "timeout_seconds", "collection", "fields", "pagination", "page_size", "max_pages", "max_rows", "max_bytes", "total_timeout_seconds", "retries", "retry_wait_seconds", "mapping_version"}:
             raise ValueError("Parámetros de conexión no admitidos.")
         return value
 
@@ -87,6 +87,36 @@ class ConnectionBody(ConnectionInput):
 
 class ConnectionTestBody(ConnectionBody):
     connection_id: str | None = None
+
+
+class RestDiscoveryBody(ConnectionTestBody):
+    draft_id: str = Field(min_length=1, max_length=100)
+    selected_collection: str | None = Field(default=None, max_length=1024)
+
+
+@router.post("/connections/discover-rest")
+def discover_rest(body: RestDiscoveryBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .rest_discovery import discover
+    if body.source_type != "REST":
+        raise ConnectionOperationError(422, "REST_SOURCE_REQUIRED", "El descubrimiento requiere un borrador REST.")
+    password = body.password.get_secret_value() if body.password else ""
+    if body.connection_id:
+        connection = owned_connection(db, body.connection_id, user)
+        if connection.source_type != "REST":
+            raise ConnectionOperationError(422, "REST_SOURCE_REQUIRED", "El descubrimiento requiere una conexión REST.")
+        if not password and body.options.get("auth", "NONE") != "NONE":
+            version = current_version(db, connection)
+            require_password_for_endpoint_change(connection, version, host=body.host, port=body.port,
+                database=body.database, username=body.username, options=body.options)
+            password = secret_store.get(user.organization_id, version.secret_reference)
+    try:
+        result = discover(body.options, password, body.selected_collection)
+    except Exception as error:
+        from .rest_transport import RestError
+        if isinstance(error, RestError):
+            raise SourceError(error.code, error.message) from None
+        raise
+    return {"draft_id": body.draft_id, **result}
 
 
 class ConnectionPatch(ConnectionInput):
@@ -235,8 +265,15 @@ def preview(connection_id: str, schema_name: str = Query(min_length=1, max_lengt
 @router.post("/connections/{connection_id}/datasets", status_code=201, response_model=SourceDatasetResponse)
 def register_source_dataset(connection_id: str, body: SourceDatasetBody,
                             db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .acquisition import lock_dataset_name, record_legacy_source_attempt
+    from .acquisition_models import AcquisitionNameReservation
     from .governance import validate_classification
+    from .processing import ProcessingError
     validate_classification(db, user.organization_id, body.macro_domain_id, body.domain_id)
+    lock_dataset_name(db, user.organization_id, body.name)
+    if db.scalar(select(Dataset.id).where(Dataset.organization_id == user.organization_id, Dataset.name == body.name)) or db.scalar(
+        select(AcquisitionNameReservation.id).where(AcquisitionNameReservation.organization_id == user.organization_id, AcquisitionNameReservation.name == body.name)):
+        raise ConnectionOperationError(409, "DATASET_NAME_EXISTS", "El nombre ya corresponde a un dataset o una adquisición en curso.")
     connection = owned_connection(db, connection_id, user, lock=True)
     require_source_selection(connection, body.model_fields_set)
     source, _ = saved_source(db, connection)
@@ -253,7 +290,23 @@ def register_source_dataset(connection_id: str, body: SourceDatasetBody,
                                    object_name=body.object_name, object_kind=selected["kind"],
                                    column_overrides=body.column_overrides)
     db.add(binding)
-    version = acquire_snapshot(db, user, connection, binding, dataset)
+    frozen = current_version(db, connection)
+    snapshot = {"source_type": connection.source_type, "connection_id": connection.id,
+        "connection_version_id": frozen.id, "connection_version": frozen.version, "config_hash": frozen.config_hash,
+        "schema_name": binding.schema_name, "object_name": binding.object_name, "object_kind": binding.object_kind,
+        "pending_dataset": {"name": body.name, "description": body.description, "domain": body.domain,
+            "owner": user.name, "macro_domain_id": body.macro_domain_id, "domain_id": body.domain_id}}
+    started_at = utcnow()
+    try:
+        version = acquire_snapshot(db, user, connection, binding, dataset, require_nonempty=True)
+    except (SourceError, ConnectionOperationError, ProcessingError) as error:
+        db.rollback()
+        record_legacy_source_attempt(db, user, snapshot=snapshot, column_overrides=body.column_overrides,
+            started_at=started_at, error=error)
+        db.commit()
+        raise
+    record_legacy_source_attempt(db, user, snapshot=snapshot, column_overrides=body.column_overrides,
+        started_at=started_at, version=version)
     db.commit()
     return {"dataset": dataset_dto(db, dataset), "version": version_dto(version, db)}
 
@@ -266,6 +319,10 @@ def refresh_source(dataset_id: str, db: Session = Depends(get_db), user: User = 
         raise ConnectionOperationError(404, "NOT_FOUND", "No se encontró el dataset solicitado.")
     from .governance import authorize_dataset
     authorize_dataset(db, user, dataset.id, "CONTENT")
+    from .acquisition_schedule import configuration as source_configuration
+    if source_configuration(db, dataset.id):
+        raise ConnectionOperationError(409, "ASYNC_SOURCE_REFRESH_REQUIRED",
+            f"Este dataset tiene Origen y actualización configurado; utiliza /api/v1/datasets/{dataset.id}/acquisitions/refresh para respetar su política.")
     binding = db.scalar(select(DatasetSourceBinding).where(DatasetSourceBinding.dataset_id == dataset.id,
                          DatasetSourceBinding.organization_id == user.organization_id))
     if binding is None:

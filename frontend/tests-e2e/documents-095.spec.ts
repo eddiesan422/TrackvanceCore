@@ -1,0 +1,279 @@
+import { randomBytes } from 'node:crypto'
+import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
+
+// These tests create only explicitly named synthetic resources in Codex. Never
+// capture DOM/request artifacts containing local-account credential material.
+test.use({ trace: 'off', screenshot: 'off', video: 'off' })
+test.setTimeout(480_000)
+test.skip(process.env.TV_CORE095_DOCUMENT_E2E !== 'true', 'Requires the updated synthetic Codex stack and document oracle receiver')
+
+type Json = Record<string, any> // Native API evidence is heterogeneous.
+
+function knownPdf(invoice: string) {
+  const lines = [`Invoice: ${invoice}`, 'Total: 1234.50', 'Date: 2026-10-01', 'ITEM SKU1 10.25', 'ITEM SKU2 20.50']
+  const content = `BT /F1 18 Tf 60 710 Td 30 TL ${lines.map(line => `(${line}) Tj T*`).join(' ')} ET`
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Count 1 /Kids [4 0 R] >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>',
+    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`]
+  let text = '%PDF-1.4\n'
+  const offsets = [0]
+  for (let i = 0; i < objects.length; i++) { offsets.push(Buffer.byteLength(text)); text += `${i + 1} 0 obj\n${objects[i]}\nendobj\n` }
+  const xref = Buffer.byteLength(text)
+  text += `xref\n0 ${offsets.length}\n0000000000 65535 f \n${offsets.slice(1).map(n => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}trailer << /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  return Buffer.from(text)
+}
+
+async function login(page: Page) {
+  const project = process.env.TV_CORE095_TEST_PROJECT || ''
+  expect(project === 'trackvance-codex' || /^trackvance-v070-test-e2e-[a-z0-9-]*[a-f0-9]{12}$/.test(project), 'Explicit synthetic-stack identity is mandatory').toBe(true)
+  const url = new URL(process.env.TV_E2E_URL || '')
+  expect(['127.0.0.1', 'localhost']).toContain(url.hostname)
+  const username = process.env.TRACKVANCE_ADMIN_EMAIL
+  const password = process.env.TRACKVANCE_ADMIN_PASSWORD
+  await page.goto('/')
+  if (project === 'trackvance-codex') {
+    if (!username || !password) throw new Error('Synthetic Codex credentials must be provided through the process environment')
+    await page.getByRole('button', { name: 'Tengo una cuenta local', exact: true }).click()
+    await page.getByLabel('Usuario o correo', { exact: true }).fill(username)
+    await page.getByLabel('Contraseña', { exact: true }).fill(password)
+    await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+  } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  const me = await (await page.request.get('/api/v1/me')).json()
+  return String(me.csrf_token)
+}
+
+async function call(page: Page, csrf: string, path: string, data?: Json, status = 200) {
+  const response = data === undefined ? await page.request.get(`/api/v1${path}`) : await page.request.post(`/api/v1${path}`, { data, headers: { 'X-CSRF-Token': csrf } })
+  expect(response.status(), `HTTP status for ${path.split('?')[0]}`).toBe(status)
+  return response.json() as Promise<Json>
+}
+
+async function buildFamily(page: Page, nonce: string, mode = 'INDIVIDUAL') {
+  await page.getByRole('link', { name: 'Documentos', exact: true }).click()
+  await page.getByRole('button', { name: 'Nueva familia', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Nueva familia documental', exact: true })
+  await dialog.getByLabel('Nombre', { exact: true }).fill(`D095 synthetic ${nonce}`)
+  await dialog.getByLabel('Descripción', { exact: true }).fill('Known generated document corpus. Synthetic Codex fixture only.')
+  const familyResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/documents/families')
+  await dialog.getByRole('button', { name: 'Crear familia', exact: true }).click()
+  const family = await (await familyResponse).json()
+  await page.getByRole('link', { name: new RegExp(`D095 synthetic ${nonce}`) }).click()
+  await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
+  const builder = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Constructor de plantilla', exact: true }) })
+  const definitions = [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', type: 'STRING' },
+    { name: 'total', label: 'Total', pattern: '([0-9]+\\.[0-9]+)', type: 'DECIMAL' },
+    { name: 'date', label: 'Date', pattern: '([0-9-]+)', type: 'DATE' }]
+  for (let i = 0; i < definitions.length; i++) {
+    if (i) await builder.getByRole('button', { name: 'Añadir campo', exact: true }).click()
+    const group = builder.getByRole('group', { name: `Campo ${i + 1}`, exact: true })
+    await group.getByLabel('Nombre final', { exact: true }).fill(definitions[i].name)
+    await group.getByLabel('Etiqueta de búsqueda', { exact: true }).fill(definitions[i].label)
+    await group.getByLabel('Patrón con un grupo de captura', { exact: true }).fill(definitions[i].pattern)
+    await group.getByLabel('Tipo', { exact: true }).selectOption(definitions[i].type)
+    if (!i) { await group.getByRole('checkbox', { name: 'Crítico', exact: true }).check(); await group.getByRole('checkbox', { name: 'Clave de negocio', exact: true }).check() }
+  }
+  await builder.getByRole('button', { name: 'Añadir tabla repetitiva', exact: true }).click()
+  const table = builder.getByRole('group', { name: 'Tabla 1', exact: true })
+  await table.getByLabel('Nombre final de la tabla', { exact: true }).fill('details')
+  await table.getByLabel('Etiqueta o contexto al inicio de la fila', { exact: true }).fill('ITEM')
+  await table.getByLabel('Patrón de fila', { exact: true }).fill('ITEM (?P<sku>\\S+) (?P<amount>\\d+\\.\\d+)')
+  await table.getByLabel('Columna 1', { exact: true }).fill('sku')
+  await table.getByRole('button', { name: 'Añadir columna', exact: true }).click()
+  await table.getByLabel('Columna 2', { exact: true }).fill('amount')
+  await table.getByLabel('Tipo de columna', { exact: true }).nth(1).selectOption('DECIMAL')
+  await builder.getByLabel('Campo que representa el período de negocio', { exact: true }).selectOption('date')
+  if (mode === 'SCHEDULED') {
+    await builder.getByLabel('Modalidad', { exact: true }).selectOption('SCHEDULED')
+    await builder.getByLabel('Primer inicio, con zona (ISO)', { exact: true }).fill(new Date(Date.now() - 1000).toISOString())
+    await builder.getByLabel('Intervalo (segundos)', { exact: true }).fill('60')
+  }
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/v1/documents/families/${family.id}/templates`)
+  await builder.getByRole('button', { name: 'Crear revisión de plantilla', exact: true }).click()
+  const template = await (await response).json()
+  expect(template.id).toBeTruthy()
+  return { family, template }
+}
+
+async function upload(page: Page, name: string, invoice: string, example = false, templateId?: string) {
+  if (example) {
+    await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
+    const template = page.locator('.document-template').filter({ hasText: templateId ? templateId : '' })
+    // Revisions display a digest rather than a hidden identity; newest is first.
+    await (templateId ? page.getByRole('button', { name: 'Probar con documento de ejemplo', exact: true }).first() : template.getByRole('button', { name: 'Probar con documento de ejemplo', exact: true }).first()).click()
+  } else await page.getByRole('button', { name: 'Cargar documentos', exact: true }).click()
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && /\/documents\/families\/[^/]+\/originals$/.test(new URL(r.url()).pathname))
+  await page.getByRole('dialog').getByLabel('Seleccionar documentos', { exact: true }).setInputFiles({ name, mimeType: 'application/pdf', buffer: knownPdf(invoice) })
+  const received = await (await response).json()
+  expect(received.items).toHaveLength(1)
+  await page.getByRole('tab', { name: 'Documentos', exact: true }).click()
+  return received.items[0] as Json
+}
+
+async function review(page: Page, document: Json, activate = false) {
+  const row = page.getByRole('row').filter({ hasText: document.filename })
+  await row.getByRole('button', { name: 'Revisar documento', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: document.filename, exact: true })
+  await expect(dialog.getByLabel('Valor headers.0.invoice', { exact: true })).toBeVisible({ timeout: 90_000 })
+  await dialog.getByRole('button', { name: 'invoice', exact: true }).click()
+  await expect(dialog.locator('.document-origin-region')).toBeVisible()
+  await expect.poll(() => dialog.locator('.document-source img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+  for (const checkbox of await dialog.getByRole('checkbox', { name: 'Confirmar valor', exact: true }).all()) await checkbox.check()
+  await dialog.getByLabel('Motivo de la revisión', { exact: true }).fill('Known fixture fields and every table row checked against independent generated oracle.')
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/v1/documents/originals/${document.id}/review`)
+  await dialog.getByRole('button', { name: 'Guardar revisión y comprobar publicación', exact: true }).click()
+  const reviewed = await (await response).json()
+  expect(reviewed.issues).toEqual([])
+  if (activate) {
+    await dialog.getByRole('button', { name: 'Activar esta plantilla probada', exact: true }).click()
+    await expect(dialog).not.toBeVisible()
+  } else await dialog.getByRole('button', { name: 'Cerrar ventana', exact: true }).click()
+  return reviewed
+}
+
+test('document browser individual flow → exact native approved output → verified Delivery receiver', async ({ page, browser }, info) => {
+  const started = Date.now()
+  const csrf = await login(page)
+  const nonce = randomBytes(6).toString('hex')
+  const { family, template } = await buildFamily(page, nonce)
+  const example = await upload(page, `D095-example-${nonce}.pdf`, '000000', true, template.id)
+  await review(page, example, true)
+  const bootstrap = await upload(page, `D095-bootstrap-${nonce}.pdf`, '000000')
+  const first = await review(page, bootstrap)
+  expect(first.status).toBe('PUBLISHED')
+  const initialBatch = await call(page, csrf, `/documents/batches/${first.publications[0].batch_id}`)
+  const sourceFamily = await call(page, csrf, `/documents/families/${family.id}`)
+  expect(Object.keys(sourceFamily.output_datasets).sort()).toEqual(['details', 'headers'])
+  // Create/link native Intake through the browser wizard. No copied cases,
+  // custom queue, fake approved execution or direct DB writes are involved.
+  await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
+  const wizard = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Asistente de flujo posterior', exact: true }) }).last()
+  await wizard.getByLabel('Finalizar el flujo en', { exact: true }).selectOption('VALIDATION')
+  await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
+  await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
+  const pipelineResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline`))
+  await wizard.getByRole('button', { name: 'Crear revisión y preparar prueba', exact: true }).click()
+  const prepared = await (await pipelineResponse).json()
+  const bindings = prepared.intake_configuration_ids as Record<string, string>
+  const control = process.env.TV_CORE095_DOCUMENT_RECEIVER_CONTROL_URL
+  const receiver = process.env.TV_CORE095_DOCUMENT_RECEIVER_URL
+  if (!control || !receiver) throw new Error('Document oracle control/publication endpoints must be configured')
+  const registered = await page.request.post(`${control}/documents/${nonce}/oracle`, { data: { documents: [{ invoice: '000001', total: '1234.50', date: '2026-10-01' }] } })
+  expect(registered.status()).toBe(201)
+  const automationIds: Record<string, string> = {}
+  for (const structure of ['headers', 'details']) {
+    const destination = await call(page, csrf, '/delivery/destinations', { name: `D095 synthetic ${structure} ${nonce}`, sink_type: 'REST', options: { url: `${receiver}/documents/${nonce}/${structure}`, auth: 'NONE', idempotency_supported: true } }, 201)
+    const fields = structure === 'headers' ? [['document_id', 'STRING'], ['invoice', 'STRING'], ['total', 'DECIMAL'], ['date', 'DATE']] : [['document_id', 'STRING'], ['sku', 'STRING'], ['amount', 'DECIMAL']]
+    const draft = { dataset_version_id: initialBatch.published_versions[structure], destination_id: destination.id, destination_version_id: destination.destination_version_id,
+      target: { mode: 'REST', batch_rows: 10, confirmation_path: 'accepted', confirmation_value: true, rows_path: 'rows', batch_id_path: 'batch_id', payload_hash_path: 'payload_sha256' },
+      columns: fields.map(([name, type], ordinal) => ({ source_name: name, target_name: name, target_type: type, ordinal, nullable: false, ...(type === 'DECIMAL' ? { precision: 38, scale: 2 } : {}) })) }
+    expect((await call(page, csrf, '/delivery/preflight', draft)).status).toBe('PASS')
+    const config = await call(page, csrf, '/delivery/configurations', { name: `D095 synthetic delivery ${structure} ${nonce}`, ...draft }, 201)
+    const automation = await call(page, csrf, '/delivery/automations', { name: `D095 synthetic chain ${structure} ${nonce}`, configuration_id: config.id, settings: { mode: 'CHAINED', timezone: 'America/Bogota', starts_at: new Date().toISOString(), source_policy: 'INTAKE_OUTPUT', intake_configuration_id: bindings[structure] } }, 201)
+    automationIds[structure] = automation.id
+  }
+  // Return through the visual guided procedure and explicitly enable Delivery.
+  await page.reload()
+  await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
+  await wizard.getByLabel('Finalizar el flujo en', { exact: true }).selectOption('DELIVERY')
+  await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
+  for (const structure of ['headers', 'details']) await wizard.getByLabel(`Intake para ${structure}`, { exact: true }).selectOption(bindings[structure])
+  await wizard.getByRole('checkbox', { name: 'Activar explícitamente entrega automática con aprobaciones vigentes', exact: true }).check()
+  for (const structure of ['headers', 'details']) await wizard.getByLabel(`Automatización de Delivery para ${structure}`, { exact: true }).selectOption(automationIds[structure])
+  await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
+  const finalResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline`))
+  await wizard.getByRole('button', { name: 'Crear revisión y preparar prueba', exact: true }).click()
+  const finalTemplate = (await (await finalResponse).json()).template
+  const finalExample = await upload(page, `D095-delivery-example-${nonce}.pdf`, '000001', true, finalTemplate.id)
+  await review(page, finalExample, true)
+  const finalOriginal = await upload(page, `D095-delivery-${nonce}.pdf`, '000001')
+  const final = await review(page, finalOriginal)
+  expect(final.status).toBe('PUBLISHED')
+  await expect.poll(async () => (await (await page.request.get(`${control}/documents/${nonce}/receipt`)).json()).status, { timeout: 180_000 }).toBe('PASS')
+  const received = await (await page.request.get(`${control}/documents/${nonce}/receipt`)).json()
+  expect(received).toEqual(expect.objectContaining({ header_rows: 1, detail_rows: 2, all_values_exact: true, header_detail_identity_consistent: true }))
+  for (const structure of ['headers', 'details']) {
+    const history = await call(page, csrf, `/delivery/automations/${automationIds[structure]}/occurrences`)
+    const successful = history.items.find((o: Json) => o.status === 'SUCCESS')
+    expect(successful).toBeTruthy()
+    const origin = await call(page, csrf, `/runs/${successful.source_run_id}`)
+    expect(origin.module).toBe('intake')
+    expect(origin.status).toBe('SUCCESS')
+    expect(origin.decision).toBe('APPROVED')
+    expect(origin.config_id || origin.configuration_id).toBe(bindings[structure])
+  }
+  // Independent originals authorization is exercised in a second real browser
+  // session whose synthetic role can read the dataset but has no document grant.
+  const readerRole = await call(page, csrf, '/roles', { name: `D095 synthetic reader ${nonce}`, permissions: ['datasets:read', 'artifacts:download'] }, 201)
+  const reader = await call(page, csrf, '/users', { first_name: 'Synthetic', last_name: 'Document Reader', username: `d095_${nonce}`, email: `d095_${nonce}@example.test`, role_id: readerRole.id }, 201)
+  const readerContext = await browser.newContext({ baseURL: process.env.TV_E2E_URL })
+  try {
+    const readerPage = await readerContext.newPage()
+    await readerPage.goto('/')
+    await readerPage.getByRole('button', { name: 'Tengo una cuenta local', exact: true }).click()
+    await readerPage.getByLabel('Usuario o correo', { exact: true }).fill(reader.user.username)
+    await readerPage.getByLabel('Contraseña', { exact: true }).fill(reader.temporary_credentials.temporary_password)
+    await readerPage.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
+    await expect(readerPage.getByRole('heading', { name: 'Cambia tu contraseña', exact: true })).toBeVisible()
+    const localPassword = 'D095 fixture ' + randomBytes(24).toString('base64url')
+    await readerPage.getByLabel('Nueva contraseña', { exact: true }).fill(localPassword)
+    await readerPage.getByLabel('Confirmar contraseña', { exact: true }).fill(localPassword)
+    await readerPage.getByRole('button', { name: 'Guardar y continuar', exact: true }).click()
+    await readerPage.goto(`/datasets/${sourceFamily.output_datasets.headers}`)
+    await expect(readerPage.getByRole('heading', { name: `${sourceFamily.name} · headers`, exact: true })).toBeVisible()
+    await expect(readerPage.getByRole('link', { name: 'Documentos', exact: true })).toHaveCount(0)
+    const denied = await readerPage.goto(`/api/v1/documents/originals/${final.id}/file`)
+    expect(denied?.status()).toBe(403)
+    await expect(readerPage.locator('body')).toContainText('PERMISSION_DENIED')
+  } finally {
+    await readerContext.close()
+    const latestReader = await call(page, csrf, `/users/${reader.user.id}`)
+    const removal = await page.request.delete(`/api/v1/users/${reader.user.id}`, { data: { version: latestReader.version }, headers: { 'X-CSRF-Token': csrf } })
+    expect(removal.status()).toBe(200)
+  }
+  await info.attach('document-native-evidence.json', { body: JSON.stringify({ nonce, family_id: family.id, document_id: final.id, publication: final.publications, receiver: received, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
+})
+
+test('browser scheduled strict batch retains pending document and exact two-document scope', async ({ page }, info) => {
+  const started = Date.now()
+  const csrf = await login(page)
+  const nonce = randomBytes(6).toString('hex')
+  const { family, template } = await buildFamily(page, nonce, 'SCHEDULED')
+  // A short valid wait is explicitly configured through a new immutable draft
+  // so the real scheduler demonstrates BLOCKED rather than a simulated status.
+  const definition = { ...template.definition, publication: { ...template.definition.publication, wait_seconds: 0, starts_at: new Date(Date.now() - 1000).toISOString() } }
+  const bounded = await call(page, csrf, `/documents/families/${family.id}/templates`, definition)
+  await page.reload()
+  const example = await upload(page, `D095-scheduled-example-${nonce}.pdf`, '000000', true, bounded.id)
+  await review(page, example, true)
+  const first = await upload(page, `D095-scheduled-one-${nonce}.pdf`, '000001')
+  const second = await upload(page, `D095-scheduled-two-${nonce}.pdf`, '000002')
+  await review(page, first)
+  await expect.poll(async () => {
+    const batches = await call(page, csrf, `/documents/families/${family.id}/batches`)
+    return batches.items.some((batch: Json) => batch.status === 'BLOCKED' && batch.members.length === 2)
+  }, { timeout: 180_000 }).toBe(true)
+  const batches = await call(page, csrf, `/documents/families/${family.id}/batches`)
+  const blocked = batches.items.find((batch: Json) => batch.status === 'BLOCKED' && batch.members.length === 2)
+  expect(blocked.members.map((member: Json) => member.document_id).sort()).toEqual([first.id, second.id].sort())
+  expect(Object.keys(blocked.published_versions)).toHaveLength(0)
+  await review(page, second)
+  await page.goto(`/documents/families/${family.id}?batch=${blocked.id}`)
+  await expect(page.getByRole('tab', { name: 'Lotes y resultados', exact: true })).toHaveAttribute('aria-selected', 'true')
+  const batchCard = page.locator('.document-batch').filter({ hasText: blocked.id.slice(0, 8) }).first()
+  await batchCard.getByRole('button', { name: 'Revisar controles y publicar', exact: true }).click()
+  await expect(batchCard.getByRole('link', { name: 'headers: abrir versión publicada', exact: true })).toBeVisible()
+  const publication = await call(page, csrf, `/documents/batches/${blocked.id}`)
+  expect(publication.status).toBe('PUBLISHED')
+  expect(publication.members.every((member: Json) => member.status === 'PUBLISHED')).toBe(true)
+  const finalFamily = await call(page, csrf, `/documents/families/${family.id}`)
+  for (const [structure, version] of Object.entries(publication.published_versions)) {
+    const dataset = await call(page, csrf, `/datasets/${finalFamily.output_datasets[structure]}`)
+    const exact = dataset.versions.find((item: Json) => item.id === version)
+    expect(exact.row_count).toBe(structure === 'headers' ? 2 : 4)
+    expect(exact.ingestion_metadata.document_publication.scope).toBe('PUBLICATION_BATCH_ONLY')
+  }
+  await info.attach('document-scheduled-evidence.json', { body: JSON.stringify({ nonce, family_id: family.id, batch: publication, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
+})

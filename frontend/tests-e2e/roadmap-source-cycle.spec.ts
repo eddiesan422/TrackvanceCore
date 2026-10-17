@@ -86,10 +86,13 @@ for (const [engine, engineLabel, host, tls] of [
     const imported = await importedResponse
     expect(imported.status()).toBe(202)
     const source = await imported.json()
+    expect(source.dataset).toBeNull()
+    expect(source.acquisition.dataset_id).toBeNull()
     expect(source.acquisition.status).toBe('QUEUED')
     expect(source.acquisition.output_version_id).toBeNull()
     await expect.poll(async () => (await (await page.request.get(`/api/v1/acquisitions/${source.acquisition.id}`)).json()).status, { timeout: 90_000 }).toBe('SUCCESS')
     const acquired = await (await page.request.get(`/api/v1/acquisitions/${source.acquisition.id}`)).json()
+    source.dataset = { id: acquired.dataset_id }
     const originalVersion = await (await page.request.get(`/api/v1/dataset-versions/${acquired.output_version_id}/profile`)).json()
     expect(originalVersion.row_count).toBe(3)
     expect(originalVersion.source_type).toBe(engine)

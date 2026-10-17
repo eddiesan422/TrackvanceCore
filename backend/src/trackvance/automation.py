@@ -440,6 +440,38 @@ def _resolve_source(db, config, revision, settings, source_run):
     return source, None
 
 
+def document_correction_requires_review(db: Session, source: DatasetVersion) -> bool:
+    """Corrections never inherit permission to repeat an external delivery.
+
+    Follow native immutable version/run ancestry, including approved Intake
+    outputs. A new successful validation does not authorize an external effect.
+    """
+    pending: list[DatasetVersion] = [source]
+    seen: set[str] = set()
+    while pending:
+        version = pending.pop()
+        if version.id in seen:
+            continue
+        if len(seen) >= 128:
+            raise AutomationError(409, "CORRECTION_LINEAGE_LIMIT", "La procedencia de corrección requiere revisión.")
+        seen.add(version.id)
+        publication = (version.ingestion_metadata or {}).get("document_publication", {})
+        if publication.get("correction") or publication.get("automatic_delivery_allowed") is False:
+            return True
+        ancestors: list[str | None] = [version.parent_version_id] if version.parent_version_id else []
+        if version.source_run_id:
+            run = db.get(Run, version.source_run_id)
+            if not run or run.organization_id != source.organization_id:
+                raise AutomationError(409, "CORRECTION_LINEAGE_INCOMPLETE", "La procedencia requiere revisión antes de entregar.")
+            ancestors.extend([run.dataset_version_id, run.target_version_id])
+        for identity in filter(None, ancestors):
+            ancestor = db.get(DatasetVersion, identity)
+            if not ancestor or ancestor.organization_id != source.organization_id:
+                raise AutomationError(409, "CORRECTION_LINEAGE_INCOMPLETE", "La procedencia requiere revisión antes de entregar.")
+            pending.append(ancestor)
+    return False
+
+
 def dispatch_occurrence(db: Session, automation: DeliveryAutomation, revision: DeliveryAutomationVersion,
                         trigger_key: str, planned_at: datetime, *, origin="SCHEDULED",
                         source_run: Run | None = None, coalesced=0, repeat=False, request_hash=None):
@@ -475,7 +507,9 @@ def dispatch_occurrence(db: Session, automation: DeliveryAutomation, revision: D
         fingerprint, _ = target_identity(automation.organization_id, destination.sink_type,
                                          version.config, revision.settings["template"]["target"])
         guard = _guard(db, automation.organization_id, fingerprint)
-        if guard.unknown_run_id:
+        if source and document_correction_requires_review(db, source):
+            reason = "DOCUMENT_CORRECTION_REQUIRES_DESTINATION_REVIEW"
+        elif guard.unknown_run_id:
             reason = "TARGET_UNKNOWN_BLOCKED"
         elif guard.active_run_id or db.scalar(select(Run.id).join(DeliveryOccurrence, DeliveryOccurrence.run_id == Run.id).where(
                 DeliveryOccurrence.automation_id == automation.id, Run.status.in_(["QUEUED", "RUNNING"])).limit(1)):

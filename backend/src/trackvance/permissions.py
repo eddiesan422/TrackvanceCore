@@ -17,6 +17,9 @@ _ACTIONS_BY_GROUP["intake"] = "read configure execute schedule delete"
 _ACTIONS_BY_GROUP.update({"catalog": "read", "governance": "read write", "domains": "read manage",
                          "glossary": "read manage", "blocks": "read manage",
                          "reports": "read write preview download generate", "people": "read manage"})
+GROUPS["documents"] = "Documentos"
+_ACTIONS_BY_GROUP["documents"] = "read write configure review publish download"
+ACTIONS.update({"review": "Revisar extracción", "publish": "Publicar lote"})
 CATALOG = frozenset(f"{group}:{action}" for group, actions in _ACTIONS_BY_GROUP.items() for action in actions.split())
 NON_DELEGABLE = frozenset({"users:manage", "roles:manage"})
 DEPENDENCIES: dict[str, frozenset[str]] = {}
@@ -107,6 +110,7 @@ _routes("connections:use", "POST", "/datasets/{id}/refresh-source", "/connection
 _routes("connections:use", "GET", "/connections/{id}/schemas", "/connections/{id}/objects", "/connections/{id}/preview")
 _routes("connections:read", "GET", "/connections", "/connections/{id}")
 _routes("connections:manage", "POST", "/connections", "/connections/test")
+_routes("connections:manage", "POST", "/connections/discover-rest")
 _routes("connections:manage", "PATCH", "/connections/{id}")
 _routes("connections:manage", "DELETE", "/connections/{id}")
 for _module, _path in (("intake", "/intake/contracts"), ("recon", "/recon/controls"), ("sentinel", "/monitors")):
@@ -161,6 +165,8 @@ _routes("delivery:execute", "POST", "/delivery/runs")
 _routes("delivery:repair_evidence", "POST", "/delivery/runs/{id}/repair-evidence")
 _routes("delivery:review_unknown", "POST", "/delivery/runs/{id}/reviews")
 _routes("datasets:read", "GET", "/acquisitions", "/acquisitions/limits", "/acquisitions/{id}")
+_routes("datasets:read", "GET", "/datasets/{id}/source-settings")
+_routes("datasets:write", "PUT", "/datasets/{id}/source-settings")
 _routes("datasets:write", "POST", "/datasets/uploads/stage", "/datasets/{id}/acquisitions", "/acquisitions/{id}/cancel")
 _routes("datasets:write", "GET", "/datasets/uploads/{id}/inspect")
 _routes("connections:use", "POST", "/connections/{id}/acquisitions", "/datasets/{id}/acquisitions/refresh")
@@ -190,6 +196,16 @@ _routes("reports:write", "POST", "/reports/definitions", "/reports/definitions/{
 _routes("reports:preview", "POST", "/reports/preview")
 _routes("reports:download", "POST", "/reports/download")
 _routes("reports:generate", "POST", "/reports/datasets", "/reports/executions/{id}/cancel")
+_routes("datasets:read", "GET", "/datasets/{id}/comparisons", "/version-comparisons/{id}", "/version-comparisons/{id}/rows")
+_routes("datasets:read", "POST", "/datasets/{id}/comparisons", "/version-comparisons/{id}/cancel")
+_routes("artifacts:download", "GET", "/version-comparisons/{id}/download")
+_routes("exceptions:read", "GET", "/operations")
+_routes("documents:read", "GET", "/documents/limits", "/documents/families", "/documents/families/{id}", "/documents/originals", "/documents/originals/{id}", "/documents/families/{id}/batches", "/documents/batches/{id}")
+_routes("documents:configure", "POST", "/documents/families", "/documents/families/{id}/templates", "/documents/families/{id}/templates/{template_id}/activate", "/documents/families/{id}/pipeline")
+_routes("documents:write", "POST", "/documents/families/{id}/originals", "/documents/originals/{id}/cancel", "/documents/originals/{id}/retry")
+_routes("documents:review", "POST", "/documents/originals/{id}/review")
+_routes("documents:publish", "POST", "/documents/families/{id}/batches", "/documents/batches/{id}/publish")
+_routes("documents:download", "GET", "/documents/originals/{id}/file", "/documents/originals/{id}/pages/{page}")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

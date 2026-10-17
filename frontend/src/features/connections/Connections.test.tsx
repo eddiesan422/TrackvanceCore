@@ -220,7 +220,7 @@ describe('Source discovery and snapshots', () => {
   it('discovers a view, previews native types and observed values, then registers a dataset', async () => {
     mockSource()
     const sourceMock = vi.mocked(api).getMockImplementation()!
-    vi.mocked(api).mockImplementation((path, options) => path === '/connections/source-db/acquisitions' ? Promise.resolve({ dataset: { id: 'sales-dataset', name: 'ventas_vista' }, acquisition: { id: 'acq-one' } }) : path === '/acquisitions/acq-one' ? Promise.resolve({ id: 'acq-one', dataset_id: 'sales-dataset', status: 'QUEUED', stage: 'QUEUED', processed_rows: 0, processed_bytes: 0 }) : sourceMock(path, options))
+    vi.mocked(api).mockImplementation((path, options) => path === '/connections/source-db/acquisitions' ? Promise.resolve({ dataset: null, acquisition: { id: 'acq-one' } }) : path === '/acquisitions/acq-one' ? Promise.resolve({ id: 'acq-one', dataset_id: 'sales-dataset', output_version_id: 'first-version', status: 'SUCCESS', stage: 'COMPLETED', processed_rows: 2, processed_bytes: 100 }) : sourceMock(path, options))
     const user = userEvent.setup()
     renderDetail()
     await screen.findByRole('option', { name: 'comercial' })
