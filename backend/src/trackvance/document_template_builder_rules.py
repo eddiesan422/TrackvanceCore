@@ -100,7 +100,7 @@ def row_groups(lines, page, start, end):
     tokens = [(word, line) for line in lines if line["page"] == page
               for word in words(line) if start < (word["region"][1] + word["region"][3]) / 2 < end]
     tokens.sort(key=lambda item: ((item[0]["region"][1] + item[0]["region"][3]) / 2, item[0]["region"][0]))
-    groups = []
+    groups: list[tuple[float, list[tuple[dict, dict]]]] = []
     for word, line in tokens:
         middle = (word["region"][1] + word["region"][3]) / 2
         height = word["region"][3] - word["region"][1]
@@ -140,7 +140,7 @@ def table_candidates(lines, rule):
                 end = min(end, min(stops))
         bounds = [value + dx for value in rule["column_bounds"]]
         for group in row_groups(lines, line["page"], header_bottom, end):
-            columns = [[] for _ in labels]
+            columns: list[list[tuple[dict, dict]]] = [[] for _ in labels]
             for word, source in group:
                 center = (word["region"][0] + word["region"][2]) / 2
                 for index, (left, right) in enumerate(pairwise(bounds)):
