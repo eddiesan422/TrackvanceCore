@@ -1,6 +1,6 @@
 # Trackvance Core
 
-## Trackvance Core 0.9.5 — candidato en desarrollo
+## Trackvance Core 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,
 actualización de fuentes y descubrimiento REST, comparación completa de versiones
@@ -8,12 +8,35 @@ y seguimiento operativo sobre los componentes nativos. Las migraciones aditivas
 0023–0025 conservan la historia 0.9.0. La especificación técnica mantiene edición
 v1.1 y su fuente oficial permanece en TrackvanceCore-docs.
 
-**NO CERRADA**: implementación, certificación y actualización son etapas distintas.
-Las pruebas parciales o de versiones anteriores no acreditan los criterios del
-ciclo. No ejecutar seeds, reset ni pruebas sobre la instalación del usuario.
+El informe 0.9.5 del repositorio documental oficial registra el estado de cierre,
+los commits y cada gate de certificación y actualización. La versión del paquete
+y las pruebas parciales se acreditan por separado. No ejecutar seeds, reset ni
+pruebas sobre la instalación del usuario.
 Las lanes DOCUMENT y COMPARISON usan workers propios y artefactos canónicos; en
 Codex se activan explícitamente dentro del presupuesto original, pausando otros
 roles cuando sea necesario. Una corrección documental no autoriza entrega automática.
+
+Documentos distingue familia, plantilla, original, extracción, lote y versión.
+Conserva originales inmutables y revisiones humanas; una confianza alta no
+sustituye la revisión. La publicación individual y la calendarizada usan datasets
+estables por estructura, composición sellada y ventanas con zona explícita. Las
+correcciones agrupadas requieren revisar todos sus miembros y conservan la
+publicación anterior. El acceso al dataset y al original se autoriza por separado.
+
+Origen y actualización registra intentos, consultas, publicaciones y programación.
+La política de cambios compara esquema y contenido tipado completo con multiplicidad;
+publicar cada corte conserva una fotografía por ocurrencia. REST separa el timeout
+por petición (15 segundos por defecto) del presupuesto total y admite 0–5 reintentos
+adicionales con espera predeterminada de 10 segundos. Estos reintentos son de lectura.
+La primera identidad operativa se consolida junto con su binding y v1 al completar
+la adquisición. El descubrimiento de estructura es una propuesta editable de borrador.
+
+Versiones permite comparar poblaciones completas en backend y consultar un informe
+persistente con valores antes/después. Las claves deben ser únicas; el modo de
+multiplicidad expresa lo demostrable cuando no lo son. Operación deriva sus colas de
+estados reales. La resolución técnica exige evidencia de la población afectada y
+mantiene separados los cierres administrativos y la confirmación de una entrega.
+Un POST incierto permanece UNKNOWN y no se reenvía automáticamente.
 
 ## Trackvance Core 0.9.0
 

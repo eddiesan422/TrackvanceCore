@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.5 — en desarrollo, NO CERRADA
+## 0.9.5 — Documentos, adquisición, comparación y seguimiento
 
 - Familias, plantillas y extracciones documentales versionadas, OCR CPU local,
   revisión humana, lotes sellados y datasets de salida estables con procedencia.

@@ -499,8 +499,9 @@ def exercise(args, checks: Checks) -> dict[str, str]:
         f"/api/v1/datasets/{target['id']}/versions/upload",
         "recon-target.csv",
         csv_bytes(
-            ["record_key", "amount"],
-            [["M", 10], ["V", 21], ["T", 50], ["DT", 60], ["DT", 61]],
+            ["record_key", "amount", "target_row_id"],
+            [["M", 10, "T-001"], ["V", 21, "T-002"], ["T", 50, "T-003"],
+             ["DT", 60, "T-004"], ["DT", 61, "T-005"]],
         ),
     )
     control = api.post(
@@ -684,10 +685,28 @@ def exercise(args, checks: Checks) -> dict[str, str]:
         f"/api/v1/datasets/{target['id']}/versions/upload",
         "recon-target-corrected.csv",
         csv_bytes(
-            ["record_key", "amount"],
-            [["M", 10], ["V", 20], ["T", 50], ["DT", 60], ["DT", 61]],
+            ["record_key", "amount", "target_row_id"],
+            [["M", 10, "T-001"], ["V", 20, "T-002"], ["T", 50, "T-003"],
+             ["DT", 60, "T-004"], ["DT", 61, "T-005"]],
         ),
     )
+    # The Recon business key deliberately retains its DT duplicates. A separate
+    # stable row identity proves the complete corrected target population.
+    queued_comparison = api.post(f"/api/v1/datasets/{target['id']}/comparisons", {
+        "before_version_id": target_version["id"], "after_version_id": corrected_target["id"],
+        "keys": ["target_row_id"]}, expected=(202,))
+    comparison = wait_until("la comparación completa de la corrección", lambda: api.get(
+        f"/api/v1/version-comparisons/{queued_comparison['id']}"),
+        lambda value: value["status"] in {"SUCCESS", "FAILED", "CANCELLED"},
+        timeout=args.job_timeout, interval=args.poll_interval)
+    summary = comparison.get("summary") or {}
+    checks.verify(comparison["status"] == "SUCCESS" and bool(comparison.get("artifact_id"))
+        and summary.get("complete_population") is True and summary.get("mode") == "KEYED"
+        and summary.get("keys") == ["target_row_id"]
+        and summary.get("before_rows") == summary.get("after_rows") == 5
+        and summary.get("counts") == {"ADDED": 0, "ABSENT": 0, "MODIFIED": 1, "UNCHANGED": 4},
+        "La comparación completa conserva las cinco identidades del destino y demuestra una corrección")
+    created_ids["correction_comparison"] = comparison["id"]
     validation_run = run_to_completion(
         api,
         checks,

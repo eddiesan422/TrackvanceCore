@@ -90,6 +90,30 @@ def corpus(tmp_path):
             "png": tmp_path / "image.png", "jpg": tmp_path / "image.jpg"}
 
 
+def test_real_ocr_relocated_python_runtime(database, corpus, tmp_path, monkeypatch):
+    """Hosted Python stdlib lives outside the sandbox's shared-library roots."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    runtime = tmp_path / "hostedtoolcache" / "Python" / "x64"
+    (runtime / "bin").mkdir(parents=True)
+    (runtime / "lib").mkdir()
+    stdlib = Path(sys.base_prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+    shutil.copytree(stdlib, runtime / "lib" / stdlib.name,
+                    ignore=shutil.ignore_patterns("site-packages", "__pycache__", "test", "tests",
+                                                  "idlelib", "tkinter", "ensurepip"))
+    for library in (Path(sys.base_prefix) / "lib").glob("libpython*.so*"):
+        shutil.copyfile(library, runtime / "lib" / library.name)
+    executable = runtime / "bin" / "python"
+    shutil.copyfile(sys.executable, executable)
+    executable.chmod(0o700)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    result = run_engine(corpus["digital"], DEFINITION)
+    assert {name: result["payload"]["fields"][name]["value"] for name in ORACLE} == ORACLE
+    assert result["payload"]["fields"]["date"]["validity"] == "VALID"
+
+
 @pytest.mark.parametrize("kind", ["digital", "scanned", "mixed", "multipage", "png", "jpg"])
 def test_real_local_ocr_corpus_oracle(database, corpus, kind):
     result = run_engine(corpus[kind], DEFINITION)

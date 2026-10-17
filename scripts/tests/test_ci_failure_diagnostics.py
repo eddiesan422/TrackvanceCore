@@ -459,6 +459,12 @@ def test_recovery_summary_preserves_only_fixed_functional_stage_and_public_targe
             'target_last_request': {'method': 'GET', 'path': '/version-comparisons/{id}', 'http_status': 200}}
 
 
+def test_recovery_comparison_timeout_retains_closed_code_without_payload():
+    assert diagnostics.sanitize_recovery_summary({'status': 'FAIL',
+        'error_code': 'RECOVERY_COMPARISON_TIMEOUT', 'message': 'SECRET_TOKEN', 'row': 'PRIVATE_ROW'}) == {
+            'status': 'FAIL', 'error_code': 'RECOVERY_COMPARISON_TIMEOUT'}
+
+
 @pytest.mark.parametrize('metadata', [
     {'method': 'GET', 'path': '/datasets/SECRET_TOKEN', 'http_status': 200},
     {'method': 'GET', 'path': '/datasets/{id}?token=SECRET_TOKEN', 'http_status': 200},

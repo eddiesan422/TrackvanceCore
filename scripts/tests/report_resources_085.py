@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 
+from ci.certification_lanes import UNUSED_CORE095_LANES, UNUSED_CORE095_PROFILE
 from ci.local_resources import apply_limits, memory_bytes
 
 PROFILE = {
@@ -24,8 +25,13 @@ DOCKER_CLIENT_CPU_BUDGET = CPU_BUDGET + HOST_CLIENT_CPUS
 def validate(override: dict) -> dict:
     """Reject incomplete shapes, lost API memory and unbounded aggregate caps."""
     services = override["services"]
-    if set(services) != set(PROFILE):
+    if not set(PROFILE) <= set(services) or set(services) - set(PROFILE) - UNUSED_CORE095_LANES:
         raise ValueError("OWNED_REPORT_RESOURCE_TOPOLOGY")
+    for name in set(services) & UNUSED_CORE095_LANES:
+        lane = services[name]
+        if (lane.get("profiles") != [UNUSED_CORE095_PROFILE] or memory_bytes(lane.get("mem_limit", 0)) != 128 * 1024**2
+                or lane.get("cpus") != 0.125 or lane.get("pids_limit") != 64):
+            raise ValueError("OWNED_REPORT_UNUSED_LANE_PROFILE")
     memory, cpus = 0, 0.0
     for name, (mib, service_cpu_ceiling) in PROFILE.items():
         service = services[name]
@@ -67,7 +73,8 @@ def configure(directory: Path, context: dict, limit: int) -> dict:
             raise ValueError("PENDING_CAPACITY: OWNED_REPORT_PROFILE_REQUIRES_MAX_CPUS_4")
     path = directory / "compose.json"
     override = json.loads(path.read_text(encoding="utf-8"))
-    if set(override["services"]) != set(PROFILE):
+    if (not set(PROFILE) <= set(override["services"])
+            or set(override["services"]) - set(PROFILE) - UNUSED_CORE095_LANES):
         raise ValueError("OWNED_REPORT_RESOURCE_TOPOLOGY")
     for name, (mib, cpus) in PROFILE.items():
         service = override["services"][name]
@@ -76,7 +83,7 @@ def configure(directory: Path, context: dict, limit: int) -> dict:
             service["environment"].update(REPORT_DOWNLOAD_MAX_ROWS=str(limit),
                 REPORT_XLSX_MAX_ROWS=str(limit), REPORT_CONCURRENCY="1",
                 REPORT_MEMORY_MB="512", REPORT_PROCESS_MEMORY_MB="2048")
-    apply_limits(override, context["project"])
+    apply_limits(override, context["project"], active_services=PROFILE)
     receipt = validate(override)  # Never write a scaled-down API cgroup as valid.
     path.write_text(json.dumps(override, indent=2) + "\n", encoding="utf-8")
     (directory / "report-resource-profile-085.json").write_text(

@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import report_resources_085 as profile
+from ci.certification_lanes import inactive_core095_lanes
 
 
 def topology():
@@ -29,6 +30,53 @@ def test_private_profile_aggregate_and_concurrency_before_service_start(tmp_path
     assert actual["services"]["api"]["mem_limit"] == 2048 * 1024**2
     assert actual["services"]["report-worker"]["environment"]["REPORT_CONCURRENCY"] == "1"
     assert (tmp_path / "report-resource-profile-085.json").is_file()
+
+
+def test_current_context_inactive_native_lanes_preserve_original_active_profile(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRACKVANCE_LOCAL_EXECUTION_ID", raising=False)
+    project = "trackvance-v080-test-download-123456789abc"
+    data = topology()
+    extra = inactive_core095_lanes(tmp_path, project, 'sha256:' + 'a' * 64)
+    data['services'].update(extra)
+    (tmp_path / 'compose.json').write_text(json.dumps(data))
+    receipt = profile.configure(tmp_path, {'project': project, 'main_project': 'usual'}, 120)
+    configured = json.loads((tmp_path / 'compose.json').read_text())
+    assert receipt['memory_bytes'] == 8128 * 1024**2 and receipt['cpus'] == 3
+    assert receipt['memory_ceiling_bytes'] == 8 * 1024**3
+    assert {name: configured['services'][name] for name in extra} == extra
+    assert {name: (lane['mem_limit'] // 1024**2, lane['cpus'])
+        for name, lane in configured['services'].items() if name in profile.PROFILE} == profile.PROFILE
+
+
+@pytest.mark.parametrize('mutation', ['active', 'other_profile', 'memory', 'cpu', 'pids'])
+def test_inherited_native_lanes_cannot_consume_active_report_budget(tmp_path, monkeypatch, mutation):
+    monkeypatch.delenv('TRACKVANCE_LOCAL_EXECUTION_ID', raising=False)
+    project = 'trackvance-v080-test-download-123456789abc'
+    data = topology()
+    data['services'].update(inactive_core095_lanes(tmp_path, project, 'sha256:' + 'a' * 64))
+    (tmp_path / 'compose.json').write_text(json.dumps(data))
+    profile.configure(tmp_path, {'project': project, 'main_project': 'usual'}, 120)
+    data = json.loads((tmp_path / 'compose.json').read_text())
+    lane = data['services']['document-worker']
+    lane.update({'active': {'profiles': []}, 'other_profile': {'profiles': ['unverified']},
+        'memory': {'mem_limit': '1g'}, 'cpu': {'cpus': 1}, 'pids': {'pids_limit': 512}}[mutation])
+    with pytest.raises(ValueError, match='OWNED_REPORT_UNUSED_LANE_PROFILE'):
+        profile.validate(data)
+
+
+def test_runtime_cgroup_inventory_rejects_an_unexpected_running_native_lane(tmp_path, monkeypatch):
+    monkeypatch.delenv('TRACKVANCE_LOCAL_EXECUTION_ID', raising=False)
+    project = 'trackvance-v080-test-download-123456789abc'
+    data = topology()
+    data['services'].update(inactive_core095_lanes(tmp_path, project, 'sha256:' + 'a' * 64))
+    (tmp_path / 'compose.json').write_text(json.dumps(data))
+    profile.configure(tmp_path, {'project': project, 'main_project': 'usual'}, 120)
+    configured = json.loads((tmp_path / 'compose.json').read_text())
+    replies = iter(['unexpected-native-id', json.dumps([{'Id': 'unexpected-native-id',
+        'Config': {'Labels': {'com.docker.compose.project': project,
+            'com.docker.compose.service': 'document-worker'}}, 'State': {'Running': True}}])])
+    with pytest.raises(ValueError, match='OWNED_REPORT_CGROUP_IDENTITY'):
+        profile.effective_cgroups(configured, project, {'api'}, command=lambda _: next(replies))
 
 
 def test_local_cap_too_small_fails_before_replacing_owned_configuration(tmp_path, monkeypatch):

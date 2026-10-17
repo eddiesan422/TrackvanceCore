@@ -33,6 +33,10 @@ def confine(folder: Path):
     import resource
     if sys.platform != "linux":
         raise ValueError("DOCUMENT_SANDBOX_UNAVAILABLE")
+    # strptime imports its standard-library dependencies lazily. Hosted Python
+    # can keep those files outside the shared-library roots allowed below.
+    # Load them before confinement without granting access to another directory.
+    datetime.strptime("2000-01-01", "%Y-%m-%d").replace(tzinfo=UTC)
     resource.setrlimit(resource.RLIMIT_AS, (768 * 1024**2,) * 2)
     resource.setrlimit(resource.RLIMIT_CPU, (120, 121))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024**2,) * 2)
