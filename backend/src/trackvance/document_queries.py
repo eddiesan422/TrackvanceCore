@@ -8,7 +8,7 @@ from typing import Literal
 from urllib.parse import urlencode
 
 from sqlalchemy import JSON, and_, exists, func, or_, select, true, type_coerce
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, load_only
 
 from .db import iso
 from .document_models import (
@@ -94,7 +94,9 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
     if family_id:
         owned(db, DocumentFamily, family_id, user)
     # All joins are tenant scoped BEFORE search, total, sorting and pagination.
-    query = select(DocumentOriginal, DocumentFamily, DocumentTemplate, DocumentExtraction).join(
+    query = select(DocumentOriginal, DocumentFamily, DocumentTemplate, DocumentExtraction).options(
+        load_only(DocumentExtraction.id, DocumentExtraction.revision, DocumentExtraction.created_at,
+                  DocumentExtraction.reviewed, raiseload=True)).join(
         DocumentFamily, and_(DocumentOriginal.family_id == DocumentFamily.id,
                              DocumentFamily.organization_id == user.organization_id)).join(
         DocumentTemplate, and_(DocumentOriginal.template_id == DocumentTemplate.id,

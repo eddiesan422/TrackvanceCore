@@ -93,6 +93,11 @@ def test_global_search_paginates_orders_and_filters_at_database(database, docume
         assert first["total"] == second["total"] == 2
         assert [first["items"][0]["id"], second["items"][0]["id"]] == ["document-0", "document-1"]
         assert any("ORDER BY document_originals.filename ASC, document_originals.id ASC" in sql and "LIMIT" in sql for sql in statements)
+        page_queries = [sql for sql in statements if sql.startswith("SELECT document_originals.") and "LIMIT" in sql]
+        assert len(page_queries) == 2
+        assert all("document_extractions.payload" not in sql.split("FROM", 1)[0]
+                   and "document_extractions.engine" not in sql.split("FROM", 1)[0]
+                   for sql in page_queries)
         assert list_originals(db, user, family_id="family-1")["total"] == 1
         assert list_originals(db, user, mode="SCHEDULED")["items"][0]["id"] == "document-1"
         assert list_originals(db, user, status="FAILED")["total"] == 0

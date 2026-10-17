@@ -79,4 +79,22 @@ describe('Visual OCR template builder', () => {
     expect(screen.getByRole('button', { name: 'Crear revisión y probar extracción' })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: 'Período de negocio' })).toHaveTextContent('legacy')
   })
+
+  it('resumes a reloaded first example without presenting the internal scaffold as a business field', async () => {
+    const user = userEvent.setup()
+    renderApp(<VisualTemplateBuilder identity="family" existing={{ fields: [{ name: 'por_configurar', label: '__constructor_por_configurar__', logical_type: 'STRING', required: true }], tables: [] }} refresh={vi.fn()}/>)
+    await screen.findByRole('option', { name: /invoice.png/ })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'O continuar con un ejemplo recibido' }), 'example')
+    await screen.findByRole('button', { name: 'Seleccionar 000001' })
+    expect(screen.queryByRole('textbox', { name: 'Nombre del campo' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Seleccionar 000001' }))
+    expect(await screen.findByRole('textbox', { name: 'Nombre del campo' })).toHaveValue('invoice')
+    expect(screen.getAllByRole('textbox', { name: 'Nombre del campo' })).toHaveLength(1)
+    expect(screen.getByRole('combobox', { name: 'Período de negocio' })).not.toHaveTextContent('por_configurar')
+  })
+
+  it('preserves a legitimate field with the same name but a different label', () => {
+    renderApp(<VisualTemplateBuilder identity="family" existing={{ fields: [{ name: 'por_configurar', label: 'Invoice', logical_type: 'STRING' }], tables: [] }} refresh={vi.fn()}/>)
+    expect(screen.getByRole('combobox', { name: 'Período de negocio' })).toHaveTextContent('por_configurar')
+  })
 })

@@ -23,7 +23,7 @@ export default function VisualTemplateBuilder({ identity, existing, refresh, onR
   const [replacement, setReplacement] = useState<{ kind: 'FIELD' | 'TABLE'; index: number } | null>(null)
   const [selection, setSelection] = useState<Region | null>(null)
   const [start, setStart] = useState<[number, number] | null>(null)
-  const [fields, setFields] = useState<RecordData[]>(existing?.fields || [])
+  const [fields, setFields] = useState<RecordData[]>((existing?.fields || []).filter((field: RecordData) => !(field.name === 'por_configurar' && field.label === '__constructor_por_configurar__')))
   const [tables, setTables] = useState<RecordData[]>(existing?.tables || [])
   const [publication, setPublication] = useState<RecordData>(existing?.publication || defaults)
   const [period, setPeriod] = useState(existing?.business_period_field || '')
