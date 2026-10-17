@@ -124,8 +124,18 @@ def verify_comparison_report(path, rows, summary, before_id, after_id, keys):
             assert kind == "UNCHANGED" and multiplicity == 1 and json.loads(changed) == []
             old, new = json.loads(before), json.loads(after)
             assert old == new and set(old) == {name for name, *_ in FIELDS}
-            ordinal = old["ordinal"]
-            assert type(ordinal) is int and 1 <= ordinal <= rows and not seen[ordinal]
+            raw_ordinal = old["ordinal"]
+            # Canonical snapshots preserve exact scalar text alongside their
+            # logical schema. Accept only an integer or its exact base-10 text,
+            # never booleans, floats, fractional/exponent forms or coercion.
+            if type(raw_ordinal) is str:
+                assert raw_ordinal.isascii() and raw_ordinal.isdigit() and len(raw_ordinal) <= len(str(rows))
+                ordinal = int(raw_ordinal)
+                assert raw_ordinal == str(ordinal)
+            else:
+                assert type(raw_ordinal) is int
+                ordinal = raw_ordinal
+            assert 1 <= ordinal <= rows and not seen[ordinal]
             expected = synthetic_row(ordinal)
             for column in ("id", "category", "optional"):
                 assert old[column] == expected[column]

@@ -340,7 +340,8 @@ def test_business_oracle_refuses_incomplete_or_untruthful_interface_projection(d
         prove_business(pages)
 
 
-@pytest.mark.parametrize("damage", [None, "late-value", "duplicate", "missing", "float-decimal", "empty-not-null", "wrong-source"])
+@pytest.mark.parametrize("damage", [None, "canonical-integer-text", "late-value", "duplicate", "missing", "float-decimal", "empty-not-null", "wrong-source",
+    "float-integer", "boolean-integer", "fractional-integer", "exponent-integer", "padded-integer", "unicode-integer", "signed-integer", "spaced-integer"])
 def test_complete_comparison_oracle_rejects_unsampled_corruption(tmp_path, damage):
     path = tmp_path / "comparison.sqlite"
     rows = 17
@@ -355,6 +356,8 @@ def test_complete_comparison_oracle_rejects_unsampled_corruption(tmp_path, damag
             if damage == "missing" and index == rows:
                 continue
             row = cycle.synthetic_row(index if damage != "duplicate" or index != rows else 1)
+            if damage == "canonical-integer-text":
+                row["ordinal"] = str(row["ordinal"])
             if index == rows:
                 if damage == "late-value":
                     row["id"] = "17"
@@ -362,8 +365,11 @@ def test_complete_comparison_oracle_rejects_unsampled_corruption(tmp_path, damag
                     row["amount"] = float(row["amount"])
                 elif damage == "empty-not-null":
                     row["optional"] = ""
+                elif damage in {"float-integer", "boolean-integer", "fractional-integer", "exponent-integer", "padded-integer", "unicode-integer", "signed-integer", "spaced-integer"}:
+                    row["ordinal"] = {"float-integer": 17.0, "boolean-integer": True, "fractional-integer": "17.0",
+                        "exponent-integer": "17e0", "padded-integer": "017", "unicode-integer": "١٧", "signed-integer": "+17", "spaced-integer": " 17"}[damage]
             db.execute("INSERT INTO details VALUES(?,?,?,?,?,?)", (index, "UNCHANGED", 1, json.dumps(row), json.dumps(row), "[]"))
-    if damage:
+    if damage not in {None, "canonical-integer-text"}:
         with pytest.raises(AssertionError):
             cycle.verify_comparison_report(path, rows, summary, "before", "after", ["id"])
     else:
