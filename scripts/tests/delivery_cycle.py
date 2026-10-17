@@ -49,6 +49,11 @@ PRIVATE_RESOURCES = {
     "destination-sqlserver": (3072, 0.41), "scheduler": (256, 0.03),
     "events-notifications": (256, 0.03), "events-chaining": (256, 0.03),
 }
+# This older connector matrix never dispatches these independent 0.9.5 lanes.
+# Keep their definitions and probes intact while excluding them explicitly from
+# this generated disposable stack's unchanged fourteen-service resource budget.
+PRIVATE_UNUSED_SERVICES = frozenset({"document-worker", "comparison-worker"})
+PRIVATE_UNUSED_PROFILE = "delivery-unused095"
 PRIVATE_SPARK_ENV = {
     "TRACKVANCE_SPARK_MASTER": "local[1]",
     "TRACKVANCE_SPARK_DRIVER_MEMORY_MB": "768",
@@ -124,8 +129,11 @@ def validate_private_resources(profile: dict) -> dict:
     from ci.local_resources import memory_bytes
 
     services = profile["services"]
-    if set(services) != set(PRIVATE_RESOURCES):
+    if not set(PRIVATE_RESOURCES) <= set(services) or set(services) - set(PRIVATE_RESOURCES) - PRIVATE_UNUSED_SERVICES:
         raise ValueError("DELIVERY_PRIVATE_RESOURCE_TOPOLOGY")
+    if any(services[name].get("profiles") != [PRIVATE_UNUSED_PROFILE]
+           for name in set(services) & PRIVATE_UNUSED_SERVICES):
+        raise ValueError("DELIVERY_UNUSED_LANE_MUST_REMAIN_INACTIVE")
     memory, cpus = 0, 0.0
     for name, (mib, cpu_ceiling) in PRIVATE_RESOURCES.items():
         row = services[name]
@@ -172,9 +180,11 @@ def configure_private_resources(profile: dict, project: str) -> dict:
     validated_project_name(project)
     services = profile["services"]
     optional = {"report-worker", "destination-postgres", "destination-postgres18", "destination-sqlserver"}
-    if (set(services) - set(PRIVATE_RESOURCES)
+    if (set(services) - set(PRIVATE_RESOURCES) - PRIVATE_UNUSED_SERVICES
             or not set(PRIVATE_RESOURCES) - optional <= set(services)):
         raise ValueError("DELIVERY_PRIVATE_RESOURCE_TOPOLOGY")
+    for name in set(services) & PRIVATE_UNUSED_SERVICES:
+        services[name]["profiles"] = [PRIVATE_UNUSED_PROFILE]
     for name, (mib, cpus) in PRIVATE_RESOURCES.items():
         row = services.setdefault(name, {"pids_limit": 128 if name == "report-worker" else 256})
         row.update(mem_limit=mib * 1024**2, cpus=cpus)
@@ -184,7 +194,7 @@ def configure_private_resources(profile: dict, project: str) -> dict:
     services["destination-sqlserver"].setdefault("environment", {}).setdefault("MSSQL_MEMORY_LIMIT_MB", "2048")
     services["worker"].setdefault("environment", {}).update(PRIVATE_SPARK_ENV)
     validate_private_resources(profile)
-    apply_limits(profile, project)
+    apply_limits(profile, project, active_services=PRIVATE_RESOURCES)
     return validate_private_resources(profile)  # A reduced SQL cgroup never passes.
 
 _spec = importlib.util.spec_from_file_location(

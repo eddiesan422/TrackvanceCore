@@ -109,6 +109,8 @@ def probe_profile(monkeypatch):
         definitions = yaml.safe_load((runner.ROOT / relative).read_text(encoding="utf-8"))["services"]
         for name, definition in definitions.items():
             if "healthcheck" in definition:
+                if name not in profile["services"]:
+                    profile["services"][name] = {"mem_limit": definition["mem_limit"], "cpus": definition["cpus"]}
                 profile["services"][name]["healthcheck"] = copy.deepcopy(definition["healthcheck"])
     for service in profile["services"].values():
         service["pids_limit"] = 128
@@ -139,6 +141,22 @@ def test_private_probe_deadlines_preserve_every_real_command_and_original_compos
     assert [path.read_bytes() for path in paths] == originals
 
 
+@pytest.mark.parametrize("name", sorted(runner.PRIVATE_UNUSED_SERVICES))
+def test_new_lanes_are_explicitly_inactive_without_raising_the_private_connector_budget(monkeypatch, name):
+    profile = probe_profile(monkeypatch)
+    assert profile["services"][name]["profiles"] == [runner.PRIVATE_UNUSED_PROFILE]
+    assert "worker_status" in profile["services"][name]["healthcheck"]["test"][3]
+    receipt = runner.validate_private_resources(profile)
+    assert receipt["active_services"] == sorted(runner.PRIVATE_RESOURCES)
+    assert receipt["memory_bytes"] == 9728 * 1024**2 and receipt["cpus"] == 2.8
+    unexpected_running = healthy_diagnostics(profile) + [{**healthy_diagnostics(profile)[0], "service": name}]
+    with pytest.raises(RuntimeError, match="DELIVERY_REAL_HEALTHCHECK_TOPOLOGY"):
+        runner.private_healthcheck_evidence(unexpected_running, profile["services"])
+    profile["services"][name].pop("profiles")
+    with pytest.raises(ValueError, match="DELIVERY_UNUSED_LANE_MUST_REMAIN_INACTIVE"):
+        runner.validate_private_resources(profile)
+
+
 @pytest.mark.parametrize("mutation", ["disabled", "none", "short", "unbounded", "start", "absent_probe"])
 def test_private_probe_configuration_cannot_disable_or_remove_a_real_healthcheck(monkeypatch, mutation):
     services = probe_profile(monkeypatch)["services"]
@@ -164,7 +182,7 @@ def healthy_diagnostics(profile):
              "exit_code": 0, "pid": 100, "memory_limit_bytes": row["mem_limit"],
              "nano_cpus": round(row["cpus"] * 10**9), "pids_limit": row["pids_limit"],
              "probes": [{"exit_code": 0, "duration_seconds": 4.2, "timed_out": False}]}
-            for name, row in profile["services"].items()]
+            for name, row in profile["services"].items() if name in runner.PRIVATE_RESOURCES]
 
 
 def test_real_probe_receipt_requires_all_fourteen_service_cgroups_and_completed_probes(monkeypatch):
@@ -231,6 +249,8 @@ def test_runtime_reader_includes_native_targets_only_when_requested_and_never_pr
     profile = probe_profile(monkeypatch)
     rows = []
     for name, definition in profile["services"].items():
+        if name not in runner.PRIVATE_RESOURCES:
+            continue
         rows.append({"Config": {"Labels": {"com.docker.compose.service": name},
                                 "Env": ["PRIVATE_SYNTHETIC_MARKER"]},
                      "HostConfig": {"PidsLimit": definition["pids_limit"], "Memory": definition["mem_limit"],

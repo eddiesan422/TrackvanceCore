@@ -46,7 +46,7 @@ TYPE_TABLE = {"DATASET": "datasets", "DATASET_VERSION": "dataset_versions", "RUN
     "INTAKE_OCCURRENCE": "intake_occurrences",
     "DOCUMENT_FAMILY": "document_families", "DOCUMENT_TEMPLATE": "document_templates",
     "DOCUMENT": "document_originals", "DOCUMENT_EXTRACTION": "document_extractions",
-    "DOCUMENT_BATCH": "document_batches", "COMPARISON": "version_comparisons",
+    "DOCUMENT_BATCH": "document_batches", "COMPARISON": "version_comparisons", "VERSION_COMPARISON": "version_comparisons",
     "CONNECTION_VERSION": "external_connection_versions", "DELIVERY_DESTINATION": "delivery_destinations",
     "DELIVERY_DESTINATION_VERSION": "delivery_destination_versions", "DELIVERY_TARGET_POLICY": "delivery_target_policies"}
 PATH_FIELDS = {"dataset_versions": ("original_path", "canonical_path"), "runs": ("result_path", "evidence_path"),

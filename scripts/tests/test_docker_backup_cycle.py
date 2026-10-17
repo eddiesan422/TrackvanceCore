@@ -742,7 +742,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
     monkeypatch.setattr(runner, "cleanup", lambda project, path: calls.append(("cleanup", project)))
     monkeypatch.setattr(runner, "initialize_source", lambda *args: None)
     monkeypatch.setattr(runner, "attach_external_network", lambda *args: None)
-    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.9.0"}))
+    monkeypatch.setattr(runner, "RecoveryApi", lambda *args: SimpleNamespace(json=lambda *args: {"version": "0.9.5"}))
     monkeypatch.setattr(runner, "capture_original", lambda *args: {"real_connection": True})
     monkeypatch.setattr(runner, "prepare_delivery_operations", lambda *args: None)
     monkeypatch.setattr(runner, "prepare_identity_recovery", lambda *args: args[-1])
@@ -758,7 +758,7 @@ def test_orchestration_destroys_source_before_restore_and_reports_html_only(monk
             assert env['TRACKVANCE_SSO_GOOGLE_ENABLED'] == 'false'
             assert 'TRACKVANCE_SSO_GOOGLE_CLIENT_SECRET' not in env
             profile = json.loads(Path(env['TRACKVANCE_COMPOSE_OVERRIDE_FILE']).read_text())['services']
-            assert len(profile) == 9
+            assert len(profile) == 11
             assert all(row.get('cpus') and row.get('mem_limit') and row.get('pids_limit') for row in profile.values())
         if args[:2] == ['docker', 'compose'] and 'up' in args and target in args:
             assert ('restore', target) in calls
@@ -838,7 +838,7 @@ def test_native_fingerprint_never_ignores_unknown_or_missing_tables(change):
         state['schema_version'] = 5
     if change == 'migration':
         state['migration'] = runner.docker_state.IDENTITY_MIGRATION
-    with pytest.raises(RuntimeError, match='65 tablas'):
+    with pytest.raises(RuntimeError, match='77 tablas'):
         runner.assert_native_fingerprint(state)
 
 

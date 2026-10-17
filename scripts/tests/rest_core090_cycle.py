@@ -14,12 +14,14 @@ import json
 import os
 import resource
 import sqlite3
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -106,6 +108,36 @@ def run_timing(run):
     assert seconds >= 0
     return {"created_at": run["created_at"], "started_at": run["started_at"], "finished_at": run["finished_at"],
             "execution_seconds": seconds}
+
+
+def verify_comparison_report(path, rows, summary, before_id, after_id, keys):
+    """Independent complete-value oracle; never import the product comparator."""
+    seen = bytearray(rows + 1)
+    records = 0
+    with sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True) as db:
+        metadata = {key: json.loads(value) for key, value in db.execute("SELECT key,value FROM report_metadata")}
+        assert metadata["summary"] == summary
+        assert metadata["before_version_id"] == before_id and metadata["after_version_id"] == after_id
+        assert metadata["settings"]["keys"] == keys
+        for kind, multiplicity, before, after, changed in db.execute(
+                "SELECT kind,multiplicity,before_json,after_json,changed_columns FROM details ORDER BY id"):
+            assert kind == "UNCHANGED" and multiplicity == 1 and json.loads(changed) == []
+            old, new = json.loads(before), json.loads(after)
+            assert old == new and set(old) == {name for name, *_ in FIELDS}
+            ordinal = old["ordinal"]
+            assert type(ordinal) is int and 1 <= ordinal <= rows and not seen[ordinal]
+            expected = synthetic_row(ordinal)
+            for column in ("id", "category", "optional"):
+                assert old[column] == expected[column]
+            assert isinstance(old["amount"], str) and Decimal(old["amount"]) == Decimal(expected["amount"])
+            assert datetime.fromisoformat(old["observed_at"]).astimezone(UTC) == datetime.fromisoformat(expected["observed_at"]).astimezone(UTC)
+            seen[ordinal] = 1
+            records += 1
+    assert records == rows and sum(seen) == rows
+    assert summary["counts"] == {"ADDED": 0, "ABSENT": 0, "MODIFIED": 0, "UNCHANGED": rows}
+    return {"result": "PASS", "detail_records": records, "unique_ordinals": rows, "values_checked": rows * len(FIELDS) * 2,
+            "oracle": "EVERY_PERSISTED_BEFORE_AFTER_VALUE_AND_COMPLETE_UNIQUE_ID_BITMAP",
+            "bounded_bitmap_bytes": len(seen), "no_product_comparator_imports": True}
 
 
 def require_codex():
@@ -323,6 +355,20 @@ class Client:
         assert size > 0
         return {"sha256": digest.hexdigest(), "bytes": size, "scope": "COMPLETE_PERSISTED_REPORT_STREAM"}
 
+    def comparison_report(self, identity, rows, summary, before_id, after_id, keys):
+        digest, size = hashlib.sha256(), 0
+        with tempfile.TemporaryDirectory(prefix="core095-comparison-oracle-") as directory:
+            path = Path(directory) / "report.sqlite"
+            with self.opener.open(self.base + f"/api/v1/version-comparisons/{identity}/download", timeout=120) as response, path.open("xb") as target:
+                assert response.status == 200
+                while block := response.read(65536):
+                    size += len(block)
+                    assert size <= 2 * 1024**3
+                    digest.update(block)
+                    target.write(block)
+            proof = verify_comparison_report(path, rows, summary, before_id, after_id, keys)
+        return {"sha256": digest.hexdigest(), "bytes": size, "scope": "COMPLETE_PERSISTED_REPORT_STREAM", "oracle": proof}
+
 
 def certify_update_comparison(client, receiver_url, dataset_id, source_id, connection_id, contract_id,
                               automation_id, actor_id, rows, nonce, timeout, original_receipt):
@@ -374,7 +420,20 @@ def certify_update_comparison(client, receiver_url, dataset_id, source_id, conne
     assert details["records"] == rows and details["total"] == rows and len(details["items"]) == 1
     first = details["items"][0]
     assert first["before"] == first["after"] and first["before"]["id"] == "000000001" and first["changed_columns"] == []
-    report = client.download_digest(f"/version-comparisons/{queued['id']}/download")
+    report = client.comparison_report(queued["id"], rows, summary, source_id, repeated["output_version_id"], ["id"])
+    fallback_reports = []
+    for keys in (["category"], []):
+        registered = client.call(f"/datasets/{dataset_id}/comparisons", {"before_version_id": source_id,
+            "after_version_id": repeated["output_version_id"], "keys": keys}, expected=202)
+        result = wait_for(lambda: client.call(f"/version-comparisons/{registered['id']}"), lambda item: item["status"] in TERMINAL,
+            timeout=timeout, label="full-ambiguous-key-comparison" if keys else "full-no-key-comparison")
+        assert result["status"] == "SUCCESS" and result["summary"]["mode"] == "MULTISET"
+        assert result["summary"]["complete_population"] is True
+        assert result["summary"]["before_rows"] == result["summary"]["after_rows"] == rows
+        if keys:
+            assert any("AMBIGUOUS_KEYS" in warning for warning in result["summary"]["warnings"])
+        fallback_reports.append({"id": result["id"], "artifact_id": result["artifact_id"], "summary": result["summary"],
+            "report": client.comparison_report(result["id"], rows, result["summary"], source_id, repeated["output_version_id"], keys)})
     final_receipt = receiver_json(receiver_url, "/receipt")
     for key in ("received_rows", "post_calls", "batches", "population_sha256", "batch_metadata_sha256", "confirmed_rows", "payload_bytes"):
         assert final_receipt[key] == original_receipt[key]
@@ -383,6 +442,7 @@ def certify_update_comparison(client, receiver_url, dataset_id, source_id, conne
         "duration_seconds": unchanged["duration_seconds"], "output_version_id": None},
         "every_cut": {"id": repeated["id"], "duration_seconds": repeated["duration_seconds"], "version": second_snapshot},
         "comparison": {"id": compared["id"], "artifact_id": compared["artifact_id"], "summary": summary, "report": report},
+        "fallback_comparisons": fallback_reports,
         "no_additional_delivery_posts": True, "receiver_post_calls": final_receipt["post_calls"]}
 
 

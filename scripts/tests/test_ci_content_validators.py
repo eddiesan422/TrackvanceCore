@@ -301,6 +301,9 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
         'identity-sso.spec.ts': ('TV_IDENTITY_SSO_E2E', 'identity-sso'),
         'roadmap-source-cycle.spec.ts': ('TV_CONNECTIONS_E2E', 'connections'),
         'volume.spec.ts': ('TV_VOLUME_E2E', 'async-volume-100'),
+        'documents-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        'acquisition-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        'resolution-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
     }
     value = {'selected_spec_files': list(spec['browser_required_specs']),
              'excluded_opt_in_specs': [{'file': 'tests-e2e/' + name, 'required_flag': flag, 'covered_by_group': group}

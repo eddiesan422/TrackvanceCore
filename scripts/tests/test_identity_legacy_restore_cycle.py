@@ -17,7 +17,7 @@ def test_historical_sources_are_fixed_authentic_commits_not_current_checkout():
         version: spec[0] for version, spec in runner.SOURCES.items()}
     assert runner.SOURCES["0.6.1"] == (
         "6fac26b3648cb4a4b50c094ef12c1e103bc97ddd", "0012_delivery_target_audit", 5)
-    assert runner.TARGET_VERSION == "0.9.0"
+    assert runner.TARGET_VERSION == "0.9.5"
     assert runner.SOURCES["0.6.0"] == (
         "587909bc4462683e87e403dd2ea29a1d6d4afe08", "0012_delivery_target_audit", 5)
     assert runner.SOURCES["0.5.1"] == (
@@ -195,7 +195,7 @@ def test_restore_compares_immutable_state_before_enabling_disposable_demo_access
     monkeypatch.setattr(runner, "assert_main_unchanged", lambda *_: None)
     monkeypatch.setattr(runner, "available_port", iter([3201, 3202]).__next__)
     monkeypatch.setattr(runner.docker_state, "ensure_fresh_project", lambda _: None)
-    versions = iter(["0.5.1", "0.9.0"])
+    versions = iter(["0.5.1", "0.9.5"])
     monkeypatch.setattr(runner, "health_version", lambda _: next(versions))
     before = {"migration": "0009_delivery_reviews", "schema_version": 4, "tables": {}}
     after = {"migration": runner.docker_state.CURRENT_MIGRATION, "schema_version": runner.docker_state.VERIFY_SCHEMA_VERSION,

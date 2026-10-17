@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
@@ -337,3 +338,35 @@ def test_business_oracle_refuses_incomplete_or_untruthful_interface_projection(d
         pages[0]["nodes"][-1]["technical_groups"][0]["relationship_count"] = 999
     with pytest.raises(AssertionError):
         prove_business(pages)
+
+
+@pytest.mark.parametrize("damage", [None, "late-value", "duplicate", "missing", "float-decimal", "empty-not-null", "wrong-source"])
+def test_complete_comparison_oracle_rejects_unsampled_corruption(tmp_path, damage):
+    path = tmp_path / "comparison.sqlite"
+    rows = 17
+    summary = {"counts": {"ADDED": 0, "ABSENT": 0, "MODIFIED": 0, "UNCHANGED": rows}}
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE details(id INTEGER PRIMARY KEY,kind TEXT,multiplicity INTEGER,before_json TEXT,after_json TEXT,changed_columns TEXT)")
+        db.execute("CREATE TABLE report_metadata(key TEXT PRIMARY KEY,value TEXT)")
+        for key, value in {"summary": summary, "settings": {"keys": ["id"]},
+                           "before_version_id": "before", "after_version_id": "foreign" if damage == "wrong-source" else "after"}.items():
+            db.execute("INSERT INTO report_metadata VALUES(?,?)", (key, json.dumps(value)))
+        for index in range(1, rows + 1):
+            if damage == "missing" and index == rows:
+                continue
+            row = cycle.synthetic_row(index if damage != "duplicate" or index != rows else 1)
+            if index == rows:
+                if damage == "late-value":
+                    row["id"] = "17"
+                elif damage == "float-decimal":
+                    row["amount"] = float(row["amount"])
+                elif damage == "empty-not-null":
+                    row["optional"] = ""
+            db.execute("INSERT INTO details VALUES(?,?,?,?,?,?)", (index, "UNCHANGED", 1, json.dumps(row), json.dumps(row), "[]"))
+    if damage:
+        with pytest.raises(AssertionError):
+            cycle.verify_comparison_report(path, rows, summary, "before", "after", ["id"])
+    else:
+        proof = cycle.verify_comparison_report(path, rows, summary, "before", "after", ["id"])
+        assert proof["result"] == "PASS" and proof["unique_ordinals"] == rows
+        assert proof["values_checked"] == rows * 12

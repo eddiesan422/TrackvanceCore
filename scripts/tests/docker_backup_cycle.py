@@ -91,7 +91,7 @@ def assert_no_secrets(contents: str | bytes, credentials: tuple[str, ...]) -> No
 def assert_native_fingerprint(state: dict[str, Any]) -> None:
     ensure(state.get('schema_version') == docker_state.VERIFY_SCHEMA_VERSION and set(state.get('tables', {})) == docker_state.CURRENT_STATE_TABLES
            and state.get('migration') == docker_state.CURRENT_MIGRATION,
-           'La captura no contiene las 65 tablas y la revisión nativa 0.9.5.')
+           'La captura no contiene las 77 tablas y la revisión nativa 0.9.5.')
 
 
 def assert_stream_no_secrets(stream: BinaryIO, credentials: tuple[str, ...]) -> None:

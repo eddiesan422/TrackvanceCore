@@ -20,12 +20,17 @@ os.environ["DEMO_SEED_ENABLED"] = "false"
 
 @pytest.fixture
 def database():
+    from sqlalchemy import MetaData, Table
+
     from trackvance import identity_bootstrap  # noqa: F401
     from trackvance.db import Base, SessionLocal, engine
     from trackvance.models import User
 
     assert Path(engine.url.database).resolve().is_relative_to(TEST_ROOT)
     Base.metadata.drop_all(engine)
+    # Migration tests can leave a historical revision. The fixture recreates the
+    # current model, so its external Alembic marker must be reset with that schema.
+    Table("alembic_version", MetaData()).drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
         db.add(User(id="test-user", name="Test User", email="tester@example.test",

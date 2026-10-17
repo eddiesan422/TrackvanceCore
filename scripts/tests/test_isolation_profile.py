@@ -32,7 +32,7 @@ def test_profile_masks_live_sso_and_namespaces_every_app_image(tmp_path):
     assert environment['POSTGRES_USER'] == environment['POSTGRES_DB'] == 'tv_v070_test'
     assert environment['TRACKVANCE_SPARK_MASTER'] == 'local[2]'
     services = json.loads((tmp_path / 'private-compose.json').read_text())['services']
-    assert len(services) == 9
+    assert len(services) == 11
     for name, settings in services.items():
         assert settings['cpus'] > 0 and settings['mem_limit'] and settings['pids_limit'] > 0
         if name != 'postgres':
@@ -79,7 +79,11 @@ def test_ci_report_bounds_match_base_compose_and_original_nine_services_are_unch
                 'scheduler': (.25, '256m', 128), 'events-notifications': (.25, '256m', 128),
                 'events-chaining': (.25, '256m', 128), 'web': (.25, '128m', 64)}
     assert {name: (value['cpus'], value['mem_limit'], value['pids_limit'])
-            for name, value in services.items() if name != 'report-worker'} == expected
+            for name, value in services.items() if name in expected} == expected
+    added = {'document-worker': (1, '1g', 128), 'comparison-worker': (1, '768m', 128)}
+    assert {name: (services[name]['cpus'], services[name]['mem_limit'], services[name]['pids_limit'])
+            for name in added} == added
+    assert set(services) == set(expected) | set(added) | {'report-worker'}
     assert len(calls) == 1 and calls[0][0] == (scoped, environment)
     assert calls[0][1] == {'project': project, 'directory': tmp_path, 'allow_mock_oidc': False}
 
