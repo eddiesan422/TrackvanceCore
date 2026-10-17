@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .document_template_builder_schemas import VisualFieldRule, VisualTableRule
+
 
 class DocumentField(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -18,6 +20,7 @@ class DocumentField(BaseModel):
     business_key: bool = False
     date_format: str = Field(default="%Y-%m-%d", max_length=40)
     decimal_separator: Literal[".", ","] = "."
+    visual: VisualFieldRule | None = None
 
     @field_validator("pattern")
     @classmethod
@@ -33,13 +36,22 @@ class DocumentField(BaseModel):
 class DocumentTable(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
-    row_pattern: str = Field(min_length=1, max_length=1000)
+    row_pattern: str = Field(default="", max_length=1000)
     fields: list[DocumentField] = Field(min_length=1, max_length=40)
     required: bool = True
     row_label: str = Field(default="", max_length=160)
+    visual: VisualTableRule | None = None
 
     @model_validator(mode="after")
     def row_groups(self):
+        if self.visual:
+            if len(self.fields) != len(self.visual.header_labels):
+                raise ValueError("La tabla visual requiere una definición por columna.")
+            if len({f.name.casefold() for f in self.fields}) != len(self.fields):
+                raise ValueError("Los nombres finales de columnas deben ser únicos.")
+            return self
+        if not self.row_pattern:
+            raise ValueError("Selecciona una tabla visual o configura el patrón avanzado.")
         try:
             groups = re.compile(self.row_pattern).groupindex
         except re.error:

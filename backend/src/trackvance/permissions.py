@@ -206,6 +206,8 @@ _routes("documents:write", "POST", "/documents/families/{id}/originals", "/docum
 _routes("documents:review", "POST", "/documents/originals/{id}/review")
 _routes("documents:publish", "POST", "/documents/families/{id}/batches", "/documents/batches/{id}/publish")
 _routes("documents:download", "GET", "/documents/originals/{id}/file", "/documents/originals/{id}/pages/{page}")
+_routes("documents:configure", "GET", "/documents/originals/{id}/builder")
+_routes("documents:configure", "POST", "/documents/families/{id}/builder/examples", "/documents/originals/{id}/builder/propose", "/documents/families/{id}/builder/test")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

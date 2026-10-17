@@ -280,6 +280,7 @@ def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
         'roadmap-source-cycle.spec.ts': ('TV_CONNECTIONS_E2E', 'connections'),
         'reports-download-opfs.spec.ts': ('TV_REPORT_DOWNLOAD_OPFS', 'catalog-reports'),
         'documents-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        'document-visual-builder-095.spec.ts': ('TV_CORE095_VISUAL_E2E', 'compose-functional'),
         'acquisition-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
         'resolution-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
     }

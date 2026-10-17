@@ -873,6 +873,11 @@
     },
     {
       "method": "GET",
+      "path": "/documents/originals/{id}/builder",
+      "permission": "documents:configure"
+    },
+    {
+      "method": "GET",
       "path": "/documents/originals/{id}/file",
       "permission": "documents:download"
     },
@@ -1433,6 +1438,16 @@
     },
     {
       "method": "POST",
+      "path": "/documents/families/{id}/builder/examples",
+      "permission": "documents:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/documents/families/{id}/builder/test",
+      "permission": "documents:configure"
+    },
+    {
+      "method": "POST",
       "path": "/documents/families/{id}/originals",
       "permission": "documents:write"
     },
@@ -1449,6 +1464,11 @@
     {
       "method": "POST",
       "path": "/documents/families/{id}/templates/{template_id}/activate",
+      "permission": "documents:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/documents/originals/{id}/builder/propose",
       "permission": "documents:configure"
     },
     {

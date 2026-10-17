@@ -2,7 +2,7 @@
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 215 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 219 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -138,6 +138,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/documents/limits` | `documents:read` |
 | GET | `/documents/originals` | `documents:read` |
 | GET | `/documents/originals/{id}` | `documents:read` |
+| GET | `/documents/originals/{id}/builder` | `documents:configure` |
 | GET | `/documents/originals/{id}/file` | `documents:download` |
 | GET | `/documents/originals/{id}/pages/{page}` | `documents:download` |
 | GET | `/exceptions` | `exceptions:read` |
@@ -250,10 +251,13 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/documents/batches/{id}/publish` | `documents:publish` |
 | POST | `/documents/families` | `documents:configure` |
 | POST | `/documents/families/{id}/batches` | `documents:publish` |
+| POST | `/documents/families/{id}/builder/examples` | `documents:configure` |
+| POST | `/documents/families/{id}/builder/test` | `documents:configure` |
 | POST | `/documents/families/{id}/originals` | `documents:write` |
 | POST | `/documents/families/{id}/pipeline` | `documents:configure` |
 | POST | `/documents/families/{id}/templates` | `documents:configure` |
 | POST | `/documents/families/{id}/templates/{template_id}/activate` | `documents:configure` |
+| POST | `/documents/originals/{id}/builder/propose` | `documents:configure` |
 | POST | `/documents/originals/{id}/cancel` | `documents:write` |
 | POST | `/documents/originals/{id}/retry` | `documents:write` |
 | POST | `/documents/originals/{id}/review` | `documents:review` |

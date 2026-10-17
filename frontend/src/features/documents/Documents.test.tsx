@@ -17,6 +17,7 @@ beforeEach(() => {
     if (path === '/documents/families/family') return family
     if (path.startsWith('/documents/originals?')) return { items: [original], total: 1 }
     if (path === '/documents/originals/original') return original
+    if (path === '/documents/batches/batch-1') return { id: 'batch-1', family_id: 'family', status: 'PUBLISHED', settings: {}, members: [{ document_id: 'original', status: 'PUBLISHED' }], published_versions: { headers: 'version-2' } }
     if (path === '/documents/families/family/batches') return { items: [{ id: 'batch-1', status: 'PUBLISHED', settings: {}, members: [{ document_id: 'original', status: 'PUBLISHED' }], published_versions: { headers: 'version-2' } }], total: 1 }
     throw new Error('Unexpected API path in document UI test')
   })
@@ -52,12 +53,11 @@ describe('Documentos guided operations', () => {
   it('requires explicit impact acknowledgement and preserves the exact published document set for correction', async () => {
     const user = userEvent.setup()
     const baseApi = vi.mocked(api).getMockImplementation()!
-    vi.mocked(api).mockImplementation(async path => path === '/documents/families/family/batches' ? {
-      items: [{ id: 'batch-1', template_id: 'frozen-template', status: 'PUBLISHED', settings: {}, published_versions: { headers: 'version-2' }, members: [
+    vi.mocked(api).mockImplementation(async path => path === '/documents/batches/batch-1' ? { id: 'batch-1', template_id: 'frozen-template', status: 'PUBLISHED', settings: {}, published_versions: { headers: 'version-2' }, members: [
         { document_id: 'original', extraction_id: 'old-extraction-1', status: 'PUBLISHED' },
         { document_id: 'second-original', extraction_id: 'old-extraction-2', status: 'PUBLISHED' },
         { document_id: 'deferred-original', status: 'DEFERRED' },
-      ] }], total: 1,
+      ], family_id: 'family',
     } : baseApi(path))
     vi.mocked(post).mockResolvedValue({ id: 'correction-batch', status: 'BLOCKED' })
     renderApp(<Documents/>, { path: '/documents/families/family?batch=batch-1', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:publish'] })

@@ -99,7 +99,7 @@ def add_document_fixture(compose, environment, evidence, project):
         "delivery-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}},
         "acquisition-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}}
     }}, indent=2), encoding="utf-8")
-    environment.update(TV_CORE095_DOCUMENT_E2E="true", TV_CORE095_TEST_PROJECT=project,
+    environment.update(TV_CORE095_DOCUMENT_E2E="true", TV_CORE095_VISUAL_E2E="true", TV_CORE095_TEST_PROJECT=project,
         TV_CORE095_DOCUMENT_RECEIVER_URL=internal,
         TV_CORE095_DOCUMENT_RECEIVER_CONTROL_URL=f"http://127.0.0.1:{receiver_port}")
     return [*compose, "-f", str(overlay)]
@@ -152,7 +152,7 @@ def main() -> int:
     environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
     documents_enabled = not options.clean_demo and not options.skip_playwright and (
         options.documents or not options.browser_spec or bool(set(options.browser_spec) & {
-            "tests-e2e/documents-095.spec.ts", "tests-e2e/acquisition-095.spec.ts", "tests-e2e/resolution-095.spec.ts"}))
+            "tests-e2e/documents-095.spec.ts", "tests-e2e/document-visual-builder-095.spec.ts", "tests-e2e/acquisition-095.spec.ts", "tests-e2e/resolution-095.spec.ts"}))
     if documents_enabled:
         compose = add_document_fixture(compose, environment, evidence, project)
     compose = isolate_compose(compose, environment, evidence, project)

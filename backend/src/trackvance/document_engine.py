@@ -10,6 +10,7 @@ import csv
 import ctypes
 import ctypes.util
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -27,6 +28,13 @@ from typing import Any
 MAX_PAGES = 50
 MAX_PIXELS = 20_000_000
 MAX_TEXT = 2_000_000
+
+# -I intentionally excludes the script directory from sys.path. Load only this
+# fixed sibling before confinement; the definition cannot choose a module/path.
+_rules_spec = importlib.util.spec_from_file_location("document_visual_rules", Path(__file__).with_name("document_template_builder_rules.py"))
+assert _rules_spec and _rules_spec.loader
+_visual_rules = importlib.util.module_from_spec(_rules_spec)
+_rules_spec.loader.exec_module(_visual_rules)
 
 
 def confine(folder: Path):
@@ -153,7 +161,10 @@ def ocr(path, page):
         y2 = max(int(w["top"]) + int(w["height"]) for w in words)
         lines.append({"text": " ".join(w["text"] for w in words), "page": page,
                       "region": [x1 / width, y1 / height, x2 / width, y2 / height],
-                      "confidence": min(float(w["conf"]) for w in words), "method": "OCR"})
+                      "confidence": min(float(w["conf"]) for w in words), "method": "OCR",
+                      "words": [{"text": w["text"], "region": [int(w["left"]) / width, int(w["top"]) / height,
+                          (int(w["left"]) + int(w["width"])) / width, (int(w["top"]) + int(w["height"])) / height],
+                          "confidence": float(w["conf"])} for w in words]})
     return lines
 
 
@@ -185,7 +196,10 @@ def lines_from_file(source, folder, progress):
                     page_lines.append({"text": " ".join(w.text or "" for w in words), "page": index + 1,
                         "region": [float(line.attrib["xMin"]) / width, float(line.attrib["yMin"]) / height,
                                    float(line.attrib["xMax"]) / width, float(line.attrib["yMax"]) / height],
-                        "confidence": None, "method": "DIGITAL"})
+                        "confidence": None, "method": "DIGITAL",
+                        "words": [{"text": w.text or "", "region": [float(w.attrib["xMin"]) / width,
+                            float(w.attrib["yMin"]) / height, float(w.attrib["xMax"]) / width,
+                            float(w.attrib["yMax"]) / height], "confidence": None} for w in words]})
         # Mixed pages retain digital text and additionally recognize embedded scans.
         images = command(["/usr/bin/pdfimages", "-f", str(index + 1), "-l", str(index + 1), "-list", str(source)])
         if not page_lines or re.search(r"^\s*\d+\s+\d+\s+image\s", images, re.MULTILINE):
@@ -232,7 +246,9 @@ def extract(lines, definition):
     fields = {}
     for field in definition["fields"]:
         matches = []
-        for line in lines:
+        if field.get("visual"):
+            matches = _visual_rules.field_candidates(lines, field["visual"])
+        for line in ([] if field.get("visual") else lines):
             text = line["text"]
             label = field.get("label", "")
             if label:
@@ -256,6 +272,18 @@ def extract(lines, definition):
     for table in definition["tables"]:
         rows = []
         rejected = []
+        if table.get("visual"):
+            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"])
+            for values in visual_rows:
+                row = {}
+                for field, (raw, source) in zip(table["fields"], values, strict=True):
+                    value, validity = validate_value(raw, field)
+                    row[field["name"]] = {"value": value, "observed": raw, "validity": validity,
+                        "confidence": source["confidence"], "origin": {k: source[k] for k in ("page", "region", "method")},
+                        "reviewed": False}
+                rows.append(row)
+            tables[table["name"]], table_unparsed[table["name"]] = rows, rejected
+            continue
         prefix = table.get("row_label", "")
         if not prefix:
             literal = re.match(r"\^?([A-Za-z][A-Za-z0-9 ]+)\(", table["row_pattern"])

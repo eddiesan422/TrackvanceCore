@@ -79,6 +79,7 @@ async function buildFamily(page: Page, nonce: string, mode = 'INDIVIDUAL') {
   await familyCard.click()
   await expect(page).toHaveURL(new RegExp(`/documents/families/${family.id}$`))
   await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
+  await page.getByText('Configuración avanzada de expresiones y plantillas anteriores', { exact: true }).click()
   const builder = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Constructor de plantilla', exact: true }) })
   const definitions = [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', type: 'STRING' },
     { name: 'total', label: 'Total', pattern: '([0-9]+\\.[0-9]+)', type: 'DECIMAL' },
@@ -257,12 +258,30 @@ test('document browser individual flow → exact native approved output → veri
     const denied = await readerPage.goto(`/api/v1/documents/originals/${final.id}/file`)
     expect(denied?.status()).toBe(403)
     await expect(readerPage.locator('body')).toContainText('PERMISSION_DENIED')
+    const deniedGlobal = await readerPage.request.get(`/api/v1/documents/originals?search=${final.id}`)
+    expect(deniedGlobal.status()).toBe(403)
+    const deniedBody = await deniedGlobal.json()
+    expect(deniedBody).not.toHaveProperty('total')
+    expect(deniedBody).not.toHaveProperty('items')
   } finally {
     await readerContext.close()
     const latestReader = await call(page, csrf, `/users/${reader.user.id}`)
     const removal = await page.request.delete(`/api/v1/users/${reader.user.id}`, { data: { version: latestReader.version }, headers: { 'X-CSRF-Token': csrf } })
     expect(removal.status()).toBe(200)
   }
+  await page.goto('/documents')
+  await page.getByRole('tab', { name: 'Todos los documentos', exact: true }).click()
+  const global = page.getByRole('region', { name: 'Todos los documentos', exact: true })
+  await global.getByRole('textbox', { name: 'Buscar nombre, referencia, identificador extraído o familia', exact: true }).fill(final.id)
+  await expect(global.locator('tbody tr')).toHaveCount(1)
+  const finalBatch = await call(page, csrf, `/documents/batches/${final.publications[0].batch_id}`)
+  for (const structure of ['headers', 'details']) {
+    await expect(global.locator(`a[href="/datasets/${sourceFamily.output_datasets[structure]}?version=${finalBatch.published_versions[structure]}"]`)).toBeVisible()
+  }
+  await global.getByRole('link', { name: `Lote ${finalBatch.id.slice(0, 8)}`, exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/documents/families/${family.id}\\?batch=${finalBatch.id}$`))
+  await expect(page.getByRole('tab', { name: 'Lotes y resultados', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('link', { name: 'headers: abrir versión publicada', exact: true })).toHaveAttribute('href', `/datasets/${sourceFamily.output_datasets.headers}?version=${finalBatch.published_versions.headers}`)
   await info.attach('document-native-evidence.json', { body: JSON.stringify({ nonce, family_id: family.id, document_id: final.id, publication: final.publications, receiver: received, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
 })
 
@@ -389,4 +408,76 @@ test('grouped correction preserves the delivered two-document population without
   const afterReceipt = await (await page.request.get(`${control}/documents/${nonce}/receipt`)).json()
   expect(afterReceipt).toEqual(beforeReceipt)
   await info.attach('document-grouped-correction-evidence.json', { body: JSON.stringify({ nonce, family_id: family.id, original_batch: deliveredBatch, blocked_correction: blockedCorrection, correction, receiver_before: beforeReceipt, receiver_after: afterReceipt, post_observation_seconds: (Date.now() - quietStarted) / 1000, technical_resolution_claimed: false, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
+})
+
+test('global documents search, bounded pages, filters and direct evidence links across two families', async ({ page }, info) => {
+  const started = Date.now()
+  const csrf = await login(page)
+  const nonce = randomBytes(6).toString('hex')
+  const families: Json[] = []
+  const originals: Json[] = []
+  const invoiceBase = String(Date.now())
+  for (let group = 0; group < 2; group++) {
+    const family = await call(page, csrf, '/documents/families', { name: `D095 global ${nonce} ${group === 0 ? 'Alpha' : 'Beta'}`, description: 'Synthetic bounded global-document navigation fixture.' })
+    families.push(family)
+    const template = await call(page, csrf, `/documents/families/${family.id}/templates`, {
+      fields: [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', business_key: true }],
+      publication: group === 0 ? { mode: 'INDIVIDUAL' } : { mode: 'SCHEDULED', starts_at: new Date(Date.now() + 86400_000).toISOString() },
+    })
+    for (let index = 0; index < (group === 0 ? 6 : 5); index++) {
+      const invoice = `${invoiceBase}${group}${index}`
+      const response = await page.request.post(`/api/v1/documents/families/${family.id}/originals`, {
+        headers: { 'X-CSRF-Token': csrf }, multipart: { template_id: template.id, is_example: 'true',
+          files: { name: `${nonce}-${group}-${index}.pdf`, mimeType: 'application/pdf', buffer: knownPdf(invoice) } },
+      })
+      expect(response.status()).toBe(200)
+      const original = (await response.json()).items[0]
+      originals.push({ ...original, expected_invoice: invoice })
+    }
+  }
+  // The search oracle is an actual worker extraction in each family, never an
+  // injected payload. The other receipts also exercise the non-extracted states.
+  for (const original of [originals[0], originals[6]]) {
+    await expect.poll(async () => {
+      const observed = await call(page, csrf, `/documents/originals/${original.id}`)
+      return observed.extraction?.payload.fields.invoice.value
+    }, { timeout: 150_000, intervals: [500, 1000, 2000] }).toBe(original.expected_invoice)
+  }
+  await page.goto('/documents')
+  await page.getByRole('tab', { name: 'Todos los documentos', exact: true }).click()
+  const section = page.getByRole('region', { name: 'Todos los documentos', exact: true })
+  const search = section.getByRole('textbox', { name: 'Buscar nombre, referencia, identificador extraído o familia', exact: true })
+  await search.fill(nonce)
+  await section.getByLabel('Documentos por página', { exact: true }).selectOption('10')
+  await section.getByLabel('Ordenar documentos', { exact: true }).selectOption('filename:asc')
+  await expect(section.locator('tbody tr')).toHaveCount(10)
+  await expect(section.getByRole('status').filter({ hasText: '1–10 de 11' })).toBeVisible()
+  const firstPage = await section.locator('tbody tr td:first-child > a').allTextContents()
+  const nextPageResponse = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/v1/documents/originals' && url.searchParams.get('offset') === '10' && url.searchParams.get('search') === nonce
+  })
+  await section.getByRole('button', { name: 'Página siguiente', exact: true }).click()
+  const nextPage = await (await nextPageResponse).json()
+  expect(nextPage.items).toHaveLength(1)
+  expect(nextPage.total).toBe(11)
+  expect(firstPage).not.toContain(nextPage.items[0].filename)
+  await expect(section.locator('tbody tr')).toHaveCount(1)
+  await section.getByLabel('Familia documental', { exact: true }).selectOption(families[1].id)
+  await expect(section.locator('tbody tr')).toHaveCount(5)
+  await section.getByLabel('Modalidad de recepción', { exact: true }).selectOption('INDIVIDUAL')
+  await expect(section.getByText('No hay documentos con estos filtros', { exact: true })).toBeVisible()
+  await section.getByLabel('Modalidad de recepción', { exact: true }).selectOption('SCHEDULED')
+  await section.getByLabel('Publicación del documento', { exact: true }).selectOption('UNPUBLISHED')
+  await expect(section.locator('tbody tr')).toHaveCount(5)
+  await search.fill(originals[6].expected_invoice)
+  await expect(section.locator('tbody tr')).toHaveCount(1)
+  const result = section.locator('tbody tr').first()
+  await expect(result.getByRole('link', { name: `${nonce}-1-0.pdf`, exact: true })).toHaveAttribute('href', `/documents/families/${families[1].id}?document=${originals[6].id}`)
+  await expect(result.getByRole('link', { name: /Extracción · revisión 1/ })).toBeVisible()
+  await expect(result.getByRole('link', { name: 'Abrir original', exact: true })).toHaveAttribute('href', `/api/v1/documents/originals/${originals[6].id}/file`)
+  await result.getByRole('link', { name: 'Revisar y corregir', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: `${nonce}-1-0.pdf`, exact: true })).toBeVisible()
+  await expect(page.getByLabel('Valor headers.0.invoice', { exact: true })).toHaveValue(originals[6].expected_invoice)
+  await info.attach('global-documents-evidence.json', { body: JSON.stringify({ nonce, family_ids: families.map(family => family.id), original_ids: originals.map(original => original.id), documents: 11, first_page: 10, second_page: 1, extracted_search_oracles: 2, direct_document_original_family_links: true, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
 })

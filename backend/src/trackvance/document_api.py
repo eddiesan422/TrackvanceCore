@@ -1,5 +1,52 @@
 """Operational document API with independent original/review/publication grants."""
-import base64import threadingfrom pathlib import Pathfrom typing import Literalfrom fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFilefrom fastapi.responses import FileResponsefrom pydantic import BaseModel, Fieldfrom sqlalchemy import func, selectfrom sqlalchemy.orm import Sessionfrom starlette.concurrency import run_in_threadpoolfrom .artifactstore import link_artifact, storage_providerfrom .db import get_db, utcnowfrom .document_models import (    DocumentBatch,    DocumentFamily,    DocumentOriginal,    DocumentTemplate,)from .document_schemas import DocumentDefinitionfrom .document_service import (    MAX_BYTES,    activate_template,    batch_dto,    create_template,    dispatch_individual,    family_dto,    lock_family,    open_batch,    original_dto,    owned,    permission,    prepare_pipeline,    publish_durable,    review,    template_dto,)from .models import Artifact, ArtifactLink, Job, Userfrom .operations_common import OperationErrorfrom .services import auditrouter = APIRouter(prefix="/api/v1/documents", tags=["Documentos"])_preview_slot = threading.BoundedSemaphore(1)
+import base64
+import threading
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
+
+from .artifactstore import link_artifact, storage_provider
+from .db import get_db, utcnow
+from .document_models import (
+    DocumentBatch,
+    DocumentFamily,
+    DocumentOriginal,
+    DocumentTemplate,
+)
+from .document_queries import DocumentOrder, PublicationFilter, list_originals
+from .document_schemas import DocumentDefinition
+from .document_service import (
+    MAX_BYTES,
+    activate_template,
+    batch_dto,
+    create_template,
+    dispatch_individual,
+    family_dto,
+    lock_family,
+    open_batch,
+    original_dto,
+    owned,
+    permission,
+    prepare_pipeline,
+    publish_durable,
+    review,
+    template_dto,
+)
+from .document_template_builder_api import router as visual_router
+from .models import Artifact, ArtifactLink, Job, User
+from .operations_common import OperationError
+from .services import audit
+
+router = APIRouter(prefix="/api/v1/documents", tags=["Documentos"])
+router.include_router(visual_router)
+_preview_slot = threading.BoundedSemaphore(1)
 
 
 def current_user(request: Request):
@@ -101,16 +148,14 @@ def activate(identity: str, template_id: str, body: ActivateBody, db: Session = 
 @router.get("/originals")
 def originals(family_id: str | None = None, search: str = Query("", max_length=240), status: str | None = None,
               offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+              received_from: datetime | None = None, received_to: datetime | None = None,
+              mode: Literal["INDIVIDUAL", "SCHEDULED"] | None = None,
+              publication: PublicationFilter | None = None, order_by: DocumentOrder = "received_at",
+              direction: Literal["asc", "desc"] = "desc",
               db: Session = Depends(get_db), user: User = Depends(current_user)):
-    query = select(DocumentOriginal).where(DocumentOriginal.organization_id == user.organization_id,
-                                          DocumentOriginal.filename.ilike("%" + search + "%"))
-    if family_id:
-        owned(db, DocumentFamily, family_id, user)
-        query = query.where(DocumentOriginal.family_id == family_id)
-    if status:
-        query = query.where(DocumentOriginal.status == status)
-    return {"items": [original_dto(db, d) for d in db.scalars(query.order_by(DocumentOriginal.received_at.desc()).offset(offset).limit(limit))],
-            "total": db.scalar(select(func.count()).select_from(query.subquery()))}
+    return list_originals(db, user, family_id=family_id, search=search, status=status,
+        received_from=received_from, received_to=received_to, mode=mode, publication=publication,
+        order_by=order_by, direction=direction, offset=offset, limit=limit)
 
 
 @router.post("/families/{identity}/originals")
@@ -188,7 +233,44 @@ def file(identity: str, db: Session = Depends(get_db), user: User = Depends(curr
     audit(db, "DOCUMENT_ORIGINAL_ACCESSED", "document", item.id, "Original consultado con permiso independiente", user.name,
           user.organization_id, {"artifact_id": artifact.id, "sha256": artifact.sha256})
     db.commit()
-    return FileResponse(path, media_type=artifact.media_type, filename=item.filename, content_disposition_type="inline")@router.get("/originals/{identity}/pages/{page}")async def page_preview(identity: str, page: int, db: Session = Depends(get_db), user: User = Depends(current_user)):    from .document_worker import run_engine    item = owned(db, DocumentOriginal, identity, user)    if not 1 <= page <= 50 or not item.filename.lower().endswith(".pdf"):        raise OperationError(422, "DOCUMENT_PAGE_LIMIT", "Selecciona una página PDF de 1 a 50.")    relation = f"DOCUMENT_PAGE_{page}"    found = db.scalar(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,        ArtifactLink.source_type == "DOCUMENT", ArtifactLink.source_id == item.id, ArtifactLink.relation == relation))    if found:        artifact = owned(db, Artifact, found.target_id, user)    else:        if not _preview_slot.acquire(blocking=False):            raise OperationError(429, "DOCUMENT_PREVIEW_BUSY", "La vista previa local está ocupada; reintenta en unos segundos.")        temporary = storage_provider.temporary_path(".jpg")        try:            original = owned(db, Artifact, item.artifact_id, user)            source = storage_provider.materialize(original)            # No DB transaction is held while the confined child renders.            db.rollback()            result = await run_in_threadpool(run_engine, source, {}, preview_page=page)            user = owned(db, User, user.id, user)            db.refresh(user)            permission(db, user, "download")            temporary.write_bytes(base64.b64decode(result["preview"], validate=True))            artifact = storage_provider.put_file(db, temporary, "DOCUMENT_PREVIEW", user.organization_id,                                                 f"page-{page}.jpg", media_type="image/jpeg")            link_artifact(db, user.organization_id, relation, "DOCUMENT", item.id, "ARTIFACT", artifact.id)        finally:            temporary.unlink(missing_ok=True)            _preview_slot.release()    audit(db, "DOCUMENT_PAGE_ACCESSED", "document", item.id, "Página original consultada bajo demanda", user.name,          user.organization_id, {"page": page, "artifact_id": artifact.id})    db.commit()    return FileResponse(storage_provider.materialize(artifact), media_type="image/jpeg")
+    return FileResponse(path, media_type=artifact.media_type, filename=item.filename, content_disposition_type="inline")
+
+
+@router.get("/originals/{identity}/pages/{page}")
+async def page_preview(identity: str, page: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_worker import run_engine
+    item = owned(db, DocumentOriginal, identity, user)
+    if not 1 <= page <= 50 or not item.filename.lower().endswith(".pdf"):
+        raise OperationError(422, "DOCUMENT_PAGE_LIMIT", "Selecciona una página PDF de 1 a 50.")
+    relation = f"DOCUMENT_PAGE_{page}"
+    found = db.scalar(select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,
+        ArtifactLink.source_type == "DOCUMENT", ArtifactLink.source_id == item.id, ArtifactLink.relation == relation))
+    if found:
+        artifact = owned(db, Artifact, found.target_id, user)
+    else:
+        if not _preview_slot.acquire(blocking=False):
+            raise OperationError(429, "DOCUMENT_PREVIEW_BUSY", "La vista previa local está ocupada; reintenta en unos segundos.")
+        temporary = storage_provider.temporary_path(".jpg")
+        try:
+            original = owned(db, Artifact, item.artifact_id, user)
+            source = storage_provider.materialize(original)
+            # No DB transaction is held while the confined child renders.
+            db.rollback()
+            result = await run_in_threadpool(run_engine, source, {}, preview_page=page)
+            user = owned(db, User, user.id, user)
+            db.refresh(user)
+            permission(db, user, "download")
+            temporary.write_bytes(base64.b64decode(result["preview"], validate=True))
+            artifact = storage_provider.put_file(db, temporary, "DOCUMENT_PREVIEW", user.organization_id,
+                                                 f"page-{page}.jpg", media_type="image/jpeg")
+            link_artifact(db, user.organization_id, relation, "DOCUMENT", item.id, "ARTIFACT", artifact.id)
+        finally:
+            temporary.unlink(missing_ok=True)
+            _preview_slot.release()
+    audit(db, "DOCUMENT_PAGE_ACCESSED", "document", item.id, "Página original consultada bajo demanda", user.name,
+          user.organization_id, {"page": page, "artifact_id": artifact.id})
+    db.commit()
+    return FileResponse(storage_provider.materialize(artifact), media_type="image/jpeg")
 
 
 @router.post("/originals/{identity}/review")

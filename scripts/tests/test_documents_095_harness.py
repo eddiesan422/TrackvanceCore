@@ -35,12 +35,14 @@ def test_ci_document_fixture_bounds_only_owned_receiver_and_exact_origin(tmp_pat
     assert not any("credentials" in str(volume) for volume in fixture["volumes"])
     assert environment["TV_CORE095_TEST_PROJECT"] == project
     assert environment["TV_CORE095_DOCUMENT_E2E"] == "true"
+    assert environment["TV_CORE095_VISUAL_E2E"] == "true"
     assert data["services"]["api"]["environment"]["TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS"] == "http://document-fixture:18095"
 
 
-@pytest.mark.parametrize("feature,module", [("documents", "documents_ocr"),
-    ("acquisition", "acquisitions_multiformat"), ("resolution", "exceptions_resolution")])
-def test_native_095_browser_is_mandatory_in_functional_commands_manifest_and_coverage(tmp_path, feature, module):
+@pytest.mark.parametrize("feature,module,flag", [("documents", "documents_ocr", "TV_CORE095_DOCUMENT_E2E"),
+    ("document-visual-builder", "documents_ocr", "TV_CORE095_VISUAL_E2E"),
+    ("acquisition", "acquisitions_multiformat", "TV_CORE095_DOCUMENT_E2E"), ("resolution", "exceptions_resolution", "TV_CORE095_DOCUMENT_E2E")])
+def test_native_095_browser_is_mandatory_in_functional_commands_manifest_and_coverage(tmp_path, feature, module, flag):
     commands = run_suite.commands_for("compose-functional", tmp_path)
     command = next(command for phase, command, _ in commands if phase == "browser-persistence")
     spec = f"tests-e2e/{feature}-095.spec.ts"
@@ -49,7 +51,7 @@ def test_native_095_browser_is_mandatory_in_functional_commands_manifest_and_cov
     group = next(g for g in manifest["groups"] if g["id"] == "compose-functional")
     scenario = next(s for s in group["scenarios"] if s["id"] == "functional-compose-browser-persistence")
     assert spec in scenario["browser_required_specs"]
-    assert browser_evidence.CI_OPT_IN_SPECS[spec] == ("TV_CORE095_DOCUMENT_E2E", "compose-functional")
+    assert browser_evidence.CI_OPT_IN_SPECS[spec] == (flag, "compose-functional")
     functional = manifest["profiles"]["functional"]
     assert spec in functional["module_coverage"][module]["browser_specs"]
 

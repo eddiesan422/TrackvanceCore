@@ -302,6 +302,7 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
         'roadmap-source-cycle.spec.ts': ('TV_CONNECTIONS_E2E', 'connections'),
         'volume.spec.ts': ('TV_VOLUME_E2E', 'async-volume-100'),
         'documents-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        'document-visual-builder-095.spec.ts': ('TV_CORE095_VISUAL_E2E', 'compose-functional'),
         'acquisition-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
         'resolution-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
     }

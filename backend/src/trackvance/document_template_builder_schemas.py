@@ -1,0 +1,53 @@
+"""Bounded visual rules. No executable expressions or user supplied code."""
+from itertools import pairwise
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class VisualRegion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page: int = Field(default=1, ge=1, le=50)
+    region: list[float] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        x1, y1, x2, y2 = self.region
+        if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
+            raise ValueError("Selecciona una región válida dentro de la página.")
+        return self
+
+
+class VisualFieldRule(VisualRegion):
+    kind: Literal["LABEL_VALUE", "REGION_CONTEXT"] = "LABEL_VALUE"
+    label: str = Field(min_length=1, max_length=160)
+    direction: Literal["RIGHT", "BELOW"] = "RIGHT"
+    sample_value: str = Field(default="", max_length=500)
+    context: str = Field(default="", max_length=160)
+    end_label: str = Field(default="", max_length=160)
+    tolerance: float = Field(default=0.12, ge=0, le=0.25)
+
+
+class VisualTableRule(VisualRegion):
+    header_labels: list[str] = Field(min_length=2, max_length=40)
+    column_bounds: list[float] = Field(min_length=3, max_length=41)
+    stop_label: str = Field(default="", max_length=160)
+    tolerance: float = Field(default=0.12, ge=0, le=0.25)
+
+    @model_validator(mode="after")
+    def columns(self):
+        if len(self.column_bounds) != len(self.header_labels) + 1:
+            raise ValueError("Cada columna requiere dos límites consecutivos.")
+        if any(not s.strip() or len(s) > 160 for s in self.header_labels):
+            raise ValueError("Indica las etiquetas de la cabecera.")
+        if len({s.strip().casefold() for s in self.header_labels}) != len(self.header_labels):
+            raise ValueError("Cada columna requiere una etiqueta distinta.")
+        if not all(0 <= a < b <= 1 for a, b in pairwise(self.column_bounds)):
+            raise ValueError("Ordena los límites de columna de izquierda a derecha.")
+        return self
+
+
+class BuilderProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selection: VisualRegion
+    kind: Literal["FIELD", "TABLE"] = "FIELD"

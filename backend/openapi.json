@@ -14515,6 +14515,292 @@
         "x-required-permission": "catalog:read"
       }
     },
+    "/api/v1/documents/families/{identity}/builder/examples": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Example",
+        "operationId": "example_api_v1_documents_families__identity__builder_examples_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_example_api_v1_documents_families__identity__builder_examples_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/originals/{identity}/builder": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Geometry",
+        "operationId": "geometry_api_v1_documents_originals__identity__builder_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/originals/{identity}/builder/propose": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Proposal",
+        "operationId": "proposal_api_v1_documents_originals__identity__builder_propose_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuilderProposal"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/families/{identity}/builder/test": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Test",
+        "operationId": "test_api_v1_documents_families__identity__builder_test_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuilderTest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
     "/api/v1/documents/limits": {
       "get": {
         "tags": [
@@ -15067,6 +15353,111 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "received_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Received From"
+            }
+          },
+          {
+            "name": "received_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Received To"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "INDIVIDUAL",
+                    "SCHEDULED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mode"
+            }
+          },
+          {
+            "name": "publication",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PUBLISHED",
+                    "UNPUBLISHED",
+                    "BATCHED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Publication"
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "received_at",
+                "filename",
+                "family",
+                "status"
+              ],
+              "type": "string",
+              "default": "received_at",
+              "title": "Order By"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "desc",
+              "title": "Direction"
             }
           }
         ],
@@ -16660,6 +17051,20 @@
         ],
         "title": "BlockBody"
       },
+      "Body_example_api_v1_documents_families__identity__builder_examples_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_example_api_v1_documents_families__identity__builder_examples_post"
+      },
       "Body_inspect_dataset_upload_api_v1_datasets_uploads_inspect_post": {
         "properties": {
           "file": {
@@ -16770,6 +17175,45 @@
           "file"
         ],
         "title": "Body_upload_version_api_v1_datasets__dataset_id__versions_upload_post"
+      },
+      "BuilderProposal": {
+        "properties": {
+          "selection": {
+            "$ref": "#/components/schemas/VisualRegion"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "FIELD",
+              "TABLE"
+            ],
+            "title": "Kind",
+            "default": "FIELD"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "title": "BuilderProposal"
+      },
+      "BuilderTest": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/DocumentDefinition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "definition"
+        ],
+        "title": "BuilderTest"
       },
       "CasePatch": {
         "properties": {
@@ -19249,6 +19693,16 @@
             ],
             "title": "Decimal Separator",
             "default": "."
+          },
+          "visual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualFieldRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -19369,8 +19823,8 @@
           "row_pattern": {
             "type": "string",
             "maxLength": 1000,
-            "minLength": 1,
-            "title": "Row Pattern"
+            "title": "Row Pattern",
+            "default": ""
           },
           "fields": {
             "items": {
@@ -19391,13 +19845,22 @@
             "maxLength": 160,
             "title": "Row Label",
             "default": ""
+          },
+          "visual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualTableRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
-          "row_pattern",
           "fields"
         ],
         "title": "DocumentTable"
@@ -22657,6 +23120,167 @@
           "version"
         ],
         "title": "VersionInput"
+      },
+      "VisualFieldRule": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Page",
+            "default": 1
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "LABEL_VALUE",
+              "REGION_CONTEXT"
+            ],
+            "title": "Kind",
+            "default": "LABEL_VALUE"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "RIGHT",
+              "BELOW"
+            ],
+            "title": "Direction",
+            "default": "RIGHT"
+          },
+          "sample_value": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Sample Value",
+            "default": ""
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Context",
+            "default": ""
+          },
+          "end_label": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "End Label",
+            "default": ""
+          },
+          "tolerance": {
+            "type": "number",
+            "maximum": 0.25,
+            "minimum": 0.0,
+            "title": "Tolerance",
+            "default": 0.12
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "region",
+          "label"
+        ],
+        "title": "VisualFieldRule"
+      },
+      "VisualRegion": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Page",
+            "default": 1
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "region"
+        ],
+        "title": "VisualRegion"
+      },
+      "VisualTableRule": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Page",
+            "default": 1
+          },
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region"
+          },
+          "header_labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "minItems": 2,
+            "title": "Header Labels"
+          },
+          "column_bounds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 41,
+            "minItems": 3,
+            "title": "Column Bounds"
+          },
+          "stop_label": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Stop Label",
+            "default": ""
+          },
+          "tolerance": {
+            "type": "number",
+            "maximum": 0.25,
+            "minimum": 0.0,
+            "title": "Tolerance",
+            "default": 0.12
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "region",
+          "header_labels",
+          "column_bounds"
+        ],
+        "title": "VisualTableRule"
       },
       "trackvance__api__DatasetBody": {
         "properties": {
