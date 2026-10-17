@@ -172,7 +172,7 @@ def real_spec_names(tmp_path):
     return tmp_path, sorted(names)
 
 
-def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_ten_opt_ins(real_spec_names):
+def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_twelve_opt_ins(real_spec_names):
     root, names = real_spec_names
     environment = {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}
     selected, metadata = browser_evidence.ci_spec_selection([], root, environment)
@@ -181,7 +181,7 @@ def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_ten_opt_
     assert metadata["excluded_opt_in_specs"] == [
         {"file": name, "required_flag": flag, "covered_by_group": group}
         for name, (flag, group) in sorted(browser_evidence.CI_OPT_IN_SPECS.items())]
-    assert len(metadata["excluded_opt_in_specs"]) == 10
+    assert len(metadata["excluded_opt_in_specs"]) == 12
 
 
 @pytest.mark.parametrize("flag", sorted({flag for flag, _ in browser_evidence.CI_OPT_IN_SPECS.values()}))
@@ -273,4 +273,4 @@ def test_ci_browser_publishes_exact_selection_and_keeps_unexpected_skip_failure(
     assert summary["selected_spec_files"] == expected
     assert summary["skipped"] == skipped
     assert summary["status"] == ("FAIL" if skipped else "PASS")
-    assert len(summary["excluded_opt_in_specs"]) == 10
+    assert len(summary["excluded_opt_in_specs"]) == 12

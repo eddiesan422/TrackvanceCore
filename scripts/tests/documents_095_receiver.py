@@ -14,7 +14,7 @@ import threading
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 
 def canonical(value):
@@ -37,7 +37,16 @@ def receipt(oracle, rows, project="trackvance-codex"):
             "oracle_sha256": hashlib.sha256(canonical(oracle)).hexdigest()}
 
 
-def serve(port, database):
+def acquisition_records():
+    """Exact small REST proposal/reader oracle; decimal 1.0 is syntactically decimal."""
+    records = [{"id": f"{index:06d}", "quantity": index, "amount": 1.0, "flag": True,
+        "day": "2026-10-16", "at": "2026-10-16T08:00:00.123456-05:00",
+        "company": {"name": "Synthetic Ω"}, "tags": ["not-expanded"]} for index in range(1, 4)]
+    records[-1]["later"] = "last-only"
+    return records
+
+
+def serve(port, database, *, serve_forever=True):
     project = os.getenv("TRACKVANCE_CERTIFICATION_PROJECT", "")
     if project != "trackvance-codex" and not re.fullmatch(r"trackvance-v070-test-e2e-[a-z0-9-]*[a-f0-9]{12}", project):
         raise RuntimeError("El receptor documental exige trackvance-codex o un proyecto E2E desechable comprobado.")
@@ -49,6 +58,8 @@ def serve(port, database):
     with sqlite3.connect(target) as db:
         db.execute("CREATE TABLE IF NOT EXISTS oracles(nonce TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, nonce TEXT NOT NULL, structure TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS acquisition_fixtures(nonce TEXT PRIMARY KEY, failures INTEGER NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS acquisition_calls(seq INTEGER PRIMARY KEY AUTOINCREMENT, nonce TEXT NOT NULL, page INTEGER NOT NULL, page_size INTEGER NOT NULL, status INTEGER NOT NULL)")
     guard = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -73,6 +84,35 @@ def serve(port, database):
             if path == "/health":
                 self.respond(200, {"project": project, "fixture": "DOCUMENT_ORACLE_095", "status": "READY"})
                 return
+            acquisition = re.fullmatch(r"/acquisition/([a-f0-9]{12})/(source|receipt)", path)
+            if acquisition:
+                nonce, action = acquisition.groups()
+                with guard, sqlite3.connect(target) as db:
+                    if action == "receipt":
+                        calls = [{"page": page, "page_size": size, "status": status} for page, size, status in db.execute(
+                            "SELECT page,page_size,status FROM acquisition_calls WHERE nonce=? ORDER BY seq", [nonce])]
+                        failure = db.execute("SELECT failures FROM acquisition_fixtures WHERE nonce=?", [nonce]).fetchone()
+                        self.respond(200, {"project": project, "expected_rows": 3, "calls": calls, "failures_remaining": failure[0] if failure else None})
+                        return
+                    try:
+                        query = parse_qs(urlsplit(self.path).query)
+                        page, size = int(query.get("page", [1])[0]), int(query.get("page_size", [100])[0])
+                        if page < 1 or not 1 <= size <= 100:
+                            raise ValueError()
+                    except (ValueError, TypeError):
+                        self.respond(422, {"code": "INVALID_SYNTHETIC_PAGINATION"})
+                        return
+                    remaining = db.execute("SELECT failures FROM acquisition_fixtures WHERE nonce=?", [nonce]).fetchone()
+                    status = 503 if page == 2 and remaining and remaining[0] > 0 else 200
+                    if status == 503:
+                        db.execute("UPDATE acquisition_fixtures SET failures=failures-1 WHERE nonce=?", [nonce])
+                    db.execute("INSERT INTO acquisition_calls(nonce,page,page_size,status) VALUES (?,?,?,?)", [nonce, page, size, status])
+                if status == 503:
+                    self.respond(503, {"code": "CONTROLLED_SOURCE_TRANSIENT"})
+                else:
+                    records = acquisition_records()
+                    self.respond(200, {"records": records[(page - 1) * size:page * size]})
+                return
             match = re.fullmatch(r"/documents/([a-f0-9]{12})/receipt", path)
             if not match:
                 self.respond(404, {"code": "NOT_FOUND"})
@@ -87,6 +127,33 @@ def serve(port, database):
             self.respond(200, receipt(json.loads(oracle[0]), rows, project))
 
         def do_POST(self):
+            arm = re.fullmatch(r"/acquisition/([a-f0-9]{12})/(arm|faults)", urlsplit(self.path).path)
+            if arm:
+                try:
+                    count = int(self.headers.get("Content-Length", "0"))
+                    if not 0 <= count <= 128:
+                        raise ValueError()
+                    payload = json.loads(self.rfile.read(count)) if count else {}
+                    failures = payload.get("failures", 1)
+                    if type(failures) is not int or not 0 <= failures <= 8:
+                        raise ValueError()
+                except (ValueError, TypeError, AttributeError):
+                    self.respond(422, {"code": "INVALID_SYNTHETIC_FAILURE_COUNT"})
+                    return
+                with guard, sqlite3.connect(target) as db:
+                    found = db.execute("SELECT 1 FROM acquisition_fixtures WHERE nonce=?", [arm[1]]).fetchone()
+                    if arm[2] == "arm":
+                        if found:
+                            self.respond(409, {"code": "SYNTHETIC_FAULTS_ALREADY_ARMED"})
+                            return
+                        db.execute("INSERT INTO acquisition_fixtures(nonce,failures) VALUES (?,?)", [arm[1], failures])
+                    else:
+                        if not found:
+                            self.respond(404, {"code": "SYNTHETIC_FAULTS_NOT_ARMED"})
+                            return
+                        db.execute("UPDATE acquisition_fixtures SET failures=? WHERE nonce=?", [failures, arm[1]])
+                self.respond(201 if arm[2] == "arm" else 200, {"armed": True, "page": 2, "failures": failures})
+                return
             match = re.fullmatch(r"/documents/([a-f0-9]{12})/(oracle|headers|details)", urlsplit(self.path).path)
             if not match:
                 self.respond(404, {"code": "NOT_FOUND"})
@@ -131,7 +198,10 @@ def serve(port, database):
             except (ValueError, KeyError, TypeError, sqlite3.IntegrityError):
                 self.respond(422, {"code": "SYNTHETIC_ORACLE_CONTRACT"})
 
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    if serve_forever:
+        server.serve_forever()
+    return server
 
 
 if __name__ == "__main__":

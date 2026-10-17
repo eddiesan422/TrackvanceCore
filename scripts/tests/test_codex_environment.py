@@ -205,21 +205,23 @@ def test_new_worktree_uses_same_common_git_private_path(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("empty", [None, []])
-def test_first_start_dns_default_representation_preserves_full_identity(fixture, empty):
+@pytest.mark.parametrize("oom_default", [None, False])
+def test_first_start_default_representation_preserves_full_identity(fixture, empty, oom_default):
     _directory, value, values, defaults = fixture
     config = resolved(values)
     existing = runtime(config, defaults)
     row = next(row for row in existing["containers"] if row["Config"]["Labels"]["com.docker.compose.service"] == "api")
-    row["HostConfig"].update(Dns=empty, DnsOptions=empty, DnsSearch=empty)
+    row["HostConfig"].update(Dns=empty, DnsOptions=empty, DnsSearch=empty, OomKillDisable=oom_default)
     baseline = codex.runtime_identity(row)
     value["runtime_identities"] = {"api": baseline}
     row["HostConfig"].update(Dns=[] if empty is None else None,
                              DnsOptions=[] if empty is None else None,
-                             DnsSearch=[] if empty is None else None)
+                             DnsSearch=[] if empty is None else None,
+                             OomKillDisable=False if oom_default is None else None)
     codex.validate_owned(existing, config, value)
     assert value["runtime_identities"]["api"] == baseline
     for key, changed in (("Dns", ["192.0.2.1"]), ("DnsOptions", ["ndots:5"]),
-                         ("DnsSearch", ["changed.invalid"]), ("FutureHostPolicy", True)):
+                         ("DnsSearch", ["changed.invalid"]), ("OomKillDisable", True), ("FutureHostPolicy", True)):
         changed_row = copy.deepcopy(row)
         changed_row["HostConfig"][key] = changed
         assert not codex.runtime_identity_matches(baseline, changed_row)

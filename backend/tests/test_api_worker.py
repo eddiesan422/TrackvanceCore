@@ -213,6 +213,18 @@ def test_exception_version_conflicts_transitions_and_resolution_requirements(aut
         validation_run = enqueue(db, db.get(Configuration, origin.config_id), corrected_version, None, "Test User")
         db.commit()
         validation_run_id = validation_run.id
+        comparison_dataset_id, original_version_id, corrected_version_id = dataset.dataset_id, dataset.id, corrected_version.id
+    # A changed immutable snapshot must establish the same complete population;
+    # keep every historical workflow/concurrency assertion below unchanged.
+    comparison = authenticated.post(f"/api/v1/datasets/{comparison_dataset_id}/comparisons", json={
+        "before_version_id": original_version_id, "after_version_id": corrected_version_id, "keys": ["order_id"]})
+    assert comparison.status_code == 202, comparison.text
+    from trackvance.comparison_worker import process_once as compare_once
+    assert compare_once()
+    report = authenticated.get(f"/api/v1/version-comparisons/{comparison.json()['id']}").json()
+    assert report["status"] == "SUCCESS" and report["summary"]["mode"] == "KEYED"
+    assert report["summary"]["complete_population"] is True
+    assert report["summary"]["counts"]["ADDED"] == report["summary"]["counts"]["ABSENT"] == 0
     assert process_once("validation-worker") is True
     validated = authenticated.get(url).json()
     assert validated["version"] == 4

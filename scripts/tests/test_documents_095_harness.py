@@ -34,10 +34,12 @@ def test_ci_document_fixture_bounds_only_owned_receiver_and_exact_origin(tmp_pat
     assert data["services"]["api"]["environment"]["TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS"] == "http://document-fixture:18095"
 
 
-def test_document_browser_is_mandatory_in_functional_commands_manifest_and_coverage(tmp_path):
+@pytest.mark.parametrize("feature,module", [("documents", "documents_ocr"),
+    ("acquisition", "acquisitions_multiformat"), ("resolution", "exceptions_resolution")])
+def test_native_095_browser_is_mandatory_in_functional_commands_manifest_and_coverage(tmp_path, feature, module):
     commands = run_suite.commands_for("compose-functional", tmp_path)
     command = next(command for phase, command, _ in commands if phase == "browser-persistence")
-    spec = "tests-e2e/documents-095.spec.ts"
+    spec = f"tests-e2e/{feature}-095.spec.ts"
     assert spec in command and "--documents" in command
     manifest = load_manifest()
     group = next(g for g in manifest["groups"] if g["id"] == "compose-functional")
@@ -45,7 +47,7 @@ def test_document_browser_is_mandatory_in_functional_commands_manifest_and_cover
     assert spec in scenario["browser_required_specs"]
     assert browser_evidence.CI_OPT_IN_SPECS[spec] == ("TV_CORE095_DOCUMENT_E2E", "compose-functional")
     functional = manifest["profiles"]["functional"]
-    assert spec in functional["module_coverage"]["documents_ocr"]["browser_specs"]
+    assert spec in functional["module_coverage"][module]["browser_specs"]
 
 
 def test_receiver_checks_full_row_values_multiplicity_and_header_detail_link():

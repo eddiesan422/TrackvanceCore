@@ -690,7 +690,9 @@
             "tests-e2e/multiformat-navigation.spec.ts",
             "tests-e2e/rule-builders.spec.ts",
             "tests-e2e/sentinel-schedule.spec.ts",
-            "tests-e2e/documents-095.spec.ts"
+            "tests-e2e/documents-095.spec.ts",
+            "tests-e2e/acquisition-095.spec.ts",
+            "tests-e2e/resolution-095.spec.ts"
           ]
         }
       ],
@@ -874,7 +876,8 @@
             "crash-lease-120-shared"
           ],
           "browser_specs": [
-            "tests-e2e/multiformat-navigation.spec.ts"
+            "tests-e2e/multiformat-navigation.spec.ts",
+            "tests-e2e/acquisition-095.spec.ts"
           ]
         },
         "transformations": {
@@ -949,6 +952,14 @@
           ],
           "browser_specs": [
             "tests-e2e/documents-095.spec.ts"
+          ]
+        },
+        "exceptions_resolution": {
+          "scenario_ids": [
+            "functional-compose-browser-persistence"
+          ],
+          "browser_specs": [
+            "tests-e2e/resolution-095.spec.ts"
           ]
         }
       },

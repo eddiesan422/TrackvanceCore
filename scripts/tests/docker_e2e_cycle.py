@@ -96,7 +96,8 @@ def add_document_fixture(compose, environment, evidence, project):
             "ports": [f"127.0.0.1:{receiver_port}:18095"], "restart": "no",
             "healthcheck": {"test": ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18095/health',timeout=2).read()"], "interval": "2s", "timeout": "3s", "retries": 20}},
         "api": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}},
-        "delivery-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}}
+        "delivery-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}},
+        "acquisition-worker": {"environment": {"TRACKVANCE_REST_ALLOWED_INTERNAL_ORIGINS": internal}}
     }}, indent=2), encoding="utf-8")
     environment.update(TV_CORE095_DOCUMENT_E2E="true", TV_CORE095_TEST_PROJECT=project,
         TV_CORE095_DOCUMENT_RECEIVER_URL=internal,
@@ -150,7 +151,8 @@ def main() -> int:
     evidence.mkdir(parents=True, exist_ok=True)
     environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
     documents_enabled = not options.clean_demo and not options.skip_playwright and (
-        options.documents or not options.browser_spec or "tests-e2e/documents-095.spec.ts" in options.browser_spec)
+        options.documents or not options.browser_spec or bool(set(options.browser_spec) & {
+            "tests-e2e/documents-095.spec.ts", "tests-e2e/acquisition-095.spec.ts", "tests-e2e/resolution-095.spec.ts"}))
     if documents_enabled:
         compose = add_document_fixture(compose, environment, evidence, project)
     compose = isolate_compose(compose, environment, evidence, project)

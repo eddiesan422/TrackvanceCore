@@ -192,7 +192,7 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ".codex-local/v070/spark/ci-standalone", "--rows", "1000000"])],
     }
     functional_specs = ("advanced-rules", "corrections", "exception-validation", "local-identity-exceptions",
-                        "multiformat-navigation", "rule-builders", "sentinel-schedule", "documents-095")
+                        "multiformat-navigation", "rule-builders", "sentinel-schedule", "documents-095", "acquisition-095", "resolution-095")
     suites["compose-functional"] = [
         ("clean-demo", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--clean-demo"]),
         ("browser-persistence", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--documents",

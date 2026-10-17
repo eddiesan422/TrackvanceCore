@@ -312,21 +312,24 @@ def runtime_identity(row):
 
 
 def runtime_identity_matches(baseline, row):
-    """Docker may replace null DNS defaults with empty arrays on first start.
+    """Docker may change representations of unset defaults on first start.
 
     Compare every other byte of the full recorded identity unchanged. This
-    compatibility is limited to those three empty default fields; an explicit
-    DNS server, search domain, option, or any other HostConfig change is drift.
+    compatibility is limited to empty DNS fields and OOM killing remaining
+    enabled (null/false). Explicit DNS values, disabling the OOM killer, or any
+    other HostConfig change is drift.
     Keep the original raw hashes in receipts rather than rewriting evidence.
     """
     actual = runtime_identity(row)
     if baseline == actual:
         return True
     host = row["HostConfig"]
-    empty_dns = [key for key in ("Dns", "DnsOptions", "DnsSearch")
-                 if key in host and (host[key] is None or host[key] == [])]
-    for replacements in itertools.product((None, []), repeat=len(empty_dns)):
-        candidate = {**host, **dict(zip(empty_dns, replacements, strict=True))}
+    defaults = {key: (None, []) for key in ("Dns", "DnsOptions", "DnsSearch")
+                if key in host and (host[key] is None or host[key] == [])}
+    if "OomKillDisable" in host and (host["OomKillDisable"] is None or host["OomKillDisable"] is False):
+        defaults["OomKillDisable"] = (None, False)
+    for replacements in itertools.product(*defaults.values()):
+        candidate = {**host, **dict(zip(defaults, replacements, strict=True))}
         if baseline == {**actual, "host_config_sha256": canonical_hash(candidate)}:
             return True
     return False

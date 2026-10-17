@@ -1,6 +1,18 @@
 import { randomBytes } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+import { fillSecret } from './identity-helpers'
+
+const privateValues = new Set<string>()
+test.afterEach(async ({ browser }, info) => {
+  for (const error of info.errors) for (const key of ['message', 'stack', 'snippet', 'value', 'errorContext'] as const) {
+    if (typeof error[key] === 'string') for (const secret of privateValues) error[key] = error[key]!.split(secret).join('[REDACTED]')
+  }
+  for (const context of browser.contexts()) for (const page of context.pages()) {
+    await page.evaluate(() => document.body.replaceChildren()).catch(() => undefined)
+  }
+  privateValues.clear()
+})
 
 // These tests create only explicitly named synthetic resources in Codex. Never
 // capture DOM/request artifacts containing local-account credential material.
@@ -37,7 +49,8 @@ async function login(page: Page) {
     if (!username || !password) throw new Error('Synthetic Codex credentials must be provided through the process environment')
     await page.getByRole('button', { name: 'Tengo una cuenta local', exact: true }).click()
     await page.getByLabel('Usuario o correo', { exact: true }).fill(username)
-    await page.getByLabel('Contraseña', { exact: true }).fill(password)
+    privateValues.add(password)
+    await fillSecret(page.getByLabel('Contraseña', { exact: true }), password)
     await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
@@ -97,17 +110,21 @@ async function buildFamily(page: Page, nonce: string, mode = 'INDIVIDUAL') {
   return { family, template }
 }
 
-async function upload(page: Page, name: string, invoice: string, example = false, templateId?: string) {
+async function upload(page: Page, name: string, invoice: string, example = false, template?: Json) {
   if (example) {
     await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
-    const template = page.locator('.document-template').filter({ hasText: templateId ? templateId : '' })
-    // Revisions display a digest rather than a hidden identity; newest is first.
-    await (templateId ? page.getByRole('button', { name: 'Probar con documento de ejemplo', exact: true }).first() : template.getByRole('button', { name: 'Probar con documento de ejemplo', exact: true }).first()).click()
+    const revision = template
+      ? page.locator('.document-template').filter({ has: page.getByText(`Revisión ${template.revision}`, { exact: true }) })
+      : page.locator('.document-template').first()
+    // Refetch after creating a revision is asynchronous. Select its visible
+    // revision explicitly; first() could test and activate the preceding policy.
+    await revision.getByRole('button', { name: 'Probar con documento de ejemplo', exact: true }).click()
   } else await page.getByRole('button', { name: 'Cargar documentos', exact: true }).click()
   const response = page.waitForResponse(r => r.request().method() === 'POST' && /\/documents\/families\/[^/]+\/originals$/.test(new URL(r.url()).pathname))
   await page.getByRole('dialog').getByLabel('Seleccionar documentos', { exact: true }).setInputFiles({ name, mimeType: 'application/pdf', buffer: knownPdf(invoice) })
   const received = await (await response).json()
   expect(received.items).toHaveLength(1)
+  if (template) expect(received.items[0].template_id).toBe(template.id)
   await page.getByRole('tab', { name: 'Documentos', exact: true }).click()
   return received.items[0] as Json
 }
@@ -138,7 +155,7 @@ test('document browser individual flow → exact native approved output → veri
   const csrf = await login(page)
   const nonce = randomBytes(6).toString('hex')
   const { family, template } = await buildFamily(page, nonce)
-  const example = await upload(page, `D095-example-${nonce}.pdf`, '000000', true, template.id)
+  const example = await upload(page, `D095-example-${nonce}.pdf`, '000000', true, template)
   await review(page, example, true)
   const bootstrap = await upload(page, `D095-bootstrap-${nonce}.pdf`, '000000')
   const first = await review(page, bootstrap)
@@ -186,7 +203,7 @@ test('document browser individual flow → exact native approved output → veri
   const finalResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline`))
   await wizard.getByRole('button', { name: 'Crear revisión y preparar prueba', exact: true }).click()
   const finalTemplate = (await (await finalResponse).json()).template
-  const finalExample = await upload(page, `D095-delivery-example-${nonce}.pdf`, '000001', true, finalTemplate.id)
+  const finalExample = await upload(page, `D095-delivery-example-${nonce}.pdf`, '000001', true, finalTemplate)
   await review(page, finalExample, true)
   const finalOriginal = await upload(page, `D095-delivery-${nonce}.pdf`, '000001')
   const final = await review(page, finalOriginal)
@@ -214,13 +231,17 @@ test('document browser individual flow → exact native approved output → veri
     await readerPage.goto('/')
     await readerPage.getByRole('button', { name: 'Tengo una cuenta local', exact: true }).click()
     await readerPage.getByLabel('Usuario o correo', { exact: true }).fill(reader.user.username)
-    await readerPage.getByLabel('Contraseña', { exact: true }).fill(reader.temporary_credentials.temporary_password)
+    privateValues.add(reader.temporary_credentials.temporary_password)
+    await fillSecret(readerPage.getByLabel('Contraseña', { exact: true }), reader.temporary_credentials.temporary_password)
     await readerPage.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
     await expect(readerPage.getByRole('heading', { name: 'Cambia tu contraseña', exact: true })).toBeVisible()
     const localPassword = 'D095 fixture ' + randomBytes(24).toString('base64url')
-    await readerPage.getByLabel('Nueva contraseña', { exact: true }).fill(localPassword)
-    await readerPage.getByLabel('Confirmar contraseña', { exact: true }).fill(localPassword)
+    privateValues.add(localPassword)
+    await fillSecret(readerPage.getByLabel('Nueva contraseña', { exact: true }), localPassword)
+    await fillSecret(readerPage.getByLabel('Confirmar contraseña', { exact: true }), localPassword)
+    const passwordChanged = readerPage.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/auth/first-login/change-password' && response.request().method() === 'POST')
     await readerPage.getByRole('button', { name: 'Guardar y continuar', exact: true }).click()
+    expect((await passwordChanged).status()).toBe(200)
     await readerPage.goto(`/datasets/${sourceFamily.output_datasets.headers}`)
     await expect(readerPage.getByRole('heading', { name: `${sourceFamily.name} · headers`, exact: true })).toBeVisible()
     await expect(readerPage.getByRole('link', { name: 'Documentos', exact: true })).toHaveCount(0)
@@ -246,7 +267,7 @@ test('browser scheduled strict batch retains pending document and exact two-docu
   const definition = { ...template.definition, publication: { ...template.definition.publication, wait_seconds: 0, starts_at: new Date(Date.now() - 1000).toISOString() } }
   const bounded = await call(page, csrf, `/documents/families/${family.id}/templates`, definition)
   await page.reload()
-  const example = await upload(page, `D095-scheduled-example-${nonce}.pdf`, '000000', true, bounded.id)
+  const example = await upload(page, `D095-scheduled-example-${nonce}.pdf`, '000000', true, bounded)
   await review(page, example, true)
   const first = await upload(page, `D095-scheduled-one-${nonce}.pdf`, '000001')
   const second = await upload(page, `D095-scheduled-two-${nonce}.pdf`, '000002')
