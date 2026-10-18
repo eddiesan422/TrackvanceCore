@@ -1120,6 +1120,53 @@ def test_corrections_browser_failed_population_keeps_only_verified_location_and_
     assert all(value not in json.dumps(result) for value in ('SECRET_TOKEN', 'PRIVATE_ROW', 'https:', '"test":', '"env":'))
 
 
+@pytest.mark.parametrize('origin', ['ERROR_LOCATION', 'SPEC_FALLBACK'])
+@pytest.mark.parametrize('error_type', ['AssertionError', 'Error', 'TimeoutError'])
+def test_browser_verified_location_preserves_explicit_origin_and_closed_error_type(tmp_path, monkeypatch, origin, error_type):
+    source_name = 'frontend/tests-e2e/owned.spec.ts'
+    source = tmp_path / source_name
+    source.parent.mkdir(parents=True)
+    source.write_text("test('private title', () => {});\n", encoding='utf-8')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    result = diagnostics.sanitize_browser_failure({'failures': [{
+        'status': 'timedOut', 'error_type': error_type, 'location_origin': origin,
+        'location': {'file': source_name, 'line': 1, 'column': 1},
+        'test': 'PRIVATE_ROW', 'message': 'SECRET_TOKEN', 'stack': 'SECRET_TOKEN',
+    }]}, {source_name})
+    assert result['failures'] == [{'location_present': True, 'status': 'timedOut',
+        'error_type': error_type, 'location': {'file': source_name, 'line': 1, 'column': 1},
+        'location_origin': origin}]
+    assert result['failure_location_present'] is True
+    assert all(value not in json.dumps(result) for value in ('PRIVATE_ROW', 'SECRET_TOKEN', 'private title'))
+
+
+@pytest.mark.parametrize('change', ['missing-location', 'invalid-line', 'unknown-origin',
+    'origin-object', 'unknown-error-type', 'error-type-object'])
+def test_browser_origin_requires_valid_location_and_error_type_never_accepts_child_text(tmp_path, monkeypatch, change):
+    source_name = 'frontend/tests-e2e/owned.spec.ts'
+    source = tmp_path / source_name
+    source.parent.mkdir(parents=True)
+    source.write_text("test('private title', () => {});\n", encoding='utf-8')
+    monkeypatch.setattr(diagnostics, 'ROOT', tmp_path)
+    failure = {'location': {'file': source_name, 'line': 1},
+               'location_origin': 'SPEC_FALLBACK', 'error_type': 'TimeoutError'}
+    if change == 'missing-location':
+        failure.pop('location')
+    elif change == 'invalid-line':
+        failure['location']['line'] = 1000000
+    elif change.startswith('origin') or change == 'unknown-origin':
+        failure['location_origin'] = {'secret': 'SECRET_TOKEN'} if change == 'origin-object' else 'SECRET_TOKEN'
+    else:
+        failure['error_type'] = {'secret': 'SECRET_TOKEN'} if change == 'error-type-object' else 'SECRET_TOKEN'
+    result = diagnostics.sanitize_browser_failure({'failures': [failure]}, {source_name})
+    observed = result['failures'][0]
+    if change in {'missing-location', 'invalid-line', 'unknown-origin', 'origin-object'}:
+        assert 'location_origin' not in observed
+    if change in {'unknown-error-type', 'error-type-object'}:
+        assert 'error_type' not in observed
+    assert 'SECRET_TOKEN' not in json.dumps(result)
+
+
 @pytest.mark.parametrize('change', ['file-unknown', 'file-url', 'file-traversal', 'line-bool', 'line-zero',
     'line-overflow', 'column-bool', 'column-overflow', 'location-missing', 'failures-missing'])
 def test_corrections_browser_location_missing_is_explicit_without_untrusted_text(browser_root, change):

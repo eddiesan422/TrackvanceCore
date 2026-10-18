@@ -50,6 +50,9 @@ def test_failed_probe_cannot_publish_a_pass_summary(monkeypatch, tmp_path):
 
 def test_failed_assertion_publishes_only_location_and_counts(monkeypatch, tmp_path, capsys):
     secret = "disposable-password-for-redaction-test"
+    source = tmp_path / "frontend/tests-e2e/identity.spec.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("// source fixture\n" * 10, encoding="utf-8")
     report = {"stats": {"expected": 0, "unexpected": 1}, "suites": [{"specs": [{
         "title": "local login", "tests": [{"status": "unexpected", "results": [{
             "status": "failed", "error": {"message": secret, "stack": secret,
@@ -65,8 +68,55 @@ def test_failed_assertion_publishes_only_location_and_counts(monkeypatch, tmp_pa
                                      environment={"TV_CONNECTIONS_PASSWORD": secret}, evidence=evidence)
     published = (evidence / "browser-summary.json").read_text()
     assert secret not in published + capsys.readouterr().out
-    assert json.loads(published)["failures"][0]["location"]["line"] == 10
+    failure = json.loads(published)["failures"][0]
+    assert failure["location"]["line"] == 10
+    assert failure["location_origin"] == "ERROR_LOCATION"
     assert list(evidence.iterdir()) == [evidence / "browser-summary.json"]
+
+
+@pytest.mark.parametrize("error_name", ["Error", "TimeoutError", "AssertionError", "private-error-name", {"private": "value"}])
+def test_failure_without_error_location_keeps_verified_spec_fallback_without_private_text(
+    monkeypatch, tmp_path, capsys, error_name
+):
+    secret = "synthetic-private-title-body-cookie"
+    source = tmp_path / "frontend/tests-e2e/owned.spec.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("// fixture\ntest('static fixture', () => {})\n", encoding="utf-8")
+    report = {"stats": {"expected": 29, "unexpected": 1, "skipped": 0, "flaky": 0}, "suites": [{
+        "specs": [{"title": secret, "file": str(source), "line": 2, "column": 1,
+            "tests": [{"status": "unexpected", "results": [{"status": "failed", "error": {
+                "name": error_name, "message": secret, "stack": secret}}]}]}]}]}
+    monkeypatch.setattr(browser_evidence.subprocess, "run", lambda *_args, **_kwargs:
+                        SimpleNamespace(returncode=1, stdout=json.dumps(report), stderr=secret))
+    evidence = tmp_path / "published"
+    evidence.mkdir()
+    with pytest.raises(RuntimeError, match="Playwright falló"):
+        browser_evidence.run_browser("pnpm", [], root=tmp_path, project="isolated-test",
+                                     environment={"TV_CONNECTIONS_PASSWORD": secret}, evidence=evidence)
+    published = (evidence / "browser-summary.json").read_text()
+    failure = json.loads(published)["failures"][0]
+    assert failure["location"] == {"file": "frontend/tests-e2e/owned.spec.ts", "line": 2, "column": 1}
+    assert failure["location_origin"] == "SPEC_FALLBACK"
+    assert failure.get("error_type") == (error_name if isinstance(error_name, str)
+                                        and error_name in {"Error", "TimeoutError", "AssertionError"} else None)
+    assert "test" not in failure
+    assert secret not in published + capsys.readouterr().out
+    assert json.loads(published)["expected"] == 29
+    assert json.loads(published)["unexpected"] == 1
+
+
+@pytest.mark.parametrize("location", [
+    {"file": "../owned.spec.ts", "line": 1},
+    {"file": "owned.spec.ts?private", "line": 1},
+    {"file": "missing.spec.ts", "line": 1},
+    {"file": "owned.spec.ts", "line": True},
+    {"file": "owned.spec.ts", "line": 99},
+])
+def test_source_location_rejects_unverified_paths_and_lines(tmp_path, location):
+    source = tmp_path / "frontend/tests-e2e/owned.spec.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("// fixture\n", encoding="utf-8")
+    assert browser_evidence.browser_source_location(location, tmp_path) is None
 
 
 def test_raw_artifact_containing_password_blocks_publication(monkeypatch, tmp_path):

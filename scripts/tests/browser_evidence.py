@@ -89,6 +89,38 @@ def credential_privacy_reports(report: dict) -> list[dict]:
     return records
 
 
+def browser_source_location(value: object, root: Path) -> dict | None:
+    """Retain only a location inside one unambiguous, existing browser spec."""
+    if not isinstance(value, dict) or not isinstance(value.get("file"), str):
+        return None
+    raw = value["file"].replace("\\", "/")
+    if any(mark in raw for mark in ("://", "\n", "\r", "\0", "?", "#")) or ".." in raw.split("/"):
+        return None
+    candidates = []
+    for source in (root / "frontend/tests-e2e").rglob("*.spec.ts"):
+        relative = source.relative_to(root).as_posix()
+        if (raw == relative or raw.endswith("/" + relative) or raw == source.name
+                or raw == relative.removeprefix("frontend/")):
+            candidates.append((source, relative))
+    if len(candidates) != 1:
+        return None
+    source, relative = candidates[0]
+    if not source.is_file() or any(part.is_symlink() or getattr(part, "is_junction", lambda: False)()
+                                   for part in (source, *source.parents)):
+        return None
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+    line, column = value.get("line"), value.get("column")
+    if type(line) is not int or not 1 <= line <= len(lines):
+        return None
+    location = {"file": relative, "line": line}
+    if type(column) is int and 1 <= column <= min(4096, len(lines[line - 1]) + 1):
+        location["column"] = column
+    return location
+
+
 def bounded_browser_command(arguments: list[str], *, cwd: Path, environment: dict[str, str],
                             timeout_seconds: int, resource_check=None) -> subprocess.CompletedProcess:
     """Own one browser process group and reap it on timeout or interruption."""
@@ -179,8 +211,21 @@ def run_browser(pnpm: str, arguments: list[str], *, root: Path, project: str,
             for test in spec.get("tests", []):
                 if test.get("status") == "unexpected":
                     for attempt in test.get("results", []):
-                        failures.append({"test": spec.get("title"), "status": attempt.get("status"),
-                                         "location": attempt.get("error", {}).get("location", {})})
+                        failure = {}
+                        if isinstance(attempt.get("status"), str) and attempt["status"] in {"failed", "timedOut", "interrupted"}:
+                            failure["status"] = attempt["status"]
+                        error = attempt.get("error")
+                        error = error if isinstance(error, dict) else {}
+                        if isinstance(error.get("name"), str) and error["name"] in {"AssertionError", "Error", "TimeoutError"}:
+                            failure["error_type"] = error["name"]
+                        location = browser_source_location(error.get("location"), root)
+                        origin = "ERROR_LOCATION"
+                        if location is None:
+                            location = browser_source_location(spec, root)
+                            origin = "SPEC_FALLBACK"
+                        if location is not None:
+                            failure.update(location=location, location_origin=origin)
+                        failures.append(failure)
         for nested in suite.get("suites", []):
             inspect(nested)
     for suite in report.get("suites", []):

@@ -675,6 +675,8 @@ def sanitize_browser_failure(value, sources):
         item = {'location_present': False}
         if allowed(failure.get('status'), {'failed', 'timedOut', 'interrupted'}):
             item['status'] = failure['status']
+        if allowed(failure.get('error_type'), {'AssertionError', 'Error', 'TimeoutError'}):
+            item['error_type'] = failure['error_type']
         location = failure.get('location')
         if isinstance(location, dict) and isinstance(location.get('file'), str):
             raw = location['file'].replace('\\', '/')
@@ -692,6 +694,8 @@ def sanitize_browser_failure(value, sources):
                         if type(column) is int and 1 <= column <= min(4096, len(lines[line - 1]) + 1):
                             safe['column'] = column
                         item.update(location_present=True, location=safe)
+                        if allowed(failure.get('location_origin'), {'ERROR_LOCATION', 'SPEC_FALLBACK'}):
+                            item['location_origin'] = failure['location_origin']
         failures.append(item)
     result.update(failures=failures, failure_location_present=any(item['location_present'] for item in failures))
     return result
