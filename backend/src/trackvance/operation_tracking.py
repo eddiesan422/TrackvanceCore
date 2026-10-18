@@ -2,13 +2,16 @@
 
 Pagination uses a raw metadata cursor. Unauthorized resources are removed before
 serialization; neither their names nor a global count leak through this endpoint.
+scanned_records counts authorized candidates only; cursor positions can also
+cross denied metadata and do not represent an authorized population total.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import DateTime, case, cast, func, inspect, literal, or_, select, union_all
+from sqlalchemy import DateTime, String, case, cast, func, inspect, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from .acquisition_models import AcquisitionRun
@@ -25,7 +28,12 @@ from .document_models import (
     DocumentFamily,
     DocumentOriginal,
 )
-from .governance import authorize_dataset, authorize_dataset_content, authorize_run_content
+from .governance import (
+    authorize_dataset,
+    authorize_dataset_content,
+    authorize_run_content,
+    read_authorization_snapshot,
+)
 from .models import ArtifactLink, Dataset, DatasetVersion, ExceptionCase, Run, User
 from .operation_processes import process_identity, process_roots, readable_root_key
 from .operations_common import OperationError
@@ -286,7 +294,11 @@ def _item(db, user, kind, identity, grants, search="", *, authorize_only=False):
                 for member in members[:20]:
                     document = _item(db, user, "document", member.document_id, grants)
                     if document:
-                        stages.extend(stage for stage in document["stages"] if stage["id"].startswith(("document:", "extraction:")))
+                        stages.extend(stage for stage in document["stages"] if stage["id"].startswith("document:"))
+                        extraction = db.get(DocumentExtraction, member.extraction_id) if member.extraction_id else None
+                        if extraction and extraction.organization_id == user.organization_id and extraction.document_id == member.document_id:
+                            stages.append({"id": f"extraction:{extraction.id}", "title": f"Extracción · revisión {extraction.revision}",
+                                "state": "REVIEWED" if extraction.reviewed else "EXTRACTED", "created_at": iso(extraction.created_at), "href": href})
                 for version_id in (record.published_versions or {}).values():
                     published = _version_stage(db, user, version_id, grants)
                     if published:
@@ -478,6 +490,7 @@ def _within_dates(item, from_date, until_date):
 
 
 @router.get("")
+@read_authorization_snapshot
 def operations(queue: Queue = "all", search: str = Query(default="", max_length=200),
                offset: int = Query(default=0, ge=0), limit: int = Query(default=25, ge=1, le=100),
                grouped: bool = False, module: str | None = None, origin: str | None = None,
@@ -549,6 +562,52 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
         "acquisition_schedule": literal(False) if version_id else AcquisitionSourceConfiguration.dataset_id == dataset_id,
         "document_batch": DocumentBatch.id.in_(related_batches),
         "document": DocumentOriginal.id.in_(select(DocumentBatchMember.document_id).where(DocumentBatchMember.batch_id.in_(related_batches)))}
+    # A complete native identity can occur in a version/run/exception stage,
+    # even when the producer's name does not contain it. Select those real
+    # relationships before projecting groups, retaining literal title/diagnosis
+    # matches too. Free text continues through the full stage-aware predicate.
+    identity_search = bool(grouped and not related_scope and re.fullmatch(
+        r"[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", search))
+    searched_id = search.lower()
+    searched_runs = select(Run.id).where(Run.organization_id == user.organization_id,
+        or_(Run.id == searched_id, Run.dataset_version_id == searched_id, Run.target_version_id == searched_id,
+            Run.output_version_id == searched_id))
+    searched_batches = select(DocumentBatchMember.batch_id).where(DocumentBatchMember.organization_id == user.organization_id,
+        or_(DocumentBatchMember.extraction_id == searched_id, DocumentBatchMember.document_id.in_(select(DocumentOriginal.id).where(
+            DocumentOriginal.organization_id == user.organization_id,
+            or_(DocumentOriginal.id == searched_id, DocumentOriginal.extraction_id == searched_id)))))
+    searched_datasets = select(Dataset.id).where(Dataset.organization_id == user.organization_id,
+        Dataset.name.icontains(search, autoescape=True))
+    searched_families = select(DocumentFamily.id).where(DocumentFamily.organization_id == user.organization_id,
+        DocumentFamily.name.icontains(search, autoescape=True))
+    identity_conditions = {
+        "run": or_(Run.id.in_(searched_runs), Run.name.icontains(search, autoescape=True),
+            Run.error.icontains(search, autoescape=True), Run.decision.icontains(search, autoescape=True),
+            Run.progress_stage.icontains(search, autoescape=True)),
+        "exception": or_(ExceptionCase.id == searched_id, ExceptionCase.run_id.in_(searched_runs),
+            ExceptionCase.title.icontains(search, autoescape=True), ExceptionCase.root_cause.icontains(search, autoescape=True)),
+        "acquisition": or_(AcquisitionRun.id == searched_id, AcquisitionRun.output_version_id == searched_id,
+            AcquisitionRun.dataset_id.in_(searched_datasets), AcquisitionRun.filename.icontains(search, autoescape=True),
+            AcquisitionRun.error_message.icontains(search, autoescape=True), AcquisitionRun.stage.icontains(search, autoescape=True),
+            AcquisitionRun.source_snapshot["pending_dataset"]["name"].as_string().icontains(search, autoescape=True)),
+        "occurrence": or_(AcquisitionOccurrence.id == searched_id, AcquisitionOccurrence.acquisition_id == searched_id,
+            AcquisitionOccurrence.reason_message.icontains(search, autoescape=True),
+            AcquisitionOccurrence.configuration_id.in_(select(AcquisitionSourceConfiguration.id).where(
+                AcquisitionSourceConfiguration.organization_id == user.organization_id,
+                AcquisitionSourceConfiguration.dataset_id.in_(searched_datasets)))),
+        "acquisition_schedule": or_(AcquisitionSourceConfiguration.id == searched_id,
+            AcquisitionSourceConfiguration.dataset_id.in_(searched_datasets),
+            AcquisitionSourceConfiguration.dispatch_diagnostic["message"].as_string().icontains(search, autoescape=True)),
+        "document": or_(DocumentOriginal.id == searched_id, DocumentOriginal.extraction_id == searched_id,
+            DocumentOriginal.id.in_(select(DocumentBatchMember.document_id).where(
+                DocumentBatchMember.organization_id == user.organization_id, DocumentBatchMember.batch_id == searched_id)),
+            DocumentOriginal.filename.icontains(search, autoescape=True), DocumentOriginal.error_code.icontains(search, autoescape=True),
+            DocumentOriginal.family_id.in_(searched_families)),
+        "document_batch": or_(DocumentBatch.id == searched_id, DocumentBatch.id.in_(searched_batches),
+            DocumentBatch.family_id.in_(searched_families), DocumentBatch.blocked_reason.icontains(search, autoescape=True),
+            DocumentBatch.status.icontains(search, autoescape=True),
+            cast(DocumentBatch.published_versions, String).icontains(search, autoescape=True)),
+    }
     sources = []
     for kind, model, queue_expression in models:
         if kind == "exception" and "exceptions:read" not in grants or kind in {"document", "document_batch"} and "documents:read" not in grants or kind in {"acquisition", "occurrence", "acquisition_schedule"} and "datasets:read" not in grants or kind == "run" and not modules:
@@ -566,6 +625,8 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
             source = source.where(AcquisitionSourceConfiguration.dispatch_diagnostic["code"].as_string().is_not(None))
         if related_scope:
             source = source.where(scope_conditions[kind])
+        elif identity_search:
+            source = source.where(identity_conditions[kind])
         sources.append(source)
     if not sources:
         return empty
@@ -580,11 +641,11 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
     if until_date:
         metadata = metadata.where(native.c.created_at <= until_date)
     ordering = native
-    if grouped and related_scope:
+    if grouped:
         scoped = metadata.subquery("operation_related_scope")
         roots = process_roots(select(scoped.c.kind, scoped.c.identity), user.organization_id).subquery("operation_related_roots")
         process_key = readable_root_key(roots, grants, user.organization_id)
-        ranked = select(scoped, process_key.label("process_key"), func.row_number().over(
+        ranked = select(scoped, process_key.label("process_key"), roots.c.root_kind, roots.c.root_id, func.row_number().over(
             partition_by=process_key, order_by=(scoped.c.created_at.desc(), scoped.c.kind, scoped.c.identity)).label("group_rank"))
         ranked = ranked.join(roots, (roots.c.kind == scoped.c.kind) & (roots.c.identity == scoped.c.identity))
         if process:
@@ -594,18 +655,18 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
         ordering = anchors
     candidates = db.execute(metadata.order_by(ordering.c.created_at.desc(), ordering.c.kind, ordering.c.identity)
         .offset(offset).limit(1001)).all()
-    items, consumed, seen = [], 0, set()
+    items, consumed, authorized_scanned, seen = [], 0, 0, set()
     for candidate in candidates[:1000]:
         consumed += 1
+        if grouped:
+            db.info["operation_process_identities"][(user.organization_id, candidate.kind, candidate.identity)] = (
+                f"{candidate.root_kind}:{candidate.root_id}")
         item = _item(db, user, candidate.kind, candidate.identity, grants, "" if grouped else search)
         if item is None:
             continue
+        authorized_scanned += 1
         if grouped:
             item = group_item(db, user, item, grants)
-            # Only anchors emit a group. This remains stable across raw cursor
-            # pages; aliases are represented as stages of their native anchor.
-            if not related_scope and candidate.kind + ":" + candidate.identity != item["process_id"]:
-                continue
         if not _queue_matches(item, queue):
             continue
         if not _filter_matches(item, module, origin, status, result):
@@ -625,4 +686,4 @@ def operations(queue: Queue = "all", search: str = Query(default="", max_length=
             break
     has_more = consumed < len(candidates)
     return {"items": items, "limit": limit, "offset": offset, "next_offset": offset + consumed if has_more else None,
-            "has_more": has_more, "coverage": "AUTHORIZED_NATIVE_RECORDS", "scanned_records": consumed}
+            "has_more": has_more, "coverage": "AUTHORIZED_NATIVE_RECORDS", "scanned_records": authorized_scanned}
