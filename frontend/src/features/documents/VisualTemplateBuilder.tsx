@@ -11,6 +11,22 @@ const groups = { DOCUMENT: 'Documento', ISSUER: 'Emisor', BUYER: 'Adquiriente', 
 const kinds = { STRING: 'Texto o identificador', DECIMAL: 'Importe o decimal', INT64: 'Número entero', DATE: 'Fecha', BOOLEAN: 'Verdadero / falso' }
 const regionStyle = (r: Region) => ({ left: `${r[0] * 100}%`, top: `${r[1] * 100}%`, width: `${(r[2] - r[0]) * 100}%`, height: `${(r[3] - r[1]) * 100}%` })
 
+function advancedDefinition(value: unknown): RecordData {
+  const object = (item: unknown): item is RecordData => item !== null && typeof item === 'object' && !Array.isArray(item)
+  const text = (item: unknown) => item === undefined || typeof item === 'string'
+  const field = (item: unknown) => object(item) && typeof item.name === 'string' && text(item.label) && text(item.logical_type) && (item.visual == null || object(item.visual) && text(item.visual.label))
+  const invalid = () => new Error('La definición avanzada requiere un objeto con campos y tablas en listas, nombres de texto y columnas válidas. Corrige el JSON; las reglas actuales se conservan.')
+  if (!object(value)) throw invalid()
+  // Match the omitted collection defaults of DocumentDraftDefinition. The
+  // server still validates extraction rules, types and publication semantics.
+  const fields = value.fields === undefined ? [] : value.fields
+  const tables = value.tables === undefined ? [] : value.tables
+  const arithmetic = value.arithmetic === undefined ? [] : value.arithmetic
+  const publication = value.publication === undefined ? {} : value.publication
+  if (!Array.isArray(fields) || !fields.every(field) || !Array.isArray(tables) || !tables.every(table => object(table) && typeof table.name === 'string' && Array.isArray(table.fields) && table.fields.every(field) && (table.visual == null || object(table.visual) && Array.isArray(table.visual.column_bounds) && table.visual.column_bounds.every((bound: unknown) => typeof bound === 'number' && Number.isFinite(bound)) && text(table.visual.stop_label))) || !Array.isArray(arithmetic) || !arithmetic.every(object) || !object(publication)) throw invalid()
+  return { ...value, fields, tables, arithmetic, publication }
+}
+
 export default function VisualTemplateBuilder({ identity, refresh, templates = [] }: {
   identity: string; refresh: () => void; existing?: RecordData; templates?: RecordData[]; onReviewDocument?: (id: string) => void
 }) {
@@ -132,7 +148,7 @@ function DraftEditor({ initial, identity, refresh }: { initial: RecordData; iden
       </>}
     </div></div>
     {test && <section className="visual-builder-results"><h3>Prueba conjunta · instantánea {test.snapshot_hash.slice(0, 12)}</h3><p>La cobertura reconocida no demuestra exactitud automática. Las confirmaciones y el esfuerzo de corrección se muestran por separado.</p>{Object.entries(test.automatic_metrics).map(([id, metrics]) => { const m = metrics as RecordData; const final = test.reviewed_metrics[id]; return <div key={id}><strong>{references.data?.items.find(r => r.id === id)?.filename || id}</strong><p>Automático: {m.recognized}/{m.fields_and_cells} campos y celdas reconocidos · {m.rows} filas · {m.ambiguous} ambigüedades · {m.unparsed_regions} regiones sin interpretar.</p><p>Final revisado: {final.human_confirmed}/{final.fields_and_cells} confirmaciones · {final.corrected} correcciones. Exactitud: requiere oráculo independiente.</p><p>{test.issues[id].length} incidencias pendientes.</p></div> })}{test.comparisons?.map((c: RecordData) => <p key={c.association}>Asociación confirmada: {c.association} · {c.equal ? 'Valores automáticos coinciden' : 'Valores automáticos difieren; revisa los originales'}</p>)}<button className="button primary" disabled={busy || dirty || Object.values(test.issues).some(value => (value as string[]).length > 0)} onClick={() => void act(async () => { const result = await post(`/documents/builder/tests/${test.id}/activate`); setTest({ ...test, activated_template_id: result.id }); setNotice(`Revisión formal ${result.revision} activada desde esta instantánea. Los ejemplos siguen como referencias.`); refresh() })}>{test.activated_template_id ? 'Revisión activada' : 'Aprobar y activar esta instantánea'}</button></section>}
-    <details className="document-advanced"><summary>Configuración técnica avanzada del borrador</summary><p>Reglas, formatos, publicación y comprobaciones aritméticas pertenecen a la misma instantánea.</p><textarea aria-label="Definición avanzada del borrador" rows={14} value={advanced ?? JSON.stringify(definition, null, 2)} onChange={e => setAdvanced(e.target.value)}/><button className="button secondary" disabled={!advanced} onClick={() => { if (advanced === null) return; try { edit(JSON.parse(advanced)); setAdvanced(null) } catch (e) { setError(e) } }}>Aplicar cambios avanzados al borrador</button></details>
+    <details className="document-advanced"><summary>Configuración técnica avanzada del borrador</summary><p>Reglas, formatos, publicación y comprobaciones aritméticas pertenecen a la misma instantánea.</p><textarea aria-label="Definición avanzada del borrador" rows={14} value={advanced ?? JSON.stringify(definition, null, 2)} onChange={e => setAdvanced(e.target.value)}/><button className="button secondary" disabled={!advanced} onClick={() => { if (advanced === null) return; try { edit(advancedDefinition(JSON.parse(advanced))); setAdvanced(null); setError(null) } catch (e) { setError(e) } }}>Aplicar cambios avanzados al borrador</button></details>
     {notice && <Notice>{notice}</Notice>}{!!(error || references.error || reference.error) && <ErrorState error={error || references.error || reference.error}/>}
   </div>
 }

@@ -107,4 +107,42 @@ describe('DOC097 independent draft and references', () => {
     expect(screen.queryByRole('button', { name: 'Aprobar y activar esta instantánea' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Probar todas las referencias' })).toBeEnabled()
   })
+
+  it('accepts advanced definitions with omitted optional arrays without losing the editor', async () => {
+    localStorage.setItem('document-draft:family', 'draft')
+    const user = userEvent.setup()
+    renderApp(<VisualTemplateBuilder identity="family" refresh={vi.fn()}/>)
+    await user.click(await screen.findByText('Configuración técnica avanzada del borrador'))
+    const editor = screen.getByLabelText('Definición avanzada del borrador')
+    await user.clear(editor)
+    await user.paste(JSON.stringify({ fields: [{ name: 'minimal', label: 'Invoice' }], publication: { mode: 'INDIVIDUAL' } }))
+    await user.click(screen.getByRole('button', { name: 'Aplicar cambios avanzados al borrador' }))
+    expect(await screen.findByLabelText('Nombre del campo')).toHaveValue('minimal')
+    expect(screen.getByLabelText('Cargar referencias')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar borrador' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/documents/builder/drafts/draft', expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"tables":[]') })))
+    const saved = vi.mocked(api).mock.calls.find(([path, options]) => path.endsWith('/drafts/draft') && options?.method === 'PUT')!
+    expect(JSON.parse(String(saved[1]!.body)).definition).toEqual({ fields: [{ name: 'minimal', label: 'Invoice' }], publication: { mode: 'INDIVIDUAL' }, tables: [], arithmetic: [] })
+  })
+
+  it.each([
+    { case: 'null', value: null },
+    { case: 'fields is not a list', value: { fields: 'not a field list', tables: [] } },
+    { case: 'table columns are not a list', value: { fields: [{ name: 'invoice' }], tables: [{ name: 'details', fields: 'not a column list' }] } },
+  ])('rejects invalid advanced JSON structure ($case) visibly and preserves both the current rules and entered text', async ({ value }) => {
+    localStorage.setItem('document-draft:family', 'draft')
+    const user = userEvent.setup()
+    renderApp(<VisualTemplateBuilder identity="family" refresh={vi.fn()}/>)
+    await user.click(await screen.findByText('Configuración técnica avanzada del borrador'))
+    const editor = screen.getByLabelText('Definición avanzada del borrador')
+    const invalid = JSON.stringify(value)
+    await user.clear(editor)
+    await user.paste(invalid)
+    await user.click(screen.getByRole('button', { name: 'Aplicar cambios avanzados al borrador' }))
+    expect(await screen.findByText(/La definición avanzada requiere/)).toBeVisible()
+    expect(screen.getByLabelText('Nombre del campo')).toHaveValue('invoice')
+    expect(editor).toHaveValue(invalid)
+    expect(screen.getByRole('button', { name: 'Guardar borrador' })).toBeDisabled()
+    expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
+  })
 })
