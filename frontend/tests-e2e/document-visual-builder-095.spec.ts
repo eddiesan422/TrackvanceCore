@@ -10,6 +10,7 @@ test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000,
 test.setTimeout(420_000)
 test.skip(process.env.TV_CORE095_VISUAL_E2E !== 'true', 'Requires explicitly identified synthetic Codex or disposable functional stack')
 test.afterEach(async ({ browser }, info) => {
+  for (const context of browser.contexts()) for (const cookie of await context.cookies()) if (cookie.value) privateValues.add(cookie.value)
   for (const error of info.errors) for (const key of ['message', 'stack', 'snippet', 'value', 'errorContext'] as const) if (typeof error[key] === 'string') for (const secret of privateValues) error[key] = error[key]!.split(secret).join('[REDACTED]')
   for (const context of browser.contexts()) for (const page of context.pages()) await page.evaluate(() => document.body.replaceChildren()).catch(() => undefined)
   privateValues.clear()
@@ -51,6 +52,7 @@ async function login(page: Page) {
     await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  for (const cookie of await page.context().cookies()) if (cookie.value) privateValues.add(cookie.value)
   return String((await (await page.request.get('/api/v1/me')).json()).csrf_token)
 }
 

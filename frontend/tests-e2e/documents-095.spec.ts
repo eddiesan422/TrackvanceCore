@@ -6,6 +6,7 @@ import { fillSecret } from './identity-helpers'
 
 const privateValues = new Set<string>()
 test.afterEach(async ({ browser }, info) => {
+  for (const context of browser.contexts()) for (const cookie of await context.cookies()) if (cookie.value) privateValues.add(cookie.value)
   for (const error of info.errors) for (const key of ['message', 'stack', 'snippet', 'value', 'errorContext'] as const) {
     if (typeof error[key] === 'string') for (const secret of privateValues) error[key] = error[key]!.split(secret).join('[REDACTED]')
   }
@@ -53,6 +54,7 @@ async function login(page: Page) {
     await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
+  for (const cookie of await page.context().cookies()) if (cookie.value) privateValues.add(cookie.value)
   const me = await (await page.request.get('/api/v1/me')).json()
   return String(me.csrf_token)
 }
@@ -293,6 +295,7 @@ test('document browser individual flow → exact native approved output → veri
     await fillSecret(readerPage.getByLabel('Contraseña', { exact: true }), reader.temporary_credentials.temporary_password)
     await readerPage.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
     await expect(readerPage.getByRole('heading', { name: 'Cambia tu contraseña', exact: true })).toBeVisible()
+    for (const cookie of await readerContext.cookies()) if (cookie.value) privateValues.add(cookie.value)
     const localPassword = 'D095 fixture ' + randomBytes(24).toString('base64url')
     privateValues.add(localPassword)
     await fillSecret(readerPage.getByLabel('Nueva contraseña', { exact: true }), localPassword)
@@ -300,6 +303,7 @@ test('document browser individual flow → exact native approved output → veri
     const passwordChanged = readerPage.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/auth/first-login/change-password' && response.request().method() === 'POST')
     await readerPage.getByRole('button', { name: 'Guardar y continuar', exact: true }).click()
     expect((await passwordChanged).status()).toBe(200)
+    for (const cookie of await readerContext.cookies()) if (cookie.value) privateValues.add(cookie.value)
     await readerPage.goto(`/datasets/${sourceFamily.output_datasets.headers}`)
     await expect(readerPage.getByRole('heading', { name: `${sourceFamily.name} · headers`, exact: true })).toBeVisible()
     await expect(readerPage.getByRole('link', { name: 'Documentos', exact: true })).toHaveCount(0)
