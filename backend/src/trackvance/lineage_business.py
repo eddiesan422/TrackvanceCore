@@ -11,6 +11,7 @@ import hmac
 import json
 import time
 from collections import deque
+from types import SimpleNamespace
 
 from sqlalchemy import and_, case, func, literal, or_, select, union_all
 
@@ -25,6 +26,7 @@ CURSOR_SECONDS = 1800
 RELATION_LABELS = {
     "DERIVED_FROM": "Derivada de", "INTAKE_ACCEPTED_FROM": "Datos aceptados",
     "SOURCE_SNAPSHOT": "Fuente de la versión", "REFRESH_OF": "Actualiza",
+    "ACQUISITION_SOURCE": "Fuente consultada · referencia de la adquisición",
     "RUN_INPUT": "Entrada", "RUN_REFERENCE": "Referencia", "DELIVERY_INPUT": "Entrada de entrega",
     "RUN_OUTPUT": "Salida", "ACQUISITION_OUTPUT": "Publica", "USES_CONFIGURATION": "Usa contrato",
     "REPORT_SOURCE": "Entrada de Reportes", "REPORT_OUTPUT": "Salida de Reportes",
@@ -54,16 +56,16 @@ def _invalid():
                           "La continuación venció o no corresponde a esta versión y sesión. Actualiza el linaje.")
 
 
-def _encode(request, root, path, direction="both", after="", technical=False):
+def _encode(request, root, path, direction="both", after="", technical=False, origin=False):
     body = json.dumps({"v": 1, "root": root, "user": request.state.user.id,
                        "path": path, "direction": direction, "after": after,
-                       "technical": technical, "expires": int(time.time()) + CURSOR_SECONDS},
+                       "technical": technical, "origin": origin, "expires": int(time.time()) + CURSOR_SECONDS},
                       separators=(",", ":"), sort_keys=True).encode()
     signature = hmac.new(request.state.session.token_hash.encode(), body, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(body + signature).rstrip(b"=").decode()
 
 
-def _decode(db, request, root, grants, cursor, technical):
+def _decode(db, request, root, grants, cursor, technical, origin=False):
     try:
         raw = base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
         body, signature = raw[:-32], raw[-32:]
@@ -73,7 +75,9 @@ def _decode(db, request, root, grants, cursor, technical):
         value = json.loads(body)
         path = value["path"]
         if (value["v"] != 1 or value["root"] != root or value["user"] != request.state.user.id
-                or value["technical"] is not technical or value["expires"] < time.time()
+                or value["technical"] is not technical or value.get("origin", False) is not origin
+                or (origin and not technical and value["direction"] != "upstream")
+                or value["expires"] < time.time()
                 or not isinstance(path, list) or not 1 <= len(path) <= MAX_PATH
                 or path[0] != root or value["direction"] not in {"both", "upstream", "downstream"}
                 or not isinstance(value["after"], str) or len(value["after"]) > 110):
@@ -93,6 +97,16 @@ def _decode(db, request, root, grants, cursor, technical):
                              ArtifactLink.target_type == kind, ArtifactLink.target_id == identity),
                         and_(ArtifactLink.target_type == prev_kind, ArtifactLink.target_id == prev_id,
                              ArtifactLink.source_type == kind, ArtifactLink.source_id == identity))).limit(1))
+                if not exists and origin and prev_kind == "ACQUISITION" and kind == "CONNECTION_VERSION":
+                    from .acquisition_models import AcquisitionRun
+                    exists = db.scalar(select(AcquisitionRun.id).where(AcquisitionRun.id == prev_id,
+                        AcquisitionRun.organization_id == request.state.user.organization_id,
+                        AcquisitionRun.connection_version_id == identity))
+                if origin and exists and kind != "CONNECTION_VERSION":
+                    # A signed path must still describe producer ancestry after permission changes.
+                    exists = db.scalar(_origin_adjacency(request.state.user, previous).with_only_columns(ArtifactLink.id)
+                        .where(or_(and_(ArtifactLink.source_type == kind, ArtifactLink.source_id == identity),
+                                   and_(ArtifactLink.target_type == kind, ArtifactLink.target_id == identity))).limit(1))
                 if not exists:
                     raise ValueError
             previous = key
@@ -113,6 +127,50 @@ def _adjacency(user, key, direction="both", technical=False):
     artifact = or_(ArtifactLink.source_type == "ARTIFACT", ArtifactLink.target_type == "ARTIFACT")
     return select(ArtifactLink).where(ArtifactLink.organization_id == user.organization_id,
                                      condition, artifact if technical else ~artifact)
+
+
+def _origin_adjacency(user, key):
+    """Select semantic producer edges in SQL, before any traversal/page limit.
+
+    REFRESH_OF is chronology, not data derivation. Consumers cannot be reached:
+    RUN_INPUT is followed only from a run proven to produce the selected output.
+    Original links remain immutable and available in the historical projections.
+    """
+    from .acquisition_models import AcquisitionRun
+    incoming = and_(ArtifactLink.relation.in_([
+        "RUN_OUTPUT", "ACQUISITION_OUTPUT", "REPORT_OUTPUT", "DOCUMENT_PUBLICATION",
+        "EXTRACTION_BATCH", "DOCUMENT_EXTRACTION", "DOCUMENT_BATCH_MEMBER",
+    ]), ArtifactLink.source_type != "ARTIFACT", ArtifactLink.target_type != "ARTIFACT")
+    derivation = and_(ArtifactLink.relation.in_(["DERIVED_FROM", "INTAKE_ACCEPTED_FROM"]),
+        ArtifactLink.source_type == "DATASET_VERSION", ArtifactLink.target_type == "DATASET_VERSION",
+        ArtifactLink.source_id.in_(select(DatasetVersion.id).where(
+            DatasetVersion.source_type.not_in(["REST", "POSTGRESQL", "SQLSERVER", "SOURCE_SNAPSHOT"]))))
+    source = and_(ArtifactLink.relation == "SOURCE_SNAPSHOT",
+        ~select(AcquisitionRun.id).where(AcquisitionRun.output_version_id == ArtifactLink.source_id,
+            AcquisitionRun.organization_id == user.organization_id).exists())
+    inputs = ArtifactLink.relation.in_(["RUN_INPUT", "RUN_REFERENCE", "REPORT_SOURCE"])
+    return _adjacency(user, key, "upstream").where(or_(incoming, derivation, source, inputs))
+
+
+def _configuration_metadata(db, user, node):
+    """Frozen identifiers/hashes belong to node detail, never extra graph hops."""
+    from .document_models import DocumentExtraction, DocumentOriginal, DocumentTemplate
+    from .models import Configuration, Run
+    references = []
+    if node["type"] == "RUN":
+        run = db.get(Run, node["resource_id"])
+        configuration = db.get(Configuration, run.config_id) if run and run.config_id else None
+        if configuration and configuration.organization_id == user.organization_id:
+            references.append({"type": "CONFIGURATION", "id": configuration.id,
+                "revision": configuration.version})
+    if node["type"] in {"DOCUMENT", "DOCUMENT_EXTRACTION"}:
+        model = DocumentOriginal if node["type"] == "DOCUMENT" else DocumentExtraction
+        record = db.get(model, node["resource_id"])
+        template = db.get(DocumentTemplate, record.template_id) if record else None
+        if template and template.organization_id == user.organization_id:
+            references.append({"type": "DOCUMENT_TEMPLATE", "id": template.id,
+                "revision": template.revision, "sha256": template.definition_hash})
+    return references
 
 
 def _technical_groups(db, user, key, grants):
@@ -187,7 +245,7 @@ def _business_edges(links, nodes):
     return list(grouped.values())
 
 
-def _evidence_page(db, request, root, grants, value):
+def _evidence_page(db, request, root, grants, value, origin=False):
     user, path = request.state.user, value["path"]
     owner = path[-1]
     query = _technical_query(db, user, owner).subquery()
@@ -203,25 +261,25 @@ def _evidence_page(db, request, root, grants, value):
     return {"projection": "evidence", "root_id": root["id"], "version_id": root["resource_id"],
             "owner_id": owner, "items": visible, "complete": len(rows) <= PAGE_SIZE,
             "next_cursor": _encode(request, root["id"], path, after=rows[PAGE_SIZE - 1].id,
-                                   technical=True) if len(rows) > PAGE_SIZE else None,
+                                   technical=True, origin=origin) if len(rows) > PAGE_SIZE else None,
             "scanned_relationships": min(len(rows), PAGE_SIZE), "limit": PAGE_SIZE,
             "semantics": "METADATA_ONLY_NO_ROW_OR_COLUMN_CORRESPONDENCE"}
 
 
-def business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evidence):
+def business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evidence, origin=False):
     user = request.state.user
-    value = _decode(db, request, root["id"], grants, cursor, evidence) if cursor else None
+    value = _decode(db, request, root["id"], grants, cursor, evidence, origin) if cursor else None
     if evidence:
         if value is None:
             raise _invalid()
-        return _evidence_page(db, request, root, grants, value)
+        return _evidence_page(db, request, root, grants, value, origin)
     path = value["path"] if value else [root["id"]]
     anchor = path[-1]
     anchor_kind, anchor_id = anchor.split(":", 1)
     anchor_node = _node(db, user, anchor_kind, anchor_id, grants)
     nodes, links, paths = {anchor: anchor_node}, {}, {anchor: path}
     queue = deque([(anchor, 0, value["after"] if value else "",
-                    value["direction"] if value else "both")])
+                    value["direction"] if value else "upstream" if origin else "both")])
     visited, pending = set(), {}
     scanned, budget = 0, max_nodes * 8
     while queue and budget > 0:
@@ -230,8 +288,20 @@ def business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evid
             continue
         visited.add(key)
         size = min(PAGE_SIZE, budget)
-        rows = db.scalars(_adjacency(user, key, direction).where(ArtifactLink.id > after)
+        adjacency = _origin_adjacency(user, key) if origin else _adjacency(user, key, direction)
+        rows = list(db.scalars(adjacency.where(ArtifactLink.id > after)
                           .order_by(ArtifactLink.id).limit(size + 1)).all()
+        )
+        if origin and key.startswith("ACQUISITION:"):
+            from .acquisition_models import AcquisitionRun
+            acquisition = db.get(AcquisitionRun, key.split(":", 1)[1])
+            if acquisition and acquisition.connection_version_id:
+                reference = "FK:ACQUISITION_SOURCE:" + acquisition.id
+                if reference > after:
+                    rows.append(SimpleNamespace(id=reference, relation="ACQUISITION_SOURCE",
+                        source_type="ACQUISITION", source_id=acquisition.id,
+                        target_type="CONNECTION_VERSION", target_id=acquisition.connection_version_id))
+                    rows.sort(key=lambda item: item.id)
         budget -= min(len(rows), size)
         scanned += min(len(rows), size)
         last = after
@@ -264,19 +334,23 @@ def business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evid
             pending.setdefault(key, {"after": after, "direction": direction})
     branches = []
     for key, node in nodes.items():
+        if origin and node.get("type") == "RUN":
+            node["role"] = "EXECUTION"
         node["has_more"] = key in pending
         node["technical_groups"] = _technical_groups(db, user, key, grants)
-        node["evidence_cursor"] = _encode(request, root["id"], paths[key], technical=True)
-        node["expand"] = ({direction: _encode(request, root["id"], paths[key], direction)
-                           for direction in ("upstream", "downstream")}
+        if origin:
+            node["configuration_references"] = _configuration_metadata(db, user, node)
+        node["evidence_cursor"] = _encode(request, root["id"], paths[key], technical=True, origin=origin)
+        node["expand"] = ({direction: _encode(request, root["id"], paths[key], direction, origin=origin)
+                           for direction in (("upstream",) if origin else ("upstream", "downstream"))}
                           if len(paths[key]) < MAX_PATH else None)
         node["expansion_limit"] = len(paths[key]) >= MAX_PATH
     for key, continuation in pending.items():
         if len(paths[key]) >= MAX_PATH:
             continue
         branches.append({"node_id": key, "direction": continuation["direction"],
-                         "cursor": _encode(request, root["id"], paths[key], **continuation)})
-    return {"projection": "business", "nodes": list(nodes.values()),
+                         "cursor": _encode(request, root["id"], paths[key], origin=origin, **continuation)})
+    return {"projection": "origin" if origin else "business", "nodes": list(nodes.values()),
             "edges": _business_edges(links, nodes), "root_id": root["id"],
             "anchor_id": anchor, "version_id": root["resource_id"], "complete": not pending,
             "pending_branches": sorted(pending), "branches": branches,

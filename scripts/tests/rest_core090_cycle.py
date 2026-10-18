@@ -610,7 +610,61 @@ def business_lineage_proof(client, dataset_id, version_id, output_version_id,
             "limits_per_page": {"max_nodes": 100, "max_depth": 4}, "browser_review": "SEPARATE_REQUIRED_EVIDENCE"}
 
 
-def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False):
+def origin097_proof(client, dataset_id, version_id, acquisition_id, connection_version_id):
+    """Check the producing chain before reading any consumer metadata."""
+    graph = client.call(f"/catalog/datasets/{dataset_id}/lineage-graph?projection=origin&version_id={version_id}&max_nodes=100&max_depth=4")
+    expected = {f"CONNECTION_VERSION:{connection_version_id}", f"ACQUISITION:{acquisition_id}", f"DATASET_VERSION:{version_id}"}
+    assert graph["projection"] == "origin" and graph["root_id"] == f"DATASET_VERSION:{version_id}"
+    assert {node["id"] for node in graph["nodes"]} == expected
+    assert graph["complete"] is True
+    assert all(node["type"] != "RUN" for node in graph["nodes"])
+    edges = {(edge["source"], edge["target"]) for edge in graph["edges"]}
+    assert (f"CONNECTION_VERSION:{connection_version_id}", f"ACQUISITION:{acquisition_id}") in edges
+    assert (f"ACQUISITION:{acquisition_id}", f"DATASET_VERSION:{version_id}") in edges
+    return {"result": "PASS", "projection": "origin", "nodes": graph["nodes"], "edges": graph["edges"],
+        "complete": True, "metadata_sha256": hashlib.sha256(canonical_row(graph)).hexdigest()}
+
+
+def scheduled097_acquisition(client, dataset_id, connection_id, actor_id, timeout):
+    """Configure once and observe real supervised scheduler/worker processes.
+
+    Bootstrap only provides a stable dataset and schema for the native pipeline.
+    Every record of the measured population arrives through this scheduled cut.
+    No direct dispatch call, SQL cursor edit or manual refresh is permitted here.
+    """
+    previous = client.call(f"/datasets/{dataset_id}/source-settings")
+    settings = {"connection_id": connection_id, "schema_name": "REST", "object_name": "collection",
+        "column_overrides": {}, "responsible_user_id": actor_id, "interval_seconds": 30,
+        "timezone": "America/Bogota", "enabled": True, "publication_policy": "EVERY_CUT", "empty_policy": "BLOCK"}
+    configured = client.call(f"/datasets/{dataset_id}/source-settings", {**settings, "expected_version": previous["version"]}, method="PUT")
+    assert configured["settings"]["interval_seconds"] == 30 and configured["next_run_at"]
+    def occurrence():
+        rows = client.call(f"/datasets/{dataset_id}/acquisition-occurrences?limit=1")["items"]
+        return rows[0] if rows else {}
+    registered = wait_for(occurrence, lambda value: bool(value.get("acquisition_id")) or value.get("status") == "BLOCKED",
+        timeout=min(timeout, 120), label="real-scheduled-acquisition-occurrence")
+    assert registered["status"] == "ENQUEUED" and registered["acquisition_id"], registered.get("reason_code")
+    assert registered["planned_at"] == configured["next_run_at"] and registered["coalesced_intervals"] == 0
+    # Stop only this new synthetic schedule once its measured cut exists. Pausing
+    # affects future occurrences; the frozen logical acquisition continues.
+    paused = client.call(f"/datasets/{dataset_id}/source-settings", {**settings, "expected_version": configured["version"], "enabled": False}, method="PUT")
+    assert paused["enabled"] is False
+    run = wait_for(lambda: client.call(f"/acquisitions/{registered['acquisition_id']}"), lambda value: value["status"] in TERMINAL,
+        timeout=timeout, label="scheduled-full-rest-acquisition")
+    snapshot = run["source_snapshot"]
+    assert snapshot["occurrence_id"] == registered["id"] and snapshot["origin"] == "SCHEDULED"
+    assert snapshot["planned_at"] == registered["planned_at"] and snapshot["responsible_user_id"] == actor_id
+    assert snapshot["source_configuration_version"] == configured["version"]
+    assert run["initiated_by_id"] == actor_id
+    evidence = {"result": "PASS", "occurrence": registered, "interval_seconds": 30, "timezone": "America/Bogota",
+        "saved_next_run_at": configured["next_run_at"], "configuration_version": configured["version"],
+        "paused_version": paused["version"], "manual_scheduler_calls": 0, "manual_refresh_calls": 0,
+        "acquisition_id": run["id"], "source_configuration_id": snapshot["source_configuration_id"]}
+    return run, evidence
+
+
+def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False, core097=False):
+    core095 = core095 or core097
     project = require_codex()
     started = time.monotonic()
     cpu_started = resource.getrusage(resource.RUSAGE_SELF)
@@ -663,11 +717,14 @@ def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False):
             "settings": {"mode": "CHAINED", "timezone": "America/Bogota", "starts_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
                          "source_policy": "INTAKE_OUTPUT", "intake_configuration_id": contract["id"]}}, expected=201)
         options["url"] = receiver_url + "/source"
-        client.call(f"/connections/{connection['id']}", {"version": connection["version"], "options": options}, method="PATCH")
+        current_connection = client.call(f"/connections/{connection['id']}", {"version": connection["version"], "options": options}, method="PATCH")
         source_start = receiver_json(receiver_url, "/source-receipt")["last_seq"] if core095 else None
-        refreshed = client.call(f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202, key=f"million-{nonce}")
-        acquisition = wait_for(lambda: client.call(f"/acquisitions/{refreshed['id']}"), lambda result: result["status"] in TERMINAL,
-            timeout=timeout, label="full-rest-acquisition")
+        if core097:
+            acquisition, stages["scheduled_acquisition"] = scheduled097_acquisition(client, dataset_id, connection["id"], actor["id"], timeout)
+        else:
+            refreshed = client.call(f"/datasets/{dataset_id}/acquisitions/refresh", {}, expected=202, key=f"million-{nonce}")
+            acquisition = wait_for(lambda: client.call(f"/acquisitions/{refreshed['id']}"), lambda result: result["status"] in TERMINAL,
+                timeout=timeout, label="full-rest-acquisition")
         assert acquisition["status"] == "SUCCESS", acquisition.get("error_code")
         assert acquisition["published_rows"] == rows
         if core095:
@@ -748,6 +805,17 @@ def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False):
         assert stages["lineage"]["result"] == "PASS"
         stages["business_lineage"] = business_lineage_proof(client, dataset_id, source_id,
             intake["output_version_id"], intake["id"], delivery["id"], destination["destination_version_id"], len(batches))
+        if core097:
+            stages["origin_lineage"] = origin097_proof(client, dataset_id, source_id, acquisition["id"], current_connection["connection_version_id"])
+            operation = client.call(f"/operations?grouped=true&process=occurrence:{acquisition['source_snapshot']['occurrence_id']}")
+            assert len(operation["items"]) == 1
+            group = operation["items"][0]
+            assert group["process_id"] == f"occurrence:{acquisition['source_snapshot']['occurrence_id']}"
+            stage_ids = {item["id"] for item in group["stages"]}
+            assert {f"acquisition:{acquisition['id']}", f"run:{intake['id']}", f"run:{delivery['id']}"} <= stage_ids
+            stages["unified_operation"] = {"result": "PASS", "process_id": group["process_id"], "stage_ids": sorted(stage_ids),
+                "technical_state": group["technical_state"], "functional_result": group["functional_result"],
+                "intervention_required": group["intervention_required"], "scanned_records": operation.get("scanned_records")}
         if core095:
             stages["update_and_comparison"] = certify_update_comparison(client, receiver_url, dataset_id, source_id,
                 connection["id"], contract["id"], automation["id"], actor["id"], rows, nonce, timeout, receipt)
@@ -759,7 +827,7 @@ def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False):
         report["duration_seconds"] = time.monotonic() - started
         report["finished_at"] = datetime.now(UTC).isoformat()
         usage = resource.getrusage(resource.RUSAGE_SELF)
-        report["runner"] = {"identity": "rest_core090_cycle", "max_rss_kib": usage.ru_maxrss,
+        report["runner"] = {"identity": "rest_core090_cycle", "implementation": "0.9.7" if core097 else "0.9.5" if core095 else "0.9.0", "max_rss_kib": usage.ru_maxrss,
             "cpu_seconds": usage.ru_utime + usage.ru_stime - cpu_started.ru_utime - cpu_started.ru_stime}
         evidence_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps({"result": report["result"], "rows": rows, "duration_seconds": report["duration_seconds"], "evidence": str(evidence_path)}), flush=True)
@@ -777,13 +845,14 @@ def main():
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--transient-faults", action="store_true", help="Inject only source GET failures on pages 2 and 5.")
     parser.add_argument("--core095", action="store_true", help="Require retry, no-change, every-cut and full comparison evidence.")
+    parser.add_argument("--core097", action="store_true", help="Start the new measured REST population through a real 30s acquisition schedule; require origin and unified operation evidence.")
     args = parser.parse_args()
     if not 1 <= args.rows <= 1000000:
         raise ValueError("Las poblaciones del harness están acotadas a un millón; no cambia límites de producto.")
     if args.mode == "serve":
         receiver(args.rows, args.port, args.db, transient_faults=args.transient_faults)
     else:
-        certify(args.api, args.receiver, args.rows, args.evidence, args.timeout, core095=args.core095)
+        certify(args.api, args.receiver, args.rows, args.evidence, args.timeout, core095=args.core095, core097=args.core097)
 
 
 if __name__ == "__main__":

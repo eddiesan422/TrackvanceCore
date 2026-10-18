@@ -74,6 +74,16 @@ def readable_modules(db: Session, user: User) -> set[str]:
     return {module for module in ("intake", "recon", "sentinel", "DELIVERY") if f"{module.lower()}:read" in grants}
 
 
+def can_read_operations(grants) -> bool:
+    """Operational consultation derives from existing resource read grants.
+
+    Exception records still require exceptions:read; personal events retain
+    notifications:read. This shared surface never grants either permission.
+    """
+    return bool(set(grants) & {f"{module}:read" for module in (
+        "datasets", "intake", "recon", "sentinel", "delivery", "documents", "exceptions")})
+
+
 def dependency_closure(grants: set[str]) -> set[str]:
     result = set(grants)
     while True:
@@ -183,6 +193,7 @@ _routes("domains:manage", "POST", "/governance/macrodomains", "/governance/domai
 _routes("domains:manage", "PATCH", "/governance/macrodomains/{id}", "/governance/domains/{id}", "/catalog/macrodomains/{id}", "/catalog/domains/{id}")
 _routes("catalog:read", "GET", "/catalog/tree", "/catalog/resources", "/catalog/datasets", "/catalog/datasets/{id}", "/catalog/datasets/{id}/blocks")
 _routes("catalog:read", "GET", "/catalog/datasets/{id}/lineage-graph")
+_routes("datasets:read", "GET", "/datasets/{id}/acquisition-occurrences")
 _routes("governance:write", "PATCH", "/datasets/{id}/governance", "/catalog/datasets/{id}/columns")
 _routes("glossary:read", "GET", "/governance/glossary")
 _routes("glossary:manage", "POST", "/governance/glossary", "/catalog/datasets/{id}/terms")
@@ -208,6 +219,13 @@ _routes("documents:publish", "POST", "/documents/families/{id}/batches", "/docum
 _routes("documents:download", "GET", "/documents/originals/{id}/file", "/documents/originals/{id}/pages/{page}")
 _routes("documents:configure", "GET", "/documents/originals/{id}/builder")
 _routes("documents:configure", "POST", "/documents/families/{id}/builder/examples", "/documents/originals/{id}/builder/propose", "/documents/families/{id}/builder/test")
+_routes("documents:configure", "GET", "/documents/families/{id}/builder/references", "/documents/families/{id}/builder/drafts", "/documents/builder/references/{id}", "/documents/builder/drafts/{id}")
+_routes("documents:configure", "POST", "/documents/families/{id}/builder/references", "/documents/families/{id}/builder/drafts", "/documents/builder/references/{id}/propose", "/documents/builder/drafts/{id}/discover", "/documents/builder/drafts/{id}/test", "/documents/builder/tests/{id}/activate")
+_routes("documents:configure", "PUT", "/documents/builder/drafts/{id}")
+_routes("documents:configure", "PATCH", "/documents/builder/references/{id}")
+_routes("documents:configure", "POST", "/documents/families/{id}/pipeline-draft")
+_routes("documents:review", "POST", "/documents/builder/tests/{id}/review")
+_routes("documents:download", "GET", "/documents/builder/references/{id}/file", "/documents/builder/references/{id}/pages/{page}")
 ENDPOINT_MATRIX = tuple(_MATRIX)
 _COMPILED = [(method, re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path.replace(".", r"\.")) + "$"), permission) for method, path, permission in ENDPOINT_MATRIX]
 

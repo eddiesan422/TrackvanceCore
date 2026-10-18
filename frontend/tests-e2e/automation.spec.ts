@@ -1,7 +1,15 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 test.setTimeout(180_000)
+
+async function openPersonalGroups(page: Page) {
+  const summaries = page.getByText('Ver etapas, novedades y enlaces originales', { exact: true })
+  await expect(summaries.first()).toBeVisible()
+  for (const summary of await summaries.all()) {
+    if (await summary.locator('..').getAttribute('open') === null) await summary.click()
+  }
+}
 test.skip(process.env.TV_AUTOMATION_E2E !== 'true', 'Requires automation_cycle.py disposable fixtures')
 
 test('real automation history, exact Intake origin and personal inbox', async ({ page }) => {
@@ -20,22 +28,26 @@ test('real automation history, exact Intake origin and personal inbox', async ({
   await expect(page.getByRole('link', { name: 'Ver entrega', exact: true }).first()).toBeVisible()
   await page.getByRole('link', { name: 'Ver entrega', exact: true }).first().click()
   await expect(page.getByText('Confirmado', { exact: true }).first()).toBeVisible()
-  await page.getByRole('link', { name: 'Notificaciones', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Notificaciones', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Operación', exact: true }).click()
+  await page.getByRole('button', { name: 'Novedades personales', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Novedades personales', exact: true })).toBeVisible()
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await openPersonalGroups(page)
   await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
   const confirmedNotification = page.getByRole('row', { name: /Entrega confirmada en el destino\./ }).first()
   await expect(confirmedNotification.getByText('Confirmado', { exact: true })).toBeVisible()
   await expect(confirmedNotification.getByText('Data Delivery · Encadenado', { exact: true })).toBeVisible()
   const detail = confirmedNotification.getByRole('link', { name: 'Ver detalle', exact: true })
   await expect(detail).toHaveAttribute('href', /\/runs\/[a-z0-9-]+/)
-  await page.getByRole('button', { name: 'Marcar todas como leídas', exact: true }).click()
+  await page.getByRole('button', { name: 'Marcar esta página como leída', exact: true }).click()
   await expect(page.getByText('Sin leer · ', { exact: true })).toHaveCount(0)
   await page.getByLabel('Lectura', { exact: true }).selectOption('READ')
+  await openPersonalGroups(page)
   await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
   await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')
   await expect(page.getByText('Sin notificaciones', { exact: true })).toBeVisible()
   await page.getByLabel('Lectura', { exact: true }).selectOption('ALL')
+  await openPersonalGroups(page)
   await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
   expect(errors).toEqual([])
 })

@@ -137,6 +137,15 @@ def pipeline(identity: str, body: PipelineBody, db: Session = Depends(get_db), u
     return {"template": template_dto(template), "next_action": "TEST_EXAMPLE_AND_ACTIVATE", "intake_configuration_ids": template.definition["publication"]["intake_configuration_ids"]}
 
 
+@router.post("/families/{identity}/pipeline-draft")
+def pipeline_draft(identity: str, body: PipelineBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_builder_workspace import draft_dto
+    item = owned(db, DocumentFamily, identity, user)
+    draft = prepare_pipeline(db, item, user, body.stop_after, body.intake_bindings, body.delivery_bindings, body.automatic_delivery, as_draft=True)
+    db.commit()
+    return {"draft": draft_dto(draft), "next_action": "SELECT_REFERENCES_TEST_AND_ACTIVATE"}
+
+
 @router.post("/families/{identity}/templates/{template_id}/activate")
 def activate(identity: str, template_id: str, body: ActivateBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     item = owned(db, DocumentFamily, identity, user)
@@ -152,10 +161,11 @@ def originals(family_id: str | None = None, search: str = Query("", max_length=2
               mode: Literal["INDIVIDUAL", "SCHEDULED"] | None = None,
               publication: PublicationFilter | None = None, order_by: DocumentOrder = "received_at",
               direction: Literal["asc", "desc"] = "desc",
+              purpose: Literal["OPERATIONAL", "LEGACY_REFERENCE"] | None = None,
               db: Session = Depends(get_db), user: User = Depends(current_user)):
     return list_originals(db, user, family_id=family_id, search=search, status=status,
         received_from=received_from, received_to=received_to, mode=mode, publication=publication,
-        order_by=order_by, direction=direction, offset=offset, limit=limit)
+        order_by=order_by, direction=direction, offset=offset, limit=limit, purpose=purpose)
 
 
 @router.post("/families/{identity}/originals")

@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from sqlalchemy import MetaData, inspect
+from sqlalchemy import Column, ForeignKeyConstraint, MetaData, Table, inspect
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -24,6 +24,36 @@ class PhysicalSchemaMismatch(ValueError):
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(message)
+
+
+def metadata_before_additions(metadata: MetaData, tables: Iterable[str], columns: Mapping[str, Mapping[str, Any]]) -> MetaData:
+    """Build a named historical column/FK contract for isolated migration proofs.
+
+    This does not alter the live guard or infer historical schema by reflection.
+    Callers must enumerate the exact additive migration boundary they prove.
+    """
+    excluded = set(tables)
+    if not excluded.issubset(metadata.tables) or any(name not in metadata.tables or not set(fields).issubset(metadata.tables[name].c.keys())
+            for name, fields in columns.items()):
+        raise PhysicalSchemaMismatch("HISTORICAL_SCHEMA_BOUNDARY_INVALID", "La frontera histórica no corresponde al modelo.")
+    previous = MetaData()
+    for name, table in metadata.tables.items():
+        if name not in excluded:
+            Table(table.name, previous, *(Column(column.name, column.type, primary_key=column.primary_key)
+                for column in table.columns if column.name not in columns.get(name, {})), schema=table.schema)
+    for name, table in metadata.tables.items():
+        if name in excluded:
+            continue
+        for constraint in table.foreign_key_constraints:
+            elements = list(constraint.elements)
+            if any(element.parent.name in columns.get(name, {}) for element in elements):
+                continue
+            if any(element.column.table.key in excluded for element in elements):
+                raise PhysicalSchemaMismatch("HISTORICAL_SCHEMA_BOUNDARY_INVALID", "Una relación histórica requiere una tabla excluida.")
+            previous.tables[name].append_constraint(ForeignKeyConstraint(
+                [element.parent.name for element in elements], [element.target_fullname for element in elements],
+                ondelete=constraint.ondelete, onupdate=constraint.onupdate, deferrable=constraint.deferrable, initially=constraint.initially))
+    return previous
 
 
 def _schema(schema: str | None, default: str) -> str:

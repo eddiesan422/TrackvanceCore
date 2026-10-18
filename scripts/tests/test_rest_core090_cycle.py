@@ -17,6 +17,48 @@ cycle = importlib.util.module_from_spec(module_spec)
 module_spec.loader.exec_module(cycle)
 
 
+def test_core097_scheduled_population_requires_native_occurrence_and_never_manual_refresh(monkeypatch):
+    calls = []
+    class Client:
+        def call(self, path, body=None, **kwargs):
+            calls.append((path, body, kwargs))
+            if path.endswith("source-settings"):
+                if body is None:
+                    return {"version": None}
+                return {"settings": body, "version": 1 if body["enabled"] else 2,
+                    "enabled": body["enabled"], "next_run_at": "2026-10-18T12:00:30Z"}
+            if "acquisition-occurrences" in path:
+                return {"items": [{"id": "cut", "acquisition_id": "scheduled-run", "status": "ENQUEUED",
+                    "planned_at": "2026-10-18T12:00:30Z", "coalesced_intervals": 0}]}
+            assert path == "/acquisitions/scheduled-run"
+            return {"id": "scheduled-run", "status": "SUCCESS", "initiated_by_id": "actor", "source_snapshot": {
+                "origin": "SCHEDULED", "occurrence_id": "cut", "planned_at": "2026-10-18T12:00:30Z", "responsible_user_id": "actor",
+                "source_configuration_version": 1, "source_configuration_id": "calendar"}}
+    result, evidence = cycle.scheduled097_acquisition(Client(), "dataset", "connection", "actor", 120)
+    assert result["id"] == "scheduled-run" and evidence["result"] == "PASS"
+    assert evidence["manual_refresh_calls"] == evidence["manual_scheduler_calls"] == 0
+    updates = [(body, kwargs) for _, body, kwargs in calls if body is not None]
+    assert len(updates) == 2 and updates[0][0]["enabled"] is True and updates[1][0]["enabled"] is False
+    assert updates[0][0]["interval_seconds"] == 30 and updates[1][0]["expected_version"] == 1
+    assert all("refresh" not in path and "tick" not in path and "dispatch" not in path for path, _, _ in calls)
+
+
+def test_core097_origin_oracle_rejects_consumers_and_previous_snapshots():
+    graph = {"projection": "origin", "root_id": "DATASET_VERSION:version", "complete": True,
+        "nodes": [{"id": "CONNECTION_VERSION:source", "type": "CONNECTION_VERSION"},
+            {"id": "ACQUISITION:run", "type": "ACQUISITION"}, {"id": "DATASET_VERSION:version", "type": "DATASET_VERSION"}],
+        "edges": [{"source": "CONNECTION_VERSION:source", "target": "ACQUISITION:run"},
+            {"source": "ACQUISITION:run", "target": "DATASET_VERSION:version"}]}
+    class Client:
+        def call(self, path):
+            assert "projection=origin" in path and "max_nodes=100" in path
+            return graph
+    assert cycle.origin097_proof(Client(), "dataset", "version", "run", "source")["result"] == "PASS"
+    graph["nodes"].append({"id": "RUN:consumer", "type": "RUN"})
+    with pytest.raises(AssertionError):
+        cycle.origin097_proof(Client(), "dataset", "version", "run", "source")
+
+
 @pytest.fixture
 def server(monkeypatch, tmp_path):
     monkeypatch.setenv("TRACKVANCE_CERTIFICATION_PROJECT", "trackvance-codex")

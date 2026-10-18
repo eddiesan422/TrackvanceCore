@@ -39,7 +39,7 @@ def generator(monkeypatch):
 
 @pytest.mark.parametrize("name", ["model_contract", "permission_contract", "parameters"])
 def test_current_contract_requires_explicit_current_version(generator, name):
-    value = {"version": "0.9.5"}
+    value = {"version": "0.9.7"}
     assert generator.validate_input_document(name, value) is value
     for invalid in ({}, {"version": "0.9.0"}, {"version": "0.8.5"}, {"version": "0.8.0"}, {"version": "0.8.6"}, []):
         with pytest.raises((TypeError, ValueError)):
@@ -52,7 +52,7 @@ def test_only_declared_historical_version_is_accepted_without_mutation(generator
     assert generator.validate_input_document(name, value) is value
     assert value == before
     version_field = "version" if name == "corrections_results" else "Versión"
-    for invalid_version in (None, "0.7.0", "0.9.0", "0.9.5", "0.8.6"):
+    for invalid_version in (None, "0.7.0", "0.9.0", "0.9.7", "0.8.6"):
         invalid = {**value, version_field: invalid_version}
         with pytest.raises(ValueError, match="0.8.0"):
             generator.validate_input_document(name, invalid)
@@ -90,16 +90,16 @@ def test_loading_keeps_historical_filename_and_exact_bytes(generator, monkeypatc
 @pytest.mark.parametrize("name", ["model_contract", "permission_contract"])
 def test_runtime_contract_uses_current_versioned_path(generator, monkeypatch, tmp_path, name):
     monkeypatch.setattr(generator, "REPO", tmp_path, raising=False)
-    path = tmp_path / "docs/specification" / f"{name}_0.9.5.json"
+    path = tmp_path / "docs/specification" / f"{name}_0.9.7.json"
     path.parent.mkdir(parents=True)
-    path.write_text('{"version": "0.9.5"}', encoding="utf-8")
+    path.write_text('{"version": "0.9.7"}', encoding="utf-8")
     (path.parent / f"{name}_0.8.0.json").write_text('{"version": "0.8.0"}', encoding="utf-8")
-    assert generator.input_document(name)["version"] == "0.9.5"
+    assert generator.input_document(name)["version"] == "0.9.7"
 
 
 def test_model_labels_follow_product_authority(generator, monkeypatch):
-    assert generator.model_evolution_label("NEW") == "Nueva en 0.9.5"
-    assert generator.model_evolution_label("MODIFIED") == "Evolucionada en 0.9.5"
+    assert generator.model_evolution_label("NEW") == "Nueva en 0.9.7"
+    assert generator.model_evolution_label("MODIFIED") == "Evolucionada en 0.9.7"
     assert generator.model_evolution_label("PRESERVED") == "Estructura histórica preservada"
     monkeypatch.setattr(generator, "VERSION", "9.9.9")
     assert generator.model_evolution_label("NEW") == "Nueva en 9.9.9"
@@ -136,7 +136,7 @@ def test_both_directives_render_antecedent_notice_and_original_rows(generator, m
     notices = [item[1] for item in rendered if isinstance(item, tuple)
                and item[0] == "paragraph" and item[1].startswith("Antecedente de ")]
     assert len(notices) == 2
-    assert all("0.8.0" in notice and "No certifica la implementación 0.9.5" in notice for notice in notices)
+    assert all("0.8.0" in notice and "No certifica la implementación 0.9.7" in notice for notice in notices)
     tables = [item[1] for item in rendered if isinstance(item, tuple) and item[0] == "table"]
     assert [CORRECTIONS["summary"][0]["label"], CORRECTIONS["summary"][0]["result"]] in tables[-2]
     assert ["Versión", "0.8.0"] in tables[-1]

@@ -101,3 +101,50 @@ class DocumentPublicationClaim(Record, Base):
     extraction_id: Mapped[str] = mapped_column(ForeignKey("document_extractions.id"), unique=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("document_originals.id"), index=True)
     batch_id: Mapped[str] = mapped_column(ForeignKey("document_batches.id"), index=True)
+
+
+class DocumentReference(Record, Base):
+    """Configuration corpus, deliberately outside operational originals/publication."""
+    __tablename__ = "document_references"
+    family_id: Mapped[str] = mapped_column(ForeignKey("document_families.id"), index=True)
+    artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"))
+    filename: Mapped[str] = mapped_column(String(240))
+    sha256: Mapped[str] = mapped_column(String(64))
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    role: Mapped[str] = mapped_column(String(20), default="CONFIGURATION")
+    association: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    configuration_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(20), default="QUEUED")
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    engine: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class DocumentDraft(Record, Base):
+    __tablename__ = "document_drafts"
+    family_id: Mapped[str] = mapped_column(ForeignKey("document_families.id"), index=True)
+    name: Mapped[str] = mapped_column(String(140), default="Borrador")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    definition: Mapped[dict] = mapped_column(JSON)
+    definition_hash: Mapped[str] = mapped_column(String(64))
+    reference_ids: Mapped[list] = mapped_column(JSON, default=list)
+    discovered_from: Mapped[list] = mapped_column(JSON, default=list)
+    source_template_id: Mapped[str | None] = mapped_column(ForeignKey("document_templates.id"), nullable=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+
+
+class DocumentBuilderTest(Record, Base):
+    __tablename__ = "document_builder_tests"
+    __table_args__ = (UniqueConstraint("draft_id", "snapshot_hash"),)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("document_drafts.id"), index=True)
+    draft_version: Mapped[int] = mapped_column(Integer)
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    snapshot_hash: Mapped[str] = mapped_column(String(64))
+    automatic_results: Mapped[dict] = mapped_column(JSON)
+    automatic_results_hash: Mapped[str] = mapped_column(String(64))
+    reviewed_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    review_version: Mapped[int] = mapped_column(Integer, default=1)
+    review_history: Mapped[list] = mapped_column(JSON, default=list)
+    activated_template_id: Mapped[str | None] = mapped_column(ForeignKey("document_templates.id"), nullable=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))

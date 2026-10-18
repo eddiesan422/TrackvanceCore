@@ -44,8 +44,18 @@ describe('All authorized documents', () => {
     await waitFor(() => {
       const path = [...vi.mocked(api).mock.calls].reverse().find(([value]) => value.startsWith('/documents/originals?'))?.[0]
       const query = new URLSearchParams(path?.split('?')[1])
-      expect(Object.fromEntries(query)).toEqual({ search: 'INV-12', offset: '0', limit: '25', order_by: 'filename', direction: 'asc', family_id: 'family-1', status: 'REVIEW_REQUIRED', mode: 'SCHEDULED', publication: 'UNPUBLISHED' })
+      expect(Object.fromEntries(query)).toEqual({ search: 'INV-12', offset: '0', limit: '25', purpose: 'OPERATIONAL', order_by: 'filename', direction: 'asc', family_id: 'family-1', status: 'REVIEW_REQUIRED', mode: 'SCHEDULED', publication: 'UNPUBLISHED' })
     })
+  })
+
+  it('separates operational receipts and historical references with a family reference link', async () => {
+    const user = userEvent.setup()
+    renderApp(<AllDocuments/>, { permissions: ['documents:read'] })
+    expect(screen.getByLabelText('Tipo de documento')).toHaveValue('OPERATIONAL')
+    await user.selectOptions(screen.getByLabelText('Tipo de documento'), 'LEGACY_REFERENCE')
+    await user.selectOptions(screen.getByLabelText('Familia documental'), 'family-1')
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some(([path]) => path.includes('purpose=LEGACY_REFERENCE'))).toBe(true))
+    expect(screen.getByRole('link', { name: 'Abrir referencias y borradores de esta familia' })).toHaveAttribute('href', '/documents/families/family-1?view=references')
   })
 
   it('does not invent generated dataset links when the backend withholds their metadata', async () => {

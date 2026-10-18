@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -41,7 +42,8 @@ def _metric_number(metrics: dict[str, Any], key: str) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        number = float(value)
+        return number if isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
@@ -74,21 +76,21 @@ def run_health_score(run: Run) -> float | None:
         score = _metric_number(metrics, "acceptance_rate")
         total = _metric_number(metrics, "total_rows")
         valid = _metric_number(metrics, "valid_rows")
-        if score is None and total:
-            score = 100 * (valid or 0) / total
+        if score is None and total is not None and total > 0 and valid is not None:
+            score = 100 * valid / total
     elif run.module == "recon":
         score = _metric_number(metrics, "match_rate")
         total = _metric_number(metrics, "total_rows")
         matched = _metric_number(metrics, "matched")
-        if score is None and total:
-            score = 100 * (matched or 0) / total
+        if score is None and total is not None and total > 0 and matched is not None:
+            score = 100 * matched / total
     else:
         score = _metric_number(metrics, "health_score")
         total = _metric_number(metrics, "total_checks")
         failed = _metric_number(metrics, "failed_checks")
-        if score is None and total:
-            score = 100 * (total - (failed or 0)) / total
-    return round(max(0.0, min(100.0, 100.0 if score is None else score)), 2)
+        if score is None and total is not None and total > 0 and failed is not None:
+            score = 100 * (total - failed) / total
+    return round(max(0.0, min(100.0, score)), 2) if score is not None else None
 
 
 def processed_records(run: Run) -> int | None:
@@ -353,6 +355,17 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
             "intake": aggregate_health(groups.get("intake", [])),
             "recon": aggregate_health(groups.get("recon", [])),
             "sentinel": aggregate_health(groups.get("sentinel", [])),
+            "comparable_runs": {
+                "overall": sum(run_health_score(run) is not None for items in groups.values() for run in items),
+                **{module: sum(run_health_score(run) is not None for run in groups.get(module, []))
+                   for module in ("intake", "recon", "sentinel")},
+            },
+            "technical_failures": {
+                "overall": sum(run_health_score(run) is not None and run_operational_status(run) == "TECHNICAL_FAILURE"
+                               for items in groups.values() for run in items),
+                **{module: sum(run_health_score(run) is not None and run_operational_status(run) == "TECHNICAL_FAILURE"
+                               for run in groups.get(module, [])) for module in ("intake", "recon", "sentinel")},
+            },
         })
 
     module_status = []

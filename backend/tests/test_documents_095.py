@@ -455,6 +455,15 @@ def test_guided_native_pipeline_and_frozen_automatic_policy(authenticated, datab
         "template_id": template["id"], "document_ids": [original["id"]], "idempotency_key": "pipeline-first-publication"})
     assert response.status_code == 200 and response.json()["status"] == "PUBLISHED"
     versions = response.json()["published_versions"]
+    with database() as db:
+        revisions_before = db.scalar(select(func.count()).select_from(DocumentTemplate))
+    prepared = authenticated.post(f"/api/v1/documents/families/{family['id']}/pipeline-draft", json={"stop_after": "PUBLICATION"})
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()["draft"]["source_template_id"] == template["id"]
+    assert prepared.json()["next_action"] == "SELECT_REFERENCES_TEST_AND_ACTIVATE"
+    with database() as db:
+        assert db.scalar(select(func.count()).select_from(DocumentTemplate)) == revisions_before
+        assert db.get(DocumentFamily, family["id"]).active_template_id == template["id"]
     response = authenticated.post(f"/api/v1/documents/families/{family['id']}/pipeline", json={"stop_after": "VALIDATION"})
     assert response.status_code == 200, response.text
     new_template = response.json()["template"]

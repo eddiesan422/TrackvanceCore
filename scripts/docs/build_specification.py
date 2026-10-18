@@ -59,8 +59,8 @@ REPO: Path
 DOCS_ROOT: Path
 SOURCE: Path
 PDF_NAME = "Trackvance_Core_Especificacion_Tecnica_v1.1.pdf"
-VERSION = "0.9.5"
-EDITION_DATE = "16 octubre 2026"
+VERSION = "0.9.7"
+EDITION_DATE = "18 octubre 2026"
 ORIGINAL_SHA256 = "82341b3c63710abd996476e1ac9ca453010dcf7918cb3ed7de5d75c4b8b90244"
 WIDTH, HEIGHT = letter if AUTHORING_IMPORT_ERROR is None else (612, 792)
 MARGIN = 43
@@ -600,8 +600,9 @@ def build(candidate: Path, results: dict, draft: bool):
     story.append(Spacer(1, 14))
     story.append(Paragraph("Especificación técnica v1.1", ParagraphStyle("subtitle", fontName="Arial", fontSize=21, leading=28, textColor=NAVY)))
     story.append(Spacer(1, 25))
-    cover_status = "Borrador: certificación consolidada en curso" if draft else "Estado funcional y evidencia de validación"
-    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · DOCUMENTOS, ADQUISICIÓN, COMPARACIÓN Y RESOLUCIÓN"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
+    cover_status = ("Borrador: certificación consolidada en curso" if draft else
+                    results.get("Estado", "Estado funcional y evidencia de validación"))
+    story.append(table([[f"IMPLEMENTACIÓN {VERSION} · AUTOMATIZACIÓN, OPERACIÓN, ORIGEN Y DOCUMENTOS"], [f"{EDITION_DATE} · {cover_status}"]], [CONTENT]))
     story.append(Spacer(1, 18))
     story.append(paragraph("Arquitectura local y evolución a producto", "h2"))
     story.append(paragraph("Monolito modular · Persistencia local · Reglas portables · Evidencia verificable"))

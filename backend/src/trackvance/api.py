@@ -94,6 +94,7 @@ from .operations_common import OperationError
 from .permissions import (
     PUBLIC_ENDPOINTS,
     SESSION_ENDPOINTS,
+    can_read_operations,
     effective_permissions,
     readable_modules,
     required_permission,
@@ -196,7 +197,7 @@ async def session_boundary(request: Request, call_next):
                 return error_response(request, 403, "PASSWORD_CHANGE_REQUIRED", "Cambia tu contraseña para continuar.")
             permission = required_permission(endpoint[1], request.method)
             grants = effective_permissions(db, user)
-            shared_allowed = (permission == "runs:read" and bool(readable_modules(db, user))) or (
+            shared_allowed = (endpoint[1] == "/operations" and request.method == "GET" and can_read_operations(grants)) or (permission == "runs:read" and bool(readable_modules(db, user))) or (
                 permission == "runs:execute" and any(f"{module}:execute" in grants for module in ("intake", "recon", "sentinel", "delivery")))
             if permission and permission not in grants and not shared_allowed:
                 return error_response(request, 403, "PERMISSION_DENIED", "Tu rol no permite realizar esta acción.")

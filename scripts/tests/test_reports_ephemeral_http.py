@@ -124,7 +124,7 @@ def observation_receipt():
             if name == "CSV_CELL_BYTES":
                 case.update(max_cell_bytes=65535, input_cell_bytes=65536, cell_limit_scope="PRIVATE_REDUCED_OUTPUT_BUDGET")
         cases.append(case)
-    return {"status": "PASS", "version": "0.9.5", "requirement": "R085-01", "cases": cases,
+    return {"status": "PASS", "version": "0.9.7", "requirement": "R085-01", "cases": cases,
             "main_unchanged": True, "trace_scope": "REAL_NGINX_API_AND_CONFINED_CHILDREN", "privileges_added": False,
             "raw_traces_published": False,
             "private_max_cell_bytes": 65535, "input_cell_bytes": 65536, "default_max_cell_bytes": 65536,

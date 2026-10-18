@@ -22,7 +22,7 @@ CHECKS = ("dry_plan_read_only", "fault_rollback", "abrupt_fault_recovery", "meta
 
 def require_copy(project):
     if not re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", project):
-        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.9.5 copy.")
+        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.9.7 copy.")
 
 
 def assert_plan(plan, before, fixture):

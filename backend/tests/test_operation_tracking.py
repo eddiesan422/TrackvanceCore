@@ -241,7 +241,12 @@ def test_original_document_tracking_requires_its_independent_read_permission(aut
     from test_documents_095 import LINES, create_family, pdf_file, upload
 
     family, template = create_family(authenticated, name="Synthetic invoices tracking")
-    original = upload(authenticated, family, template, pdf_file(tmp_path / "tracking.pdf", [(LINES, None)]))
+    from trackvance.document_models import DocumentFamily
+
+    with database() as db:
+        db.get(DocumentFamily, family["id"]).active_template_id = template["id"]
+        db.commit()
+    original = upload(authenticated, family, template, pdf_file(tmp_path / "tracking.pdf", [(LINES, None)]), example=False)
     result = authenticated.get("/api/v1/operations").json()
     item = next(item for item in result["items"] if item["id"] == f"document:{original['id']}")
     assert len(item["stages"]) == 1  # No extraction or publication has happened.

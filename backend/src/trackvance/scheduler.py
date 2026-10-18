@@ -1,9 +1,10 @@
 """Transactional local scheduler. It evaluates registered snapshots, never external credentials."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from .db import SessionLocal, iso, utcnow
 from .models import (
     Configuration,
     DatasetVersion,
+    Job,
     MonitorOccurrence,
     MonitorSchedule,
     MonitorScheduleVersion,
@@ -23,6 +25,13 @@ from .processing import ProcessingError
 from .services import audit, enqueue
 
 SCHEDULER_ACTOR = Actor("SYSTEM", "trackvance:local-scheduler", "Programador Sentinel")
+logger = logging.getLogger(__name__)
+
+
+class SchedulerDispatchError(RuntimeError):
+    def __init__(self, errors, dispatched_count, successful_count=0):
+        self.errors, self.dispatched_count, self.successful_count = errors, dispatched_count, successful_count
+        super().__init__("Uno o más módulos no pudieron completar su despacho.")
 
 
 class ScheduleError(Exception):
@@ -239,19 +248,46 @@ def dispatch_due(db: Session, now: datetime | None = None, *, limit: int = 100) 
     return dispatched
 
 
-def tick() -> int:
-    with SessionLocal() as db:
-        from .acquisition_schedule import dispatch_due as dispatch_acquisition_due
-        from .document_service import dispatch_due as dispatch_documents_due
-        from .intake_automation import dispatch_due as dispatch_intake_due
-        from .sentinel_auto import dispatch_daily
-        count = dispatch_due(db)
-        count += dispatch_intake_due(db)
-        count += dispatch_daily(db)
-        count += dispatch_acquisition_due(db)
-        count += dispatch_documents_due(db)
+def commit_dispatch(db, dispatch):
+    """Count only native jobs surviving all source savepoints and this commit."""
+    inserted: set[str] = set()
+    def capture_jobs(session, _context):
+        inserted.update(item.id for item in session.new if isinstance(item, Job))
+    event.listen(db, "after_flush", capture_jobs)
+    try:
+        registered = dispatch(db)
+        db.flush()
+        # A job inserted inside a later rolled-back savepoint is not a dispatch.
+        queued = db.scalars(select(Job.id).where(Job.id.in_(inserted), Job.status == "QUEUED")).all() if inserted else []
         db.commit()
-        return count
+        return registered, len(queued)
+    finally:
+        event.remove(db, "after_flush", capture_jobs)
+
+
+def tick() -> int:
+    from .acquisition_schedule import DispatchCount
+    from .acquisition_schedule import dispatch_due as dispatch_acquisition_due
+    from .document_service import dispatch_due as dispatch_documents_due
+    from .intake_automation import dispatch_due as dispatch_intake_due
+    from .sentinel_auto import dispatch_daily
+    count, successful, errors = 0, 0, []
+    # A connector/configuration incident in one module must never undo jobs
+    # already committed by another module or starve delivery dispatches.
+    for module, dispatch in (("sentinel", dispatch_due), ("intake", dispatch_intake_due),
+        ("sentinel-automatic", dispatch_daily), ("acquisition", dispatch_acquisition_due), ("documents", dispatch_documents_due)):
+        try:
+            with SessionLocal() as db:
+                registered, jobs = commit_dispatch(db, dispatch)
+                count += registered
+                successful += jobs
+                errors.extend(db.info.get("scheduler_errors", []))
+        except Exception:  # noqa: BLE001 -- independent retryable module boundary
+            errors.append({"module": module, "code": "SCHEDULER_MODULE_DISPATCH_FAILED"})
+            logger.warning("Falló el despacho del módulo %s; los demás módulos conservan sus transacciones.", module)
+    if errors:
+        raise SchedulerDispatchError(errors, count, successful)
+    return DispatchCount(count, successful)
 
 
 def occurrence_dto(db: Session, occurrence: MonitorOccurrence) -> dict:

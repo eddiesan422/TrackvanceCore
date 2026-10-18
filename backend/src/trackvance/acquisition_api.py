@@ -11,7 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -81,7 +81,7 @@ class SourceSettingsBody(BaseModel):
     object_name: str = Field(min_length=1, max_length=128)
     column_overrides: dict = Field(default_factory=dict)
     responsible_user_id: str = Field(min_length=1, max_length=64)
-    interval_seconds: int = Field(default=86400, ge=60, le=2678400)
+    interval_seconds: int = Field(default=86400, ge=30, le=2678400, strict=True)
     timezone: str = Field(default="America/Bogota", max_length=80)
     enabled: bool = False
     publication_policy: Literal["ON_CHANGE", "EVERY_CUT"] = "ON_CHANGE"
@@ -103,6 +103,20 @@ def put_source_settings(dataset_id: str, body: SourceSettingsBody, db: Session =
     save_settings(db, dataset, user, settings=body.model_dump(exclude={"expected_version"}), expected_version=body.expected_version)
     db.commit()
     return source_settings_dto(db, dataset)
+
+
+@router.get("/datasets/{dataset_id}/acquisition-occurrences")
+def acquisition_occurrences(dataset_id: str, limit: int = Query(default=25, ge=1, le=100),
+                            offset: int = Query(default=0, ge=0), db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .acquisition_schedule import configuration, occurrence_dto
+    from .acquisition_schedule_models import AcquisitionOccurrence
+    dataset = _dataset(db, user, dataset_id)
+    config = configuration(db, dataset.id)
+    query = select(AcquisitionOccurrence).where(AcquisitionOccurrence.configuration_id == config.id,
+        AcquisitionOccurrence.organization_id == user.organization_id) if config else select(AcquisitionOccurrence).where(false())
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.scalars(query.order_by(AcquisitionOccurrence.planned_at.desc(), AcquisitionOccurrence.id).offset(offset).limit(limit)).all()
+    return {"items": [occurrence_dto(db, row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
 
 class AcquisitionResponse(BaseModel):

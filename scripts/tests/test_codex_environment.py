@@ -311,7 +311,7 @@ def test_bounded_restart_drill_stops_only_explicit_worker_and_records_grace(fixt
     assert len(calls) == 2
 
 
-def schema_upgrade_evidence(tmp_path, value, existing):
+def schema_upgrade_evidence(tmp_path, value, existing, source_schema=9):
     from datetime import UTC, datetime
 
     import docker_state
@@ -319,10 +319,13 @@ def schema_upgrade_evidence(tmp_path, value, existing):
 
     backup = tmp_path / "schema-backup"
     manifest, state = write_delivery_backup(backup, current=True)
-    state.update(schema_version=9, migration=docker_state.PEOPLE_MIGRATION)
-    state["tables"].update({name: {} for name in docker_state.PEOPLE_STATE_TABLES - set(state["tables"])})
+    migration, tables = {9: (docker_state.PEOPLE_MIGRATION, docker_state.PEOPLE_STATE_TABLES),
+        10: (docker_state.CORE090_MIGRATION, docker_state.CORE090_STATE_TABLES_ALL),
+        11: (docker_state.CORE095_MIGRATION, docker_state.CORE095_STATE_TABLES_ALL)}[source_schema]
+    state.update(schema_version=source_schema, migration=migration)
+    state["tables"].update({name: {} for name in tables - set(state["tables"])})
     candidate = "sha256:" + "5" * 64
-    manifest.update(source_project=codex.PROJECT, migration=docker_state.PEOPLE_MIGRATION,
+    manifest.update(source_project=codex.PROJECT, migration=migration,
         application_only_codex=True, source_inventory_sha256=codex.canonical_hash(docker_state.codex_backup_identity(existing)),
         images={"api": value["images"]["backend"]["id"]}, preserved_external_destination={
             "container_id": "8" * 64, "image_id": IDS["postgres"], "volume_name": "trackvance-codex_test_destination_data"})
@@ -337,15 +340,42 @@ def schema_upgrade_evidence(tmp_path, value, existing):
     return SimpleNamespace(schema_upgrade_backup=backup, schema_upgrade_restore_receipt=receipt_path, backend_image=candidate), receipt, state
 
 
-def test_schema_upgrade_accepts_only_verified_backup_bound_to_exact_candidate_and_old_runtime(fixture, tmp_path):
+@pytest.mark.parametrize("source_schema", [9, 10, 11])
+def test_schema_upgrade_accepts_only_verified_backup_bound_to_exact_candidate_and_old_runtime(fixture, tmp_path, source_schema):
     _directory, value, values, defaults = fixture
     existing = runtime(resolved(values), defaults)
-    args, _receipt, state = schema_upgrade_evidence(tmp_path, value, existing)
+    args, _receipt, state = schema_upgrade_evidence(tmp_path, value, existing, source_schema)
     proof = codex.validate_schema_upgrade(args, value, NEW, existing)
     assert proof["source_state"] == state and proof["candidate_backend_image_id"] == args.backend_image
     existing["containers"][0]["Image"] = "sha256:" + "9" * 64
     with pytest.raises(ValueError, match="DRIFT"):
         codex.validate_schema_upgrade(args, value, NEW, existing)
+
+
+def test_schema11_upgrade_projects_exact_source_before_any_consumer_is_reactivated(fixture, monkeypatch):
+    import docker_state
+
+    directory, _value, values, defaults = fixture
+    existing = runtime(resolved(values), defaults)
+    source = {"schema_version": 11, "migration": docker_state.CORE095_MIGRATION,
+        "tables": {"internal_notifications": {"personal-history": "a" * 64}}}
+    current = {"schema_version": 12, "migration": docker_state.CURRENT_MIGRATION}
+    monkeypatch.setattr(codex, "inventory", lambda *_args: existing)
+    commands = []
+
+    def snapshot(_api, path, command="snapshot"):
+        commands.append(command)
+        result = current if command == "snapshot" else source
+        path.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(docker_state, "_copy_snapshot", snapshot)
+    proof = codex.verify_schema_upgrade({}, {"source_state": source}, directory)
+    assert proof["historical_state_preserved"]
+    assert commands == ["snapshot", "snapshot-legacy-v11"]
+    changed = {**source, "tables": {"internal_notifications": {"personal-history": "b" * 64}}}
+    with pytest.raises(ValueError, match="HISTORICAL_STATE_PRESERVATION_FAILED"):
+        codex.verify_schema_upgrade({}, {"source_state": changed}, directory)
 
 
 @pytest.mark.parametrize("damage", ["hash", "source_sha", "candidate", "migration", "permanent", "expired", "missing"])

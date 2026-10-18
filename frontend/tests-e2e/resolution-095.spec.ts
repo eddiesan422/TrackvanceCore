@@ -98,7 +98,7 @@ async function findOperation(page: Page, versionId: string, exceptionId: string,
   await page.getByPlaceholder('Buscar por nombre, diagnóstico o identidad de seguimiento…', { exact: true }).fill(versionId)
   const response = await loaded
   expect(response.status()).toBe(200)
-  expect((await response.json()).items.some((item: RecordData) => item.id === `exception:${exceptionId}`)).toBe(true)
+  expect((await response.json()).items.some((item: RecordData) => item.stages.some((stage: RecordData) => stage.id === `exception:${exceptionId}`))).toBe(true)
   const card = page.locator('article.operation-card').filter({ has: page.locator(`a[href="/exceptions?id=${exceptionId}"]`) })
   await expect(card).toHaveCount(1)
   return card
@@ -118,8 +118,8 @@ test('native resolution: assignment → waiting → correction → verified comp
   await dialog.getByLabel('Comentario para el historial', { exact: true }).fill('Waiting for the known synthetic source owner to correct amount B; no external write is initiated.')
   await save(page, exception.id, 'WAITING_EXTERNAL')
   const waiting = await findOperation(page, version.id, exception.id, 'waiting')
-  await expect(waiting).toContainText(`version:${version.id}`)
-  await expect(waiting).toContainText('El cierre de una excepción y la confirmación de una entrega son etapas independientes.')
+  await expect(waiting.locator(`a[href="/datasets/${dataset.id}?version=${version.id}"]`).first()).toHaveAttribute('href', `/datasets/${dataset.id}?version=${version.id}`)
+  await expect(waiting).toContainText('Esta ejecución no habilita la continuación automática a Delivery que exige aprobación estricta.')
   await waiting.getByRole('link', { name: 'Gestionar excepción', exact: true }).click()
   dialog = page.getByRole('dialog')
   await dialog.getByLabel('Comentario para el historial', { exact: true }).fill('Received corrected synthetic source; continue through the same control and exact population.')

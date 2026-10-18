@@ -303,7 +303,7 @@ class Trial:
             for role in ("backend", "web"):
                 path = fixture / (role + ".tar")
                 labels = {"org.opencontainers.image.revision": self.sha,
-                          "org.opencontainers.image.version": "0.9.5", OWNER: self.project}
+                          "org.opencontainers.image.version": "0.9.7", OWNER: self.project}
                 content = image_archive(path, self.sha, role, config_change={
                     "config": {"Labels": labels, "Env": ["FIXTURE_ROLE=" + role]}})
                 expected[role] = content["configuration_digest"]

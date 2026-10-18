@@ -18,7 +18,7 @@ const resourceNames: Record<string, string> = { DATASET: 'Datasets', INTAKE: 'Da
 type TreeNode = { id: string; label: string; type: string; count: number; has_children: boolean }
 type TreeScope = { domain_id?: string; macro_domain_id?: string; pending?: string }
 type DatasetSection = { dataset: RecordData; governance: RecordData; items: RecordData[]; total: number; eligibility?: RecordData; version_id?: string; dataset_terms?: RecordData[] }
-const sections = [['summary', 'Resumen y gobierno'], ['columns', 'Columnas y glosario'], ['versions', 'Versiones'], ['quality', 'Calidad y contratos'], ['lineage', 'Linaje'], ['history', 'Historial']]
+const sections = [['summary', 'Resumen y gobierno'], ['columns', 'Columnas y glosario'], ['versions', 'Versiones'], ['quality', 'Calidad y contratos'], ['lineage', 'Origen de esta versión'], ['history', 'Historial']]
 
 function TreeBranch({ node, scope, onSelect }: { node: TreeNode; scope: TreeScope; onSelect: (node: TreeNode, scope: TreeScope) => void }) {
   const [expanded, setExpanded] = useState(false), expandable = node.has_children && node.type !== 'resource_type'

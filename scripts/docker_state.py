@@ -33,7 +33,8 @@ SUPPORTED_BACKUP_SCHEMA_VERSIONS = {
     LEGACY_BACKUP_SCHEMA_VERSION,
     BACKUP_SCHEMA_VERSION,
 }
-VERIFY_SCHEMA_VERSION = 11
+VERIFY_SCHEMA_VERSION = 12
+CORE095_VERIFY_SCHEMA_VERSION = 11
 CORE090_VERIFY_SCHEMA_VERSION = 10
 PEOPLE_VERIFY_SCHEMA_VERSION = 9
 CATALOG_VERIFY_SCHEMA_VERSION = 8
@@ -52,7 +53,8 @@ LEGACY_MIGRATION = "0007_monitor_scheduling"
 CATALOG_MIGRATION = "0017_catalog_reports"
 PEOPLE_MIGRATION = "0019_governance_people"
 CORE090_MIGRATION = "0022_intake_automation_deletion"
-CURRENT_MIGRATION = "0025_comparison_095"
+CORE095_MIGRATION = "0025_comparison_095"
+CURRENT_MIGRATION = "0027_document_builder_097"
 RESET_SCHEMA_VERSION = 1
 PROJECT_PATTERN = re.compile(r"trackvance-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
 LEGACY_PRIMARY_SERVICES = frozenset({"postgres", "api", "worker", "delivery-worker", "web"})
@@ -152,7 +154,9 @@ CORE095_STATE_TABLES = frozenset({"acquisition_name_reservations", "acquisition_
     "acquisition_source_revisions", "acquisition_occurrences", "document_families", "document_templates",
     "document_originals", "document_extractions", "document_batches", "document_batch_members",
     "document_publication_claims", "version_comparisons"})
-CURRENT_STATE_TABLES = CORE090_STATE_TABLES_ALL | CORE095_STATE_TABLES
+CORE095_STATE_TABLES_ALL = CORE090_STATE_TABLES_ALL | CORE095_STATE_TABLES
+CORE097_STATE_TABLES = frozenset({"document_references", "document_drafts", "document_builder_tests"})
+CURRENT_STATE_TABLES = CORE095_STATE_TABLES_ALL | CORE097_STATE_TABLES
 DELIVERY_STATE_FIELDS = LEGACY_STATE_FIELDS | {
     "verified_source_secrets", "verified_delivery_secrets",
 }
@@ -764,6 +768,7 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         CATALOG_VERIFY_SCHEMA_VERSION: CATALOG_MIGRATION,
         PEOPLE_VERIFY_SCHEMA_VERSION: PEOPLE_MIGRATION,
         CORE090_VERIFY_SCHEMA_VERSION: CORE090_MIGRATION,
+        CORE095_VERIFY_SCHEMA_VERSION: CORE095_MIGRATION,
         VERIFY_SCHEMA_VERSION: CURRENT_MIGRATION}
     if (type(state.get("schema_version")) is not int or state["schema_version"] not in expected_migrations
             or state.get("migration") != expected_migrations[state["schema_version"]]):
@@ -783,6 +788,8 @@ def validate_delivery_state(state: Mapping[str, Any]) -> None:
         if state.get("schema_version") == PEOPLE_VERIFY_SCHEMA_VERSION
         else CORE090_STATE_TABLES_ALL
         if state.get("schema_version") == CORE090_VERIFY_SCHEMA_VERSION
+        else CORE095_STATE_TABLES_ALL
+        if state.get("schema_version") == CORE095_VERIFY_SCHEMA_VERSION
         else CURRENT_STATE_TABLES
     )
     tables = state.get("tables")
@@ -899,6 +906,8 @@ def verify_backup(source: Path) -> dict[str, Any]:
         expected_state_schema = PEOPLE_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CORE090_MIGRATION:
         expected_state_schema = CORE090_VERIFY_SCHEMA_VERSION
+    elif manifest.get("migration") == CORE095_MIGRATION:
+        expected_state_schema = CORE095_VERIFY_SCHEMA_VERSION
     elif manifest.get("migration") == CURRENT_MIGRATION:
         expected_state_schema = VERIFY_SCHEMA_VERSION
     else:
@@ -961,11 +970,18 @@ def validate_restored_state(
     schema_version = manifest.get("schema_version")
     validate_delivery_state(restored_state)
     if schema_version == BACKUP_SCHEMA_VERSION:
+        if manifest.get("migration") == CORE095_MIGRATION:
+            if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
+                    or restored_state.get("migration") != CURRENT_MIGRATION
+                    or normalized_legacy_state != expected_state
+                    or any(restored_state["tables"].get(name) != {} for name in CORE097_STATE_TABLES)):
+                raise OperationError("La huella v11 normalizada no coincide con el respaldo 0.9.5.")
+            return
         if manifest.get("migration") == CORE090_MIGRATION:
             if (restored_state.get("schema_version") != VERIFY_SCHEMA_VERSION
                     or restored_state.get("migration") != CURRENT_MIGRATION
                     or normalized_legacy_state != expected_state
-                    or any(restored_state["tables"].get(name) != {} for name in CORE095_STATE_TABLES)):
+                    or any(restored_state["tables"].get(name) != {} for name in CORE095_STATE_TABLES | CORE097_STATE_TABLES)):
                 raise OperationError("La huella v10 normalizada no coincide con el respaldo 0.9.0.")
             return
         if manifest.get("migration") == PEOPLE_MIGRATION:
@@ -1283,6 +1299,8 @@ def _restore_verified(
             if manifest.get("migration") == CATALOG_MIGRATION
             else "snapshot-legacy-v9"
             if manifest.get("migration") == PEOPLE_MIGRATION
+            else "snapshot-legacy-v11"
+            if manifest.get("migration") == CORE095_MIGRATION
             else "snapshot-legacy-v10"
             if manifest.get("migration") == CORE090_MIGRATION
             else None

@@ -253,3 +253,10 @@ tbody tr:hover { background: #f4f8fc; }
   .data-glow { animation: none; }
   .sidebar,.nav-item,.button { transition: none; }
 }
+
+/* 0.9.7: local health selector retains native keyboard radio navigation. */
+.health-series-selector { display:flex; flex-wrap:wrap; gap:.75rem 1.25rem; border:0; margin:0 0 1rem; padding:.5rem 0; }
+.health-series-selector legend { font-weight:600; margin-bottom:.5rem; }
+.health-series-selector label { display:flex; align-items:center; gap:.4rem; cursor:pointer; }
+.health-series-selector input { accent-color:#08786f; }
+.health-trend circle:focus-visible { outline:3px solid #08786f; outline-offset:3px; }

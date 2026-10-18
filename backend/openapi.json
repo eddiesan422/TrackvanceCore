@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.9.5"
+    "version": "0.9.7"
   },
   "paths": {
     "/health": {
@@ -4082,6 +4082,162 @@
               "minimum": 1,
               "default": 25,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "grouped",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Grouped"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Origin"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "result",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "until_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until Date"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
+            }
+          },
+          {
+            "name": "dataset_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
             }
           }
         ],
@@ -8400,6 +8556,87 @@
         "x-required-permission": "datasets:write"
       }
     },
+    "/api/v1/datasets/{dataset_id}/acquisition-occurrences": {
+      "get": {
+        "tags": [
+          "Adquisición"
+        ],
+        "summary": "Acquisition Occurrences",
+        "operationId": "acquisition_occurrences_api_v1_datasets__dataset_id__acquisition_occurrences_get",
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "datasets:read"
+      }
+    },
     "/api/v1/acquisitions/limits": {
       "get": {
         "tags": [
@@ -10153,6 +10390,93 @@
               ],
               "title": "Read State"
             }
+          },
+          {
+            "name": "decision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "until_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until Date"
+            }
+          },
+          {
+            "name": "grouped",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Grouped"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
+            }
+          },
+          {
+            "name": "notification_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Notification Offset"
+            }
           }
         ],
         "responses": {
@@ -10243,6 +10567,23 @@
         ],
         "summary": "Read All",
         "operationId": "read_all_api_v1_notifications_inbox_read_all_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReadSnapshot"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Snapshot"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -10250,6 +10591,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -14440,7 +14791,8 @@
             "schema": {
               "enum": [
                 "technical",
-                "business"
+                "business",
+                "origin"
               ],
               "type": "string",
               "default": "technical",
@@ -14551,6 +14903,1075 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/families/{identity}/builder/references": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Upload References",
+        "operationId": "upload_references_api_v1_documents_families__identity__builder_references_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_references_api_v1_documents_families__identity__builder_references_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      },
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "References",
+        "operationId": "references_api_v1_documents_families__identity__builder_references_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/references/{identity}": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Reference",
+        "operationId": "reference_api_v1_documents_builder_references__identity__get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      },
+      "patch": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Configure Reference",
+        "operationId": "configure_reference_api_v1_documents_builder_references__identity__patch",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/references/{identity}/propose": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Proposal",
+        "operationId": "proposal_api_v1_documents_builder_references__identity__propose_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuilderProposal"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/references/{identity}/file": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Reference File",
+        "operationId": "reference_file_api_v1_documents_builder_references__identity__file_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:download"
+      }
+    },
+    "/api/v1/documents/builder/references/{identity}/pages/{page}": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Reference Page",
+        "operationId": "reference_page_api_v1_documents_builder_references__identity__pages__page__get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:download"
+      }
+    },
+    "/api/v1/documents/families/{identity}/builder/drafts": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Drafts",
+        "operationId": "drafts_api_v1_documents_families__identity__builder_drafts_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      },
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "New Draft",
+        "operationId": "new_draft_api_v1_documents_families__identity__builder_drafts_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/drafts/{identity}": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Draft",
+        "operationId": "draft_api_v1_documents_builder_drafts__identity__get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      },
+      "put": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Save",
+        "operationId": "save_api_v1_documents_builder_drafts__identity__put",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/drafts/{identity}/discover": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Discovery",
+        "operationId": "discovery_api_v1_documents_builder_drafts__identity__discover_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/drafts/{identity}/test": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Test",
+        "operationId": "test_api_v1_documents_builder_drafts__identity__test_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
+    "/api/v1/documents/builder/tests/{identity}/review": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Review",
+        "operationId": "review_api_v1_documents_builder_tests__identity__review_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:review"
+      }
+    },
+    "/api/v1/documents/builder/tests/{identity}/activate": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Activate",
+        "operationId": "activate_api_v1_documents_builder_tests__identity__activate_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -14730,8 +16151,9 @@
         "tags": [
           "Documentos"
         ],
-        "summary": "Test",
-        "operationId": "test_api_v1_documents_families__identity__builder_test_post",
+        "summary": "Legacy Test",
+        "description": "Retain the historical route without recreating revision-per-attempt behavior.",
+        "operationId": "legacy_test_api_v1_documents_families__identity__builder_test_post",
         "parameters": [
           {
             "name": "identity",
@@ -14756,7 +16178,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BuilderTest"
+                "$ref": "#/components/schemas/LegacyBuilderTest"
               }
             }
           }
@@ -15196,6 +16618,82 @@
         "x-required-permission": "documents:configure"
       }
     },
+    "/api/v1/documents/families/{identity}/pipeline-draft": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Pipeline Draft",
+        "operationId": "pipeline_draft_api_v1_documents_families__identity__pipeline_draft_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
     "/api/v1/documents/families/{identity}/templates/{template_id}/activate": {
       "post": {
         "tags": [
@@ -15458,6 +16956,26 @@
               "type": "string",
               "default": "desc",
               "title": "Direction"
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "OPERATIONAL",
+                    "LEGACY_REFERENCE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
             }
           }
         ],
@@ -17152,6 +18670,44 @@
         ],
         "title": "Body_upload_attachment_api_v1_exceptions__case_id__attachments_post"
       },
+      "Body_upload_references_api_v1_documents_families__identity__builder_references_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "CONFIGURATION",
+              "HOLDOUT"
+            ],
+            "title": "Role",
+            "default": "CONFIGURATION"
+          },
+          "association": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Association"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_references_api_v1_documents_families__identity__builder_references_post"
+      },
       "Body_upload_version_api_v1_datasets__dataset_id__versions_upload_post": {
         "properties": {
           "file": {
@@ -17197,23 +18753,6 @@
           "selection"
         ],
         "title": "BuilderProposal"
-      },
-      "BuilderTest": {
-        "properties": {
-          "document_id": {
-            "type": "string",
-            "title": "Document Id"
-          },
-          "definition": {
-            "$ref": "#/components/schemas/DocumentDefinition"
-          }
-        },
-        "type": "object",
-        "required": [
-          "document_id",
-          "definition"
-        ],
-        "title": "BuilderTest"
       },
       "CasePatch": {
         "properties": {
@@ -19591,6 +21130,78 @@
         ],
         "title": "DispatchBody"
       },
+      "DocumentArithmetic": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "SUM",
+              "PRODUCT"
+            ],
+            "title": "Operation",
+            "default": "SUM"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Terms"
+          },
+          "subtract": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Subtract"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "scale": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 0.0,
+            "title": "Scale",
+            "default": 2
+          },
+          "tolerance": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,12})?$",
+            "title": "Tolerance",
+            "default": "0.01"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "terms",
+          "result"
+        ],
+        "title": "DocumentArithmetic"
+      },
       "DocumentDefinition": {
         "properties": {
           "fields": {
@@ -19623,6 +21234,14 @@
               }
             ],
             "title": "Business Period Field"
+          },
+          "arithmetic": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentArithmetic"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Arithmetic"
           }
         },
         "additionalProperties": false,
@@ -19631,6 +21250,52 @@
           "fields"
         ],
         "title": "DocumentDefinition"
+      },
+      "DocumentDraftDefinition": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentField"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Fields"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentTable"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Tables"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/DocumentPublication"
+          },
+          "business_period_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Period Field"
+          },
+          "arithmetic": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentArithmetic"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Arithmetic"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DocumentDraftDefinition",
+        "description": "A genuine empty draft is valid storage, never an executable template."
       },
       "DocumentField": {
         "properties": {
@@ -19694,6 +21359,51 @@
             "title": "Decimal Separator",
             "default": "."
           },
+          "thousands_separator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ".",
+                  ",",
+                  " "
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thousands Separator"
+          },
+          "currency_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Currency Symbols"
+          },
+          "decimal_format_explicit": {
+            "type": "boolean",
+            "title": "Decimal Format Explicit",
+            "default": true
+          },
+          "numeric_fragments": {
+            "type": "boolean",
+            "title": "Numeric Fragments",
+            "default": false
+          },
+          "section": {
+            "type": "string",
+            "enum": [
+              "DOCUMENT",
+              "ISSUER",
+              "BUYER",
+              "TOTALS"
+            ],
+            "title": "Section",
+            "default": "DOCUMENT"
+          },
           "visual": {
             "anyOf": [
               {
@@ -19703,6 +21413,14 @@
                 "type": "null"
               }
             ]
+          },
+          "visual_alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/VisualFieldRule"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Visual Alternatives"
           }
         },
         "additionalProperties": false,
@@ -19971,6 +21689,20 @@
           "context_id"
         ],
         "title": "DownloadBody"
+      },
+      "ExpectedVersion": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "ExpectedVersion"
       },
       "ExternalIdentityResponse": {
         "properties": {
@@ -20244,6 +21976,32 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groups"
+          },
+          "watermark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watermark"
           }
         },
         "type": "object",
@@ -20477,6 +22235,23 @@
         "additionalProperties": false,
         "type": "object",
         "title": "KeyNormalization"
+      },
+      "LegacyBuilderTest": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/DocumentDefinition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "definition"
+        ],
+        "title": "LegacyBuilderTest"
       },
       "LoginBody": {
         "properties": {
@@ -20777,6 +22552,30 @@
         "additionalProperties": false,
         "type": "object",
         "title": "MonitorRunBody"
+      },
+      "NewDraft": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 140,
+            "minLength": 1,
+            "title": "Name",
+            "default": "Borrador"
+          },
+          "source_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Template Id"
+          }
+        },
+        "type": "object",
+        "title": "NewDraft"
       },
       "NotificationDiagnostic": {
         "properties": {
@@ -21229,6 +23028,11 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "marked_count": {
+            "type": "integer",
+            "title": "Marked Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -21236,6 +23040,27 @@
           "status"
         ],
         "title": "ReadResponse"
+      },
+      "ReadSnapshot": {
+        "properties": {
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "title": "ReadSnapshot"
       },
       "ReconBody": {
         "properties": {
@@ -21405,6 +23230,43 @@
           "target_version_id"
         ],
         "title": "ReconRunBody"
+      },
+      "ReferenceSettings": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "CONFIGURATION",
+              "HOLDOUT"
+            ],
+            "title": "Role"
+          },
+          "association": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Association"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "reason"
+        ],
+        "title": "ReferenceSettings"
       },
       "ReleaseBody": {
         "properties": {
@@ -21723,6 +23585,55 @@
         ],
         "title": "ReviewBody"
       },
+      "ReviewTest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "reference_id": {
+            "type": "string",
+            "title": "Reference Id"
+          },
+          "changes": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "maxProperties": 10000,
+            "title": "Changes"
+          },
+          "confirmed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "title": "Confirmed"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "reference_id",
+          "reason"
+        ],
+        "title": "ReviewTest"
+      },
       "RevisionBody": {
         "properties": {
           "expected_version": {
@@ -22024,6 +23935,39 @@
           "type"
         ],
         "title": "RuleDefinition"
+      },
+      "SaveDraft": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/DocumentDraftDefinition"
+          },
+          "reference_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Reference Ids"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 140,
+            "minLength": 1,
+            "title": "Name",
+            "default": "Borrador"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "definition"
+        ],
+        "title": "SaveDraft"
       },
       "ScheduleResponse": {
         "properties": {
@@ -22459,7 +24403,7 @@
           "interval_seconds": {
             "type": "integer",
             "maximum": 2678400.0,
-            "minimum": 60.0,
+            "minimum": 30.0,
             "title": "Interval Seconds",
             "default": 86400
           },
@@ -23187,6 +25131,54 @@
             "minimum": 0.0,
             "title": "Tolerance",
             "default": 0.12
+          },
+          "label_aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Label Aliases"
+          },
+          "section_label": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Section Label",
+            "default": ""
+          },
+          "require_unique_origin": {
+            "type": "boolean",
+            "title": "Require Unique Origin",
+            "default": false
+          },
+          "section_bounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Bounds"
+          },
+          "value_pattern": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Value Pattern",
+            "default": ""
+          },
+          "baseline_tolerance": {
+            "type": "number",
+            "maximum": 0.02,
+            "minimum": 0.001,
+            "title": "Baseline Tolerance",
+            "default": 0.004
           }
         },
         "additionalProperties": false,
@@ -23271,6 +25263,36 @@
             "minimum": 0.0,
             "title": "Tolerance",
             "default": 0.12
+          },
+          "flowing": {
+            "type": "boolean",
+            "title": "Flowing",
+            "default": false
+          },
+          "continue_pages": {
+            "type": "boolean",
+            "title": "Continue Pages",
+            "default": false
+          },
+          "multiline_column": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 39.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multiline Column"
+          },
+          "row_tolerance": {
+            "type": "number",
+            "maximum": 0.03,
+            "minimum": 0.004,
+            "title": "Row Tolerance",
+            "default": 0.018
           }
         },
         "additionalProperties": false,

@@ -29,7 +29,7 @@ def test_historical_migration_leaves_its_actual_revision(database):
 
 def test_current_client_after_historical_migration_starts_with_current_schema(client):
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0025_comparison_095"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0027_document_builder_097"
         assert set(inspect(connection).get_table_names()) - {"alembic_version"} == set(Base.metadata.tables)
-        assert len(Base.metadata.tables) == 77
+        assert len(Base.metadata.tables) == 80
     assert client.get("/api/v1/health").status_code == 200

@@ -20,7 +20,19 @@ class DocumentField(BaseModel):
     business_key: bool = False
     date_format: str = Field(default="%Y-%m-%d", max_length=40)
     decimal_separator: Literal[".", ","] = "."
+    thousands_separator: Literal[".", ",", " "] | None = None
+    currency_symbols: list[str] = Field(default_factory=list, max_length=10)
+    decimal_format_explicit: bool = True
+    numeric_fragments: bool = False
+    section: Literal["DOCUMENT", "ISSUER", "BUYER", "TOTALS"] = "DOCUMENT"
     visual: VisualFieldRule | None = None
+    visual_alternatives: list[VisualFieldRule] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def numeric_format(self):
+        if self.thousands_separator == self.decimal_separator:
+            raise ValueError("Los separadores decimal y de millares deben ser distintos.")
+        return self
 
     @field_validator("pattern")
     @classmethod
@@ -103,6 +115,7 @@ class DocumentDefinition(BaseModel):
     tables: list[DocumentTable] = Field(default_factory=list, max_length=10)
     publication: DocumentPublication = Field(default_factory=DocumentPublication)
     business_period_field: str | None = None
+    arithmetic: list["DocumentArithmetic"] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def names(self):
@@ -118,7 +131,28 @@ class DocumentDefinition(BaseModel):
                 raise ValueError("Columnas de tabla reservadas.")
         if self.business_period_field and self.business_period_field not in {f.name for f in self.fields}:
             raise ValueError("El período de negocio debe referenciar un campo de cabecera declarado.")
+        for check in self.arithmetic:
+            scope = next((t.fields for t in self.tables if t.name == check.table), None) if check.table else self.fields
+            if scope is None or not {check.result, *check.terms, *check.subtract}.issubset({f.name for f in scope}):
+                raise ValueError("La comprobación aritmética requiere campos declarados en su estructura.")
         return self
+
+
+class DocumentArithmetic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    table: str | None = None
+    operation: Literal["SUM", "PRODUCT"] = "SUM"
+    terms: list[str] = Field(min_length=1, max_length=30)
+    subtract: list[str] = Field(default_factory=list, max_length=30)
+    result: str
+    scale: int = Field(default=2, ge=0, le=12)
+    tolerance: str = Field(default="0.01", pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
+
+
+class DocumentDraftDefinition(DocumentDefinition):
+    """A genuine empty draft is valid storage, never an executable template."""
+    fields: list[DocumentField] = Field(default_factory=list, max_length=100)
 
 
 def structures(definition: dict) -> dict[str, list[dict]]:

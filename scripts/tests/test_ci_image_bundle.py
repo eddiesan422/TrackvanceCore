@@ -61,7 +61,7 @@ def test_invalid_bundle_cannot_mutate_docker(bundle, monkeypatch, damage):
 def test_loaded_image_must_match_commit_runtime_and_digest(monkeypatch, damage):
     row = {"Id": "sha256:" + "1" * 64, "Os": "linux", "Architecture": "amd64",
         "Config": {"Labels": {"org.opencontainers.image.revision": COMMIT,
-                              "org.opencontainers.image.version": "0.9.5"}}}
+                              "org.opencontainers.image.version": "0.9.7"}}}
     if damage in {"revision", "version"}:
         row["Config"]["Labels"]["org.opencontainers.image." + damage] = "wrong"
     elif damage == "old-version":

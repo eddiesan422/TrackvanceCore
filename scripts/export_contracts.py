@@ -11,10 +11,7 @@ from trackvance.permissions import ENDPOINT_MATRIX, catalog_dto
 ROOT = Path(__file__).resolve().parents[1]
 HERE = ROOT / "docs" / "specification"
 NEW_TABLES = {
-    "acquisition_name_reservations", "acquisition_source_configurations", "acquisition_source_revisions",
-    "acquisition_occurrences", "document_families", "document_templates", "document_originals",
-    "document_extractions", "document_batches", "document_batch_members", "document_publication_claims",
-    "version_comparisons",
+    "document_references", "document_drafts", "document_builder_tests",
 }
 
 
@@ -26,7 +23,11 @@ def main():
     save(ROOT / "backend" / "openapi.json", app.openapi())
     permissions = {"version": __version__, "catalog": catalog_dto(),
                    "routes": [{"method": method, "path": path, "permission": permission}
-                              for method, path, permission in sorted(ENDPOINT_MATRIX)]}
+                              for method, path, permission in sorted(ENDPOINT_MATRIX)],
+                   "shared_read_routes": [{"method": "GET", "path": "/operations",
+                       "resource_permissions": ["datasets:read", "intake:read", "recon:read", "sentinel:read", "delivery:read", "documents:read"],
+                       "authorization": "RESOURCE_AND_CONTENT_BEFORE_FILTER_COUNT_AND_PAGINATION",
+                       "cases_require": "exceptions:read", "personal_news_require": "notifications:read"}]}
     save(HERE / f"permission_contract_{__version__}.json", permissions)
     inventory = {"version": __version__, "tables": sorted(Base.metadata.tables), "entities": []}
     for name in sorted(Base.metadata.tables):
@@ -34,7 +35,7 @@ def main():
         inventory["entities"].append({
             "table": name,
             "evolution": ("NEW" if name in NEW_TABLES else "MODIFIED" if name in
-                          {"acquisition_runs", "jobs"} else "PRESERVED"),
+                          {"acquisition_occurrences", "acquisition_source_configurations", "jobs"} else "PRESERVED"),
             "columns": [{"name": c.name, "type": str(c.type), "nullable": c.nullable,
                          "primary_key": c.primary_key,
                          "references": sorted(str(f.target_fullname) for f in c.foreign_keys)}
@@ -67,6 +68,12 @@ def main():
     lines.extend(["", ("La inbox aplica usuario destinatario y permisos actuales del módulo "
                   "a lista, contador y lectura. El responsable de programación se revalida "
                   "al despachar y antes de STARTED; SYSTEM no es una cuenta ejecutora."), ""])
+    lines.extend(["## Consulta operativa compartida", "",
+        ("GET /operations permite consulta por los permisos existentes de Datasets, Intake, ReconOps, "
+        "Sentinel, Delivery o Documentos, autorizando cada recurso/contenido antes de filtrar, contar y paginar. "
+        "La alternativa de consulta no otorga Excepciones: sus casos, enlaces y conteos requieren exceptions:read. "
+        "Las novedades personales conservan notifications:read y la gestión de casos sus permisos históricos. "
+        "Los filtros dataset_id/version_id se autorizan antes de consultar usos directos de la versión."), ""])
     (ROOT / "docs" / "development" / "permission-matrix.md").write_text("\n".join(lines), encoding="utf-8")
     print(json.dumps({"version": __version__, "paths": len(app.openapi()["paths"]),
                       "tables": len(inventory["tables"]), "permissions": len(permissions["catalog"])}))

@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.9.5
+# Matriz de permisos HTTP y catálogo 0.9.7
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 219 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 236 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -111,6 +111,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/datasets` | `datasets:read` |
 | GET | `/datasets/uploads/{id}/inspect` | `datasets:write` |
 | GET | `/datasets/{id}` | `datasets:read` |
+| GET | `/datasets/{id}/acquisition-occurrences` | `datasets:read` |
 | GET | `/datasets/{id}/comparisons` | `datasets:read` |
 | GET | `/datasets/{id}/schema` | `datasets:read` |
 | GET | `/datasets/{id}/source-settings` | `datasets:read` |
@@ -132,9 +133,15 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/delivery/validations` | `delivery:read` |
 | GET | `/delivery/validations/{id}` | `delivery:read` |
 | GET | `/documents/batches/{id}` | `documents:read` |
+| GET | `/documents/builder/drafts/{id}` | `documents:configure` |
+| GET | `/documents/builder/references/{id}` | `documents:configure` |
+| GET | `/documents/builder/references/{id}/file` | `documents:download` |
+| GET | `/documents/builder/references/{id}/pages/{page}` | `documents:download` |
 | GET | `/documents/families` | `documents:read` |
 | GET | `/documents/families/{id}` | `documents:read` |
 | GET | `/documents/families/{id}/batches` | `documents:read` |
+| GET | `/documents/families/{id}/builder/drafts` | `documents:configure` |
+| GET | `/documents/families/{id}/builder/references` | `documents:configure` |
 | GET | `/documents/limits` | `documents:read` |
 | GET | `/documents/originals` | `documents:read` |
 | GET | `/documents/originals/{id}` | `documents:read` |
@@ -206,6 +213,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | PATCH | `/connections/{id}` | `connections:manage` |
 | PATCH | `/datasets/{id}/governance` | `governance:write` |
 | PATCH | `/delivery/destinations/{id}` | `destinations:manage` |
+| PATCH | `/documents/builder/references/{id}` | `documents:configure` |
 | PATCH | `/exceptions/{id}` | `exceptions:write` |
 | PATCH | `/governance/domains/{id}` | `domains:manage` |
 | PATCH | `/governance/glossary/{id}` | `glossary:manage` |
@@ -249,12 +257,20 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/delivery/validations` | `delivery:configure` |
 | POST | `/delivery/validations/{id}/cancel` | `delivery:configure` |
 | POST | `/documents/batches/{id}/publish` | `documents:publish` |
+| POST | `/documents/builder/drafts/{id}/discover` | `documents:configure` |
+| POST | `/documents/builder/drafts/{id}/test` | `documents:configure` |
+| POST | `/documents/builder/references/{id}/propose` | `documents:configure` |
+| POST | `/documents/builder/tests/{id}/activate` | `documents:configure` |
+| POST | `/documents/builder/tests/{id}/review` | `documents:review` |
 | POST | `/documents/families` | `documents:configure` |
 | POST | `/documents/families/{id}/batches` | `documents:publish` |
+| POST | `/documents/families/{id}/builder/drafts` | `documents:configure` |
 | POST | `/documents/families/{id}/builder/examples` | `documents:configure` |
+| POST | `/documents/families/{id}/builder/references` | `documents:configure` |
 | POST | `/documents/families/{id}/builder/test` | `documents:configure` |
 | POST | `/documents/families/{id}/originals` | `documents:write` |
 | POST | `/documents/families/{id}/pipeline` | `documents:configure` |
+| POST | `/documents/families/{id}/pipeline-draft` | `documents:configure` |
 | POST | `/documents/families/{id}/templates` | `documents:configure` |
 | POST | `/documents/families/{id}/templates/{template_id}/activate` | `documents:configure` |
 | POST | `/documents/originals/{id}/builder/propose` | `documents:configure` |
@@ -300,5 +316,10 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/users/{id}/reset-password` | `users:manage` |
 | POST | `/version-comparisons/{id}/cancel` | `datasets:read` |
 | PUT | `/datasets/{id}/source-settings` | `datasets:write` |
+| PUT | `/documents/builder/drafts/{id}` | `documents:configure` |
 
 La inbox aplica usuario destinatario y permisos actuales del módulo a lista, contador y lectura. El responsable de programación se revalida al despachar y antes de STARTED; SYSTEM no es una cuenta ejecutora.
+
+## Consulta operativa compartida
+
+GET /operations permite consulta por los permisos existentes de Datasets, Intake, ReconOps, Sentinel, Delivery o Documentos, autorizando cada recurso/contenido antes de filtrar, contar y paginar. La alternativa de consulta no otorga Excepciones: sus casos, enlaces y conteos requieren exceptions:read. Las novedades personales conservan notifications:read y la gestión de casos sus permisos históricos. Los filtros dataset_id/version_id se autorizan antes de consultar usos directos de la versión.

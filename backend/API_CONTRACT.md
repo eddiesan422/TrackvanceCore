@@ -1,4 +1,26 @@
-# Contrato Trackvance Core local 0.8.0
+# Contrato Trackvance Core local 0.9.7
+
+Estado: candidato **NO CERRADA**. El runtime exportado es la autoridad; las
+aprobaciones históricas no certifican este cambio.
+
+- Adquisición: source-settings acepta intervalos enteros de 30 a 2.678.400 segundos,
+  zona IANA y revisión esperada. Conserva referencias congeladas; la lectura y los
+  secretos se resuelven en worker. acquisition-occurrences pagina estado y causas.
+- Operación: grouped/process conserva identidades causales; dataset_id/version_id
+  consultan usos directos autorizados antes de paginar. La lectura compartida por
+  permisos de recursos no concede casos de Excepciones. Las novedades mantienen
+  notifications:read y lectura personal por instantánea de IDs.
+- Linaje: projection=origin recorre únicamente productores antes de límites;
+  cursores de origen no pueden usarse para expandir consumidores en business.
+- Documentos: builder/references y builder/drafts separan ejemplos de operaciones.
+  Guardar usa expected_version y conflicto 409; discover/test/activate conservan
+  instantáneas exactas, evidencia automática y correcciones humanas separadas.
+  Las rutas históricas de plantillas siguen disponibles para compatibilidad.
+- Salud: puntos conservan ausencia/cero, muestras consideradas y contribuciones de
+  fallos técnicos; seleccionar una serie local no modifica las demás métricas.
+
+La [matriz oficial](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/core-0.9.7.md)
+identifica límites, migraciones, permisos y evidencia por requisito.
 
 El esquema ejecutable se genera desde la aplicación y mantiene la base `/api/v1`
 para compatibilidad. [openapi.json](openapi.json) se regenera y revisa como paso

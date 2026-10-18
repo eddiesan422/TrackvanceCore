@@ -337,8 +337,8 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
 ])
 def test_native_fixture_restore_requires_schema_exact_hashes_key_families_and_stopped_consumers(field, value, code):
     receipt = {"status": "PASS", "main_inventory": "UNCHANGED", "automatic_processes_started": False,
-               "restore": "STOPPED_VERIFIED", "revision": "0025_comparison_095", "state_schema_version": 11,
-               "tables": 77, "multipart_integrity": "PASS", "historical_bytes_and_hashes": "PASS",
+               "restore": "STOPPED_VERIFIED", "revision": "0027_document_builder_097", "state_schema_version": 12,
+               "tables": 80, "multipart_integrity": "PASS", "historical_bytes_and_hashes": "PASS",
                "exact_state_comparison": "PASS", "source_state_sha256": "a" * 64,
                "restored_state_sha256": "a" * 64, "manifest_sha256": "c" * 64,
                "verified_artifacts": 1, "verified_source_secrets": 1, "verified_delivery_secrets": 1}
@@ -354,8 +354,8 @@ def selective_receipt_fixture():
     removed = {name: 0 if name in PROTECTED | {"audit_events"} else 1 for name in CURRENT_STATE_TABLES}
     removed["datasets"] = 2
     return {"status": "PASS", "scope": "OWNED_RESTORED_POSTGRES_COPY", "database": "POSTGRESQL",
-        "project": "trackvance-v080-test-restore085-012345abcdef", "source_sha": "a" * 40, "schema_version": 11,
-        "migration": "0025_comparison_095", "tables": 77, "verified_restore": "STOPPED_VERIFIED",
+        "project": "trackvance-v080-test-restore085-012345abcdef", "source_sha": "a" * 40, "schema_version": 12,
+        "migration": "0027_document_builder_097", "tables": 80, "verified_restore": "STOPPED_VERIFIED",
         "verified_restore_project": "trackvance-v080-test-cleanuprestore085-123456abcdef", "backup_manifest_sha256": "b" * 64,
         "verified_state_sha256": "c" * 64, "plan_sha256": "d" * 64, "external_destinations_touched": False,
         "backup_retained": True, "usual_inventory": "UNCHANGED", "reset_audit_added": 1,
@@ -388,10 +388,10 @@ def test_historical_restore_gate_preserves_source_identity_and_requires_current_
     # Validator-only evidence fixture; the real migration/restore gate supplies
     # its own independently measured row fingerprints and resource inventory.
     receipt = {"status": "PASS", "source_destroyed_before_restore": True, "main_inventory": "UNCHANGED",
-        "source_version": source, "target_version": "0.9.5", "restore": "STOPPED_VERIFIED",
+        "source_version": source, "target_version": "0.9.7", "restore": "STOPPED_VERIFIED",
         "automatic_processes_started": False, "exact_historical_state": "PASS", "source_state_sha256": "a" * 64,
-        "restored_legacy_sha256": "a" * 64, "native_tables": 77, "new_catalog_tables_empty": True,
-        "migration": "0025_comparison_095", "state_schema_version": 11, "cleanup": "PASS", "log_secret_scan": "PASS"}
+        "restored_legacy_sha256": "a" * 64, "native_tables": 80, "new_catalog_tables_empty": True,
+        "migration": "0027_document_builder_097", "state_schema_version": 12, "cleanup": "PASS", "log_secret_scan": "PASS"}
     restore(receipt, source)
     receipt["restored_legacy_sha256"] = "b" * 64
     with pytest.raises(EvidenceError, match="HASH_MISMATCH"):

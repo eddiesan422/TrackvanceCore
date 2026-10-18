@@ -13,6 +13,7 @@ from .component_health import (
 )
 from .db import SessionLocal, iso, utcnow
 from .models import uid
+from .scheduler import SchedulerDispatchError, commit_dispatch
 from .scheduler import tick as schedule_tick
 
 logger = logging.getLogger(__name__)
@@ -39,12 +40,46 @@ def write_heartbeat(component: str, owner: str):
 
 
 def dispatch_tick(*, limit=100):
-    # Each dispatch transaction is retryable by cursor/occurrence uniqueness.
-    schedule_tick()
-    with SessionLocal() as db:
-        count = dispatch_due(db, limit=limit)
-        db.commit()
-        return count
+    # Each module commits independently; even a failed module cannot starve
+    # Delivery. Health records completed cycles separately from process pulses.
+    count, successful, errors = 0, 0, []
+    try:
+        scheduled = schedule_tick()
+        count += scheduled
+        successful += getattr(scheduled, "successful_count", scheduled)
+    except SchedulerDispatchError as error:
+        count += error.dispatched_count
+        successful += error.successful_count
+        errors.extend(error.errors)
+    except Exception:  # noqa: BLE001 -- keep the delivery dispatcher independent
+        errors.append({"module": "schedules", "code": "SCHEDULER_DISPATCH_FAILED"})
+    try:
+        with SessionLocal() as db:
+            registered, jobs = commit_dispatch(db, lambda session: dispatch_due(session, limit=limit))
+            count += registered
+            successful += jobs
+    except Exception:  # noqa: BLE001 -- supervised retry after durable diagnostics
+        errors.append({"module": "delivery", "code": "SCHEDULER_MODULE_DISPATCH_FAILED"})
+    write_dispatch_evidence(count=successful, errors=errors)
+    if errors:
+        raise SchedulerDispatchError(errors, count)
+    return count
+
+
+def write_dispatch_evidence(*, count, errors):
+    path = artifact_store.location("scheduler-dispatch.json")
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        previous = {}
+    now = iso(utcnow())
+    evidence = {"last_cycle_at": now, "last_successful_cycle_at": previous.get("last_successful_cycle_at") if errors else now,
+        "last_successful_dispatch_at": now if count else previous.get("last_successful_dispatch_at"),
+        "dispatched_count": count, "errors": errors,
+        "consecutive_failures": previous.get("consecutive_failures", 0) + 1 if errors else 0}
+    temporary = path.with_suffix(f".{uid()}.tmp")
+    temporary.write_text(json.dumps(evidence), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def heartbeat_loop(component, owner, stop):

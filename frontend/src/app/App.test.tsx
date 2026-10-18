@@ -41,7 +41,7 @@ describe('App session', () => {
     const sentinel = links.findIndex(link => link.textContent?.includes('Sentinel'))
     const delivery = links.findIndex(link => link.textContent?.includes('Data Delivery'))
     expect(delivery).toBe(sentinel + 1)
-    expect(screen.getByText(/v0\.9\.5/)).toBeInTheDocument()
+    expect(screen.getByText(/v0\.9\.7/)).toBeInTheDocument()
     await user.click(logout)
 
     await waitFor(() => expect(post).toHaveBeenCalledWith('/auth/logout'))
@@ -140,5 +140,16 @@ describe('App session', () => {
     expect(screen.queryByRole('link', { name: 'Datasets' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Buscar datasets' })).not.toBeInTheDocument()
     expect(post).not.toHaveBeenCalledWith('/auth/logout')
+  })
+
+  it('redirects the historical notification route to personal operation without exceptions permission', async () => {
+    vi.mocked(api).mockImplementation(async path => path === '/me' ? { ...session, user: { ...session.user, permissions: ['notifications:read', 'intake:read'] } } : path.includes('unread-count') ? { unread_count: 0 } : { groups: [], items: [], total: 0 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/notifications?read_state=UNREAD']}><App/><CurrentLocation/></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('heading', { name: 'Novedades personales' })).toBeVisible()
+    expect(screen.getByTestId('current-location')).toHaveTextContent('/operations')
+    expect(screen.queryByRole('link', { name: 'Notificaciones' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Gestionar excepciones' })).not.toBeInTheDocument()
+    expect(api).toHaveBeenCalledWith(expect.stringContaining('read_state=UNREAD'))
   })
 })

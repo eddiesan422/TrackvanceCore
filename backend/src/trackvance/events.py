@@ -103,7 +103,7 @@ def _before_flush(db: Session, _context, _instances):
                 dedupe_key=f"acquisition:{record.id}:{record.status}", event_type="ACQUISITION_TERMINAL",
                 aggregate_type="ACQUISITION", aggregate_id=record.id, module="acquisition",
                 payload={"recipient_user_id": record.initiated_by_id, "status": record.status,
-                         "origin": "MANUAL", "dataset_id": record.dataset_id,
+                         "origin": (record.source_snapshot or {}).get("origin", "MANUAL"), "dataset_id": record.dataset_id,
                          "output_version_id": record.output_version_id,
                          "error_code": record.error_code, "error_message": record.error_message,
                          "error_details": record.error_details, "error_reference": record.error_reference})
@@ -137,6 +137,8 @@ def functional_description(event: OutboxEvent):
                 "MONITOR_BUSY": "El intervalo Sentinel se omitió porque existe una ejecución activa.",
                 "NO_DATASET_VERSION": "El intervalo Sentinel se omitió porque no existe una versión registrada."}.get(
                     str(payload.get("reason_code")), "La programación Sentinel no pudo ejecutar este intervalo; revisa sus ocurrencias.")
+    if event.event_type == "ACQUISITION_SCHEDULE_BLOCKED":
+        return payload.get("reason_message") or "El corte de adquisición no ejecutó una consulta; revisa su motivo y la programación."
     if event.event_type == "INTAKE_SCHEDULE_BLOCKED":
         return {"QUALITY_REJECTION_REVIEW_REQUIRED": "La entrada ya fue rechazada con esta revisión Intake; requiere revisión antes de repetirse.",
                 "INTAKE_EXECUTOR_DISABLED": "La programación Intake se bloqueó porque su responsable no está habilitado.",
@@ -185,6 +187,8 @@ def consume_notification(db: Session, record: OutboxEvent):
 
     if record.event_type == "DATASET_VERSION_PUBLISHED":
         return  # Publication events drive metadata consumers, not status notifications.
+    if record.payload.get("suppress_notification") is True:
+        return  # Occurrence/outbox evidence remains; repeated identical blocks are related there.
     recipient_id = record.payload.get("recipient_user_id")
     user = db.get(User, recipient_id) if recipient_id else None
     if user is None or user.organization_id != record.organization_id:
@@ -197,6 +201,8 @@ def consume_notification(db: Session, record: OutboxEvent):
                else f"/runs/{record.aggregate_id}")
     elif record.aggregate_type == "ACQUISITION":
         url = f"/datasets/{record.payload.get('dataset_id', '')}?acquisition={record.aggregate_id}"
+    elif record.aggregate_type == "ACQUISITION_OCCURRENCE":
+        url = f"/operations?view=news&process=occurrence:{record.aggregate_id}"
     elif record.aggregate_type == "MONITOR_OCCURRENCE":
         url = f"/sentinel?monitor={record.payload.get('monitor_id', '')}"
     elif record.aggregate_type == "INTAKE_OCCURRENCE":

@@ -169,50 +169,58 @@ def test_real_visual_invoice_and_shifted_second_invoice_exact_oracle(database, t
 
 
 def test_builder_api_creates_immutable_example_and_test_before_activation(authenticated, database, tmp_path):
+    """0.9.7 supersedes revision-per-attempt with the same real local engine."""
+    from sqlalchemy import func, select
+
     from trackvance.document_models import DocumentOriginal, DocumentTemplate
     from trackvance.document_worker import process_once
 
     source = invoice_pdf(tmp_path / "invoice.pdf")
-    response = authenticated.post("/api/v1/documents/families", json={"name": "Visual invoice"})
+    holdout = invoice_pdf(tmp_path / "holdout.pdf", shifted=True)
+    family = authenticated.post("/api/v1/documents/families", json={"name": "Visual invoice"}).json()["id"]
+    references = []
+    for path, role in [(source, "CONFIGURATION"), (holdout, "HOLDOUT")]:
+        response = authenticated.post(f"/api/v1/documents/families/{family}/builder/references",
+            files={"files": (path.name, path.read_bytes(), "application/pdf")}, data={"role": role})
+        assert response.status_code == 200, response.text
+        reference = response.json()["items"][0]
+        assert reference["kind"] == "REFERENCE" and reference["template_id"] is None
+        assert process_once()
+        references.append(reference["id"])
+    with database() as db:
+        assert db.scalar(select(func.count()).select_from(DocumentTemplate)) == 0
+        assert db.scalar(select(func.count()).select_from(DocumentOriginal)) == 0
+    draft = authenticated.post(f"/api/v1/documents/families/{family}/builder/drafts", json={}).json()
+    draft = authenticated.put(f"/api/v1/documents/builder/drafts/{draft['id']}", json={
+        "expected_version": draft["version"], "definition": draft["definition"], "reference_ids": references}).json()
+    response = authenticated.post(f"/api/v1/documents/builder/drafts/{draft['id']}/discover", json={"expected_version": draft["version"]})
     assert response.status_code == 200, response.text
-    family = response.json()["id"]
-    response = authenticated.post(f"/api/v1/documents/families/{family}/builder/examples",
-                                  files={"file": (source.name, source.read_bytes(), "application/pdf")})
-    assert response.status_code == 200, response.text
-    original = response.json()
-    assert original["is_example"] and original["status"] == "QUEUED"
-    assert authenticated.get(f"/api/v1/documents/originals/{original['id']}/builder").status_code == 409
-    assert process_once()
-    response = authenticated.get(f"/api/v1/documents/originals/{original['id']}/builder")
-    assert response.status_code == 200, response.text
-    geometry = response.json()
-    value_word = next(word for line in geometry["lines"] for word in line["words"] if word["text"] == "000001")
-    response = authenticated.post(f"/api/v1/documents/originals/{original['id']}/builder/propose",
-        json={"selection": {"page": 1, "region": value_word["region"]}, "kind": "FIELD"})
-    assert response.status_code == 200, response.text
-    field = response.json()["field"]
-    field.update(critical=True, business_key=True)
-    response = authenticated.post(f"/api/v1/documents/families/{family}/builder/test",
-        json={"document_id": original["id"], "definition": {"fields": [field]}})
+    draft = response.json()["draft"]
+    assert draft["discovered_from"] == [references[0]]
+    assert any(field["name"] == "numero_factura" for field in draft["definition"]["fields"])
+    response = authenticated.post(f"/api/v1/documents/builder/drafts/{draft['id']}/test", json={"expected_version": draft["version"]})
     assert response.status_code == 200, response.text
     tested = response.json()
-    assert tested["id"] != original["id"] and tested["template_id"] != original["template_id"]
-    assert process_once()
-    detail = authenticated.get(f"/api/v1/documents/originals/{tested['id']}").json()
-    assert detail["extraction"]["payload"]["fields"]["invoice"]["value"] == "000001"
-    activate = f"/api/v1/documents/families/{family}/templates/{tested['template_id']}/activate"
-    assert authenticated.post(activate, json={"test_extraction_id": detail["extraction"]["id"]}).status_code == 422
-    reviewed = authenticated.post(f"/api/v1/documents/originals/{tested['id']}/review", json={
-        "expected_extraction_id": detail["extraction"]["id"], "confirmed": ["headers.0.invoice"], "reason": "Exact invoice oracle verified"})
-    assert reviewed.status_code == 200, reviewed.text
-    current = authenticated.get(f"/api/v1/documents/originals/{tested['id']}").json()
-    assert authenticated.post(activate, json={"test_extraction_id": current["extraction"]["id"]}).status_code == 200
+    assert set(tested["automatic_results"]) == set(references)
+    assert tested["automatic_results"][references[0]]["fields"]["numero_factura"]["value"] == "000001"
+    assert tested["automatic_results"][references[1]]["fields"]["numero_factura"]["value"] == "000002"
+    activate = f"/api/v1/documents/builder/tests/{tested['id']}/activate"
+    assert authenticated.post(activate).status_code == 422
+    for reference_id in references:
+        payload = tested["automatic_results"][reference_id]
+        confirmed = [f"headers.0.{name}" for name in payload["fields"]]
+        confirmed += [f"{table}.{index}.{name}" for table, rows in payload["tables"].items() for index, row in enumerate(rows) for name in row]
+        response = authenticated.post(f"/api/v1/documents/builder/tests/{tested['id']}/review", json={
+            "reference_id": reference_id, "expected_version": tested["review_version"],
+            "confirmed": confirmed, "reason": "Independent PDF oracle checked"})
+        assert response.status_code == 200, response.text
+        tested = response.json()
+    response = authenticated.post(activate)
+    assert response.status_code == 200, response.text
+    assert authenticated.post(activate).json()["id"] == response.json()["id"]
     with database() as db:
-        prior, later = db.get(DocumentOriginal, original["id"]), db.get(DocumentOriginal, tested["id"])
-        assert prior.artifact_id == later.artifact_id and prior.sha256 == later.sha256
-        assert prior.extraction_id != later.extraction_id
-        assert db.get(DocumentTemplate, original["template_id"]).definition["fields"][0]["name"] == "por_configurar"
-        assert db.get(DocumentTemplate, tested["template_id"]).definition["fields"][0]["visual"]["label"] == "Invoice"
+        assert db.scalar(select(func.count()).select_from(DocumentTemplate)) == 1
+        assert db.scalar(select(func.count()).select_from(DocumentOriginal)) == 0
 
 
 @pytest.mark.parametrize("missing", ["documents:configure", "documents:write", "documents:download"])

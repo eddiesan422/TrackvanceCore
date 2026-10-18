@@ -43,7 +43,8 @@ TYPE_TABLE = {"DATASET": "datasets", "DATASET_VERSION": "dataset_versions", "RUN
     "REPORT_DEFINITION": "report_definitions", "REPORT_REVISION": "report_revisions", "REPORT_CONTEXT": "report_contexts",
     "REPORT_EXECUTION": "report_executions", "DELIVERY_ATTEMPT": "delivery_attempts",
     "MONITOR_OCCURRENCE": "monitor_occurrences", "DELIVERY_OCCURRENCE": "delivery_occurrences",
-    "INTAKE_OCCURRENCE": "intake_occurrences",
+    "INTAKE_OCCURRENCE": "intake_occurrences", "ACQUISITION_OCCURRENCE": "acquisition_occurrences",
+    "DOCUMENT_REFERENCE": "document_references", "DOCUMENT_DRAFT": "document_drafts", "DOCUMENT_BUILDER_TEST": "document_builder_tests",
     "DOCUMENT_FAMILY": "document_families", "DOCUMENT_TEMPLATE": "document_templates",
     "DOCUMENT": "document_originals", "DOCUMENT_EXTRACTION": "document_extractions",
     "DOCUMENT_BATCH": "document_batches", "COMPARISON": "version_comparisons", "VERSION_COMPARISON": "version_comparisons",
@@ -473,8 +474,8 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         files_by_path[entry["path"]] = entry
     files = sorted(files_by_path.values(), key=lambda item: item["path"])
     revisions = list(db.scalars(text("SELECT version_num FROM alembic_version")))
-    if revisions != ["0025_comparison_095"] or len(rows) != 77:
-        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.5 requiere exactamente la revisión 0025 y sus 77 tablas completas.")
+    if revisions != ["0027_document_builder_097"] or len(rows) != 80:
+        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.7 requiere exactamente la revisión 0027 y sus 80 tablas completas.")
     revision = revisions[0]
     return {"project": project, "organization_id": organization_id, "dataset_ids": sorted(dataset_ids),
         "migration": revision, "schema_sha256": digest(schema), "population_sha256": digest(rows),
@@ -646,7 +647,7 @@ def _recover_locked(db: Session, quarantine: Path, storage: Path, *, project: st
             error("CLEANUP_RECOVERY_INVALID", "El marcador de commit no corresponde al journal sellado.")
         return {"status": "METADATA_COMMITTED_FILES_QUARANTINED", "files_restored": 0}
     rows, _, _ = population(db)
-    if journal.get("migration") != "0025_comparison_095" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
+    if journal.get("migration") != "0027_document_builder_097" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
         error("CLEANUP_SCHEMA_DRIFT", "La recuperación requiere la misma revisión certificada del journal.")
     live = {(Path(row[field]) if Path(row[field]).is_absolute() else storage / row[field]).resolve()
             for name, items in rows.items() for row in items.values() for field in PATH_FIELDS.get(name, ())

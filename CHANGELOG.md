@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.7 — candidato en desarrollo, NO CERRADA
+
+- Scheduler prepara trabajos sin resolver secretos ni abrir fuentes; mínimo 30 s,
+  aislamiento de fallos y metadata acotada de despacho/ocurrencias.
+- Novedades personales en Operación, agrupación causal y lectura por instantánea.
+- Origen productor de versión en backend y selector local de salud con vacíos reales.
+- Referencias documentales independientes, borradores persistentes con CAS,
+  descubrimiento multiejemplo y pruebas/activación sobre instantáneas verificadas.
+- Migraciones aditivas 0026/0027. Las pruebas históricas no certifican este candidato.
+
+
 ## 0.9.5 — Documentos, adquisición, comparación y seguimiento
 
 - Familias, plantillas y extracciones documentales versionadas, OCR CPU local,

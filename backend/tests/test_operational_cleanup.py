@@ -572,8 +572,8 @@ def test_core095_evidence_protects_requested_dataset_without_adoption(population
                         settings={}, published_versions={"headers": "test-version"}, actor_id="test-user", wait_until=utcnow(), organization_id=org))
         db.commit()
         plan = create_plan(db, "trackvance-cleanup-test", org, ["test-dataset"], storage)
-    assert plan["scope"]["migration"] == "0025_comparison_095"
-    assert len(plan["scope"]["state_tables"]) == 77
+    assert plan["scope"]["migration"] == "0027_document_builder_097"
+    assert len(plan["scope"]["state_tables"]) == 80
     assert not plan["scope"]["delete"]["datasets"]
     assert not plan["scope"]["delete"]["dataset_versions"]
     assert not plan["scope"]["files"]

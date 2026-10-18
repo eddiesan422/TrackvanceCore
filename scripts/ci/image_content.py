@@ -59,7 +59,7 @@ def _config(payload: bytes, sha: str) -> dict:
     layers = rootfs.get("diff_ids")
     if (document.get("os") != "linux" or document.get("architecture") != "amd64"
             or labels.get("org.opencontainers.image.revision") != sha
-            or labels.get("org.opencontainers.image.version") != "0.9.5"
+            or labels.get("org.opencontainers.image.version") != "0.9.7"
             or rootfs.get("type") != "layers" or not isinstance(layers, list)
             or len(layers) > 256 or not all(isinstance(v, str) and DIGEST.fullmatch(v)
                                          for v in layers)):

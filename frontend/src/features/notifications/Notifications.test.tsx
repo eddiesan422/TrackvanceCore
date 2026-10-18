@@ -22,7 +22,7 @@ it('separates technical SUCCESS from a rejected business result and marks only i
   vi.mocked(post).mockResolvedValue({})
   const user = userEvent.setup()
   renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
-  expect(await screen.findByRole('link', { name: 'Ver notificaciones, 1 sin leer' })).toHaveAttribute('href', '/notifications')
+  expect(await screen.findByRole('link', { name: 'Ver notificaciones, 1 sin leer' })).toHaveAttribute('href', '/operations?view=news&read_state=UNREAD')
   expect(await screen.findByText('Completada', { selector: 'span' })).toBeInTheDocument()
   expect(screen.getByText('Rechazado')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Ver detalle' })).toHaveAttribute('href', '/runs/validated')
@@ -171,7 +171,7 @@ it('supports changing read status with the keyboard Space key', async () => {
   await waitFor(() => expect(checkbox).toBeChecked())
 })
 
-it('ignores a stale initial inbox and count response after read-all is confirmed', async () => {
+it('requires a visible snapshot for page reading and ignores a stale count after confirmation', async () => {
   const item = { id: 'initial', module: 'intake', origin: 'MANUAL', status: 'SUCCESS', decision: 'APPROVED', description: 'Validación completada.', created_at: '2030-01-01T09:00:00Z', read_at: null as string | null, detail_url: '/runs/approved' }
   let inboxCalls = 0, countCalls = 0
   let resolveInbox!: (value: { items: typeof item[]; total: number }) => void
@@ -187,13 +187,15 @@ it('ignores a stale initial inbox and count response after read-all is confirmed
   })
   vi.mocked(post).mockImplementationOnce(() => new Promise(done => { confirm = done }))
   renderApp(<><NotificationIndicator/><NotificationsPage/></>, { permissions: ['notifications:read'] })
-  const markAll = screen.getByRole('button', { name: 'Marcar todas como leídas' })
+  const markAll = screen.getByRole('button', { name: 'Marcar esta página como leída' })
+  expect(markAll).toBeDisabled()
+  await act(async () => resolveInbox({ items: [item], total: 1 }))
+  await screen.findByRole('checkbox', { name: /^Leída:/ })
   fireEvent.click(markAll)
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/notifications/inbox/read-all'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/notifications/inbox/read-all', { ids: ['initial'] }))
   expect(markAll).toBeDisabled()
   await act(async () => { confirm({ updated: 1 }) })
   await act(async () => {
-    resolveInbox({ items: [item], total: 1 })
     resolveCount({ unread_count: 1 })
   })
   await waitFor(() => expect(screen.getByRole('checkbox', { name: /^Leída:/ })).toBeChecked())
@@ -201,4 +203,22 @@ it('ignores a stale initial inbox and count response after read-all is confirmed
   expect(countCalls).toBe(2)
   expect(screen.queryByText('Sin leer ·')).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Ver notificaciones' })).toBeInTheDocument()
+})
+
+it('renders one expandable process and freezes page notification identities during bulk reading', async () => {
+  const first = { id: 'one', module: 'intake', origin: 'MANUAL', status: 'SUCCESS', decision: 'REJECTED', description: 'Validación rechazada.', created_at: '2030-01-01T09:00:00Z', read_at: null, detail_url: '/runs/one' }
+  const second = { ...first, id: 'two', module: 'DELIVERY', status: 'UNKNOWN', decision: null, description: 'Confirmación insuficiente.', detail_url: '/runs/two' }
+  const group = { process_id: 'run:one', operation: { title: 'Proceso verificado', impact: 'La confirmación es insuficiente.', stages: [{ id: 'run:one', title: 'Intake', state: 'SUCCESS', href: '/runs/one' }], next_action: 'Revisar evidencia' }, items: [first, second], unread_count: 2 }
+  vi.mocked(api).mockResolvedValue({ groups: [group], items: [], total: 1 })
+  vi.mocked(post).mockResolvedValue({ status: 'READ', marked_count: 2 })
+  const user = userEvent.setup()
+  renderApp(<NotificationsPage/>, { permissions: ['notifications:read'] })
+  expect(await screen.findByRole('heading', { name: 'Proceso verificado' })).toBeVisible()
+  expect(screen.getByText(/2 novedades sin leer/)).toBeVisible()
+  expect(screen.getByText('Ver etapas, novedades y enlaces originales').closest('details')).not.toHaveAttribute('open')
+  await user.click(screen.getByText('Ver etapas, novedades y enlaces originales'))
+  expect(screen.getByText('Ver etapas, novedades y enlaces originales').closest('details')).toHaveAttribute('open')
+  expect(screen.getAllByRole('link', { name: 'Ver detalle' })).toHaveLength(2)
+  await user.click(screen.getByRole('button', { name: 'Marcar esta página como leída' }))
+  expect(post).toHaveBeenCalledWith('/notifications/inbox/read-all', { ids: ['one', 'two'] })
 })

@@ -32,6 +32,7 @@ from .connections_service import (
     saved_source,
     settings_for,
 )
+from .credential_store import SecretStoreError
 from .dataset_readers import DatasetReadResult, ReaderOptions
 from .dataset_scans import profile_paths, publish_materialized_version
 from .dataset_sources import SourceError, source_registry
@@ -192,10 +193,17 @@ def register_upload(db: Session, user: User, dataset: Dataset, upload_id: str, *
 def register_source(db: Session, user: User, connection: ExternalConnection,
                     binding: DatasetSourceBinding, dataset: Dataset, *,
                     idempotency_key: str | None = None, request_identity: dict | None = None,
-                    initial: bool = False, update_policy: dict | None = None) -> AcquisitionRun:
+                    initial: bool = False, update_policy: dict | None = None,
+                    defer_source_validation: bool = False, frozen_source: dict | None = None) -> AcquisitionRun:
     if dataset.organization_id != user.organization_id or binding.organization_id != user.organization_id:
         raise AcquisitionOperationError(404, "NOT_FOUND", "No se encontró la selección solicitada.")
-    version = current_version(db, connection)
+    # A scheduled cut pins metadata only. Secret resolution, connector creation
+    # and source/schema access belong exclusively to the authorized worker.
+    version = db.get(ExternalConnectionVersion, frozen_source["connection_version_id"]) if frozen_source else current_version(db, connection)
+    if version is None or version.connection_id != connection.id or version.organization_id != user.organization_id:
+        raise AcquisitionOperationError(409, "SOURCE_REVISION_MISMATCH", "La revisión guardada de la conexión ya no está disponible.")
+    if connection.deleted or not connection.enabled:
+        raise AcquisitionOperationError(409, "CONNECTION_DISABLED", "Habilita la conexión para consultar su fuente.")
     digest = _request_hash(request_identity or {"operation": "SOURCE", "dataset_id": dataset.id, "connection_version_id": version.id,
         "schema_name": binding.schema_name, "object_name": binding.object_name,
         "object_kind": binding.object_kind, "column_overrides": binding.column_overrides})
@@ -207,13 +215,17 @@ def register_source(db: Session, user: User, connection: ExternalConnection,
         if db.scalar(select(AcquisitionRun.id).where(AcquisitionRun.dataset_id == dataset.id,
                 AcquisitionRun.status.in_(["QUEUED", "RUNNING"]))):
             raise AcquisitionOperationError(409, "ACQUISITION_DATASET_BUSY", "El dataset ya tiene una adquisición en curso.")
-    source, version = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
-    columns = source.columns(binding.schema_name, binding.object_name)
+    if defer_source_validation:
+        columns = frozen_source.get("source_native_schema") if frozen_source else None
+    else:
+        source, version = saved_source(db, connection, schema_name=binding.schema_name, object_name=binding.object_name)
+        columns = source.columns(binding.schema_name, binding.object_name)
     overrides = dict(binding.column_overrides)
-    if connection.source_type == "REST":
+    if columns is not None and connection.source_type == "REST":
         from .rest_source import declared_overrides
         overrides = declared_overrides(columns, overrides)
-    validate_column_overrides(overrides, [column["name"] for column in columns])
+    if columns is not None:
+        validate_column_overrides(overrides, [column["name"] for column in columns])
     previous = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version.desc()))
     source_snapshot = {"source_type": connection.source_type, "connection_id": connection.id,
         "connection_version_id": version.id, "connection_version": version.version,
@@ -431,6 +443,23 @@ def execute_acquisition(identifier: str, owner: str) -> None:
             if source_version.connection_id != connection.id or source_version.config_hash != snapshot["config_hash"]:
                 raise AcquisitionStopped("SOURCE_REVISION_MISMATCH", "La identidad de la revisión fuente no coincide.")
             source = source_registry.create(settings_for(connection, source_version), snapshot["schema_name"], snapshot["object_name"])
+            # Historical schedules did not freeze a native schema. Establish it
+            # in this worker once, then compare every batch to that exact schema.
+            # Publication still checks compatibility with the complete prior version.
+            observed_columns = source.columns(snapshot["schema_name"], snapshot["object_name"])
+            if snapshot.get("source_native_schema") is not None and observed_columns != snapshot["source_native_schema"]:
+                raise AcquisitionStopped("SOURCE_SCHEMA_DRIFT", "El esquema de la fuente cambió después de confirmar la selección.")
+            snapshot["source_native_schema"] = observed_columns
+            if source_type == "REST":
+                from .rest_source import declared_overrides
+                overrides = declared_overrides(observed_columns, overrides)
+            validate_column_overrides(overrides, [column["name"] for column in observed_columns])
+            job = db.scalar(select(Job).where(Job.acquisition_id == identifier).with_for_update())
+            db.refresh(run)
+            if job is None or job.status != "RUNNING" or job.lease_owner != owner or job.lease_until is None or job.lease_until.replace(tzinfo=UTC) <= utcnow() or run.attempt_id != attempt:
+                raise AcquisitionStopped("ACQUISITION_LEASE_LOST", "El worker perdió su lease al validar la fuente; no puede continuar.")
+            run.source_snapshot, run.column_overrides = snapshot, overrides
+            db.commit()
             reader = None
             iterable = source.read_batches(limits=limits)
 
@@ -678,6 +707,8 @@ def process_once(owner: str | None = None, active: dict | None = None) -> bool:
         elif isinstance(exc, ProcessingError):
             diagnostic = processing_diagnostic(exc)
             code, message, details = diagnostic.code, diagnostic.message, diagnostic.details
+        elif isinstance(exc, SecretStoreError):
+            code, message = "ACQUISITION_CREDENTIAL_UNAVAILABLE", "El worker no pudo recuperar la credencial de la fuente. Revisa el almacén autorizado; la versión anterior permanece disponible."
         elif isinstance(exc, (MemoryError, duckdb.OutOfMemoryException)):
             code, message = "ACQUISITION_MEMORY_LIMIT", "No hay memoria suficiente para completar la adquisición dentro del presupuesto."
         elif isinstance(exc, PermissionError):

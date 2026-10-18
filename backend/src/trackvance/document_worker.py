@@ -20,7 +20,7 @@ from sqlalchemy.engine import CursorResult
 
 from .artifactstore import link_artifact, storage_provider
 from .db import SessionLocal, require_record, utcnow
-from .document_models import DocumentExtraction, DocumentOriginal
+from .document_models import DocumentExtraction, DocumentOriginal, DocumentReference
 from .document_service import (
     definition_for,
     digest,
@@ -111,6 +111,8 @@ def process_once(owner=None, active=None):
         if cast(CursorResult, result).rowcount != 1:
             db.rollback()
             return False
+        if job.document_reference_id:
+            return process_reference(db, job, owner, active)
         original = require_record(db, DocumentOriginal, job.document_id)
         document_id, job_id = original.id, job.id
         if original.cancel_requested:
@@ -176,6 +178,58 @@ def process_once(owner=None, active=None):
                 audit(db, "DOCUMENT_EXTRACTION_FAILED", "document", original.id, "La extracción requiere intervención", "Document worker",
                       original.organization_id, {"code": error.code, "attempt": job.attempts})
                 db.commit()
+    finally:
+        active.pop("job_id", None)
+    return True
+
+
+def process_reference(db, job, owner, active):
+    """The same fenced DOCUMENT lane reads corpus without operational documents."""
+    reference = require_record(db, DocumentReference, job.document_reference_id)
+    identity, job_id = reference.id, job.id
+    source = storage_provider.materialize(require_record(db, Artifact, reference.artifact_id))
+    reference.status = "RUNNING"
+    db.commit()
+    active["job_id"] = job_id
+
+    def authority(session):
+        current = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+        from .scheduler import aware
+        if not current or current.lease_owner != owner or current.status != "RUNNING" or not current.lease_until or aware(current.lease_until) <= utcnow():
+            raise OperationError(409, "DOCUMENT_LEASE_LOST", "La lectura de referencia perdió autoridad.")
+        item = require_record(session, DocumentReference, identity)
+        actor = require_record(session, User, item.actor_id)
+        if actor.deleted or not actor.active:
+            raise OperationError(403, "DOCUMENT_ACTOR_DISABLED", "El responsable ya no está habilitado.")
+        for grant in ("configure", "write", "download"):
+            permission(session, actor, grant)
+        return current, item, actor
+
+    def checkpoint(_progress):
+        with SessionLocal() as session:
+            current, _, _ = authority(session)
+            current.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
+            session.commit()
+
+    try:
+        data = run_engine(source, {"fields": [], "tables": []}, check=checkpoint)
+        with SessionLocal() as session:
+            current, item, actor = authority(session)
+            if item.payload is None:
+                item.payload, item.payload_hash, item.engine = data["payload"], digest(data["payload"]), data["engine"]
+            item.status, item.error_code = "READY", None
+            current.status, current.lease_until = "SUCCESS", None
+            audit(session, "DOCUMENT_REFERENCE_READ", "document_reference", item.id, "Referencia disponible para configurar; sin publicación operativa", actor.name,
+                  actor.organization_id, {"sha256": item.sha256, "payload_hash": item.payload_hash, "engine": item.engine})
+            session.commit()
+    except OperationError as error:
+        with SessionLocal() as session:
+            current = require_record(session, Job, job_id)
+            if current.lease_owner == owner and current.status == "RUNNING":
+                item = require_record(session, DocumentReference, identity)
+                item.status, item.error_code = "FAILED", error.code
+                current.status, current.last_error, current.lease_until = "FAILED", error.code, None
+                session.commit()
     finally:
         active.pop("job_id", None)
     return True

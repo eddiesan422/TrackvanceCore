@@ -3,6 +3,14 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(5_400_000)
+
+async function openPersonalGroups(page: Page) {
+  const summaries = page.getByText('Ver etapas, novedades y enlaces originales', { exact: true })
+  await expect(summaries.first()).toBeVisible()
+  for (const summary of await summaries.all()) {
+    if (await summary.locator('..').getAttribute('open') === null) await summary.click()
+  }
+}
 test.skip(process.env.TV_VOLUME_E2E !== 'true', 'Requires guarded volume_cycle.py fixtures')
 
 async function terminal(page: Page, path: string) {
@@ -176,9 +184,11 @@ test('1M: recepción → adquisición persistente → Spark → Delivery encaden
     const inbox = await (await page.request.get('/api/v1/notifications/inbox?limit=100')).json()
     return wanted.every(id => inbox.items.some((item: { resource_id: string }) => item.resource_id === id))
   }, { timeout: 60_000, intervals: [1000] }).toBe(true)
-  await page.getByRole('link', { name: 'Notificaciones', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Notificaciones', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Operación', exact: true }).click()
+  await page.getByRole('button', { name: 'Novedades personales', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Novedades personales', exact: true })).toBeVisible()
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await openPersonalGroups(page)
   await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
   expect(errors).toEqual([])
   await writeFile(testInfo.outputPath('volume-ui.json'), JSON.stringify({ project, acquisition_id: acquisition.id,

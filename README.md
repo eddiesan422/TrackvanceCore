@@ -1,6 +1,13 @@
 # Trackvance Core
 
-## Trackvance Core 0.9.5
+## Trackvance Core 0.9.7 — NO CERRADA
+
+Candidato en implementación: scheduler sin secretos, ocurrencias diagnosticables,
+Operación unificada, origen productor, salud con vacíos y borradores/referencias
+documentales independientes. La [matriz oficial 0.9.7](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/core-0.9.7.md)
+registra gates pendientes. El cambio de versión no actualiza ni certifica una instalación.
+
+### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,
 actualización de fuentes y descubrimiento REST, comparación completa de versiones

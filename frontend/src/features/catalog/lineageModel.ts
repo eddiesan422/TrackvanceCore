@@ -3,8 +3,9 @@ export type LineageNode = {
   status: string | null; decision: string | null; technical: boolean; has_more: boolean
   sha256?: string; row_count?: number; module?: string; role?: string
   technical_groups?: { relation: string; label: string; relationship_count: number }[]
-  evidence_cursor?: string; expand?: { upstream: string; downstream: string }
+  evidence_cursor?: string; expand?: { upstream: string; downstream?: string }
   expansion_limit?: boolean
+  configuration_references?: { type: string; id: string; revision: number; sha256?: string }[]
 }
 export type LineageEdge = {
   id: string; source: string; target: string; relation: string; stored_relation: string; state: string
@@ -55,7 +56,7 @@ export function mergeLineage(current: LineageData, page: LineageData, consumedCu
  */
 export function layoutLineage(nodes: LineageNode[], edges: LineageEdge[], heights: Record<string, number> = {}) {
   const nodeMap = new Map(nodes.map(node => [node.id, node]))
-  const business = nodes.filter(node => node.role !== 'MONITORING' && node.module !== 'sentinel')
+  const business = nodes.filter(node => node.role !== 'MONITORING' && !(node.module === 'sentinel' && !node.role))
   const ids = new Set(business.map(node => node.id))
   const transforms = edges.filter(edge => ids.has(edge.source) && ids.has(edge.target) && edge.relation !== 'MONITOREA')
   const adjacency = new Map(business.map(node => [node.id, [] as string[]]))

@@ -152,14 +152,14 @@ def main() -> int:
     environment['TRACKVANCE_CERTIFICATION_USE_ISOLATED_IMAGES'] = 'true' if options.skip_build else 'false'
     documents_enabled = not options.clean_demo and not options.skip_playwright and (
         options.documents or not options.browser_spec or bool(set(options.browser_spec) & {
-            "tests-e2e/documents-095.spec.ts", "tests-e2e/document-visual-builder-095.spec.ts", "tests-e2e/acquisition-095.spec.ts", "tests-e2e/resolution-095.spec.ts"}))
+            "tests-e2e/documents-095.spec.ts", "tests-e2e/document-visual-builder-095.spec.ts", "tests-e2e/acquisition-095.spec.ts", "tests-e2e/acquisition-097.spec.ts", "tests-e2e/operations-origin-health-097.spec.ts", "tests-e2e/resolution-095.spec.ts"}))
     if documents_enabled:
         compose = add_document_fixture(compose, environment, evidence, project)
     compose = isolate_compose(compose, environment, evidence, project)
     started = False
     began = time.monotonic()
     outcome = 1
-    result = {"version": "0.9.5", "status": "FAIL", "project": project, "port": port,
+    result = {"version": "0.9.7", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
     (evidence / "isolation.json").write_text(json.dumps({"project": project}), encoding="utf-8")
     stage = "docker"
@@ -193,7 +193,7 @@ def main() -> int:
         started = True
         execute(up, environment=environment)
         execute([*compose, 'exec', '-T', 'api', 'python', '-c',
-                 "import trackvance; assert trackvance.__version__ == '0.9.5'"], environment=environment)
+                 "import trackvance; assert trackvance.__version__ == '0.9.7'"], environment=environment)
         stage = "doctor"
         execute(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],

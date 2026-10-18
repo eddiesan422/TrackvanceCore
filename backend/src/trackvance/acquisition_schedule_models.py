@@ -18,6 +18,7 @@ class AcquisitionSourceConfiguration(Record, Base):
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_query_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_publication_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dispatch_diagnostic: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class AcquisitionSourceRevision(Record, Base):
@@ -38,3 +39,7 @@ class AcquisitionOccurrence(Record, Base):
     acquisition_id: Mapped[str | None] = mapped_column(ForeignKey("acquisition_runs.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(30))
     reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    coalesced_intervals: Mapped[int] = mapped_column(Integer, default=0)
+    reason_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)

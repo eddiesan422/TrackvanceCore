@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.9.5",
+  "version": "0.9.7",
   "legacy_workflow_instances": 16,
   "groups": [
     {
@@ -113,7 +113,9 @@
             "tests-e2e/local-identity-exceptions.spec.ts",
             "tests-e2e/multiformat-navigation.spec.ts",
             "tests-e2e/rule-builders.spec.ts",
-            "tests-e2e/sentinel-schedule.spec.ts"
+            "tests-e2e/sentinel-schedule.spec.ts",
+            "tests-e2e/acquisition-097.spec.ts",
+            "tests-e2e/operations-origin-health-097.spec.ts"
           ]
         }
       ],
@@ -349,7 +351,7 @@
           "id": "backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.5"
+          "version": "0.9.7"
         },
         {
           "id": "backup-authentic051",
@@ -693,6 +695,8 @@
             "tests-e2e/document-visual-builder-095.spec.ts",
             "tests-e2e/documents-095.spec.ts",
             "tests-e2e/acquisition-095.spec.ts",
+            "tests-e2e/acquisition-097.spec.ts",
+            "tests-e2e/operations-origin-health-097.spec.ts",
             "tests-e2e/resolution-095.spec.ts"
           ]
         }
@@ -738,7 +742,7 @@
           "id": "functional-backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.5"
+          "version": "0.9.7"
         }
       ],
       "timeout_minutes": 25,
@@ -878,7 +882,9 @@
           ],
           "browser_specs": [
             "tests-e2e/multiformat-navigation.spec.ts",
-            "tests-e2e/acquisition-095.spec.ts"
+            "tests-e2e/acquisition-095.spec.ts",
+            "tests-e2e/acquisition-097.spec.ts",
+            "tests-e2e/operations-origin-health-097.spec.ts"
           ]
         },
         "transformations": {

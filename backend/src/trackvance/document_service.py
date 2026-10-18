@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from .artifactstore import link_artifact, storage_provider
 from .dataset_readers import DatasetReadResult
 from .db import iso, require_record, utcnow
-from .document_engine import validate_value
+from .document_engine import arithmetic_checks, validate_value
 from .document_models import (
     DocumentBatch,
     DocumentBatchMember,
@@ -76,6 +76,9 @@ def issues(extraction, definition):
     payload = extraction.payload
     policy = definition["publication"]
     result = []
+    for check in payload.get("arithmetic", []):
+        if check["status"] != "VALID":
+            result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check['row']}")
     for name, fields in structures(definition).items():
         rows = [payload["fields"]] if name == "headers" else payload["tables"].get(name, [])
         table = next((t for t in definition["tables"] if t["name"] == name), None)
@@ -155,8 +158,9 @@ def family_dto(db, family):
             "responsible_user_id": family.responsible_user_id, "active_template_id": family.active_template_id,
             "output_datasets": family.output_datasets, "next_cut_at": iso(family.next_cut_at),
             "publication": template.definition["publication"] if template else None,
-            "document_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id)),
+            "document_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id, DocumentOriginal.is_example.is_(False))),
             "pending_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id,
+                                          DocumentOriginal.is_example.is_(False),
                                           DocumentOriginal.status.in_(["QUEUED", "RUNNING", "REVIEW_REQUIRED", "FAILED"])))}
 
 
@@ -181,6 +185,15 @@ def activate_template(db, family, template, test_extraction_id, user):
     original = owned(db, DocumentOriginal, test.document_id, user)
     if template.family_id != family.id or test.template_id != template.id or not original.is_example or issues(test, template.definition):
         raise OperationError(422, "DOCUMENT_TEMPLATE_TEST_REQUIRED", "Prueba y revisa un ejemplo completo con esta revisión antes de activarla.")
+    activate_verified_template(db, family, template, user)
+    template.tested_extraction_id = test.id
+    audit(db, "DOCUMENT_TEMPLATE_ACTIVATED", "document_family", family.id, "Plantilla probada activada para nuevas recepciones", user.name,
+          user.organization_id, {"template_id": template.id, "test_extraction_id": test.id})
+
+
+def activate_verified_template(db, family, template, user):
+    """Shared binding/schema checks after a legacy extraction or exact builder test."""
+    permission(db, user, "configure")
     current = db.get(DocumentTemplate, family.active_template_id) if family.active_template_id else None
     signature = lambda value: {name: [(f["name"], f["logical_type"]) for f in fields] for name, fields in structures(value).items()}
     if current and signature(current.definition) != signature(template.definition):
@@ -204,7 +217,6 @@ def activate_template(db, family, template, test_extraction_id, user):
                                  .order_by(DeliveryAutomationVersion.version.desc()))
             if not revision or revision.settings.get("mode") != "CHAINED" or revision.settings.get("intake_configuration_id") != settings["intake_configuration_ids"].get(name):
                 raise OperationError(422, "DOCUMENT_DELIVERY_CONFIGURATION", "La automatización debe consumir la salida aprobada del contrato vinculado.")
-    template.tested_extraction_id = test.id
     family.active_template_id = template.id
     family.next_cut_at = datetime.fromisoformat(settings["starts_at"]) + timedelta(seconds=settings["interval_seconds"]) if settings["mode"] == "SCHEDULED" else None
     if settings["stop_after"] != "PUBLICATION":
@@ -217,11 +229,9 @@ def activate_template(db, family, template, test_extraction_id, user):
             save_schedule(db, config, user, IntakeScheduleSettings(mode="EVENT", timezone=settings["timezone"], starts_at=utcnow()),
                           enabled=True, responsible_user_id=family.responsible_user_id,
                           expected_version=schedule.version if schedule else None)
-    audit(db, "DOCUMENT_TEMPLATE_ACTIVATED", "document_family", family.id, "Plantilla probada activada para nuevas recepciones", user.name,
-          user.organization_id, {"template_id": template.id, "test_extraction_id": test.id})
 
 
-def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bindings, automatic_delivery):
+def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bindings, automatic_delivery, *, as_draft=False):
     """Create/link native contracts; return a new template, still requiring a test."""
     permission(db, user, "configure")
     if not family.active_template_id or not family.output_datasets:
@@ -256,6 +266,10 @@ def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bin
             bindings[name] = config.id
     definition["publication"].update(stop_after=stop_after, intake_configuration_ids=bindings,
         delivery_automation_ids=delivery_bindings, automatic_delivery=automatic_delivery)
+    if as_draft:
+        from .document_builder_workspace import create_draft, save_draft
+        draft = create_draft(db, family.id, user, family.active_template_id, "Flujo posterior · borrador")
+        return save_draft(db, draft, draft.version, definition, [], draft.name, user)
     return create_template(db, family, definition, user)
 
 
@@ -306,12 +320,17 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
             cell.update(value=value, validity=validity, reviewed=False)
             # The region proves the observed source, never a newly invented value.
             cell["corrected"] = value != cell.get("observed")
+            if cell["corrected"]:
+                cell["observed_origin"] = cell.get("observed_origin", cell.get("origin"))
+                cell["origin"], cell["confidence"] = None, None
         if path in confirmed:
             if cell["validity"] != "VALID":
                 raise OperationError(422, "DOCUMENT_REVIEW_INVALID", "Corrige o completa los valores inválidos antes de confirmarlos.")
             cell["reviewed"] = True
             if cell.get("alternatives"):
                 cell["alternatives"] = []
+    if definition.get("arithmetic"):
+        payload["arithmetic"] = arithmetic_checks(payload, definition)
     item = DocumentExtraction(organization_id=user.organization_id, document_id=original.id, template_id=original.template_id,
                               revision=previous.revision + 1, previous_id=previous.id, payload=payload, payload_hash=digest(payload),
                               engine=previous.engine, actor_id=user.id, reason=reason.strip(), reviewed=True)

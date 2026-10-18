@@ -1,4 +1,5 @@
 """Bounded visual rules. No executable expressions or user supplied code."""
+import re
 from itertools import pairwise
 from typing import Literal
 
@@ -26,6 +27,24 @@ class VisualFieldRule(VisualRegion):
     context: str = Field(default="", max_length=160)
     end_label: str = Field(default="", max_length=160)
     tolerance: float = Field(default=0.12, ge=0, le=0.25)
+    label_aliases: list[str] = Field(default_factory=list, max_length=30)
+    section_label: str = Field(default="", max_length=160)
+    require_unique_origin: bool = False
+    section_bounds: list[float] | None = Field(default=None, min_length=2, max_length=2)
+    value_pattern: str = Field(default="", max_length=500)
+    baseline_tolerance: float = Field(default=.004, ge=.001, le=.02)
+
+    @model_validator(mode="after")
+    def context_bounds(self):
+        if self.section_bounds and not 0 <= self.section_bounds[0] < self.section_bounds[1] <= 1:
+            raise ValueError("La sección requiere límites horizontales ordenados.")
+        if self.value_pattern:
+            try:
+                if re.compile(self.value_pattern).groups != 1:
+                    raise ValueError("El patrón de valor requiere un grupo de captura.")
+            except re.error:
+                raise ValueError("Patrón de valor inválido.") from None
+        return self
 
 
 class VisualTableRule(VisualRegion):
@@ -33,6 +52,10 @@ class VisualTableRule(VisualRegion):
     column_bounds: list[float] = Field(min_length=3, max_length=41)
     stop_label: str = Field(default="", max_length=160)
     tolerance: float = Field(default=0.12, ge=0, le=0.25)
+    flowing: bool = False
+    continue_pages: bool = False
+    multiline_column: int | None = Field(default=None, ge=0, le=39)
+    row_tolerance: float = Field(default=.018, ge=.004, le=.03)
 
     @model_validator(mode="after")
     def columns(self):

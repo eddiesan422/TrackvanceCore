@@ -52,7 +52,7 @@ describe('Operational control center', () => {
     expect(screen.getByRole('heading', { name: 'Requiere tu atención' })).toBeVisible()
     expect(screen.getByText('Filas rechazadas')).toBeVisible()
     expect(screen.getByRole('link', { name: /Gestionar excepción/ })).toHaveAttribute('href', '/exceptions?id=exception-1')
-    expect(screen.getByRole('img', { name: 'Evolución de salud por módulo' })).toBeVisible()
+    expect(screen.getByRole('img', { name: 'Evolución de salud · General' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Datasets que necesitan atención' })).toBeVisible()
     expect(screen.getAllByRole('link', { name: 'Pedidos críticos' }).some(link => link.getAttribute('href') === '/datasets/ds-1')).toBe(true)
     expect(screen.getAllByRole('columnheader', { name: 'Hallazgos' }).length).toBeGreaterThanOrEqual(2)

@@ -81,7 +81,8 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
                    status: str | None = None, received_from: datetime | None = None,
                    received_to: datetime | None = None, mode: str | None = None,
                    publication: PublicationFilter | None = None, order_by: DocumentOrder = "received_at",
-                   direction: Literal["asc", "desc"] = "desc", offset: int = 0, limit: int = 50):
+                   direction: Literal["asc", "desc"] = "desc", offset: int = 0, limit: int = 50,
+                   purpose: Literal["OPERATIONAL", "LEGACY_REFERENCE"] | None = None):
     permission(db, user, "read")
     if not 0 <= offset or not 1 <= limit <= 100:
         raise OperationError(422, "DOCUMENT_PAGE_LIMIT", "Selecciona una página de 1 a 100 documentos.")
@@ -115,6 +116,8 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
         DocumentPublicationClaim.organization_id == user.organization_id)).correlate(DocumentOriginal)
     if family_id:
         query = query.where(DocumentOriginal.family_id == family_id)
+    if purpose:
+        query = query.where(DocumentOriginal.is_example.is_(purpose == "LEGACY_REFERENCE"))
     if search.strip():
         pattern = _like(search.strip())
         query = query.where(or_(DocumentOriginal.filename.ilike(pattern, escape="\\"),

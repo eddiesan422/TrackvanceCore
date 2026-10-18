@@ -17,7 +17,7 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     <header className="login-brand"><Brand/><span>CONTROL DE DATOS, CON EVIDENCIA.</span></header>
     <main className="login-content" id="login-content">
       <section className="login-story" aria-labelledby="welcome-heading">
-        <div className="eyebrow"><span/>TRACKVANCE CORE · 0.9.5</div>
+        <div className="eyebrow"><span/>TRACKVANCE CORE · 0.9.7</div>
         <h1 id="welcome-heading">Confianza en cada dato.<br/><em>Control en cada decisión.</em></h1>
         <p>Una sola plataforma para validar tus archivos, conciliar la información y gestionar las diferencias hasta su resolución.</p>
         <div className="login-features">

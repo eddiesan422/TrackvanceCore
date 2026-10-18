@@ -152,7 +152,7 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ("types", [*uv, "mypy", "src/trackvance", "--check-untyped-defs", "--ignore-missing-imports"], ROOT / "backend"),
             ("contracts", [*uv, "python", "../scripts/export_contracts.py"], ROOT / "backend"),
             ("contracts-diff", ["git", "diff", "--exit-code", "--", "backend/openapi.json",
-                "docs/specification/model_contract_0.9.5.json", "docs/specification/permission_contract_0.9.5.json",
+                "docs/specification/model_contract_0.9.7.json", "docs/specification/permission_contract_0.9.7.json",
                 "docs/development/permission-matrix.md"], ROOT),
             *[("migration-" + name, [*uv, "alembic", *args], ROOT / "backend")
               for name, args in (("upgrade", ["upgrade", "head"]), ("check", ["check"]),
@@ -192,7 +192,7 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
             ".codex-local/v070/spark/ci-standalone", "--rows", "1000000"])],
     }
     functional_specs = ("advanced-rules", "corrections", "exception-validation", "local-identity-exceptions",
-                        "multiformat-navigation", "rule-builders", "sentinel-schedule", "documents-095", "document-visual-builder-095", "acquisition-095", "resolution-095")
+                        "multiformat-navigation", "rule-builders", "sentinel-schedule", "documents-095", "document-visual-builder-095", "acquisition-095", "acquisition-097", "operations-origin-health-097", "resolution-095")
     suites["compose-functional"] = [
         ("clean-demo", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--clean-demo"]),
         ("browser-persistence", [python, tests + "docker_e2e_cycle.py", "--skip-build", "--documents",

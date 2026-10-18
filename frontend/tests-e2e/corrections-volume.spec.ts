@@ -5,6 +5,14 @@ import { createClassification } from './helpers/classification'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000, navigationTimeout: 30_000 })
 test.setTimeout(5_400_000)
+
+async function openPersonalGroups(page: Page) {
+  const summaries = page.getByText('Ver etapas, novedades y enlaces originales', { exact: true })
+  await expect(summaries.first()).toBeVisible()
+  for (const summary of await summaries.all()) {
+    if (await summary.locator('..').getAttribute('open') === null) await summary.click()
+  }
+}
 test.skip(process.env.TV_CORRECTIONS_E2E !== 'true', 'Requires guarded corrections_cycle.py fixtures')
 
 async function terminal(page: Page, path: string, options: { deliveryEvidence?: boolean } = {}) {
@@ -259,13 +267,20 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
     const inbox = await (await page.request.get('/api/v1/notifications/inbox?limit=100')).json()
     return wanted.every(id => inbox.items.some((item: { resource_id: string }) => item.resource_id === id))
   }, { timeout: 60_000, intervals: [1000] }).toBe(true)
-  await page.getByRole('link', { name: 'Notificaciones', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Notificaciones', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Operación', exact: true }).click()
+  await page.getByRole('button', { name: 'Novedades personales', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Novedades personales', exact: true })).toBeVisible()
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await openPersonalGroups(page)
   await expect(page.getByText('Entrega confirmada en el destino.').first()).toBeVisible()
-  await page.getByRole('button', { name: 'Marcar todas como leídas', exact: true }).click()
-  await expect(page.getByRole('link', { name: 'Ver notificaciones', exact: true })).toBeVisible()
+  const pageRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/notifications/inbox/read-all' && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Marcar esta página como leída', exact: true }).click()
+  expect((await pageRead).status()).toBe(200)
+  const unreadBaseline = (await (await page.request.get('/api/v1/notifications/unread-count')).json()).unread_count
+  const bellLabel = (count: number) => `Ver notificaciones${count ? `, ${count} sin leer` : ''}`
+  await expect(page.getByRole('link', { name: bellLabel(unreadBaseline), exact: true })).toBeVisible()
   await page.getByLabel('Lectura', { exact: true }).selectOption('READ')
+  await openPersonalGroups(page)
   const confirmed = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Ver detalle', exact: true }).and(page.locator(`a[href="/runs/${committed.id}"]`)) })
   await expect(confirmed).toHaveCount(1)
   const unreadResponse = page.waitForResponse(response => /\/notifications\/inbox\/[^/]+\/unread$/.test(new URL(response.url()).pathname) && response.request().method() === 'POST')
@@ -275,27 +290,33 @@ test('XLSX completo: recepción → adquisición persistente → Spark → Deliv
   const personal = await unread.json()
   expect(personal.read_at).toBeNull()
   await expect(confirmed).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Ver notificaciones, 1 sin leer', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: bellLabel(unreadBaseline + 1), exact: true })).toBeVisible()
   await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')
+  await openPersonalGroups(page)
   await expect(confirmed.getByRole('checkbox', { name: /^Leída:/ })).not.toBeChecked()
   await page.reload()
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await openPersonalGroups(page)
   await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')
+  await openPersonalGroups(page)
   await expect(confirmed.getByRole('checkbox', { name: /^Leída:/ })).not.toBeChecked()
-  await expect(page.getByRole('link', { name: 'Ver notificaciones, 1 sin leer', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: bellLabel(unreadBaseline + 1), exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).click()
   await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   // A hard navigation must wait for the async login to establish its session.
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
   await page.goto('/notifications')
   await page.getByLabel('Origen', { exact: true }).selectOption('CHAINED')
+  await openPersonalGroups(page)
   await page.getByLabel('Lectura', { exact: true }).selectOption('UNREAD')
+  await openPersonalGroups(page)
   await expect(confirmed.getByRole('checkbox', { name: /^Leída:/ })).not.toBeChecked()
-  await expect(page.getByRole('link', { name: 'Ver notificaciones, 1 sin leer', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: bellLabel(unreadBaseline + 1), exact: true })).toBeVisible()
   await confirmed.getByRole('checkbox', { name: /^Leída:/ }).check()
   await expect(confirmed).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Ver notificaciones', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: bellLabel(unreadBaseline), exact: true })).toBeVisible()
   await page.getByLabel('Lectura', { exact: true }).selectOption('ALL')
+  await openPersonalGroups(page)
   await expect(confirmed.getByRole('checkbox', { name: /^Leída:/ })).toBeChecked()
   expect(errors).toEqual([])
   await writeFile(testInfo.outputPath('corrections-ui.json'), JSON.stringify({ project, acquisition_id: acquisition.id,

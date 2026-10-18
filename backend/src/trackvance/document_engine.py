@@ -21,7 +21,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,8 @@ _rules_spec = importlib.util.spec_from_file_location("document_visual_rules", Pa
 assert _rules_spec and _rules_spec.loader
 _visual_rules = importlib.util.module_from_spec(_rules_spec)
 _rules_spec.loader.exec_module(_visual_rules)
+PROCESSOR_HASHES = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                   for name in ("document_engine.py", "document_template_builder_rules.py")}
 
 
 def confine(folder: Path):
@@ -224,6 +226,24 @@ def validate_value(raw, field):
         kind = field["logical_type"]
         if kind == "DECIMAL":
             separator = field.get("decimal_separator", ".")
+            sign = ""
+            if field.get("currency_symbols") and value.startswith(("-", "+")):
+                sign, value = value[0], value[1:].strip()
+            for symbol in sorted(field.get("currency_symbols", []), key=len, reverse=True):
+                if value.startswith(symbol):
+                    value = value[len(symbol):].strip()
+                    break
+            value = sign + value
+            if not field.get("decimal_format_explicit", True) and re.fullmatch(r"[+-]?[0-9]{1,3}[.,][0-9]{3}", value):
+                return raw, "AMBIGUOUS"
+            thousands = field.get("thousands_separator")
+            if field.get("numeric_fragments") and thousands:
+                value = re.sub(r"(?<=[0-9])\s+(?=[0-9])", "", value)
+            if thousands and thousands in value:
+                integer, *fraction = value.split(separator)
+                if len(fraction) > 1 or not re.fullmatch(r"[+-]?[0-9]{1,3}(?:" + re.escape(thousands) + r"[0-9]{3})+", integer):
+                    raise ValueError()
+                value = integer.replace(thousands, "") + (separator + fraction[0] if fraction else "")
             if not re.fullmatch(r"[+-]?[0-9]+(?:" + re.escape(separator) + r"[0-9]+)?", value):
                 raise ValueError()
             value = value.replace(separator, ".")
@@ -234,6 +254,8 @@ def validate_value(raw, field):
                 raise ValueError()
         elif kind == "DATE":
             parsed = datetime.strptime(value, field.get("date_format", "%Y-%m-%d")).replace(tzinfo=UTC)
+            if parsed.strftime(field.get("date_format", "%Y-%m-%d")) != value:
+                raise ValueError()
             value = parsed.date().isoformat()
         elif kind == "BOOLEAN" and value not in {"true", "false"}:
             raise ValueError()
@@ -242,12 +264,43 @@ def validate_value(raw, field):
         return raw, "INVALID"  # Never erase an invalid observation or replace it with zero.
 
 
+def arithmetic_checks(payload, definition):
+    checks = []
+    for rule in definition.get("arithmetic", []):
+        rows = payload["tables"].get(rule.get("table"), []) if rule.get("table") else [payload["fields"]]
+        for index, row in enumerate(rows):
+            result = {"name": rule["name"], "table": rule.get("table"), "row": index, "rounding": "ROUND_HALF_UP", "scale": rule["scale"]}
+            try:
+                required = [rule["result"], *rule["terms"], *rule.get("subtract", [])]
+                if any(row.get(key, {}).get("validity") != "VALID" for key in required):
+                    raise ValueError()
+                numbers = [Decimal(str(row[key]["value"])) for key in rule["terms"]]
+                expected = sum(numbers, Decimal(0)) if rule["operation"] == "SUM" else Decimal(1)
+                if rule["operation"] == "PRODUCT":
+                    for number in numbers:
+                        expected *= number
+                expected -= sum((Decimal(str(row[key]["value"])) for key in rule.get("subtract", [])), Decimal(0))
+                expected = expected.quantize(Decimal(1).scaleb(-rule["scale"]), rounding=ROUND_HALF_UP)
+                observed = Decimal(str(row[rule["result"]]["value"]))
+                result.update(status="VALID" if abs(observed - expected) <= Decimal(rule["tolerance"]) else "DISCREPANCY", expected=str(expected), observed=str(observed))
+            except (KeyError, ValueError, InvalidOperation):
+                result["status"] = "NOT_EVALUATED"
+            checks.append(result)
+    return checks
+
+
 def extract(lines, definition):
     fields = {}
     for field in definition["fields"]:
         matches = []
         if field.get("visual"):
             matches = _visual_rules.field_candidates(lines, field["visual"])
+            for alternative in field.get("visual_alternatives", []):
+                matches += _visual_rules.field_candidates(lines, alternative)
+            unique = {}
+            for raw_match, source in matches:
+                unique[(raw_match, source["page"], tuple(source["region"]))] = (raw_match, source)
+            matches = list(unique.values())
         for line in ([] if field.get("visual") else lines):
             text = line["text"]
             label = field.get("label", "")
@@ -262,11 +315,13 @@ def extract(lines, definition):
         distinct = {m[0] for m in matches}
         raw, origin = matches[0] if matches else (None, None)
         value, validity = validate_value(raw, field)
+        ambiguous = len(distinct) > 1 or len(matches) > 1 and (field.get("visual") or {}).get("require_unique_origin", False)
         fields[field["name"]] = {"value": value, "observed": raw,
-            "validity": "AMBIGUOUS" if len(distinct) > 1 else validity,
+            "validity": "AMBIGUOUS" if ambiguous else validity,
+            "recognition_status": "AMBIGUOUS" if ambiguous else "RECOGNIZED" if raw is not None else "EXPECTED_NOT_LOCATED" if field.get("required", True) else "NOT_APPLICABLE",
             "confidence": origin["confidence"] if origin else None,
             "origin": {k: origin[k] for k in ("page", "region", "method")} if origin else None,
-            "reviewed": False, "alternatives": sorted(distinct)[:20] if len(distinct) > 1 else []}
+            "reviewed": False, "alternatives": sorted(distinct)[:20] if ambiguous else []}
     tables = {}
     table_unparsed = {}
     for table in definition["tables"]:
@@ -279,7 +334,7 @@ def extract(lines, definition):
                 for field, (raw, source) in zip(table["fields"], values, strict=True):
                     value, validity = validate_value(raw, field)
                     row[field["name"]] = {"value": value, "observed": raw, "validity": validity,
-                        "confidence": source["confidence"], "origin": {k: source[k] for k in ("page", "region", "method")},
+                        "confidence": source["confidence"], "origin": {k: source[k] for k in ("page", "region", "method", "continuation_origins") if k in source},
                         "reviewed": False}
                 rows.append(row)
             tables[table["name"]], table_unparsed[table["name"]] = rows, rejected
@@ -307,9 +362,12 @@ def extract(lines, definition):
         tables[table["name"]] = rows
         table_unparsed[table["name"]] = rejected
     period_field = definition.get("business_period_field")
-    return {"fields": fields, "tables": tables, "pages": sorted({line["page"] for line in lines}),
+    payload = {"fields": fields, "tables": tables, "pages": sorted({line["page"] for line in lines}),
             "lines": lines, "table_unparsed": table_unparsed,
             "business_period": {"field": period_field, **fields[period_field]} if period_field else None}
+    if definition.get("arithmetic"):
+        payload["arithmetic"] = arithmetic_checks(payload, definition)
+    return payload
 
 
 def main():
@@ -340,7 +398,7 @@ def main():
     for language in ("eng", "spa"):
         for path in Path("/usr/share/tesseract-ocr").glob(f"*/tessdata/{language}.traineddata"):
             models[language] = hashlib.sha256(path.read_bytes()).hexdigest()
-    result = {"payload": payload, "engine": {"key": "POPPLER_TESSERACT_CPU_V1", "pages": pages,
+    result = {"payload": payload, "engine": {"key": "POPPLER_TESSERACT_CPU_V1", "pages": pages, "processing_sha256": PROCESSOR_HASHES,
         "poppler": subprocess.run(["/usr/bin/pdftotext", "-v"], capture_output=True, timeout=5, check=True).stderr.decode("utf-8").splitlines()[0],
         "tesseract": command(["/usr/bin/tesseract", "--version"]).splitlines()[0], "model_sha256": models,
         "resources": {"elapsed_seconds": round(time.monotonic() - started, 4),

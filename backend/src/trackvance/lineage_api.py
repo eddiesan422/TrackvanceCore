@@ -15,6 +15,7 @@ from .permissions import effective_permissions
 
 router = APIRouter(prefix="/api/v1/catalog", tags=["Linaje gráfico"])
 REVERSE = frozenset({"DERIVED_FROM", "INTAKE_ACCEPTED_FROM", "SOURCE_SNAPSHOT", "REFRESH_OF",
+                     "ACQUISITION_SOURCE",
                      "RUN_INPUT", "RUN_REFERENCE", "USES_CONFIGURATION", "REPORT_SOURCE",
                      "REPORT_APPROVAL", "REPORT_REVISION", "EXPORT_OF", "EVIDENCE_OF",
                      "COMPARISON_INPUT", "COMPARISON_EVIDENCE"})
@@ -256,7 +257,7 @@ def _edge(link, nodes):
         run = nodes.get(f"RUN:{link.source_id}", {})
         state = "CONFIRMED" if run.get("status") == "SUCCESS" and run.get("decision") == "COMMITTED" else "UNCONFIRMED"
         relation = "ENTREGA_CONFIRMADA" if state == "CONFIRMED" else "DESTINO_PREVISTO"
-    if link.relation in {"RUN_INPUT", "RUN_REFERENCE"} and nodes.get(target, {}).get("module") == "sentinel":
+    if link.relation in {"RUN_INPUT", "RUN_REFERENCE"} and nodes.get(target, {}).get("role") == "MONITORING":
         relation = "MONITOREA"
     return {"id": link.id, "source": source, "target": target, "relation": relation,
             "stored_relation": link.relation, "stored_source": f"{link.source_type}:{link.source_id}",
@@ -266,7 +267,7 @@ def _edge(link, nodes):
 @router.get("/datasets/{dataset_id}/lineage-graph")
 def lineage_graph(dataset_id: str, request: Request, version_id: str | None = None,
                   max_depth: int = Query(2, ge=1, le=8), max_nodes: int = Query(100, ge=10, le=500),
-                  projection: Literal["technical", "business"] = "technical",
+                  projection: Literal["technical", "business", "origin"] = "technical",
                   cursor: str | None = Query(None, max_length=32768),
                   evidence: bool = False,
                   db: Session = Depends(get_db)):
@@ -284,9 +285,9 @@ def lineage_graph(dataset_id: str, request: Request, version_id: str | None = No
             raise OperationError(404, "NOT_FOUND", "No se encontró la versión del dataset.")
         empty: dict[str, object] = {"nodes": [], "edges": [], "root_id": None, "version_id": None,
                  "complete": True, "pending_branches": [], "limits": {"max_depth": max_depth, "max_nodes": max_nodes}}
-        if projection == "business":
+        if projection in {"business", "origin"}:
             from .lineage_business import MAX_PATH, PAGE_SIZE
-            empty.update(projection="business", anchor_id=None, branches=[],
+            empty.update(projection=projection, anchor_id=None, branches=[],
                          metadata_relationships_scanned=0,
                          limits={"max_depth": max_depth, "max_nodes": max_nodes,
                                  "adjacency_page_size": PAGE_SIZE, "max_path": MAX_PATH})
@@ -295,9 +296,9 @@ def lineage_graph(dataset_id: str, request: Request, version_id: str | None = No
     root = _node(db, user, "DATASET_VERSION", version.id, grants)
     if root is None:
         raise OperationError(403, "PERMISSION_DENIED", "Tu rol no permite consultar esta versión.")
-    if projection == "business":
+    if projection in {"business", "origin"}:
         from .lineage_business import business_graph
-        return business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evidence)
+        return business_graph(db, request, root, grants, max_depth, max_nodes, cursor, evidence, projection == "origin")
     if cursor or evidence:
         raise OperationError(422, "LINEAGE_CURSOR_INVALID", "La continuación requiere la vista de negocio.")
     nodes, links, pending = {root["id"]: root}, {}, set()

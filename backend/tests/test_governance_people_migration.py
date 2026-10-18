@@ -92,10 +92,10 @@ with engine.connect() as connection:
     command.upgrade(config,'0017_catalog_reports')
     connection.commit()
     report=checker.verify_people_preservation(connection,config)
-    assert report['source_version']=='0.8.0' and report['target_version']=='0.9.5'
+    assert report['source_version']=='0.8.0' and report['target_version']=='0.9.7'
     assert report['exact_historical_projection']=='PASS' and report['roundtrip']=='PASS'
-    assert report['tables_before']==55 and report['tables_after']==77 and report['tables_at_core090']==65
-    assert report['physical_schema']['tables']==77
+    assert report['tables_before']==55 and report['tables_after']==80 and report['tables_at_core090']==65
+    assert report['physical_schema']['tables']==80
 print('Populated source080 harness logic PASS on SQLite; PostgreSQL execution remains separate')
 """
     result=subprocess.run([sys.executable,'-c',script],cwd=Path(__file__).resolve().parents[1],env=environment,
