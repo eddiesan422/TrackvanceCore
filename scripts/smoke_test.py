@@ -30,6 +30,12 @@ from xml.etree import ElementTree
 class SmokeFailure(RuntimeError):
     """An externally observable product invariant did not hold."""
 
+    def __init__(self, message: str, *, http_status: int | None = None,
+                 api_error_code: Any = None) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.api_error_code = api_error_code
+
 
 @dataclass
 class Response:
@@ -87,8 +93,15 @@ class Api:
             ) from exc
         if response.status not in expected:
             detail = response.body.decode("utf-8", errors="replace")[:800]
+            try:
+                error_payload = json.loads(response.body) if len(response.body) <= 8192 else None
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                error_payload = None
+            error = error_payload.get("error") if isinstance(error_payload, dict) else None
             raise SmokeFailure(
-                f"{method} {path}: HTTP {response.status}, esperado {expected}. {detail}"
+                f"{method} {path}: HTTP {response.status}, esperado {expected}. {detail}",
+                http_status=response.status,
+                api_error_code=error.get("code") if isinstance(error, dict) else None,
             )
         return response
 

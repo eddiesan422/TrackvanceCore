@@ -655,6 +655,26 @@ def test_connections_reads_only_new_safe_runtime_sidecar(tmp_path):
     assert 'SECRET_TOKEN' not in json.dumps(result)
 
 
+@pytest.mark.parametrize('stage', ['post_restart_source_check', 'source_certification'])
+def test_connections_http_diagnostic_is_closed_and_scoped_to_restart(tmp_path, stage):
+    compose_failure_result(tmp_path, 'connections', failed_stage=stage, error_type='SmokeFailure',
+        http_failure={'http_status': 403, 'api_error_code': 'CSRF_FAILED',
+                      'body': 'SECRET_TOKEN', 'url': 'https://SECRET_TOKEN', 'uuid': 'PRIVATE_ROW'})
+    result = diagnostics.collect_child_failure('connections', set(), root=tmp_path, sources=set())[0]['result']
+    assert result['error_type'] == 'SmokeFailure'
+    if stage == 'post_restart_source_check':
+        assert result['http_failure'] == {'http_status': 403, 'api_error_code': 'CSRF_FAILED'}
+    else:
+        assert 'http_failure' not in result
+    assert all(value not in json.dumps(result) for value in ('SECRET_TOKEN', 'PRIVATE_ROW'))
+
+
+@pytest.mark.parametrize('value', [None, [], {'http_status': True}, {'http_status': '503'},
+    {'http_status': 99}, {'http_status': 600}, {'api_error_code': 'CSRF_FAILED'}])
+def test_compose_http_diagnostic_rejects_missing_or_malformed_status(value):
+    assert diagnostics.sanitize_compose_http_failure(value) == {}
+
+
 @pytest.mark.parametrize('changes', [{'project': 'trackvance-certification'}, {'status': 'PASS'}])
 def test_compose_partial_rejects_main_or_success(tmp_path, changes):
     compose_failure_result(tmp_path, 'compose-critical', **changes)

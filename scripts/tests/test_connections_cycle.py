@@ -1,7 +1,10 @@
 """Only disposable connection test resources may be provisioned or deleted."""
 
 import importlib.util
+import io
+import json
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -74,3 +77,51 @@ def test_temporal_fixture_covers_every_precision_and_timezone_policy(source_type
         assert expected["aware_7"] == "2026-09-23T15:00:00.1234567Z"
         assert expected["naive_7"] == "2026-09-23T10:00:00.1234567"
         assert logical["legacy_datetime"] == logical["legacy_small"] == "STRING"
+
+
+@pytest.mark.parametrize("status,code", [
+    (401, "UNAUTHENTICATED"), (403, "CSRF_FAILED"),
+    (422, "SOURCE_UNAVAILABLE"), (503, "CREDENTIAL_STORE_UNAVAILABLE"),
+    (409, "PRIVATE_TOKEN"), (500, {"private": "PRIVATE_TOKEN"}),
+])
+def test_unexpected_source_http_remains_failure_and_exports_only_safe_facts(monkeypatch, status, code):
+    from ci.failure_diagnostics import sanitize_compose_http_failure
+
+    api = runner.smoke.Api("http://127.0.0.1:3200", timeout=60)
+    body = json.dumps({"error": {"code": code, "message": "PRIVATE_TOKEN"},
+                       "url": "https://PRIVATE_TOKEN", "row": "PRIVATE_ROW"}).encode()
+
+    def open_request(request, *, timeout):
+        assert timeout == 60 and request.method == "POST"
+        raise HTTPError(request.full_url, status, "PRIVATE_TOKEN", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(api.opener, "open", open_request)
+    with pytest.raises(runner.smoke.SmokeFailure) as raised:
+        api.post("/api/v1/connections/private-uuid/test", {}, expected=(200,))
+    failure = raised.value
+    result = sanitize_compose_http_failure({
+        "http_status": failure.http_status, "api_error_code": failure.api_error_code,
+        "message": str(failure), "url": "https://PRIVATE_TOKEN", "body": body.decode(),
+    })
+    assert result == {"http_status": status, **(
+        {"api_error_code": code} if status in {401, 403, 422, 503} else {})}
+    assert all(value not in json.dumps(result) for value in ("PRIVATE_TOKEN", "PRIVATE_ROW", "private-uuid"))
+
+
+@pytest.mark.parametrize("body", [b"<html>PRIVATE_TOKEN</html>", b"[" * 2000 + b"]" * 2000,
+    b'{"error":{"code":"CSRF_FAILED"},"message":"' + b"x" * 8192 + b'"}'])
+def test_unexpected_proxy_body_retains_status_without_parsing_or_retrying(monkeypatch, body):
+    from ci.failure_diagnostics import sanitize_compose_http_failure
+
+    api = runner.smoke.Api("http://127.0.0.1:3200", timeout=60)
+    calls = []
+
+    def open_request(request, *, timeout):
+        calls.append(request)
+        raise HTTPError(request.full_url, 502, "PRIVATE_TOKEN", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(api.opener, "open", open_request)
+    with pytest.raises(runner.smoke.SmokeFailure) as raised:
+        api.post("/api/v1/connections/private-uuid/test", {}, expected=(200,))
+    assert len(calls) == 1
+    assert sanitize_compose_http_failure(vars(raised.value)) == {"http_status": 502}

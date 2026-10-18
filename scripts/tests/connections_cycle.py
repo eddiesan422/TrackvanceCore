@@ -617,10 +617,15 @@ def main() -> int:
         print(f"OK: {len(checks.completed)} comprobaciones de conectores reales.", flush=True)
         return 0
     except (OSError, RuntimeError, ValueError, AssertionError, KeyError, smoke.SmokeFailure) as error:
-        from ci.failure_diagnostics import capture_runner_frames
+        from ci.failure_diagnostics import capture_runner_frames, sanitize_compose_http_failure
         print("ERROR: " + redact(str(error), credentials), file=sys.stderr, flush=True)
+        http_failure = sanitize_compose_http_failure({
+            "http_status": getattr(error, "http_status", None),
+            "api_error_code": getattr(error, "api_error_code", None),
+        }) if stage == "post_restart_source_check" else {}
         (evidence / "result.json").write_text(json.dumps({"status": "FAIL", "project": project,
                                                         "error_type": type(error).__name__, "failed_stage": stage,
+                                                        **({"http_failure": http_failure} if http_failure else {}),
                                                         "failure_frames": capture_runner_frames(error),
                                                         "checks": checks.completed,
                                                         "sqlserver_streaming_probe": streaming,

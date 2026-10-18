@@ -21,7 +21,8 @@ ERROR_TYPES = {'AssertionError', 'RuntimeError', 'ValueError', 'TimeoutError', '
                'FileNotFoundError', 'ConnectionError', 'HTTPError', 'URLError', 'IncompleteRead',
                'EvidenceError', 'PermissionError', 'OSError', 'KeyError', 'TypeError', 'MemoryError',
                'RecoveryCheckError', 'RecoveryCommandError', 'DeliveryEvidenceError',
-               'ImportError', 'ModuleNotFoundError', 'ComposePreflightError', 'CalledProcessError'}
+               'ImportError', 'ModuleNotFoundError', 'ComposePreflightError', 'CalledProcessError',
+               'SmokeFailure'}
 ERROR_CODES = {'REPORT_TIMEOUT', 'REPORT_RESULT_LIMIT', 'REPORT_JOIN_LIMIT', 'REPORT_JOIN_EXPANSION',
                'REPORT_MEMORY_LIMIT', 'REPORT_DISK_LIMIT', 'REPORT_ENGINE_FAILED', 'REPORT_ENGINE_ERROR',
                'REPORT_SOURCE_CHANGED', 'REPORT_CONTEXT_EXPIRED', 'REPORT_CANCELLED',
@@ -73,6 +74,10 @@ COMPOSE_FAILURES = {'CONTAINER_UNHEALTHY', 'BUILD_FAILED', 'PORT_BIND_FAILED', '
 COMPOSE_PHASES = {'docker', 'doctor', 'postgres_migrations', 'regression_smoke', 'browser',
     'storage_snapshot', 'restart_readiness', 'source_fixture', 'source_streaming',
     'source_certification', 'source_temporal', 'post_restart_source_check', 'credential_privacy'}
+COMPOSE_HTTP_CODES = frozenset({'UNAUTHENTICATED', 'CSRF_FAILED', 'PERMISSION_DENIED',
+    'PASSWORD_CHANGE_REQUIRED', 'NOT_FOUND', 'CONNECTION_DISABLED',
+    'CONNECTION_CONFIGURATION_MISSING', 'CREDENTIAL_STORE_UNAVAILABLE',
+    'SOURCE_AUTH_FAILED', 'SOURCE_PERMISSION_DENIED', 'SOURCE_TIMEOUT', 'SOURCE_UNAVAILABLE'})
 RUNTIME_SERVICES = {'postgres', 'api', 'worker', 'delivery-worker', 'acquisition-worker',
                     'document-worker', 'comparison-worker',
                     'report-worker', 'scheduler', 'events-notifications', 'events-chaining',
@@ -106,6 +111,19 @@ def safe_error(value):
             result['type'] = value['type']
         if allowed(value.get('code'), ERROR_CODES):
             result['code'] = value['code']
+    return result
+
+
+def sanitize_compose_http_failure(value):
+    """Retain an HTTP status and known public code, never response content."""
+    if not isinstance(value, dict):
+        return {}
+    status = value.get('http_status')
+    if type(status) is not int or not 100 <= status <= 599:
+        return {}
+    result = {'http_status': status}
+    if allowed(value.get('api_error_code'), COMPOSE_HTTP_CODES):
+        result['api_error_code'] = value['api_error_code']
     return result
 
 
@@ -1033,6 +1051,10 @@ def collect_compose_failure(group, before, *, root=ROOT, sources=None):
             summary['duration_seconds'] = value['duration_seconds']
         if type(value.get('demo_seed_enabled')) is bool:
             summary['demo_seed_enabled'] = value['demo_seed_enabled']
+        if group == 'connections' and value.get('failed_stage') == 'post_restart_source_check':
+            http_failure = sanitize_compose_http_failure(value.get('http_failure'))
+            if http_failure:
+                summary['http_failure'] = http_failure
         frames = sanitize_runner_frames(value.get('failure_frames'), trusted_sources() if sources is None else sources, root)
         if frames:
             summary['failure_frames'] = frames
