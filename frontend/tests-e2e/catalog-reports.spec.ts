@@ -381,12 +381,12 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   await page.getByRole('link', { name: 'Gobierno y linaje', exact: true }).click()
   await expect(page.getByRole('heading', { name: generatedName, exact: true })).toBeVisible()
   const lineageResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/catalog/datasets/${published.output_dataset_id}/lineage-graph`)
-  await page.getByRole('tab', { name: 'Linaje', exact: true }).click()
+  await page.getByRole('tab', { name: 'Origen de esta versión', exact: true }).click()
   const lineage = await lineageResponse
   expect(lineage.ok(), await lineage.text()).toBeTruthy()
   const graph = await lineage.json()
   const rootId = `DATASET_VERSION:${published.output_version_id}`, reportId = `REPORT_EXECUTION:${generation.id}`
-  expect(graph).toMatchObject({ root_id: rootId, version_id: published.output_version_id })
+  expect(graph).toMatchObject({ root_id: rootId, version_id: published.output_version_id, projection: 'origin' })
   expect(graph.nodes).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: rootId, resource_id: published.output_version_id, type: 'DATASET_VERSION' }),
     expect.objectContaining({ id: reportId, resource_id: generation.id, type: 'REPORT_EXECUTION', href: `/reports/executions/${generation.id}` }),

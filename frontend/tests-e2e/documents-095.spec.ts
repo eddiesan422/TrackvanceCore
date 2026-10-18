@@ -63,7 +63,73 @@ async function call(page: Page, csrf: string, path: string, data?: Json, status 
   return response.json() as Promise<Json>
 }
 
-async function buildFamily(page: Page, nonce: string, mode = 'INDIVIDUAL') {
+async function activateDraft(page: Page, csrf: string, family: Json, definition?: Json, existingDraft?: Json, sourceTemplate?: Json) {
+  await page.goto(`/documents/families/${family.id}?view=references`)
+  const builder = page.locator('.visual-template-builder')
+  const before = await call(page, csrf, `/documents/families/${family.id}`)
+  let draft = existingDraft
+  if (draft) {
+    await builder.getByLabel('Borrador guardado', { exact: true }).selectOption(draft.id)
+  } else {
+    if (sourceTemplate) await builder.getByLabel('Base de un nuevo borrador', { exact: true }).selectOption(sourceTemplate.id)
+    const created = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/families/${family.id}/builder/drafts`))
+    await builder.getByRole('button', { name: 'Crear borrador', exact: true }).click()
+    draft = await (await created).json()
+  }
+  await expect(builder.getByLabel('Borrador guardado', { exact: true })).toHaveValue(draft!.id)
+  await expect(builder.getByLabel('Nombre del borrador', { exact: true })).toHaveValue(draft!.name)
+  if (definition) {
+    await builder.getByText('Configuración técnica avanzada del borrador', { exact: true }).click()
+    await builder.getByLabel('Definición avanzada del borrador', { exact: true }).fill(JSON.stringify(definition))
+    await builder.getByRole('button', { name: 'Aplicar cambios avanzados al borrador', exact: true }).click()
+  }
+  let references = (await call(page, csrf, `/documents/families/${family.id}/builder/references?limit=100`)).items as Json[]
+  if (!references.length) {
+    await builder.getByLabel('Cargar referencias', { exact: true }).setInputFiles({ name: 'D097-configuration.pdf', mimeType: 'application/pdf', buffer: knownPdf('000000') })
+    await expect(builder.getByRole('checkbox', { name: /D097-configuration.pdf/ })).toBeVisible()
+    await builder.getByLabel('Uso de las nuevas referencias', { exact: true }).selectOption('HOLDOUT')
+    await builder.getByLabel('Cargar referencias', { exact: true }).setInputFiles({ name: 'D097-unused-holdout.pdf', mimeType: 'application/pdf', buffer: knownPdf('000099') })
+    await expect(builder.getByRole('checkbox', { name: /D097-unused-holdout.pdf/ })).toBeVisible()
+  }
+  await expect(builder.locator('.visual-builder-reference-list input[type="checkbox"]')).toHaveCount(2)
+  for (const checkbox of await builder.locator('.visual-builder-reference-list input[type="checkbox"]').all()) await checkbox.check()
+  await builder.getByRole('button', { name: 'Guardar borrador', exact: true }).click()
+  await expect(builder.getByText(/Guardado en servidor/)).toBeVisible()
+  const stored = await call(page, csrf, `/documents/builder/drafts/${draft!.id}`)
+  const unactivated = await call(page, csrf, `/documents/families/${family.id}`)
+  expect(unactivated.templates).toHaveLength(before.templates.length)
+  expect(unactivated.document_count).toBe(before.document_count)
+  await expect.poll(async () => (await call(page, csrf, `/documents/families/${family.id}/builder/references?limit=100`)).items.filter((r: Json) => r.status === 'READY').length, { timeout: 90_000 }).toBe(2)
+  references = (await call(page, csrf, `/documents/families/${family.id}/builder/references?limit=100`)).items
+  expect(references.map(r => r.role).sort()).toEqual(['CONFIGURATION', 'HOLDOUT'])
+  expect(new Set(references.map(r => r.sha256)).size).toBe(2)
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/builder/drafts/${draft!.id}/test`))
+  await builder.getByRole('button', { name: 'Probar todas las referencias', exact: true }).click()
+  const tested = await (await response).json()
+  for (const reference of references) {
+    const payload = tested.automatic_results[reference.id]
+    const values: Json = { invoice: reference.role === 'HOLDOUT' ? '000099' : '000000', total: '1234.50', date: '2026-10-01' }
+    expect(Object.fromEntries(Object.entries(payload.fields).map(([name, cell]) => [name, (cell as Json).value]))).toEqual(Object.fromEntries(stored.definition.fields.map((field: Json) => [field.name, values[field.name]])))
+    if (stored.definition.tables.length) {
+      expect(payload.tables.details.map((row: Json) => [row.sku.value, row.amount.value])).toEqual([['SKU1', '10.25'], ['SKU2', '20.50']])
+      expect(payload.table_unparsed.details).toEqual([])
+    }
+    await builder.getByLabel('Referencia en revisión', { exact: true }).selectOption(reference.id)
+    await expect(builder.getByRole('checkbox', { name: 'Confirmar contra original', exact: true })).toHaveCount(stored.definition.fields.length + (stored.definition.tables.length ? 4 : 0))
+    for (const checkbox of await builder.getByRole('checkbox', { name: 'Confirmar contra original', exact: true }).all()) await checkbox.check()
+    await builder.getByLabel('Motivo de la revisión de valores', { exact: true }).fill('Every header and detail cell checked against the complete independent generated invoice oracle.')
+    await builder.getByRole('button', { name: 'Guardar revisión de este documento', exact: true }).click()
+    await expect(builder.getByLabel('Motivo de la revisión de valores', { exact: true })).toHaveValue('')
+  }
+  const activated = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/builder/tests/${tested.id}/activate`))
+  await builder.getByRole('button', { name: 'Aprobar y activar esta instantánea', exact: true }).click()
+  const template = await (await activated).json()
+  expect(template.id).toBeTruthy()
+  expect((await call(page, csrf, `/documents/families/${family.id}`)).templates).toHaveLength(before.templates.length + 1)
+  return template as Json
+}
+
+async function buildFamily(page: Page, csrf: string, nonce: string, mode = 'INDIVIDUAL') {
   await page.getByRole('link', { name: 'Documentos', exact: true }).click()
   await page.getByRole('button', { name: 'Nueva familia', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Nueva familia documental', exact: true })
@@ -73,45 +139,19 @@ async function buildFamily(page: Page, nonce: string, mode = 'INDIVIDUAL') {
   await dialog.getByRole('button', { name: 'Crear familia', exact: true }).click()
   const family = await (await familyResponse).json()
   await expect(dialog).toBeHidden({ timeout: 30_000 })
+  await page.getByPlaceholder('Buscar familias documentales', { exact: true }).fill(nonce)
   const familyCard = page.locator(`a[href="/documents/families/${family.id}"]`)
   await expect(familyCard).toBeVisible()
   await expect(familyCard).toHaveAccessibleName(new RegExp(`D095 synthetic ${nonce}`))
   await familyCard.click()
   await expect(page).toHaveURL(new RegExp(`/documents/families/${family.id}$`))
-  await page.getByRole('tab', { name: 'Configuración', exact: true }).click()
-  await page.getByText('Configuración avanzada de expresiones y plantillas anteriores', { exact: true }).click()
-  const builder = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Constructor de plantilla', exact: true }) })
-  const definitions = [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', type: 'STRING' },
-    { name: 'total', label: 'Total', pattern: '([0-9]+\\.[0-9]+)', type: 'DECIMAL' },
-    { name: 'date', label: 'Date', pattern: '([0-9-]+)', type: 'DATE' }]
-  for (let i = 0; i < definitions.length; i++) {
-    if (i) await builder.getByRole('button', { name: 'Añadir campo', exact: true }).click()
-    const group = builder.getByRole('group', { name: `Campo ${i + 1}`, exact: true })
-    await group.getByLabel('Nombre final', { exact: true }).fill(definitions[i].name)
-    await group.getByLabel('Etiqueta de búsqueda', { exact: true }).fill(definitions[i].label)
-    await group.getByLabel('Patrón con un grupo de captura', { exact: true }).fill(definitions[i].pattern)
-    await group.getByLabel('Tipo', { exact: true }).selectOption(definitions[i].type)
-    if (!i) { await group.getByRole('checkbox', { name: 'Crítico', exact: true }).check(); await group.getByRole('checkbox', { name: 'Clave de negocio', exact: true }).check() }
-  }
-  await builder.getByRole('button', { name: 'Añadir tabla repetitiva', exact: true }).click()
-  const table = builder.getByRole('group', { name: 'Tabla 1', exact: true })
-  await table.getByLabel('Nombre final de la tabla', { exact: true }).fill('details')
-  await table.getByLabel('Etiqueta o contexto al inicio de la fila', { exact: true }).fill('ITEM')
-  await table.getByLabel('Patrón de fila', { exact: true }).fill('ITEM (?P<sku>\\S+) (?P<amount>\\d+\\.\\d+)')
-  await table.getByLabel('Columna 1', { exact: true }).fill('sku')
-  await table.getByRole('button', { name: 'Añadir columna', exact: true }).click()
-  await table.getByLabel('Columna 2', { exact: true }).fill('amount')
-  await table.getByLabel('Tipo de columna', { exact: true }).nth(1).selectOption('DECIMAL')
-  await builder.getByLabel('Campo que representa el período de negocio', { exact: true }).selectOption('date')
-  if (mode === 'SCHEDULED') {
-    await builder.getByLabel('Modalidad', { exact: true }).selectOption('SCHEDULED')
-    await builder.getByLabel('Primer inicio, con zona (ISO)', { exact: true }).fill(new Date(Date.now() - 1000).toISOString())
-    await builder.getByLabel('Intervalo (segundos)', { exact: true }).fill('60')
-  }
-  const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/v1/documents/families/${family.id}/templates`)
-  await builder.getByRole('button', { name: 'Crear revisión de plantilla', exact: true }).click()
-  const template = await (await response).json()
-  expect(template.id).toBeTruthy()
+  const template = await activateDraft(page, csrf, family, {
+    fields: [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', critical: true, business_key: true },
+      { name: 'total', label: 'Total', pattern: '([0-9]+\\.[0-9]+)', logical_type: 'DECIMAL', decimal_format_explicit: true },
+      { name: 'date', label: 'Date', pattern: '([0-9-]+)', logical_type: 'DATE' }],
+    tables: [{ name: 'details', row_label: 'ITEM', row_pattern: 'ITEM (?P<sku>\\S+) (?P<amount>\\d+\\.\\d+)', fields: [{ name: 'sku' }, { name: 'amount', logical_type: 'DECIMAL', decimal_format_explicit: true }] }],
+    business_period_field: 'date', publication: { mode, ...(mode === 'SCHEDULED' ? { starts_at: new Date(Date.now() - 1000).toISOString(), interval_seconds: 60, wait_seconds: 0 } : {}) },
+  })
   return { family, template }
 }
 
@@ -135,8 +175,14 @@ async function upload(page: Page, name: string, invoice: string, example = false
 }
 
 async function review(page: Page, document: Json, activate = false) {
-  const row = page.getByRole('row').filter({ hasText: document.filename })
-  await row.getByRole('button', { name: 'Revisar documento', exact: true }).click()
+  if (document.is_example) {
+    // Historical examples remain reviewable through their explicit evidence
+    // link; the operational table deliberately excludes them in 0.9.7.
+    await page.goto(`/documents/families/${document.family_id}?document=${document.id}`)
+  } else {
+    const row = page.getByRole('row').filter({ hasText: document.filename })
+    await row.getByRole('button', { name: 'Revisar documento', exact: true }).click()
+  }
   const dialog = page.getByRole('dialog', { name: document.filename, exact: true })
   await expect(dialog.getByLabel('Valor headers.0.invoice', { exact: true })).toBeVisible({ timeout: 90_000 })
   await dialog.getByRole('button', { name: 'invoice', exact: true }).click()
@@ -163,10 +209,11 @@ async function prepareDelivery(page: Page, csrf: string, family: Json, initialBa
   await wizard.getByLabel('Finalizar el flujo en', { exact: true }).selectOption('VALIDATION')
   await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
   await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
-  const pipelineResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline`))
-  await wizard.getByRole('button', { name: 'Crear revisión y preparar prueba', exact: true }).click()
+  const pipelineResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline-draft`))
+  await wizard.getByRole('button', { name: 'Guardar borrador y preparar prueba', exact: true }).click()
   const prepared = await (await pipelineResponse).json()
-  const bindings = prepared.intake_configuration_ids as Record<string, string>
+  const bindings = prepared.draft.definition.publication.intake_configuration_ids as Record<string, string>
+  await activateDraft(page, csrf, family, undefined, prepared.draft)
   const control = process.env.TV_CORE095_DOCUMENT_RECEIVER_CONTROL_URL
   const receiver = process.env.TV_CORE095_DOCUMENT_RECEIVER_URL
   if (!control || !receiver) throw new Error('Document oracle control/publication endpoints must be configured')
@@ -193,9 +240,10 @@ async function prepareDelivery(page: Page, csrf: string, family: Json, initialBa
   await wizard.getByRole('checkbox', { name: 'Activar explícitamente entrega automática con aprobaciones vigentes', exact: true }).check()
   for (const structure of ['headers', 'details']) await wizard.getByLabel(`Automatización de Delivery para ${structure}`, { exact: true }).selectOption(automationIds[structure])
   await wizard.getByRole('button', { name: 'Continuar', exact: true }).click()
-  const finalResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline`))
-  await wizard.getByRole('button', { name: 'Crear revisión y preparar prueba', exact: true }).click()
-  const finalTemplate = (await (await finalResponse).json()).template
+  const finalResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/documents/families/${family.id}/pipeline-draft`))
+  await wizard.getByRole('button', { name: 'Guardar borrador y preparar prueba', exact: true }).click()
+  const finalDraft = (await (await finalResponse).json()).draft
+  const finalTemplate = await activateDraft(page, csrf, family, undefined, finalDraft)
   return { finalTemplate, bindings, automationIds, control: control! }
 }
 
@@ -203,7 +251,7 @@ test('document browser individual flow → exact native approved output → veri
   const started = Date.now()
   const csrf = await login(page)
   const nonce = randomBytes(6).toString('hex')
-  const { family, template } = await buildFamily(page, nonce)
+  const { family, template } = await buildFamily(page, csrf, nonce)
   const example = await upload(page, `D095-example-${nonce}.pdf`, '000000', true, template)
   await review(page, example, true)
   const bootstrap = await upload(page, `D095-bootstrap-${nonce}.pdf`, '000000')
@@ -289,13 +337,11 @@ test('browser scheduled strict batch retains pending document and exact two-docu
   const started = Date.now()
   const csrf = await login(page)
   const nonce = randomBytes(6).toString('hex')
-  const { family, template } = await buildFamily(page, nonce, 'SCHEDULED')
-  // A short valid wait is explicitly configured through a new immutable draft
-  // so the real scheduler demonstrates BLOCKED rather than a simulated status.
-  const definition = { ...template.definition, publication: { ...template.definition.publication, wait_seconds: 0, starts_at: new Date(Date.now() - 1000).toISOString() } }
-  const bounded = await call(page, csrf, `/documents/families/${family.id}/templates`, definition)
+  const { family, template } = await buildFamily(page, csrf, nonce, 'SCHEDULED')
+  // The short wait was configured and tested in the persisted draft before
+  // activation. The real scheduler must now demonstrate BLOCKED.
   await page.reload()
-  const example = await upload(page, `D095-scheduled-example-${nonce}.pdf`, '000000', true, bounded)
+  const example = await upload(page, `D095-scheduled-example-${nonce}.pdf`, '000000', true, template)
   await review(page, example, true)
   const first = await upload(page, `D095-scheduled-one-${nonce}.pdf`, '000001')
   const second = await upload(page, `D095-scheduled-two-${nonce}.pdf`, '000002')
@@ -331,16 +377,16 @@ test('grouped correction preserves the delivered two-document population without
   const started = Date.now()
   const csrf = await login(page)
   const nonce = randomBytes(6).toString('hex')
-  const { family, template } = await buildFamily(page, nonce)
+  const { family, template } = await buildFamily(page, csrf, nonce)
   const example = await upload(page, `D095-group-example-${nonce}.pdf`, '000000', true, template)
   await review(page, example, true)
   const bootstrap = await upload(page, `D095-group-bootstrap-${nonce}.pdf`, '000000')
   const firstPublication = await review(page, bootstrap)
   const bootstrapBatch = await call(page, csrf, `/documents/batches/${firstPublication.publications[0].batch_id}`)
   const { finalTemplate, bindings, automationIds, control } = await prepareDelivery(page, csrf, family, bootstrapBatch, nonce, ['000001', '000002'])
-  const scheduled = await call(page, csrf, `/documents/families/${family.id}/templates`, {
+  const scheduled = await activateDraft(page, csrf, family, {
     ...finalTemplate.definition, publication: { ...finalTemplate.definition.publication, mode: 'SCHEDULED', starts_at: new Date(Date.now() - 1000).toISOString(), interval_seconds: 60, wait_seconds: 0 },
-  })
+  }, undefined, finalTemplate)
   await page.reload()
   const scheduledExample = await upload(page, `D095-group-scheduled-example-${nonce}.pdf`, '000000', true, scheduled)
   await review(page, scheduledExample, true)
@@ -420,7 +466,7 @@ test('global documents search, bounded pages, filters and direct evidence links 
   for (let group = 0; group < 2; group++) {
     const family = await call(page, csrf, '/documents/families', { name: `D095 global ${nonce} ${group === 0 ? 'Alpha' : 'Beta'}`, description: 'Synthetic bounded global-document navigation fixture.' })
     families.push(family)
-    const template = await call(page, csrf, `/documents/families/${family.id}/templates`, {
+    const template = await activateDraft(page, csrf, family, {
       fields: [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', business_key: true }],
       publication: group === 0 ? { mode: 'INDIVIDUAL' } : { mode: 'SCHEDULED', starts_at: new Date(Date.now() + 86400_000).toISOString() },
     })
@@ -448,6 +494,8 @@ test('global documents search, bounded pages, filters and direct evidence links 
   const section = page.getByRole('region', { name: 'Todos los documentos', exact: true })
   const search = section.getByRole('textbox', { name: 'Buscar nombre, referencia, identificador extraído o familia', exact: true })
   await search.fill(nonce)
+  await expect(section.locator('tbody tr')).toHaveCount(0)
+  await section.getByLabel('Tipo de documento', { exact: true }).selectOption('LEGACY_REFERENCE')
   await section.getByLabel('Documentos por página', { exact: true }).selectOption('10')
   await section.getByLabel('Ordenar documentos', { exact: true }).selectOption('filename:asc')
   await expect(section.locator('tbody tr')).toHaveCount(10)
