@@ -1,6 +1,10 @@
 """OPS-097-01/02: personal reading and process projection over real metadata."""
 from datetime import timedelta
 
+import pytest
+from argon2 import PasswordHasher
+from fastapi.testclient import TestClient
+from sqlalchemy import delete, event
 from test_exception_validation import make_case as make_native_case
 
 from trackvance.acquisition_schedule_models import (
@@ -11,9 +15,15 @@ from trackvance.acquisition_schedule_models import (
 from trackvance.automation_models import InternalNotification, OutboxEvent
 from trackvance.db import iso, utcnow
 from trackvance.events import append_event, consume_notification
+from trackvance.governance import (
+    authorize_dataset_content,
+    authorize_run_content,
+    read_authorization_scope,
+)
 from trackvance.governance_models import DatasetBlock
 from trackvance.models import DatasetVersion, Role, RolePermission, Run, User
 from trackvance.operation_processes import process_identity
+from trackvance.operations_common import OperationError
 
 
 def make_case(db, module, **options):
@@ -75,6 +85,11 @@ def test_publication_automatic_stage_requires_exact_event_and_never_parent_histo
         assert process_identity(db, origin.organization_id, "run", candidate.id) == f"run:{origin.id}"
         candidate.execution_plan = {"sentinel_automatic": {"event_id": "missing-event"}}
         assert process_identity(db, origin.organization_id, "run", candidate.id) == f"run:{candidate.id}"
+        origin.execution_plan = candidate.execution_plan = {"sentinel_automatic": {"event_id": event.id}}
+        with read_authorization_scope(db):
+            db.info["operation_process_identities"][(origin.organization_id, "run", origin.id)] = f"run:{origin.id}"
+            assert process_identity(db, origin.organization_id, "run", candidate.id) == f"run:{candidate.id}"
+        origin.execution_plan = {}
         version.parent_version_id = "missing-previous-snapshot"
         version.source_run_id = None
         assert process_identity(db, origin.organization_id, "version", version.id) == f"version:{version.id}"
@@ -280,3 +295,116 @@ def test_related_process_anchor_precedes_pagination_for_interleaved_automatic_st
     assert first["has_more"] and first["next_offset"] == 1 and first["scanned_records"] == 1
     assert not second["has_more"] and second["next_offset"] is None and second["scanned_records"] == 1
     assert exhausted["items"] == [] and not exhausted["has_more"] and exhausted["scanned_records"] == 0
+
+
+def test_populated_personal_process_batches_identity_and_anchor_authorization(authenticated, database):
+    with database() as db:
+        _, _, _, origin, version = make_case(db, "intake", candidate_decision="APPROVED")
+        for index in range(925):
+            notification(db, origin, f"populated-{index}")
+        db.commit()
+        identity, dataset_id = origin.id, version.dataset_id
+        engine = db.get_bind()
+    statements = []
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        for suffix in (f"&process=run:{identity}", ""):
+            response = authenticated.get("/api/v1/notifications/inbox?grouped=true" + suffix)
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["total"] == 1 and len(result["groups"]) == 1
+            group = result["groups"][0]
+            assert group["process_id"] == f"run:{identity}"
+            assert group["notification_count"] == group["unread_count"] == 925
+            assert len(group["items"]) == 25 and group["more_notifications"]
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    # Authorization and canonical identity must scale with distinct resources,
+    # not execute the complete causal graph once for each personal event.
+    assert len(statements) < 240
+    assert sum(statement.startswith("WITH RECURSIVE") for statement in statements) <= 2
+    with database() as db:
+        db.add(DatasetBlock(dataset_id=dataset_id, scope="CONTENT", reason="Synthetic restriction", created_by_id="test-user"))
+        db.commit()
+    hidden = authenticated.get(f"/api/v1/notifications/inbox?grouped=true&process=run:{identity}").json()
+    assert hidden["groups"] == [] and hidden["total"] == 0
+    assert authenticated.get("/api/v1/notifications/unread-count").json()["unread_count"] == 0
+
+
+def test_personal_read_snapshot_never_carries_actor_permissions_or_blocks_between_http_requests(authenticated, database):
+    with database() as db:
+        _, _, _, origin, version = make_case(db, "intake", candidate_decision="APPROVED")
+        notification(db, origin, "actor-first-1")
+        notification(db, origin, "actor-first-2")
+        roles = [Role(name=f"Personal actor {index}", normalized_name=f"personal actor {index}") for index in range(2)]
+        db.add_all(roles)
+        db.flush()
+        for role in roles:
+            for permission in ("notifications:read", "datasets:read", "intake:read"):
+                db.add(RolePermission(role_id=role.id, permission_code=permission))
+        db.get(User, "test-user").role_id = roles[0].id
+        other = User(id="ops097-other", role_id=roles[1].id, name="Other synthetic reader", username="ops097-other",
+            email="other097@example.test", password_hash=PasswordHasher(time_cost=1, memory_cost=8192).hash("other-test-password"))
+        db.add(other)
+        db.flush()
+        notice = append_event(db, organization_id=origin.organization_id, dedupe_key="ops097:other-actor",
+            event_type="RUN_TERMINAL", aggregate_type="RUN", aggregate_id=origin.id, module="intake",
+            payload={"recipient_user_id": other.id, "status": origin.status, "decision": origin.decision, "origin": "MANUAL"})
+        consume_notification(db, notice)
+        db.commit()
+        identity, dataset_id, role_id = origin.id, version.dataset_id, roles[0].id
+    first = authenticated.get(f"/api/v1/notifications/inbox?grouped=true&process=run:{identity}").json()
+    assert first["groups"][0]["unread_count"] == 2
+    assert authenticated.get("/api/v1/notifications/unread-count").json()["unread_count"] == 2
+    other_client = TestClient(authenticated.app)
+    logged = other_client.post("/api/v1/auth/login", json={"email": "other097@example.test", "password": "other-test-password"})
+    assert logged.status_code == 200
+    second = other_client.get(f"/api/v1/notifications/inbox?grouped=true&process=run:{identity}").json()
+    assert second["groups"][0]["unread_count"] == 1 and len(second["groups"][0]["items"]) == 1
+    assert other_client.get("/api/v1/notifications/unread-count").json()["unread_count"] == 1
+    assert not {item["id"] for item in first["groups"][0]["items"]} & {item["id"] for item in second["groups"][0]["items"]}
+    with database() as db:
+        db.execute(delete(RolePermission).where(RolePermission.role_id == role_id, RolePermission.permission_code == "intake:read"))
+        db.commit()
+    denied = authenticated.get(f"/api/v1/notifications/inbox?grouped=true&process=run:{identity}")
+    assert denied.json()["groups"] == [] and denied.json()["total"] == 0 and identity not in denied.text
+    assert authenticated.get("/api/v1/notifications/unread-count").json()["unread_count"] == 0
+    assert other_client.get("/api/v1/notifications/unread-count").json()["unread_count"] == 1
+    with database() as db:
+        db.add(DatasetBlock(dataset_id=dataset_id, scope="CONTENT", reason="New request restriction", created_by_id="test-user"))
+        db.commit()
+    blocked = other_client.get(f"/api/v1/notifications/inbox?grouped=true&process=run:{identity}")
+    assert blocked.json()["groups"] == [] and blocked.json()["total"] == 0 and identity not in blocked.text
+    assert other_client.get("/api/v1/notifications/unread-count").json()["unread_count"] == 0
+    other_client.close()
+
+
+def test_read_authorization_snapshot_closes_after_error_and_restores_outer_scope(database):
+    with database() as db:
+        with pytest.raises(RuntimeError, match="synthetic failure"), read_authorization_scope(db):
+            assert db.info["read_content_authorization"] == {}
+            db.info["operation_process_identities"]["synthetic"] = "temporary"
+            raise RuntimeError("synthetic failure")
+        assert "read_content_authorization" not in db.info and "operation_process_identities" not in db.info
+        previous = {"outer": None}
+        db.info["read_content_authorization"] = previous
+        with read_authorization_scope(db):
+            assert db.info["read_content_authorization"] is not previous
+        assert db.info["read_content_authorization"] is previous
+
+
+def test_missing_native_resource_keeps_closed_error_inside_read_snapshot(database):
+    with database() as db:
+        user = db.get(User, "test-user")
+        for authorize in (authorize_run_content, authorize_dataset_content):
+            for cached in (False, True):
+                with pytest.raises(OperationError) as error:
+                    if cached:
+                        with read_authorization_scope(db):
+                            authorize(db, user, None)
+                    else:
+                        authorize(db, user, None)
+                assert error.value.status == 404 and error.value.code == "NOT_FOUND"
+                assert "operation_process_identities" not in db.info and "read_content_authorization" not in db.info

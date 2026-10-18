@@ -373,7 +373,9 @@ test('el Centro de control permite filtrar y actuar sobre la operación', async 
   await expect(page.getByLabel('Filtrar por criticidad')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Requiere tu atención', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Salud de los datos', exact: true })).toBeVisible()
-  await expect(page.getByRole('img', { name: 'Evolución de salud por módulo' })).toBeVisible()
+  const health = page.getByRole('region', { name: 'Gráfica de salud', exact: true })
+  await expect(health.getByRole('radio', { name: 'General', exact: true })).toBeChecked()
+  await expect(health.getByRole('img', { name: 'Evolución de salud · General', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Datasets que necesitan atención', exact: true })).toBeVisible()
 
   const dashboardResponse = page.waitForResponse(response => {

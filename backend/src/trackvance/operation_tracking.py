@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import DateTime, case, cast, func, literal, or_, select, union_all
+from sqlalchemy import DateTime, case, cast, func, inspect, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from .acquisition_models import AcquisitionRun
@@ -163,7 +163,7 @@ def _matches_search(item, search):
     return search.casefold() in f"{item['title']} {item['tracking_id']} {item.get('diagnosis') or ''} {stages}".casefold()
 
 
-def _item(db, user, kind, identity, grants, search=""):
+def _item(db, user, kind, identity, grants, search="", *, authorize_only=False):
     model = {"acquisition": AcquisitionRun, "run": Run, "exception": ExceptionCase, "occurrence": AcquisitionOccurrence,
              "acquisition_schedule": AcquisitionSourceConfiguration,
              "document": DocumentOriginal, "document_batch": DocumentBatch}[kind]
@@ -180,6 +180,8 @@ def _item(db, user, kind, identity, grants, search=""):
             if "datasets:read" not in grants or not diagnostic:
                 return None
             authorize_dataset(db, user, record.dataset_id)
+            if authorize_only:
+                return result
             dataset = db.get(Dataset, record.dataset_id)
             result.update(title=f"Programación degradada · {dataset.name}", tracking_id=f"acquisition_schedule:{identity}",
                 state="BLOCKED", queue="intervention", module="acquisition", origin="SCHEDULED",
@@ -198,6 +200,8 @@ def _item(db, user, kind, identity, grants, search=""):
             if not config or not revision or config.organization_id != user.organization_id or revision.organization_id != user.organization_id:
                 return None
             authorize_dataset(db, user, config.dataset_id)
+            if authorize_only:
+                return result
             dataset = db.get(Dataset, config.dataset_id)
             actor = db.get(User, (revision.settings or {}).get("responsible_user_id"))
             result.update(title=f"Corte programado · {dataset.name}", tracking_id=f"occurrence:{identity}",
@@ -226,6 +230,10 @@ def _item(db, user, kind, identity, grants, search=""):
             family = db.get(DocumentFamily, record.family_id)
             if family is None or family.organization_id != user.organization_id:
                 return None
+            if kind == "document" and record.is_example:
+                return None
+            if authorize_only:
+                return result
             href = f"/documents/families/{family.id}"
             actor_id = record.uploaded_by_id if kind == "document" else family.responsible_user_id
             actor = db.get(User, actor_id)
@@ -302,6 +310,8 @@ def _item(db, user, kind, identity, grants, search=""):
                 return None
             if dataset:
                 authorize_dataset(db, user, dataset.id)
+            if authorize_only:
+                return result
             latest = db.scalar(select(DatasetVersion).where(DatasetVersion.dataset_id == record.dataset_id,
                 DatasetVersion.organization_id == user.organization_id, DatasetVersion.profile_status == "READY")
                 .order_by(DatasetVersion.version.desc()).limit(1)) if dataset else None
@@ -329,6 +339,11 @@ def _item(db, user, kind, identity, grants, search=""):
                 return None
             if kind == "exception" and "exceptions:read" not in grants:
                 return None
+            if authorize_only:
+                authorize_run_content(db, user, run)
+                return result
+            if inspect(run).unloaded:
+                db.refresh(run)
             result.update(tracking_id=f"run:{run.id}",
                 title=record.title if kind == "exception" else run.name,
                 state=record.state if kind == "exception" else run.status,
@@ -342,6 +357,8 @@ def _item(db, user, kind, identity, grants, search=""):
             if not _matches_search(result, search):
                 return None
             authorize_run_content(db, user, run)
+            if authorize_only:
+                return result
             result.update(functional_result=run.decision or "NOT_CALCULATED", impact_level="NOT_CALCULATED")
             if run.module == "intake" and run.decision == "REJECTED":
                 metrics = run.metrics or {}
@@ -383,12 +400,12 @@ def _item(db, user, kind, identity, grants, search=""):
         return None
 
 
-def process_item(db, user, process, grants):
+def process_item(db, user, process, grants, *, authorize_only=False):
     """Authorize the anchor before allowing its identity into a grouped view."""
     kind, _, identity = process.partition(":")
     if kind not in {"acquisition", "acquisition_schedule", "occurrence", "run", "document", "document_batch", "exception"}:
         return None
-    return _item(db, user, kind, identity, grants)
+    return _item(db, user, kind, identity, grants, authorize_only=authorize_only)
 
 
 def group_item(db, user, item, grants):

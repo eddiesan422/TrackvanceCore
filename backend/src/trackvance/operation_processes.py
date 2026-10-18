@@ -3,7 +3,7 @@
 The same projection serves individual identities and SQL group pagination.
 Dataset history and arbitrary tracking strings never create process edges.
 """
-from sqlalchemy import Text, and_, case, cast, func, literal, or_, select, union_all
+from sqlalchemy import Text, and_, bindparam, case, cast, func, literal, or_, select, union_all
 
 from .acquisition_models import AcquisitionRun
 from .acquisition_schedule_models import AcquisitionOccurrence, AcquisitionSourceConfiguration
@@ -136,9 +136,36 @@ def readable_root_key(roots, grants, organization_id):
 
 
 def process_identity(db, organization_id, kind, identity):
+    # A constant native identity lets PostgreSQL discard every unrelated edge
+    # branch and use its primary key. A recursive CTE for one notification
+    # instead expanded the entire edge relation and repeatedly compiled JIT.
+    # Both traversals still consume this one canonical SQL edge definition.
     db.flush()
-    root = db.execute(process_roots(select(literal(kind).label("kind"), literal(identity).label("identity")), organization_id)).one()
-    return f"{root.root_kind}:{root.root_id}"
+    original = f"{kind}:{identity}"
+    cache = db.info.get("operation_process_identities")
+    if cache is not None and (organization_id, kind, identity) in cache:
+        return cache[(organization_id, kind, identity)]
+    queries = db.info.setdefault("operation_parent_queries", {})
+    if organization_id not in queries:
+        edges = _parents(organization_id)
+        queries[organization_id] = select(edges.c.parent_kind, edges.c.parent_id).where(
+            edges.c.kind == bindparam("operation_kind"), edges.c.identity == bindparam("operation_identity")).limit(2)
+    seen = set()
+    for depth in range(17):
+        key = (organization_id, kind, identity)
+        if key in seen:
+            return original
+        seen.add(key)
+        parents = db.execute(queries[organization_id], {"operation_kind": kind, "operation_identity": identity}).all()
+        if not parents:
+            result = f"{kind}:{identity}"
+            if cache is not None:
+                cache.update({node: result for node in seen})
+            return result
+        if len(parents) != 1 or depth == 16:
+            return original
+        kind, identity = parents[0]
+    return original
 
 
 def notification_process(db, item):

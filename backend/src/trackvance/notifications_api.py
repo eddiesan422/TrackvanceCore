@@ -5,16 +5,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, exists, func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, case, exists, func, or_, select, tuple_, update
+from sqlalchemy.orm import Session, load_only
 
 from .acquisition_schedule_models import AcquisitionOccurrence
 from .automation import AutomationError
 from .automation_models import DeliveryOccurrence, InternalNotification, OutboxEvent
 from .db import get_db, iso, utcnow
+from .governance import read_authorization_snapshot
 from .intake_automation_models import IntakeOccurrence
-from .models import MonitorOccurrence, Run, User
-from .operation_processes import notification_process
+from .models import ArtifactLink, DatasetVersion, MonitorOccurrence, Run, User
+from .operation_processes import notification_process, process_roots
 from .permissions import effective_permissions
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["Internal notifications"])
@@ -181,7 +182,60 @@ def notification_event(db: Session, item: InternalNotification) -> OutboxEvent |
                                              OutboxEvent.organization_id == item.organization_id))
 
 
+def prepare_process_scope(db, user, process):
+    """Project identities once in SQL, before a process-specific inbox scan.
+
+    Seeds contain permission-scoped notification metadata only. Content policy
+    still authorizes every returned resource before counting or serialization.
+    Unread counting uses the whole process, independently of display filters.
+    """
+    native_kind = case((InternalNotification.resource_type == "RUN", "run"),
+        (InternalNotification.resource_type == "ACQUISITION", "acquisition"),
+        (InternalNotification.resource_type == "ACQUISITION_OCCURRENCE", "occurrence"),
+        else_=func.lower(InternalNotification.resource_type))
+    seeds = visible_query(db, user).with_only_columns(native_kind.label("kind"),
+        InternalNotification.resource_id.label("identity")).distinct()
+    roots = process_roots(seeds, user.organization_id).subquery("personal_process_roots")
+    projection = select(roots)
+    if process:
+        normalized = process.replace("acquisition_occurrence:", "occurrence:", 1) if process.startswith("acquisition_occurrence:") else process
+        projection = projection.where((roots.c.root_kind + ":" + roots.c.root_id == normalized)
+            | (roots.c.kind + ":" + roots.c.identity == normalized))
+    cache, selected = {}, []
+    for row in db.execute(projection.execution_options(yield_per=100)):
+        root = f"{row.root_kind}:{row.root_id}"
+        cache[(user.organization_id, row.kind, row.identity)] = root
+        cache[(user.organization_id, row.root_kind, row.root_id)] = root
+        if process:
+            selected.append((row.kind, row.identity))
+    # Request-owned, read-only memoization; never reused across sessions or
+    # mutation endpoints. Native identity lookup keeps the same SQL edge spec.
+    db.info["operation_process_identities"] = cache
+    return tuple_(native_kind, InternalNotification.resource_id).in_(selected) if process else None
+
+
+def prepare_content_metadata(db, user, query):
+    """Batch native authorization inputs; policy remains in governance.py."""
+    run_ids = query.where(InternalNotification.resource_type == "RUN").with_only_columns(InternalNotification.resource_id).order_by(None)
+    runs = db.scalars(select(Run).options(load_only(Run.id, Run.organization_id, Run.module, Run.dataset_version_id,
+        Run.target_version_id, Run.created_at)).where(Run.organization_id == user.organization_id, Run.id.in_(run_ids))).all()
+    references: dict[str, list[str]] = {run.id: [] for run in runs}
+    versions = {identity for run in runs for identity in (run.dataset_version_id, run.target_version_id) if identity}
+    links = db.execute(select(ArtifactLink.source_id, ArtifactLink.target_id).where(
+        ArtifactLink.organization_id == user.organization_id, ArtifactLink.source_type == "RUN",
+        ArtifactLink.source_id.in_(run_ids), ArtifactLink.relation == "RUN_REFERENCE", ArtifactLink.target_type == "DATASET_VERSION"))
+    for source_id, target_id in links:
+        references.setdefault(source_id, []).append(target_id)
+        versions.add(target_id)
+    records = db.scalars(select(DatasetVersion).options(load_only(DatasetVersion.id, DatasetVersion.organization_id,
+        DatasetVersion.dataset_id, DatasetVersion.parent_version_id)).where(DatasetVersion.organization_id == user.organization_id,
+            DatasetVersion.id.in_(versions))).all()
+    db.info["read_content_records"] = [*runs, *records]
+    db.info["read_run_references"] = references
+
+
 @router.get("/inbox", response_model=InboxResponse)
+@read_authorization_snapshot
 def inbox(offset: int = Query(default=0, ge=0), limit: int = Query(default=25, ge=1, le=100),
           unread: bool = False, module: str | None = None, origin: str | None = None,
           status: str | None = None, read_state: Literal["ALL", "READ", "UNREAD"] | None = None,
@@ -203,23 +257,38 @@ def inbox(offset: int = Query(default=0, ge=0), limit: int = Query(default=25, g
         query = query.where(InternalNotification.created_at >= from_date)
     if until_date:
         query = query.where(InternalNotification.created_at <= until_date)
+    scope = prepare_process_scope(db, user, process) if grouped or process else None
+    if scope is not None:
+        query = query.where(scope)
+    prepare_content_metadata(db, user, query)
     ordered = query.order_by(InternalNotification.created_at.desc(), InternalNotification.id.desc())
     if grouped:
         from .operation_tracking import group_item, process_item
         grants = set(effective_permissions(db, user))
         groups: dict[str, dict] = {}
         seen_processes: set[str] = set()
+        anchors = {}
+        allowed_anchors = {}
         for item in accessible_items(db, user, ordered):
             process_id = notification_process(db, item)
-            anchor = process_item(db, user, process_id, grants)
-            if anchor is None:
-                process_id = f"{item.resource_type.lower()}:{item.resource_id}"
+            own_anchor = item.resource_type in {"RUN", "ACQUISITION"} and process_id == f"{item.resource_type.lower()}:{item.resource_id}"
+            # visible_query and accessible_items have already authorized this
+            # exact native resource. Build its full operation/stage projection
+            # only when its group belongs to the requested page.
+            if not own_anchor:
+                if process_id not in allowed_anchors:
+                    allowed_anchors[process_id] = process_item(db, user, process_id, grants, authorize_only=True) is not None
+                if not allowed_anchors[process_id]:
+                    process_id = f"{item.resource_type.lower()}:{item.resource_id}"
             if process and process_id != process:
                 continue
             if process_id not in seen_processes:
                 index = len(seen_processes)
                 seen_processes.add(process_id)
                 if offset <= index < offset + limit:
+                    if process_id not in anchors:
+                        anchors[process_id] = process_item(db, user, process_id, grants)
+                    anchor = anchors[process_id]
                     groups[process_id] = {"process_id": process_id, "operation": group_item(db, user, anchor, grants) if anchor else None,
                         "items": [], "unread_count": 0, "notification_count": 0, "notification_offset": notification_offset}
             if process_id in groups:
@@ -231,6 +300,8 @@ def inbox(offset: int = Query(default=0, ge=0), limit: int = Query(default=25, g
         # Read state describes the entire accessible personal process, even
         # when the visible filter only shows one already-read stage.
         unread_query = visible_query(db, user).where(InternalNotification.read_at.is_(None))
+        if scope is not None:
+            unread_query = unread_query.where(scope)
         for item in accessible_items(db, user, unread_query):
             process_id = notification_process(db, item)
             if process_id not in groups:
@@ -254,8 +325,10 @@ def inbox(offset: int = Query(default=0, ge=0), limit: int = Query(default=25, g
 
 
 @router.get("/unread-count", response_model=UnreadResponse)
+@read_authorization_snapshot
 def unread_count(db: Session = Depends(get_db), user: User = Depends(current_user)):
     query = visible_query(db, user).where(InternalNotification.read_at.is_(None))
+    prepare_content_metadata(db, user, query)
     return {"unread_count": sum(1 for _ in accessible_items(db, user, query))}
 
 

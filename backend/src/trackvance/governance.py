@@ -3,6 +3,10 @@
 import copy
 import json
 from collections import Counter
+from collections.abc import Callable
+from contextlib import contextmanager
+from functools import wraps
+from inspect import signature
 from typing import Any, cast
 
 from sqlalchemy import func, select, update
@@ -27,6 +31,93 @@ from .permissions import effective_permissions
 MAX_ANCESTORS = 128
 STRICT_APPROVAL_CRITERION_VERSION = 2
 STRICT_APPROVAL_CRITERION = "ALL_ROWS_EFFECTIVELY_VALIDATED_V2"
+
+
+@contextmanager
+def read_authorization_scope(db: Session):
+    keys = ("read_content_authorization", "operation_process_identities", "read_content_metadata",
+        "read_content_records", "read_run_references")
+    previous = {key: db.info[key] for key in keys if key in db.info}
+    db.info["read_content_authorization"] = {}
+    db.info["operation_process_identities"] = {}
+    db.info["read_content_metadata"] = {}
+    db.info["read_content_records"] = []
+    db.info["read_run_references"] = {}
+    try:
+        yield
+    finally:
+        for key in keys:
+            if key in previous:
+                db.info[key] = previous[key]
+            else:
+                db.info.pop(key, None)
+
+
+def read_authorization_snapshot[**P, R](check: Callable[P, R]) -> Callable[P, R]:
+    parameters = signature(check)
+    @wraps(check)
+    def read(*args: P.args, **kwargs: P.kwargs) -> R:
+        db = parameters.bind(*args, **kwargs).arguments["db"]
+        with read_authorization_scope(db):
+            return check(*args, **kwargs)
+    return read
+
+
+def _memoize_read_authorization[**P](check: Callable[P, None]) -> Callable[P, None]:
+    """An opt-in request snapshot reuses this exact evaluator, including denials.
+
+    Only read endpoints enable the session-local cache. Actor, native identity
+    and purpose are part of its key; a new request always evaluates fresh policy.
+    """
+    parameters = signature(check)
+    resource_name = list(parameters.parameters)[2]
+    @wraps(check)
+    def authorized(*args: P.args, **kwargs: P.kwargs) -> None:
+        db = cast(Session, args[0] if args else kwargs["db"])
+        cache = db.info.get("read_content_authorization")
+        if cache is None:
+            return check(*args, **kwargs)
+        bound = parameters.bind(*args, **kwargs)
+        bound.apply_defaults()
+        user, resource = bound.arguments["user"], bound.arguments[resource_name]
+        if resource is None:
+            return check(*args, **kwargs)
+        extras = tuple((name, value) for name, value in bound.arguments.items()
+            if name not in {"db", "user", resource_name, "purpose"})
+        try:
+            hash(extras)
+        except TypeError:
+            return check(*args, **kwargs)
+        key = (check.__name__, user.organization_id, user.id, resource if isinstance(resource, str) else resource.id,
+            str(bound.arguments.get("purpose", "MODULE")).upper(), extras)
+        if key in cache:
+            if cache[key] is not None:
+                raise cache[key]
+            return None
+        try:
+            check(*args, **kwargs)
+        except OperationError as error:
+            cache[key] = error
+            raise
+        cache[key] = None
+    return authorized
+
+
+def _memoize_read_metadata[**P, R](check: Callable[P, R]) -> Callable[P, R]:
+    parameters = signature(check)
+    @wraps(check)
+    def read(*args: P.args, **kwargs: P.kwargs) -> R:
+        bound = parameters.bind(*args, **kwargs)
+        db = bound.arguments["db"]
+        cache = db.info.get("read_content_metadata")
+        if cache is None:
+            return check(*args, **kwargs)
+        key = (check.__name__, tuple((name, value if isinstance(value, (str, int, type(None)))
+            else (value.organization_id, value.id)) for name, value in bound.arguments.items() if name != "db"))
+        if key not in cache:
+            cache[key] = check(*args, **kwargs)
+        return cast(R, cache[key])
+    return read
 
 
 def contract_identity(db: Session, config: Configuration) -> str:
@@ -54,6 +145,7 @@ def validate_classification(db: Session, organization_id: str, macro_domain_id: 
         raise OperationError(422, "DOMAIN_INCOMPATIBLE", "Selecciona un dominio activo del macrodominio elegido o deja la clasificación incompleta.")
 
 
+@_memoize_read_metadata
 def verified_intake_parent(db: Session, dataset: Dataset) -> str | None:
     if dataset.intake_input_dataset_id:
         return dataset.intake_input_dataset_id
@@ -118,6 +210,7 @@ def governance_snapshot(db: Session, dataset: Dataset) -> dict:
             "technical_custodian_id": current.technical_custodian_id}
 
 
+@_memoize_read_metadata
 def dataset_ancestors(db: Session, dataset_id: str, organization_id: str) -> list[Dataset]:
     """Iterative, bounded graph walk; cycles fail closed and duplicate paths collapse."""
     result: dict[str, Dataset] = {}
@@ -147,6 +240,7 @@ def dataset_ancestors(db: Session, dataset_id: str, organization_id: str) -> lis
     return list(result.values())
 
 
+@_memoize_read_authorization
 def authorize_dataset(db: Session, user: User, dataset_id: str, purpose: str = "CONTENT") -> None:
     ancestors = dataset_ancestors(db, dataset_id, user.organization_id)
     identities = [dataset.id for dataset in ancestors]
@@ -168,12 +262,14 @@ def authorize_dataset(db: Session, user: User, dataset_id: str, purpose: str = "
         raise OperationError(403, "SOURCE_UNAVAILABLE", "Una fuente del activo derivado está inactiva.")
 
 
-def authorize_run_content(db: Session, user: User, run: Run) -> None:
-    if run.organization_id != user.organization_id:
+@_memoize_read_authorization
+def authorize_run_content(db: Session, user: User, run: Run | None) -> None:
+    if run is None or run.organization_id != user.organization_id:
         raise OperationError(404, "NOT_FOUND", "No se encontró la ejecución.")
-    references = db.scalars(select(ArtifactLink.target_id).where(ArtifactLink.organization_id == run.organization_id,
+    references = (db.info["read_run_references"][run.id] if run.id in db.info.get("read_run_references", {}) else
+        db.scalars(select(ArtifactLink.target_id).where(ArtifactLink.organization_id == run.organization_id,
         ArtifactLink.source_type == "RUN", ArtifactLink.source_id == run.id,
-        ArtifactLink.relation == "RUN_REFERENCE", ArtifactLink.target_type == "DATASET_VERSION"))
+        ArtifactLink.relation == "RUN_REFERENCE", ArtifactLink.target_type == "DATASET_VERSION")))
     for identity in (run.dataset_version_id, run.target_version_id, *references):
         if identity:
             version = db.get(DatasetVersion, identity)
@@ -182,8 +278,9 @@ def authorize_run_content(db: Session, user: User, run: Run) -> None:
             authorize_dataset_content(db, user, version, "MODULE")
 
 
-def authorize_dataset_content(db: Session, user: User, version: DatasetVersion, purpose: str = "CONTENT") -> None:
-    if version.organization_id != user.organization_id:
+@_memoize_read_authorization
+def authorize_dataset_content(db: Session, user: User, version: DatasetVersion | None, purpose: str = "CONTENT") -> None:
+    if version is None or version.organization_id != user.organization_id:
         raise OperationError(404, "NOT_FOUND", "No se encontró la versión solicitada.")
     authorize_dataset(db, user, version.dataset_id, purpose)
     # Immutable parent links also protect Intake descendants created before the

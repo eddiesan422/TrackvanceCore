@@ -46,26 +46,50 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
     expect(response.status()).toBe(200)
     return response.json()
   }
-  await expect.poll(async () => (await personal(first.id)).groups[0]?.items.length || 0,
-    { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(1)
-  const initialNews = await personal(first.id)
+  type NewsItem = { id: string; resource_id: string; resource_type: string; module: string; origin: string; status: string; decision: string }
+  async function personalPair(completed: { id: string; output_version_id: string }) {
+    await expect.poll(async () => (await personal(completed.id)).groups[0]?.items.length || 0,
+      { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(2)
+    const news = await personal(completed.id)
+    expect(news.groups).toHaveLength(1)
+    expect(news.groups[0].process_id).toBe(`run:${completed.id}`)
+    expect(news.groups[0].unread_count).toBe(2)
+    const items = news.groups[0].items as NewsItem[]
+    expect(items.map(item => item.module).sort()).toEqual(['intake', 'sentinel'])
+    expect(new Set(items.map(item => item.id)).size).toBe(2)
+    expect(items.find(item => item.module === 'intake')).toMatchObject({ resource_type: 'RUN', resource_id: completed.id,
+      origin: 'MANUAL', status: 'SUCCESS', decision: 'REJECTED' })
+    const automatic = items.find(item => item.module === 'sentinel')!
+    expect(automatic).toMatchObject({ resource_type: 'RUN', origin: 'AUTOMATIC', status: 'SUCCESS', decision: 'ALERT' })
+    const response = await api.get(`/api/v1/runs/${automatic.resource_id}`)
+    expect(response.status()).toBe(200)
+    const sentinel = await response.json()
+    expect(sentinel).toMatchObject({ id: automatic.resource_id, module: 'sentinel', dataset_version_id: completed.output_version_id })
+    expect(sentinel.execution_plan.sentinel_automatic.dataset_version_id).toBe(completed.output_version_id)
+    expect(sentinel.execution_plan.sentinel_automatic.event_id).toEqual(expect.any(String))
+    return news
+  }
+  // A rejected Intake still publishes its empty accepted output. Its real
+  // publication event triggers a separate automatic Sentinel stage and notice.
+  const initialNews = await personalPair(first)
   expect(initialNews.groups[0].process_id).toBe(`run:${first.id}`)
   const ids = initialNews.groups[0].items.map((item: { id: string }) => item.id)
   await page.goto(`/notifications?process=run:${first.id}`)
   await expect(page).toHaveURL(new RegExp(`/operations\\?.*view=news`))
   await expect(page.getByRole('heading', { name: 'Novedades personales', exact: true })).toBeVisible()
-  await expect(page.getByRole('checkbox', { name: /^Leída:/ })).not.toBeChecked()
+  const reading = page.getByRole('checkbox', { name: /^Leída:/ })
+  await expect(reading).toHaveCount(2)
+  for (const checkbox of await reading.all()) await expect(checkbox).not.toBeChecked()
   const second = await run()
   expect(second.id).not.toBe(first.id)
-  await expect.poll(async () => (await personal(second.id)).groups[0]?.unread_count || 0,
-    { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(1)
+  await personalPair(second)
   const markResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/notifications/inbox/read-all' && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Marcar esta página como leída', exact: true }).click()
   const mark = await markResponse
   expect(mark.status()).toBe(200)
   expect(mark.request().postDataJSON().ids).toEqual(ids)
   expect((await personal(first.id)).groups[0].unread_count).toBe(0)
-  expect((await personal(second.id)).groups[0].unread_count).toBe(1)
+  expect((await personal(second.id)).groups[0].unread_count).toBe(2)
   expect((await (await api.get(`/api/v1/runs/${first.id}`)).json()).decision).toBe('REJECTED')
   const groups = []
   for (const runId of [first.id, second.id]) {
@@ -75,7 +99,9 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
     expect(operation.items).toHaveLength(1)
     expect(operation.items[0].process_id).toBe(`run:${runId}`)
     expect(operation.items[0].technical_state).toBe('SUCCESS')
-    expect(operation.items[0].functional_result).toBe('REJECTED')
+    expect(operation.items[0].functional_results).toEqual(['ALERT', 'REJECTED'])
+    expect(operation.items[0].stages.find((stage: { id: string }) => stage.id === `run:${runId}`))
+      .toMatchObject({ module: 'intake', state: 'SUCCESS', decision: 'REJECTED' })
     expect(operation.items[0].intervention_required).toBe(true)
     groups.push(operation.items[0])
   }

@@ -219,12 +219,20 @@ test('native resolution: assignment → waiting → correction → verified comp
   const graphHttp = await graphResponse
   expect(graphHttp.status()).toBe(200)
   const graph = await graphHttp.json()
-  const comparisonNode = graph.nodes.find((node: RecordData) => node.type === 'VERSION_COMPARISON' && node.resource_id === comparison.id)
-  expect(comparisonNode).toBeTruthy()
+  expect(graph.projection).toBe('origin')
+  expect(graph.nodes.some((node: RecordData) => node.type === 'VERSION_COMPARISON')).toBe(false)
   await expect(page.getByLabel('Diagrama de linaje; usa las flechas para desplazar', { exact: true })).toBeVisible()
-  await page.locator('button.lineage-node').filter({ hasText: comparisonNode.label }).click()
-  await expect(page.getByLabel('Detalle del nodo', { exact: true }).getByRole('link', { name: 'Ver detalle autorizado', exact: true }))
-    .toHaveAttribute('href', `/datasets/${dataset.id}/versions/compare?report=${comparison.id}`)
+  await expect(page.getByRole('link', { name: 'Ver usos y procesos relacionados', exact: true }))
+    .toHaveAttribute('href', `/operations?dataset_id=${dataset.id}&version_id=${correctedVersion}`)
+  // Comparison observes the version; it remains accessible in the preserved
+  // historical projection and its original report, without becoming a producer.
+  const historicalGraph = await page.request.get(`/api/v1/catalog/datasets/${dataset.id}/lineage-graph?projection=business&version_id=${correctedVersion}`)
+  expect(historicalGraph.status()).toBe(200)
+  const comparisonNode = (await historicalGraph.json()).nodes.find((node: RecordData) => node.type === 'VERSION_COMPARISON' && node.resource_id === comparison.id)
+  expect(comparisonNode).toMatchObject({ href: `/datasets/${dataset.id}/versions/compare?report=${comparison.id}` })
+  await page.goto(comparisonNode.href)
+  await expect(page.getByRole('heading', { name: 'Informe de evidencia', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Informe de comparación', exact: true })).toContainText(comparison.id)
   await info.attach('resolution-095-native-evidence.json', { body: JSON.stringify({ nonce, dataset_id: dataset.id, origin_version_id: version.id,
     corrected_version_id: correctedVersion, origin_run_id: origin.id, candidate_run_id: candidate.id, acquisition_id: acquisition.id,
     exception_id: exception.id, resolved_state: closed.state, reopened_state: reopened.state, proof: closed.validation_evidence.population_proofs,
