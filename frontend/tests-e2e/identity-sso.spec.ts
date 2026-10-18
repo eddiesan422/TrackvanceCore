@@ -16,6 +16,17 @@ async function administrator(page: Page) {
   return { 'X-CSRF-Token': identity.csrf_token as string }
 }
 
+async function signOut(page: Page) {
+  // Clicking starts an async mutation. Observe the committed native logout
+  // before another API request or replay can reuse this context's old session.
+  const completed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/auth/logout'
+    && response.request().method() === 'POST', { timeout: 20_000 })
+  await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).click()
+  expect((await completed).status()).toBe(200)
+  await expect(page.getByRole('button', { name: 'Entrar al entorno demo', exact: true })).toBeVisible()
+  expect((await page.request.get('/api/v1/me')).status()).toBe(401)
+}
+
 async function sso(page: Page, options: { provider: string; email: string; subject: string; profile: string; scenario?: string }) {
   await page.goto('/')
   await page.getByRole('link', { name: `Continuar con ${options.provider}` }).click()
@@ -58,7 +69,7 @@ test('local first access is restricted, rotates the session and revokes the temp
     expect(after.user.must_change_password).toBe(false)
     expect(before.csrf_token !== after.csrf_token, 'Successful first login rotates the session').toBe(true)
     expect((await context.request.get('/api/v1/datasets')).status()).toBe(200)
-    await person.getByRole('button', { name: 'Cerrar sesión' }).click()
+    await signOut(person)
     expect((await context.request.post('/api/v1/auth/login', { data: { username: temporary.username, password: temporary.password } })).status()).toBe(401)
     expect((await context.request.post('/api/v1/auth/login', { data: { email, password: replacement } })).status()).toBe(200)
     const audit = await (await page.request.get('/api/v1/audit-events')).json()
@@ -135,7 +146,7 @@ for (const profile of [
     let current = await (await page.request.get(`/api/v1/users/${account.id}`)).json()
     expect(current.external_identities).toHaveLength(1)
     expect(current.external_identities[0].subject).toBe(subject)
-    await person.getByRole('button', { name: 'Cerrar sesión' }).click()
+    await signOut(person)
     await context.request.get(callback)
     expect((await context.request.get('/api/v1/me')).status()).toBe(401)
     expect((await context.request.post('/api/v1/auth/login', { data: { username: account.username, password: temporary.password } })).status()).toBe(401)
