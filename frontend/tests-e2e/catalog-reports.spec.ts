@@ -323,9 +323,30 @@ test('Catálogo y Reportes: dos cargas → gobierno → Intake estricto → join
   await filter.getByLabel('Filtro previo fuente1, condición 1: operador', { exact: true }).selectOption('STARTS_WITH')
   await filter.getByLabel('Filtro previo fuente1, condición 1: valor', { exact: true }).fill('00')
   await page.getByRole('button', { name: 'Añadir columna de orden', exact: true }).click()
+  const resolutionResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/reports/resolve'
+    && response.request().method() === 'POST', { timeout: 15_000 })
   await page.getByRole('button', { name: 'Resolver fuentes y validar', exact: true }).click()
+  const resolution = await resolutionResponse
+  expect(resolution.status()).toBe(200)
+  const resolvedPreviewContext = await resolution.json()
   await expect(page.getByRole('button', { name: 'Ejecutar vista previa', exact: true })).toBeEnabled()
+  // Keep the existing 15-second budget. Distinguish a missing/failed response
+  // from a successful but incorrect preview or a table that failed to render.
+  const previewResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/reports/preview'
+    && response.request().method() === 'POST' && response.request().postDataJSON().context_id === resolvedPreviewContext.context_id,
+  { timeout: 15_000 })
   await page.getByRole('button', { name: 'Ejecutar vista previa', exact: true }).click()
+  const preview = await previewResponse
+  expect(preview.status()).toBe(200)
+  const previewValue = await preview.json()
+  expect(previewValue.status).toBe('SUCCESS')
+  expect(previewValue.context_id).toBe(resolvedPreviewContext.context_id)
+  expect(previewValue.columns.map((column: { name: string }) => column.name)).toEqual(['fuente1_customer_id', 'amount_value', 'fuente2_segment'])
+  expect(previewValue.rows).toEqual([
+    { fuente1_customer_id: '001', amount_value: '10.25', fuente2_segment: 'A' },
+    { fuente1_customer_id: '002', amount_value: '20.50', fuente2_segment: 'B' },
+    { fuente1_customer_id: '003', amount_value: '30.75', fuente2_segment: null },
+  ])
   await expect(page.getByRole('cell', { name: '001', exact: true })).toBeVisible()
   await expect(page.getByRole('cell', { name: '003', exact: true })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'null', exact: true })).toBeVisible()

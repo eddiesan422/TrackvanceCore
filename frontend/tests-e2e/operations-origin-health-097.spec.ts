@@ -47,7 +47,7 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
     return response.json()
   }
   type NewsItem = { id: string; resource_id: string; resource_type: string; module: string; origin: string; status: string; decision: string }
-  async function personalPair(completed: { id: string; output_version_id: string }) {
+  async function personalPair(completed: { id: string; output_version_id: string }, sentinelDecision: 'ALERT' | 'HEALTHY') {
     await expect.poll(async () => (await personal(completed.id)).groups[0]?.items.length || 0,
       { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(2)
     const news = await personal(completed.id)
@@ -60,18 +60,28 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
     expect(items.find(item => item.module === 'intake')).toMatchObject({ resource_type: 'RUN', resource_id: completed.id,
       origin: 'MANUAL', status: 'SUCCESS', decision: 'REJECTED' })
     const automatic = items.find(item => item.module === 'sentinel')!
-    expect(automatic).toMatchObject({ resource_type: 'RUN', origin: 'AUTOMATIC', status: 'SUCCESS', decision: 'ALERT' })
+    expect(automatic).toMatchObject({ resource_type: 'RUN', origin: 'AUTOMATIC', status: 'SUCCESS', decision: sentinelDecision })
     const response = await api.get(`/api/v1/runs/${automatic.resource_id}`)
     expect(response.status()).toBe(200)
     const sentinel = await response.json()
-    expect(sentinel).toMatchObject({ id: automatic.resource_id, module: 'sentinel', dataset_version_id: completed.output_version_id })
+    expect(sentinel).toMatchObject({ id: automatic.resource_id, module: 'sentinel', dataset_version_id: completed.output_version_id,
+      decision: sentinelDecision, metrics: { profile_dataset_version_id: completed.output_version_id, profile_snapshot: { row_count: 0 },
+        failed_checks: sentinelDecision === 'ALERT' ? 1 : 0 } })
+    expect(sentinel.metrics.checks.filter((check: { code: string }) => check.code.startsWith('VOLUME_'))).toEqual([
+      expect.objectContaining(sentinelDecision === 'ALERT'
+        ? { code: 'VOLUME_MIN', actual: 0, expected: { min: 1, method: 'fixed_threshold' }, status: 'FAIL',
+            metric_method: 'EXACT_OBSERVED', metric_definition_version: 2 }
+        : { code: 'VOLUME_CHANGE', actual: 0, expected: { max_pct: 50, baseline_rows: 0, method: 'previous_version' }, status: 'PASS',
+            metric_method: 'EXACT_OBSERVED', metric_definition_version: 2 }),
+    ])
     expect(sentinel.execution_plan.sentinel_automatic.dataset_version_id).toBe(completed.output_version_id)
     expect(sentinel.execution_plan.sentinel_automatic.event_id).toEqual(expect.any(String))
     return news
   }
   // A rejected Intake still publishes its empty accepted output. Its real
   // publication event triggers a separate automatic Sentinel stage and notice.
-  const initialNews = await personalPair(first)
+  // Its first accepted output is empty without a prior output baseline.
+  const initialNews = await personalPair(first, 'ALERT')
   expect(initialNews.groups[0].process_id).toBe(`run:${first.id}`)
   const ids = initialNews.groups[0].items.map((item: { id: string }) => item.id)
   await page.goto(`/notifications?process=run:${first.id}`)
@@ -82,7 +92,9 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
   for (const checkbox of await reading.all()) await expect(checkbox).not.toBeChecked()
   const second = await run()
   expect(second.id).not.toBe(first.id)
-  await personalPair(second)
+  // The next empty output has the first empty output as a real baseline:
+  // zero volume change passes, although its own Intake remains rejected.
+  await personalPair(second, 'HEALTHY')
   const markResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/notifications/inbox/read-all' && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Marcar esta página como leída', exact: true }).click()
   const mark = await markResponse
@@ -92,14 +104,14 @@ test('OPS/DASH-097: procesos manuales separados, lectura acotada, ruta históric
   expect((await personal(second.id)).groups[0].unread_count).toBe(2)
   expect((await (await api.get(`/api/v1/runs/${first.id}`)).json()).decision).toBe('REJECTED')
   const groups = []
-  for (const runId of [first.id, second.id]) {
+  for (const [runId, sentinelDecision] of [[first.id, 'ALERT'], [second.id, 'HEALTHY']]) {
     const response = await api.get(`/api/v1/operations?grouped=true&process=run:${runId}`)
     expect(response.status()).toBe(200)
     const operation = await response.json()
     expect(operation.items).toHaveLength(1)
     expect(operation.items[0].process_id).toBe(`run:${runId}`)
     expect(operation.items[0].technical_state).toBe('SUCCESS')
-    expect(operation.items[0].functional_results).toEqual(['ALERT', 'REJECTED'])
+    expect(operation.items[0].functional_results).toEqual([sentinelDecision, 'REJECTED'])
     expect(operation.items[0].stages.find((stage: { id: string }) => stage.id === `run:${runId}`))
       .toMatchObject({ module: 'intake', state: 'SUCCESS', decision: 'REJECTED' })
     expect(operation.items[0].intervention_required).toBe(true)
