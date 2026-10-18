@@ -580,7 +580,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10", "snapshot-legacy-v11"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -602,6 +602,18 @@ def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path,
     bootstrap = calls[-1][-2]
     assert docker_state.digest(docker_state.VERIFY_SCRIPT) in bootstrap
     assert docker_state.digest(docker_state.PHYSICAL_SCHEMA_GUARD) in bootstrap
+
+
+@pytest.mark.parametrize("command", ["snapshot-legacy-v1", "snapshot-legacy-v12", "snapshot-legacy-v11 extra", "compare", "arbitrary"])
+def test_copy_snapshot_rejects_unsupported_commands_before_docker_or_file_writes(monkeypatch, tmp_path, command):
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("Unsupported commands must not invoke Docker or build the bootstrap.")
+    monkeypatch.setattr(docker_state, "execute", unexpected)
+    monkeypatch.setattr(docker_state, "snapshot_bootstrap", unexpected)
+    destination = tmp_path / "state.json"
+    with pytest.raises(docker_state.OperationError, match="Comando de huella persistente no reconocido"):
+        docker_state._copy_snapshot("fixture-api", destination, command=command)
+    assert not destination.exists()
 
 
 def write_pre_corrections_backup(root):

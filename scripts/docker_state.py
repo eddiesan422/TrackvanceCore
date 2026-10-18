@@ -553,7 +553,7 @@ def snapshot_stdin_source() -> str:
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
-    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10"}:
+    if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10", "snapshot-legacy-v11"}:
         raise OperationError("Comando de huella persistente no reconocido.")
     bootstrap = snapshot_bootstrap()
     for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
