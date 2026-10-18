@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { expect, test } from '@playwright/test'
+import { chromium, expect, request, test, type Browser } from '@playwright/test'
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' })
 test.setTimeout(180_000)
 
-test('AUT-097: guardar una vez, cerrar navegador y observar tres cortes reales de 30 segundos', async ({ page, context }, info) => {
+test('AUT-097: guardar una vez, cerrar navegador y observar tres cortes reales de 30 segundos', async ({ page, context, browser }, info) => {
   const started = Date.now(), nonce = randomBytes(6).toString('hex')
   const project = process.env.TV_CORE095_TEST_PROJECT || ''
   expect(project === 'trackvance-codex' || /^trackvance-v070-test-e2e-[a-z0-9-]*[a-f0-9]{12}$/.test(project)).toBe(true)
@@ -21,7 +21,8 @@ test('AUT-097: guardar una vez, cerrar navegador y observar tres cortes reales d
     await page.getByRole('button', { name: 'Iniciar sesión', exact: true }).click()
   } else await page.getByRole('button', { name: 'Entrar al entorno demo', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Centro de control', exact: true })).toBeVisible()
-  const api = context.request, fixturePath = `/acquisition/${nonce}`
+  let api = context.request
+  const fixturePath = `/acquisition/${nonce}`
   const csrf = await api.get('/api/v1/me')
   const me = await csrf.json()
   const csrfCookie = (await context.cookies()).find(cookie => cookie.name.includes('csrf'))
@@ -50,9 +51,14 @@ test('AUT-097: guardar una vez, cerrar navegador y observar tres cortes reales d
   expect(saved.settings.timezone).toBe('America/Bogota')
   await expect(page.getByText(/Guardado: intervalo efectivo de 30 segundos/)).toBeVisible()
   const sourceBefore = await (await api.get(control + fixturePath + '/receipt')).json()
+  const storageState = await context.storageState()
+  const independentApi = await request.newContext({ baseURL: info.project.use.baseURL, storageState })
+  let reopenedBrowser: Browser | undefined
+  api = independentApi
+  try {
+  await browser.close()
+  expect(browser.isConnected()).toBe(false)
   const closedAt = new Date().toISOString()
-  await page.close()
-  expect(context.pages()).toHaveLength(0)
   // Only reads follow. No tick function, worker call or refresh request can
   // manufacture a successful schedule in this independent observation window.
   let occurrences: { id: string; planned_at: string; dispatched_at: string; acquisition_id: string; acquisition_status: string; coalesced_intervals: number; output_version_id: string }[] = []
@@ -88,13 +94,29 @@ test('AUT-097: guardar una vez, cerrar navegador y observar tres cortes reales d
   expect(operations.items).toHaveLength(1)
   expect(operations.items[0].process_id).toBe(`occurrence:${cuts[2].id}`)
   expect(operations.items[0].stages.some((stage: { id: string }) => stage.id === `acquisition:${cuts[2].acquisition_id}`)).toBe(true)
-  const returned = await context.newPage()
+  expect(browser.isConnected()).toBe(false)
+  const reopenedAt = new Date().toISOString()
+  reopenedBrowser = await chromium.launch({ channel: info.project.use.channel, headless: true })
+  const returnedContext = await reopenedBrowser.newContext({ baseURL: info.project.use.baseURL, storageState })
+  const returned = await returnedContext.newPage()
   await returned.goto(`/datasets/${acquired.dataset_id}`)
   await expect(returned.getByText('Consulta exitosa', { exact: true })).toHaveCount(3)
   await returned.getByRole('link', { name: 'Ver en Operación', exact: true }).click()
   await expect(returned.getByRole('heading', { name: 'Operación', exact: true })).toBeVisible()
   await info.attach('aut-097-three-real-cuts.json', { body: JSON.stringify({ requirement: 'AUT-097-01/02', project, nonce, connection_id: connection.id,
-    dataset_id: acquired.dataset_id, closed_at: closedAt, interval_seconds: 30, timezone: saved.settings.timezone, occurrences: cuts,
+    dataset_id: acquired.dataset_id, closed_at: closedAt, reopened_at: reopenedAt, interval_seconds: 30, timezone: saved.settings.timezone, occurrences: cuts,
     real_source_receipt: sourceAfter, version_ids: dataset.versions.map((version: { id: string }) => version.id), origin_graph: graph, operation: operations.items[0],
-    elapsed_seconds: (Date.now() - started) / 1000, browser_closed_during_all_cuts: true, manual_dispatch_or_refresh: false }), contentType: 'application/json' })
+    elapsed_seconds: (Date.now() - started) / 1000, browser_process_closed_during_all_cuts: true, independent_http_observer: true, manual_dispatch_or_refresh: false }), contentType: 'application/json' })
+  } finally {
+    try {
+      const state = await (await independentApi.get(`/api/v1/datasets/${acquired.dataset_id}/source-settings`)).json()
+      if (state.enabled) {
+        const pause = await independentApi.put(`/api/v1/datasets/${acquired.dataset_id}/source-settings`, { headers, data: { ...state.settings, expected_version: state.version, enabled: false } })
+        expect(pause.status()).toBe(200)
+      }
+    } finally {
+      await reopenedBrowser?.close()
+      await independentApi.dispose()
+    }
+  }
 })
