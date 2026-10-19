@@ -1,11 +1,12 @@
 # Trackvance Core
 
-## Trackvance Core 0.9.7 — NO CERRADA
+## Trackvance Core 0.9.7 — implementación y validación
 
-Candidato en implementación: scheduler sin secretos, ocurrencias diagnosticables,
+Incluye scheduler sin secretos, ocurrencias diagnosticables,
 Operación unificada, origen productor, salud con vacíos y borradores/referencias
 documentales independientes. La [matriz oficial 0.9.7](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/core-0.9.7.md)
-registra gates pendientes. El cambio de versión no actualiza ni certifica una instalación.
+registra el estado de cierre, los gates, las limitaciones y la actualización de
+instalaciones. El cambio de versión no actualiza ni certifica una instalación.
 
 ### Antecedente 0.9.5
 

@@ -5,6 +5,7 @@ from the actual OCR/PDF words, never synthesized by dividing line width.
 """
 import re
 import unicodedata
+from bisect import bisect_right
 from itertools import pairwise
 
 
@@ -153,6 +154,62 @@ def column_reading_order(column):
     return [item for group in row_groups(lines, column[0][1]["page"], 0, 1) for item in group]
 
 
+def flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance):
+    """Use other columns as row baselines; retain incomplete and stray groups."""
+    def column_number(word):
+        center = (word["region"][0] + word["region"][2]) / 2
+        return next((i for i, (left, right) in enumerate(pairwise(bounds)) if left <= center < right), None)
+
+    def middle(items):
+        return sum((word["region"][1] + word["region"][3]) / 2 for word, _ in items) / len(items)
+
+    classified = []
+    for group in row_groups(lines, page, start, end):
+        parts: list[list[tuple[dict, dict]]] = [[], [], []]
+        for item in group:
+            column = column_number(item[0])
+            parts[2 if column is None else 1 if column == multiline else 0].append(item)
+        classified.append(parts)
+    backbones = sorted([(index, parts[0]) for index, parts in enumerate(classified) if parts[0]], key=lambda item: middle(item[1]))
+    if not backbones:
+        return [group for parts in classified for group in parts if group]
+    descriptions = sorted([(middle(parts[1]), index if parts[0] else None) for index, parts in enumerate(classified) if parts[1]],
+                          key=lambda item: item[0])
+    description_centers = [item[0] for item in descriptions]
+    backbone_centers = [middle(items) for _, items in backbones]
+    starts: list[float] = []
+    for position, (group_index, backbone) in enumerate(backbones):
+        center = middle(backbone)
+        index = bisect_right(description_centers, center) - 1
+        selected = None
+        if index >= 0 and description_centers[index] >= center - tolerance and (not starts or description_centers[index] > starts[-1]):
+            selected = index
+        else:
+            index = bisect_right(description_centers, center)
+            if index < len(descriptions) and description_centers[index] <= center + .004 and (not starts or description_centers[index] > starts[-1]):
+                selected = index
+        proposed = description_centers[selected] if selected is not None else center
+        if selected is not None:
+            owner = descriptions[selected][1]
+            neighbors = backbone_centers[max(0, position - 1):position] + backbone_centers[position + 1:position + 2]
+            if owner is not None and owner != group_index or any(abs(proposed - neighbor) <= abs(proposed - center) for neighbor in neighbors):
+                return None  # A neighboring row has an equal or stronger claim.
+        starts.append(proposed)
+        if len(starts) > 1 and starts[-1] <= starts[-2]:
+            return None  # The geometry cannot attribute these overlapping rows.
+    # Each token enters exactly one bucket. The first explicitly holds any
+    # fragment before the first attributed row; nothing is discarded.
+    result: list[list[tuple[dict, dict]]] = [[] for _ in range(len(backbones) + 1)]
+    backbone_buckets = {index: position + 1 for position, (index, _) in enumerate(backbones)}
+    for index, parts in enumerate(classified):
+        if parts[0]:
+            result[backbone_buckets[index]].extend(parts[0])
+        for fragment in parts[1:]:
+            if fragment:
+                result[bisect_right(starts, middle(fragment))].extend(fragment)
+    return [group for group in result if group]
+
+
 def table_candidates(lines, rule):
     lines = visual_lines(lines, .012 if rule.get("flowing") else .004)
     rows: list[list[tuple[str, dict]]] = []
@@ -187,7 +244,16 @@ def table_candidates(lines, rule):
             continuing = not bool(stops)
             previous_bounds = dx
             bounds = [value + dx for value in rule["column_bounds"]]
-            for group in row_groups(lines, page, header_bottom, end, rule.get("row_tolerance", .018) if rule.get("flowing") else .004):
+            groups = (flowing_row_groups(lines, page, header_bottom, end, bounds, rule["multiline_column"], rule.get("row_tolerance", .018))
+                      if rule.get("flowing") and rule.get("multiline_column") is not None
+                      else row_groups(lines, page, header_bottom, end, rule.get("row_tolerance", .018) if rule.get("flowing") else .004))
+            if groups is None:
+                for group in row_groups(lines, page, header_bottom, end):
+                    rejected.append({"text": " ".join(word["text"] for word, _ in group), "page": page,
+                                     "region": box([word for word, _ in group]), "method": group[0][1]["method"],
+                                     "reason": "AMBIGUOUS_ROW_BOUNDARY"})
+                continue
+            for group in groups:
                 columns: list[list[tuple[dict, dict]]] = [[] for _ in labels]
                 outside = []
                 for word, source in group:

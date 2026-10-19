@@ -1,5 +1,6 @@
 """DOC-097: independent references, exact snapshots and independent value oracles."""
 import copy
+from collections import Counter
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
@@ -149,6 +150,89 @@ def test_multiline_cells_keep_reading_order_inside_grouped_row_baselines():
     assert result["table_unparsed"]["detalle"] == []
     assert rows[0]["descripcion"]["origin"]["region"] == box([word for source in lines[1:6] for word in source["words"] if word["region"][0] < .45])
     assert lines == before
+
+
+def test_compact_multiline_rows_keep_boundaries_and_incomplete_rows_visible():
+    header = line([(.05, "Descripción"), (.5, "Cantidad"), (.7, "Precio"), (.86, "Total")], .2)
+    configured = definition({"fields": [{"name": "opcional", "required": False}], "tables": [{
+        "name": "detalle", "fields": [{"name": name} for name in ("descripcion", "cantidad", "precio", "total")],
+        "visual": {"page": 1, "region": [.05, .2, .99, .24],
+            "header_labels": ["Descripción", "Cantidad", "Precio", "Total"],
+            "column_bounds": [0, .45, .65, .83, 1], "stop_label": "Subtotal",
+            "flowing": True, "continue_pages": True, "multiline_column": 0, "row_tolerance": .027}}]})
+    body = [line([(.05, "SYN001")], .25),
+            line([(.5, "dos"), (.7, "once"), (.86, "veintidos")], .26),
+            line([(.05, "Material"), (.18, "ficticio")], .267),
+            line([(.05, "final")], .282),
+            line([(.05, "SYN002")], .297),
+            line([(.5, "cero"), (.7, "tres"), (.86, "nada")], .307),
+            line([(.05, "Otro"), (.18, "producto")], .314)]
+    for incomplete in (False, True):
+        source = copy.deepcopy(body)
+        # Realistic baseline skew, independent of scalar type and cell contents.
+        for index, word in enumerate(source[1]["words"]):
+            word["region"][1] += index * .0005
+            word["region"][3] += index * .0005
+        if incomplete:
+            source[1]["words"].pop(0)
+        before = copy.deepcopy(source)
+        result = extract([header, *source, line([(.05, "Subtotal")], .4)], configured)
+        rows = result["tables"]["detalle"]
+        values = [[row[key]["value"] for key in ("descripcion", "cantidad", "precio", "total")] for row in rows]
+        assert values == ([["SYN002 Otro producto", "cero", "tres", "nada"]] if incomplete else [
+            ["SYN001 Material ficticio final", "dos", "once", "veintidos"],
+            ["SYN002 Otro producto", "cero", "tres", "nada"]])
+        assert len(result["table_unparsed"]["detalle"]) == int(incomplete)
+        observed = Counter(token for row in rows for cell in row.values() for token in cell["value"].split())
+        observed.update(token for region in result["table_unparsed"]["detalle"] for token in region["text"].split())
+        assert observed == Counter(token for item in source for word in item["words"] for token in word["text"].split())
+        if not incomplete:
+            assert rows[0]["descripcion"]["origin"]["region"] == box([word for item in source[:4] for word in item["words"] if word["region"][0] < .45])
+        assert source == before
+    # Disjoint fragments of two close, incomplete rows cannot fabricate a row.
+    ambiguous = [line([(.05, "FIRST")], .25), line([(.5, "left")], .26),
+                 line([(.05, "SECOND")], .275), line([(.7, "middle"), (.86, "right")], .285)]
+    result = extract([header, *ambiguous, line([(.05, "Subtotal")], .4)], configured)
+    assert result["tables"]["detalle"] == []
+    assert result["table_unparsed"]["detalle"]
+    assert Counter(token for region in result["table_unparsed"]["detalle"] for token in region["text"].split()) == Counter(
+        token for item in ambiguous for word in item["words"] for token in word["text"].split())
+    # OCR baselines can overlap so that two rows compete for one later text
+    # baseline. Reject the segment rather than bisecting unordered boundaries.
+    overlapping = [line([(.5, "one")], .35), line([(.7, "two"), (.86, "three")], .3559),
+                   line([(.5, "four"), (.7, "five"), (.86, "six")], .3561), line([(.05, "shared")], .3578)]
+    for item in overlapping:
+        for word in item["words"]:
+            word["region"][3] = word["region"][1] + .01
+    before = copy.deepcopy(overlapping)
+    result = extract([header, *overlapping, line([(.05, "Subtotal")], .4)], configured)
+    assert result["tables"]["detalle"] == []
+    assert all(region["reason"] == "AMBIGUOUS_ROW_BOUNDARY" for region in result["table_unparsed"]["detalle"])
+    assert Counter(token for region in result["table_unparsed"]["detalle"] for token in region["text"].split()) == Counter(
+        token for item in overlapping for word in item["words"] for token in word["text"].split())
+    assert overlapping == before
+
+
+def test_later_multiline_fragment_cannot_complete_an_earlier_row():
+    configured = definition({"fields": [{"name": "opcional", "required": False}], "tables": [{
+        "name": "detalle", "fields": [{"name": name} for name in ("descripcion", "cantidad", "precio", "total")],
+        "visual": {"page": 1, "region": [.05, .2, .99, .24],
+            "header_labels": ["Descripción", "Cantidad", "Precio", "Total"],
+            "column_bounds": [0, .45, .65, .83, 1], "stop_label": "Subtotal",
+            "flowing": True, "continue_pages": True, "multiline_column": 0, "row_tolerance": .027}}]})
+    header = line([(.05, "Descripción"), (.5, "Cantidad"), (.7, "Precio"), (.86, "Total")], .2)
+    source = [line([(.5, "R1Q")], .246), line([(.7, "R1P"), (.86, "R1T")], .2505),
+              line([(.5, "R2Q"), (.7, "R2P"), (.86, "R2T")], .251), line([(.05, "D2")], .2509)]
+    for item in source:
+        for word in item["words"]:
+            word["region"][3] = word["region"][1] + .008
+    before = copy.deepcopy(source)
+    result = extract([header, *source, line([(.05, "Subtotal")], .4)], configured)
+    assert result["tables"]["detalle"] == []
+    assert all(region["reason"] == "AMBIGUOUS_ROW_BOUNDARY" for region in result["table_unparsed"]["detalle"])
+    assert Counter(token for region in result["table_unparsed"]["detalle"] for token in region["text"].split()) == Counter(
+        token for item in source for word in item["words"] for token in word["text"].split())
+    assert source == before
 
 
 def test_arithmetic_uses_decimal_rounding_and_never_rewrites_discrepancies():
