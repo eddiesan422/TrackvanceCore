@@ -145,6 +145,14 @@ def row_groups(lines, page, start, end, baseline_tolerance=.004):
     return [sorted(items, key=lambda item: item[0]["region"][0]) for _, items in groups]
 
 
+def column_reading_order(column):
+    """Keep separate text baselines in reading order inside one table cell."""
+    if not column:
+        return column
+    lines = [{**source, "words": [word]} for word, source in column]
+    return [item for group in row_groups(lines, column[0][1]["page"], 0, 1) for item in group]
+
+
 def table_candidates(lines, rule):
     lines = visual_lines(lines, .012 if rule.get("flowing") else .004)
     rows: list[list[tuple[str, dict]]] = []
@@ -194,6 +202,7 @@ def table_candidates(lines, rule):
                         rejected.append({"text": " ".join(w["text"] for w, _ in group), "page": page,
                                          "region": box([w for w, _ in group]), "method": group[0][1]["method"]})
                     continue
+                columns = [column_reading_order(column) for column in columns]
                 continuation = rule.get("multiline_column")
                 if continuation is not None and continuation < len(columns) and columns[continuation] and sum(bool(c) for c in columns) == 1 and rows and not outside:
                     raw, prior = rows[-1][continuation]

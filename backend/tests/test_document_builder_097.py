@@ -122,6 +122,35 @@ def test_flowing_tables_multiword_header_multiline_longer_pages_and_unparsed_row
     assert len(result["table_unparsed"]["detalle"]) == 1
 
 
+def test_multiline_cells_keep_reading_order_inside_grouped_row_baselines():
+    """A row tolerance can join lines, but must not interleave their words by x."""
+    lines = [line([(.05, "Descripción"), (.5, "Cantidad"), (.7, "Precio"), (.86, "Total")], .2),
+             line([(.05, "SYN001")], .25),
+             line([(.5, "2"), (.7, "11.25"), (.86, "22.50")], .26),
+             line([(.05, "Material"), (.16, "ficticio")], .267),
+             line([(.05, "con"), (.16, "empaque")], .282),
+             line([(.05, "extendido"), (.16, "especial")], .297),
+             line([(.05, "SYN002"), (.5, "0"), (.7, "3.25"), (.86, "0.00")], .35),
+             line([(.05, "Segundo"), (.16, "producto")], .367),
+             line([(.05, "Subtotal"), (.86, "22.50")], .45)]
+    configured = definition({"fields": [{"name": "opcional", "required": False}], "tables": [{
+        "name": "detalle", "fields": [{"name": "descripcion"},
+            *[{"name": name, "logical_type": "DECIMAL"} for name in ("cantidad", "precio", "total")]],
+        "visual": {"page": 1, "region": [.05, .2, .99, .24],
+            "header_labels": ["Descripción", "Cantidad", "Precio", "Total"],
+            "column_bounds": [0, .45, .65, .83, 1], "stop_label": "Subtotal",
+            "flowing": True, "continue_pages": True, "multiline_column": 0, "row_tolerance": .027}}]})
+    before = copy.deepcopy(lines)
+    result = extract(lines, configured)
+    rows = result["tables"]["detalle"]
+    assert [[row[key]["value"] for key in ("descripcion", "cantidad", "precio", "total")] for row in rows] == [
+        ["SYN001 Material ficticio con empaque extendido especial", "2", "11.25", "22.50"],
+        ["SYN002 Segundo producto", "0", "3.25", "0.00"]]
+    assert result["table_unparsed"]["detalle"] == []
+    assert rows[0]["descripcion"]["origin"]["region"] == box([word for source in lines[1:6] for word in source["words"] if word["region"][0] < .45])
+    assert lines == before
+
+
 def test_arithmetic_uses_decimal_rounding_and_never_rewrites_discrepancies():
     configured = definition({"fields": [{"name": name, "label": name, "logical_type": "DECIMAL"} for name in ["cantidad", "precio", "total"]],
         "arithmetic": [{"name": "cantidad por precio", "operation": "PRODUCT", "terms": ["cantidad", "precio"], "result": "total", "scale": 2, "tolerance": "0.00"}]})
