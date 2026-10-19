@@ -10,6 +10,8 @@
   descubrimiento multiejemplo y pruebas/activación sobre instantáneas verificadas.
 - Lectura de celdas multilínea por baselines y separación geométrica de filas
   compactas; las regiones incompletas conservan sus palabras para revisión.
+- Vista previa de referencias multipágina con usuario recargado y permisos
+  revalidados después del renderizado; caché sin repetir el procesamiento.
 - Migraciones aditivas 0026/0027. Las pruebas históricas no certifican este candidato.
 - El informe oficial registra gates, corpus real y sintético, preservación y
   estado de despliegue; esta versión y sus notas no sustituyen esa evidencia.

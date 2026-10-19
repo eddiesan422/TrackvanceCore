@@ -374,3 +374,66 @@ def test_legacy_builder_test_route_guides_to_draft_without_creating_evidence(aut
     with database() as db:
         for model in (DocumentTemplate, DocumentDraft, DocumentReference, DocumentOriginal, Job):
             assert db.scalar(select(func.count()).select_from(model)) == 0
+
+
+def test_reference_preview_rebinds_user_caches_second_page_and_rechecks_authority(authenticated, database, tmp_path, monkeypatch):
+    import re
+
+    from test_document_visual_builder_095 import invoice_pdf
+
+    from trackvance import document_worker
+    from trackvance.models import ArtifactLink, User
+
+    source = invoice_pdf(tmp_path / "two-pages.pdf")
+    objects = [body for _, body in re.findall(rb"(\d+) 0 obj\n(.*?)\nendobj", source.read_bytes(), re.DOTALL)]
+    objects[1] = b"<< /Type /Pages /Count 2 /Kids [4 0 R 6 0 R] >>"
+    content = b"BT /F1 18 Tf 60 710 Td (Independent synthetic second page) Tj ET"
+    objects.extend([b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>",
+                    f"<< /Length {len(content)} >>\nstream\n".encode() + content + b"\nendstream"])
+    output, offsets = bytearray(b"%PDF-1.4\n"), [0]
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode() + body + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    family = authenticated.post("/api/v1/documents/families", json={"name": "Reference page authorization"}).json()["id"]
+    uploaded = authenticated.post(f"/api/v1/documents/families/{family}/builder/references",
+        files={"files": (source.name, bytes(output), "application/pdf")}, data={"role": "HOLDOUT"})
+    assert uploaded.status_code == 200
+    identity = uploaded.json()["items"][0]["id"]
+    assert document_worker.process_once()
+    before = authenticated.get(f"/api/v1/documents/builder/references/{identity}").json()
+    assert before["payload"]["pages"] == [1, 2]
+    rendered = []
+    original_render = document_worker.run_engine
+
+    def render_and_revoke(*args, **kwargs):
+        result = original_render(*args, **kwargs)
+        rendered.append(kwargs["preview_page"])
+        if kwargs["preview_page"] == 1:
+            with database() as db:
+                actor = db.get(User, "test-user")
+                actor.active = False
+                db.commit()
+        return result
+
+    monkeypatch.setattr(document_worker, "run_engine", render_and_revoke)
+    url = f"/api/v1/documents/builder/references/{identity}/pages/"
+    first = authenticated.get(url + "2")
+    assert first.status_code == 200 and first.headers["content-type"] == "image/jpeg"
+    assert first.content.startswith(b"\xff\xd8")
+    cached = authenticated.get(url + "2")
+    assert cached.status_code == 200 and cached.content == first.content and rendered == [2]
+    denied = authenticated.get(url + "1")
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "DOCUMENT_FORBIDDEN"
+    assert rendered == [2, 1]
+    with database() as db:
+        reference = db.get(DocumentReference, identity)
+        assert reference.payload_hash == before["payload_hash"] and reference.role == "HOLDOUT" and not reference.configuration_used
+        relations = list(db.scalars(select(ArtifactLink.relation).where(ArtifactLink.source_type == "DOCUMENT_REFERENCE", ArtifactLink.source_id == identity)))
+        assert "DOCUMENT_REFERENCE_PAGE_2" in relations and "DOCUMENT_REFERENCE_PAGE_1" not in relations
+        for model in (DocumentTemplate, DocumentDraft, DocumentOriginal):
+            assert db.scalar(select(func.count()).select_from(model)) == 0
