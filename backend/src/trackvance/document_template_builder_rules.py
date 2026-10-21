@@ -3,10 +3,37 @@
 The caller retains scalar validation and provenance. Coordinates are measured
 from the actual OCR/PDF words, never synthesized by dividing line width.
 """
+import math
 import re
 import unicodedata
 from bisect import bisect_right
 from itertools import pairwise
+from statistics import median
+
+
+def valid_page_geometry(value, pages):
+    """Optional dimensions are measured source metadata, never assumed layout."""
+    if not isinstance(value, dict) or not 1 <= len(value) <= 50:
+        return False
+    for page, item in value.items():
+        if (not isinstance(page, str) or not 1 <= len(page) <= 2 or not page.isascii() or not page.isdecimal()
+            or not 1 <= int(page) <= 50 or str(int(page)) != page
+            or not isinstance(item, dict) or set(item) != {"width", "height", "unit"}
+            or not isinstance(item["unit"], str) or item["unit"] not in {"PDF_POINT", "PIXEL"}):
+            return False
+        width, height = item["width"], item["height"]
+        if any(isinstance(size, bool) or not isinstance(size, (int, float))
+               or isinstance(size, float) and not math.isfinite(size) or size <= 0
+               for size in (width, height)):
+            return False
+        if item["unit"] == "PDF_POINT" and max(width, height) > 14400:
+            return False
+        if item["unit"] == "PIXEL" and (not isinstance(width, int) or not isinstance(height, int)
+                                        or width * height > 20_000_000):
+            return False
+        if not (0 < width / height < math.inf and 0 < height / width < math.inf):
+            return False  # Both physical coordinate scales must be representable.
+    return {str(page) for page in pages} <= set(value)
 
 
 def normalized(value):
@@ -53,11 +80,46 @@ def anchor(line, label):
     return matches[0] if matches else None
 
 
+def table_anchor_matches(line, label):
+    """A full caption can continue vertically within the same horizontal band."""
+    matches = anchor_matches(line, label)
+    vertical: set[tuple[int, int]] = set()
+    target = anchor_key(label)
+    parts = normalized(label).split()
+    if len(parts) < 2:
+        return matches, vertical
+    bag = sorted(anchor_key(part) for part in parts)
+    tokens = words(line)
+    existing = {(item[0], item[1]) for item in matches}
+    for start in range(len(tokens)):
+        for end in range(start + 1, min(len(tokens), start + min(24, len(parts))) + 1):
+            if (start, end) in existing:
+                continue
+            selected = tokens[start:end]
+            observed = normalized(" ".join(word["text"] for word in selected)).split()
+            if sorted(anchor_key(part) for part in observed) != bag:
+                continue
+            rows = row_groups([{"page": line["page"], "words": selected}], line["page"], 0, 1)
+            if len(rows) < 2:
+                continue  # A different horizontal word order is not this label.
+            left = max(min(word["region"][0] for word, _ in row) for row in rows)
+            right = min(max(word["region"][2] for word, _ in row) for row in rows)
+            if left >= right:
+                continue  # Separate columns do not form a vertical caption.
+            ordered = [word for row in rows for word, _ in row]
+            if anchor_key(" ".join(word["text"] for word in ordered)) != target:
+                continue
+            matches.append((start, end, box(selected)))
+            vertical.add((start, end))
+    return matches, vertical
+
+
 def table_header_anchors(line, labels):
     if len({anchor_key(label) for label in labels}) != len(labels):
         return None  # Punctuation cannot distinguish two logical columns.
-    matches = [anchor_matches(line, label) for label in labels]
-    resolved = []
+    observed = [table_anchor_matches(line, label) for label in labels]
+    matches = [item[0] for item in observed]
+    filtered = []
     for index, candidates in enumerate(matches):
         # "Amount" inside the declared longer "Net amount" cannot also stand
         # for a separate Amount column. Its own distinct occurrence is needed.
@@ -65,11 +127,37 @@ def table_header_anchors(line, labels):
             other[0] <= candidate[0] and candidate[1] <= other[1]
             and other[1] - other[0] > candidate[1] - candidate[0]
             for other_index, group in enumerate(matches) if other_index != index for other in group)]
-        if len(candidates) != 1:
+        filtered.append(candidates)
+    if any(item[1] for item in observed):
+        # A horizontal scan can attach the next column's suffix to this one.
+        # Accept only a unique complete, ordered partition of the full labels.
+        paths: dict[tuple[int, int], tuple[int, list[tuple[int, int, list[float]]]]] = {(-1, -1): (1, [])}
+        for candidates in filtered:
+            following: dict[tuple[int, int], tuple[int, list[tuple[int, int, list[float]]]]] = {}
+            for candidate in candidates:
+                compatible = [(count, path) for (_, end), (count, path) in paths.items()
+                              if end <= candidate[0]]
+                count = min(2, sum(item[0] for item in compatible))
+                if count:
+                    following[(candidate[0], candidate[1])] = (
+                        count, compatible[0][1] + [candidate] if count == 1 else [])
+            paths = following
+        if sum(item[0] for item in paths.values()) != 1:
             return None
-        resolved.append(candidates[0])
+        resolved = next(iter(paths.values()))[1]
+        if not any((item[0], item[1]) in observed[index][1] for index, item in enumerate(resolved)) \
+                and any(len(candidates) != 1 for candidates in filtered):
+            return None  # An unused vertical alternative cannot waive legacy ambiguity.
+    else:
+        if any(len(candidates) != 1 for candidates in filtered):
+            return None
+        resolved = [candidates[0] for candidates in filtered]
     if any(first[1] > second[0] for first, second in pairwise(resolved)):
         return None  # Header spans must be distinct and in declared order.
+    if any((item[0], item[1]) in observed[index][1] for index, item in enumerate(resolved)):
+        covered = {index for start, end, _ in resolved for index in range(start, end)}
+        if covered != set(range(len(words(line)))):
+            return None  # Never erase an extra STRING while extending a header.
     return resolved
 
 
@@ -165,13 +253,42 @@ def field_candidates(lines, rule):
     return candidates
 
 
-def row_groups(lines, page, start, end, baseline_tolerance=.004):
+def projected_point(x, y, frame):
+    if frame is None:
+        return x, y
+    x0, y0 = frame["pivot"]
+    if frame["aspect"] is None:
+        return x, y - frame["slope"] * (x - x0)
+    ratio, cosine, sine = frame["aspect"], frame["cosine"], frame["sine"]
+    return (x0 + (x - x0) * cosine + (y - y0) * sine / ratio,
+            y0 - (x - x0) * sine * ratio + (y - y0) * cosine)
+
+
+def projected_center(word, frame):
+    return projected_point((word["region"][0] + word["region"][2]) / 2,
+                           (word["region"][1] + word["region"][3]) / 2, frame)
+
+
+def projected_region(word, frame):
+    x1, y1, x2, y2 = word["region"]
+    corners = [projected_point(x, y, frame) for x, y in ((x1, y1), (x1, y2), (x2, y1), (x2, y2))]
+    return [min(x for x, _ in corners), min(y for _, y in corners),
+            max(x for x, _ in corners), max(y for _, y in corners)]
+
+
+def row_groups(lines, page, start, end, baseline_tolerance=.004, baseline_slope=0, coordinate_frame=None):
+    def center(word):
+        if coordinate_frame is not None:
+            return projected_center(word, coordinate_frame)[1]
+        return ((word["region"][1] + word["region"][3]) / 2
+                - baseline_slope * (word["region"][0] + word["region"][2]) / 2)
+
     tokens = [(word, line) for line in lines if line["page"] == page
               for word in words(line) if start < (word["region"][1] + word["region"][3]) / 2 < end]
-    tokens.sort(key=lambda item: ((item[0]["region"][1] + item[0]["region"][3]) / 2, item[0]["region"][0]))
+    tokens.sort(key=lambda item: (center(item[0]), item[0]["region"][0]))
     groups: list[tuple[float, list[tuple[dict, dict]]]] = []
     for word, line in tokens:
-        middle = (word["region"][1] + word["region"][3]) / 2
+        middle = center(word)
         height = word["region"][3] - word["region"][1]
         if not groups or abs(groups[-1][0] - middle) > max(baseline_tolerance, height * .6):
             groups.append((middle, [(word, line)]))
@@ -180,25 +297,32 @@ def row_groups(lines, page, start, end, baseline_tolerance=.004):
     return [sorted(items, key=lambda item: item[0]["region"][0]) for _, items in groups]
 
 
-def column_reading_order(column):
+def column_reading_order(column, baseline_slope=0, coordinate_frame=None):
     """Keep separate text baselines in reading order inside one table cell."""
     if not column:
         return column
     lines = [{**source, "words": [word]} for word, source in column]
-    return [item for group in row_groups(lines, column[0][1]["page"], 0, 1) for item in group]
+    return [item for group in row_groups(lines, column[0][1]["page"], 0, 1,
+                                        baseline_slope=baseline_slope,
+                                        coordinate_frame=coordinate_frame) for item in group]
 
 
-def flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance):
+def flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance, baseline_slope=0, coordinate_frame=None):
     """Use other columns as row baselines; retain incomplete and stray groups."""
     def column_number(word):
-        center = (word["region"][0] + word["region"][2]) / 2
+        center = projected_center(word, coordinate_frame)[0]
         return next((i for i, (left, right) in enumerate(pairwise(bounds)) if left <= center < right), None)
 
     def middle(items):
-        return sum((word["region"][1] + word["region"][3]) / 2 for word, _ in items) / len(items)
+        if coordinate_frame is not None:
+            return sum(projected_center(word, coordinate_frame)[1] for word, _ in items) / len(items)
+        return sum((word["region"][1] + word["region"][3]) / 2
+                   - baseline_slope * (word["region"][0] + word["region"][2]) / 2
+                   for word, _ in items) / len(items)
 
     classified = []
-    for group in row_groups(lines, page, start, end):
+    for group in row_groups(lines, page, start, end, baseline_slope=baseline_slope,
+                            coordinate_frame=coordinate_frame):
         parts: list[list[tuple[dict, dict]]] = [[], [], []]
         for item in group:
             column = column_number(item[0])
@@ -242,6 +366,89 @@ def flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance):
             if fragment:
                 result[bisect_right(starts, middle(fragment))].extend(fragment)
     return [group for group in result if group]
+
+
+def header_baseline_slope(anchors):
+    """Measure a parallel baseline from complete observed anchors, never values."""
+    if len(anchors) < 3:
+        return 0
+    points = [((item[2][0] + item[2][2]) / 2, (item[2][1] + item[2][3]) / 2)
+              for item in anchors]
+    span = points[-1][0] - points[0][0]
+    if span < .25:
+        return 0
+    slopes = [(right[1] - left[1]) / (right[0] - left[0])
+              for index, left in enumerate(points) for right in points[index + 1:]
+              if right[0] - left[0] >= span / 3]
+    if not slopes:
+        return 0
+    slope = median(slopes)
+    intercept = median(y - slope * x for x, y in points)
+    glyph_height = median(item[2][3] - item[2][1] for item in anchors)
+    if max(abs(y - slope * x - intercept) for x, y in points) > glyph_height / 2:
+        return 0  # Different caption baselines do not prove a page/table angle.
+    return slope
+
+
+def observed_flowing_groups(lines, page, start, end, bounds, multiline, tolerance, anchors, geometry=None):
+    """Recover an incomplete partition using header geometry; retain all origins."""
+    original = flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance)
+
+    def columns_for(group, column_bounds, frame=None):
+        columns: list[list[dict]] = [[] for _ in column_bounds[:-1]]
+        outside: list[dict] = []
+        for word, _ in group:
+            center = projected_center(word, frame)[0]
+            index = next((i for i, (left, right) in enumerate(pairwise(column_bounds)) if left <= center < right), None)
+            (outside if index is None else columns[index]).append(word)
+        return columns, outside
+
+    def complete(group):
+        columns, outside = columns_for(group, bounds)
+        return all(columns) and not outside
+
+    if original is not None and all(complete(group) for group in original):
+        return original, None, bounds
+    slope = header_baseline_slope(anchors)
+    if not slope:
+        return original, None, bounds
+    pivot = ((anchors[0][2][0] + anchors[0][2][2]) / 2,
+             (anchors[0][2][1] + anchors[0][2][3]) / 2)
+    ratio = geometry["width"] / geometry["height"] if geometry else None
+    angle = math.atan(slope / ratio) if ratio is not None else 0
+    frame = {"slope": slope, "aspect": ratio, "pivot": pivot,
+             "cosine": math.cos(angle), "sine": math.sin(angle)}
+    shift = projected_region({"region": anchors[0][2]}, frame)[0] - anchors[0][2][0]
+    projected_bounds = [value + shift for value in bounds]
+    projected = flowing_row_groups(lines, page, start, end, projected_bounds, multiline, tolerance,
+                                   coordinate_frame=frame)
+    if projected is None:
+        return original, None, bounds
+    projected_columns = [columns_for(group, projected_bounds, frame) for group in projected]
+    # A partly explained body cannot justify a new complete row: that row may
+    # contain a neighboring product's scalar. Preserve every original region.
+    if any(outside or not all(columns) for columns, outside in projected_columns):
+        return original, None, bounds
+    previous_bottoms: dict[int, float] = {}
+    for columns, _ in projected_columns:
+        for index, column in enumerate(columns):
+            if index == multiline:
+                continue
+            regions = sorted((projected_region(word, frame) for word in column), key=lambda region: region[0])
+            if any(left[2] > right[0] for left, right in pairwise(regions)):
+                return original, None, bounds  # Overlapping values are not one scalar cell.
+            cores = [(region[1] + (region[3] - region[1]) / 3,
+                      region[3] - (region[3] - region[1]) / 3) for region in regions]
+            if max(top for top, _ in cores) > min(bottom for _, bottom in cores):
+                return original, None, bounds  # One cell needs a common observed glyph baseline.
+            top, bottom = min(region[1] for region in regions), max(region[3] for region in regions)
+            if index in previous_bottoms and top <= previous_bottoms[index]:
+                return original, None, bounds  # Neighboring row glyphs are not separable.
+            previous_bottoms[index] = bottom
+    assert {id(word) for group in projected for word, _ in group} == {
+        id(word) for line in lines if line["page"] == page for word in words(line)
+        if start < (word["region"][1] + word["region"][3]) / 2 < end}
+    return projected, frame, projected_bounds
 
 
 def prefix_furniture_words(lines, page, start, end, rule, fields, header_values, validator, dx=0):
@@ -424,7 +631,7 @@ def without_caption_words(lines, excluded):
     return filtered
 
 
-def table_candidates(lines, rule, fields=None, header_values=(), validator=None):
+def table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None):
     excluded = header_caption_word_ids(lines, rule, fields, validator)
     if excluded:
         lines = without_caption_words(lines, excluded)
@@ -446,9 +653,9 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None)
     previous_bounds, continuing = None, False
     for page in sorted({line["page"] for line in lines}):
         page_headers = [h for h in headers if h[0]["page"] == page]
-        segments = [(max(a[2][3] for a in anchors), line["region"][1], dx) for line, anchors, dx in page_headers]
+        segments = [(max(a[2][3] for a in anchors), line["region"][1], dx, anchors) for line, anchors, dx in page_headers]
         if not segments and rule.get("continue_pages") and continuing and previous_bounds is not None:
-            segments = [(0, 0, previous_bounds)]
+            segments = [(0, 0, previous_bounds, [])]
         if (page_headers or not segments) and rule.get("flowing") and page >= rule["page"] and (page == rule["page"] or rule.get("continue_pages")):
             # OCR may recognize every product but omit a white-on-dark header.
             # Never invent its rows or silently discard that visible region
@@ -475,7 +682,7 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None)
                 rejected.append({"text": " ".join(word["text"] for word, _ in body), "page": page,
                                  "region": box([word for word, _ in body]), "method": body[0][1]["method"],
                                  "reason": "TABLE_HEADER_NOT_FOUND"})
-        for header_bottom, header_top, dx in segments:
+        for header_bottom, header_top, dx, observed_anchors in segments:
             end = 1 if rule.get("flowing") else min(1, header_top + rule["region"][3] - rule["region"][1] + rule.get("tolerance", .12))
             following_headers = [line["region"][1] for line, _, _ in page_headers if line["region"][1] > header_bottom]
             if following_headers:
@@ -488,9 +695,14 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None)
             continuing = not bool(stops)
             previous_bounds = dx
             bounds = [value + dx for value in rule["column_bounds"]]
-            groups = (flowing_row_groups(lines, page, header_bottom, end, bounds, rule["multiline_column"], rule.get("row_tolerance", .018))
-                      if rule.get("flowing") and rule.get("multiline_column") is not None
-                      else row_groups(lines, page, header_bottom, end, rule.get("row_tolerance", .018) if rule.get("flowing") else .004))
+            body_frame = None
+            if rule.get("flowing") and rule.get("multiline_column") is not None:
+                groups, body_frame, bounds = observed_flowing_groups(lines, page, header_bottom, end, bounds,
+                    rule["multiline_column"], rule.get("row_tolerance", .018), observed_anchors,
+                    (page_geometry or {}).get(str(page)))
+            else:
+                groups = row_groups(lines, page, header_bottom, end,
+                                    rule.get("row_tolerance", .018) if rule.get("flowing") else .004)
             if groups is None:
                 for group in row_groups(lines, page, header_bottom, end):
                     rejected.append({"text": " ".join(word["text"] for word, _ in group), "page": page,
@@ -501,7 +713,7 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None)
                 columns: list[list[tuple[dict, dict]]] = [[] for _ in labels]
                 outside = []
                 for word, source in group:
-                    center = (word["region"][0] + word["region"][2]) / 2
+                    center = projected_center(word, body_frame)[0]
                     target = next((i for i, (left, right) in enumerate(pairwise(bounds)) if left <= center < right), None)
                     if target is None:
                         outside.append(word)
@@ -512,7 +724,7 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None)
                         rejected.append({"text": " ".join(w["text"] for w, _ in group), "page": page,
                                          "region": box([w for w, _ in group]), "method": group[0][1]["method"]})
                     continue
-                columns = [column_reading_order(column) for column in columns]
+                columns = [column_reading_order(column, coordinate_frame=body_frame) for column in columns]
                 continuation = rule.get("multiline_column")
                 if continuation is not None and continuation < len(columns) and columns[continuation] and sum(bool(c) for c in columns) == 1 and rows and not outside:
                     raw, prior = rows[-1][continuation]

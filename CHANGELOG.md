@@ -14,9 +14,18 @@
   cabeceras completas ya extraídas con procedencia, sin ocultar palabras
   desconocidas, solapamientos ni escalares de productos pendientes de revisión.
 - ID 1 PDP: atribución literal y geométrica de títulos de columna partidos, sin
-  consumir fragmentos STRING, identificadores con ceros iniciales ni regiones
+  consumir fragmentos STRING adicionales, identificadores con ceros iniciales ni regiones
   con indicios de producto. La ambigüedad conserva todas las palabras para
   revisión; no se desplaza el inicio de detalle ni se reconstruyen filas.
+- ID 1 PDP: dimensiones reales por página en nuevas lecturas, con presencia,
+  tipo y valor conservados en el protocolo Builder, descubrimiento e instantánea.
+  Las referencias anteriores sin dimensiones no reciben un tamaño supuesto.
+- ID 1 PDP: asociación local de columnas escalonadas con la proporción real de
+  página, partición completa y separación de valores vecinos; las palabras y
+  regiones originales permanecen intactas y la ambigüedad exige revisión.
+- ID 1 PDP: anclas literales completas de varias líneas con apoyo horizontal y
+  partición única del encabezado. No amplía anclas parciales ni usa alternativas
+  verticales descartadas para aceptar encabezados horizontales ambiguos.
 - Los lotes manuales reconocen la prueba independiente e íntegra de la revisión
   activada desde Builder, sin exigir un ejemplo operativo del flujo anterior.
 - Centro de control exige una población evaluada positiva para mostrar calidad.

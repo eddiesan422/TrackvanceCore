@@ -184,6 +184,7 @@ def discover(references):
     definition = DocumentDefinition.model_validate({"fields": fields, "tables": tables}).model_dump(mode="json")
     return {"definition": definition, "observations": observations,
             "expected_not_located": [name for name, samples in observations.items() if not samples],
-            "results": {reference.id: extract(reference.payload["lines"], definition) for reference in references},
+            "results": {reference.id: extract(reference.payload["lines"], definition,
+                reference.payload.get("page_geometry")) for reference in references},
             "table_alternatives": table_proposals,
             "notice": "Propuesta editable obtenida de todas las referencias de configuración; revisa ambigüedades, formatos y filas no interpretadas."}

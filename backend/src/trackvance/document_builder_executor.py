@@ -29,6 +29,8 @@ def _region(value):
 
 
 def _valid_request(request):
+    from trackvance.document_template_builder_rules import valid_page_geometry
+
     if not isinstance(request, dict) or request.get("operation") not in {"EXTRACT", "DISCOVER"}:
         return False
     references = request.get("references")
@@ -58,6 +60,8 @@ def _valid_request(request):
                 word_characters += len(word["text"])
             if max(characters, word_characters) > 2_000_000:
                 return False
+        if "page_geometry" in reference and not valid_page_geometry(reference["page_geometry"], {line["page"] for line in lines}):
+            return False
     if len(set(ids)) != len(ids):
         return False
     return request["operation"] != "EXTRACT" or isinstance(request.get("definition"), dict)
@@ -77,6 +81,8 @@ def _write_json(path, value):
 
 
 def _valid_result(result, request):
+    from trackvance.document_template_builder_rules import valid_page_geometry
+
     if not isinstance(result, dict):
         return False
     definition = request.get("definition")
@@ -103,13 +109,20 @@ def _valid_result(result, request):
     if not isinstance(result, dict) or set(result) != {reference["id"] for reference in request["references"]}:
         return False
     sources = {reference["id"]: reference["lines"] for reference in request["references"]}
+    geometries = {reference["id"]: reference.get("page_geometry") for reference in request["references"]}
+    geometry_present = {reference["id"]: "page_geometry" in reference for reference in request["references"]}
     for identity, payload in result.items():
         if (not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict)
             or not isinstance(payload.get("tables"), dict) or not isinstance(payload.get("table_unparsed"), dict)):
             return False
         if (set(payload["fields"]) != names or set(payload["tables"]) != set(columns)
             or set(payload["table_unparsed"]) != set(columns) or payload.get("lines") != sources[identity]
-            or payload.get("pages") != sorted({line["page"] for line in sources[identity]})):
+            or payload.get("pages") != sorted({line["page"] for line in sources[identity]})
+            or payload.get("page_geometry") != geometries[identity]):
+            return False
+        if (("page_geometry" in payload) != geometry_present[identity]
+            or geometry_present[identity] and (not valid_page_geometry(payload["page_geometry"], payload["pages"])
+                or json.dumps(payload["page_geometry"], sort_keys=True) != json.dumps(geometries[identity], sort_keys=True))):
             return False
         cells = list(payload["fields"].values())
         for table, rows in payload["tables"].items():
@@ -234,10 +247,11 @@ def _child(folder):
         confine(folder)
         references = request["references"]
         if request["operation"] == "DISCOVER":
-            result = discover([SimpleNamespace(id=reference["id"], payload={"lines": reference["lines"]}) for reference in references])
+            result = discover([SimpleNamespace(id=reference["id"], payload={"lines": reference["lines"],
+                **({"page_geometry": reference["page_geometry"]} if "page_geometry" in reference else {})}) for reference in references])
         else:
             definition = DocumentDefinition.model_validate(request["definition"]).model_dump(mode="json")
-            result = {reference["id"]: extract(reference["lines"], definition) for reference in references}
+            result = {reference["id"]: extract(reference["lines"], definition, reference.get("page_geometry")) for reference in references}
         _write_json(folder / "result.json", result)
     except (ArithmeticError, KeyError, MemoryError, OSError, RecursionError, TypeError, ValueError, OperationError) as error:
         code = error.code if isinstance(error, OperationError) else str(error)

@@ -49,10 +49,27 @@ Los títulos de columnas partidas pueden reconocerse mediante su etiqueta litera
 completa, un ancla observada y una banda geométrica local de la cabecera. Sólo
 se atribuyen los fragmentos completos de columnas de tipo distinto de STRING; cualquier escalar
 válido o indicio de producto anterior o solapado impide esa atribución. Los
-fragmentos de columnas STRING, incluidos `001` y `%`, permanecen visibles. No
+fragmentos STRING adicionales, incluidos `001` y `%`, permanecen visibles. No
 se adelanta el inicio del detalle ni se reconstruyen filas. Las regiones
 desconocidas o ambiguas siguen sujetas a revisión; el cambio no recupera píxeles
 que ninguno de los pases OCR haya reconocido.
+
+Una etiqueta visual literal completa también puede continuar en otra línea de
+la misma columna. Esa lectura exige fragmentos contiguos, orden vertical, apoyo
+horizontal común y una única partición ordenada que explique todo el encabezado.
+No amplía un ancla parcial a partir de la etiqueta del campo. Las alternativas
+verticales no utilizadas no eliminan el rechazo de encabezados duplicados.
+
+Las nuevas lecturas conservan `page_geometry` con las dimensiones reales de cada
+página en puntos PDF o píxeles. Builder las vincula a su prueba e instantánea;
+las referencias anteriores sin esa metadata siguen admitidas sin inventar un
+tamaño. Cuando la asociación original deja columnas incompletas, el motor puede
+usar un marco local medido desde anclas coherentes y la proporción real de la
+página. Sólo acepta una partición completa con valores vecinos separables;
+la ambigüedad conserva el resultado anterior y sus regiones para revisión.
+La proyección no modifica palabras, regiones originales ni procedencia. Este
+cambio requiere nuevas lecturas para validar su contrato y no certifica por sí
+solo el corpus ni la publicación operativa.
 
 ### Antecedente 0.9.5
 

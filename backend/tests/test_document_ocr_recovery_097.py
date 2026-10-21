@@ -54,6 +54,9 @@ def test_confined_native_process_extracts_the_complete_two_page_scanned_invoice(
         "invoice": EXPECTED["invoice"], "invoice_total": EXPECTED["total"]}
     assert payload["table_unparsed"]["detail"] == []
     assert result["engine"]["pages"] == 2
+    assert payload["page_geometry"] == {
+        "1": {"width": 612, "height": 792, "unit": "PDF_POINT"},
+        "2": {"width": 612, "height": 792, "unit": "PDF_POINT"}}
     assert result["engine"]["processing_sha256"] == engine.PROCESSOR_HASHES
 
 

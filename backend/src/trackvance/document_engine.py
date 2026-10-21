@@ -220,9 +220,12 @@ def ocr(path, page):
     return merge_lines(ocr_pass(path, page, width, height, 6), ocr_pass(path, page, width, height, 11))
 
 
-def lines_from_file(source, folder, progress):
+def lines_from_file(source, folder, progress, page_geometry=None):
     if source.suffix != ".pdf":
         lines = ocr(source, 1)
+        if page_geometry is not None:
+            width, height = image_size(source)
+            page_geometry["1"] = {"width": width, "height": height, "unit": "PIXEL"}
         progress.write_text("100")
         return lines, 1
     info = command(["/usr/bin/pdfinfo", str(source)])
@@ -242,6 +245,8 @@ def lines_from_file(source, folder, progress):
             width, height = float(page.attrib["width"]), float(page.attrib["height"])
             if width <= 0 or height <= 0 or max(width, height) > 14400:
                 raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
+            if page_geometry is not None:
+                page_geometry[str(index + 1)] = {"width": width, "height": height, "unit": "PDF_POINT"}
             for line in page.findall(".//{*}line"):
                 words = line.findall("{*}word")
                 if words:
@@ -258,6 +263,9 @@ def lines_from_file(source, folder, progress):
             prefix = folder / f"page-{index + 1}"
             command(["/usr/bin/pdftoppm", "-f", str(index + 1), "-l", str(index + 1), "-singlefile",
                      "-scale-to", "4000", "-png", str(source), str(prefix)])
+            if page_geometry is not None and str(index + 1) not in page_geometry:
+                width, height = image_size(prefix.with_suffix(".png"))
+                page_geometry[str(index + 1)] = {"width": width, "height": height, "unit": "PIXEL"}
             page_lines = merge_lines(page_lines, ocr(prefix.with_suffix(".png"), index + 1))
             prefix.with_suffix(".png").unlink(missing_ok=True)
         output.extend(page_lines)
@@ -361,7 +369,9 @@ def arithmetic_checks(payload, definition):
     return checks
 
 
-def extract(lines, definition):
+def extract(lines, definition, page_geometry=None):
+    if page_geometry is not None and not _visual_rules.valid_page_geometry(page_geometry, {line["page"] for line in lines}):
+        raise ValueError("DOCUMENT_PAGE_GEOMETRY")
     fields = {}
     for field in definition["fields"]:
         matches = []
@@ -403,7 +413,7 @@ def extract(lines, definition):
             header_values = [fields[field["name"]]["value"] for field in definition["fields"]
                              if field.get("logical_type", "STRING") == "STRING" and fields[field["name"]]["validity"] == "VALID"
                              and fields[field["name"]]["origin"] is not None]
-            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"], table["fields"], header_values, validate_value)
+            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"], table["fields"], header_values, validate_value, page_geometry)
             for values in visual_rows:
                 row = {}
                 for field, (raw, source) in zip(table["fields"], values, strict=True):
@@ -440,6 +450,8 @@ def extract(lines, definition):
     payload = {"fields": fields, "tables": tables, "pages": sorted({line["page"] for line in lines}),
             "lines": lines, "table_unparsed": table_unparsed,
             "business_period": {"field": period_field, **fields[period_field]} if period_field else None}
+    if page_geometry is not None:
+        payload["page_geometry"] = {page: dict(size) for page, size in page_geometry.items()}
     if definition.get("arithmetic"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     return payload
@@ -465,10 +477,11 @@ def main():
             raise ValueError("DOCUMENT_PREVIEW_LIMIT")
         (folder / "result.json").write_text(json.dumps({"preview": base64.b64encode(raw).decode(), "page": page}))
         return
-    lines, pages = lines_from_file(source, folder, folder / "progress")
+    page_geometry: dict[str, Any] = {}
+    lines, pages = lines_from_file(source, folder, folder / "progress", page_geometry)
     if len(lines) > 100000:
         raise ValueError("DOCUMENT_TEXT_LIMIT")
-    payload = extract(lines, request["definition"])
+    payload = extract(lines, request["definition"], page_geometry)
     models = {}
     for language in ("eng", "spa"):
         for path in Path("/usr/share/tesseract-ocr").glob(f"*/tessdata/{language}.traineddata"):
