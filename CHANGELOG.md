@@ -5,6 +5,10 @@
 - ID 1 PDP: finales alternativos de tablas multipágina; pruebas y descubrimiento
   de borradores con proceso y presupuestos efectivos, sin pruebas parciales;
   aritmética exacta acotada y diagnóstico explícito del exceso de precisión.
+- ID 1 PDP: OCR de bloque y texto disperso con unión espacial, sin duplicar
+  palabras digitales de páginas mixtas ni perder multiplicidad entre filas/páginas.
+  El detalle reconocido sin encabezado, incluido el anterior a un encabezado
+  repetido, permanece visible y bloquea la publicación por regiones no interpretadas.
 - Los lotes manuales reconocen la prueba independiente e íntegra de la revisión
   activada desde Builder, sin exigir un ejemplo operativo del flujo anterior.
 - Centro de control exige una población evaluada positiva para mostrar calidad.

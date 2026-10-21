@@ -25,6 +25,15 @@ exactos hasta 4096 dígitos y sólo el redondeo final declarado; el exceso queda
 explícitamente no evaluado y requiere revisión. Estos cambios del ID 1 no
 acreditan exactitud del corpus ni sustituyen la revisión y activación nativas.
 
+El OCR combina las lecturas de bloque y texto disperso por posición. Conserva las
+palabras digitales en páginas mixtas y evita repetir palabras ya representadas;
+la segunda lectura no reemplaza valores de la primera. Cuando se reconoce detalle
+alineado sin un encabezado interpretable, antes del primer encabezado o en otra
+página, conserva la región como `TABLE_HEADER_NOT_FOUND`. La revisión y publicación
+siguen bloqueadas por filas no interpretadas. Este control depende de las palabras
+reconocidas: no demuestra que ambos pases hayan leído todos los píxeles del original.
+Los dos pases comparten los límites de ejecución existentes.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,

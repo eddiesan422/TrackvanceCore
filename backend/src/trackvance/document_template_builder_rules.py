@@ -232,6 +232,28 @@ def table_candidates(lines, rule):
         segments = [(max(a[2][3] for a in anchors), line["region"][1], dx) for line, anchors, dx in page_headers]
         if not segments and rule.get("continue_pages") and continuing and previous_bounds is not None:
             segments = [(0, 0, previous_bounds)]
+        if (page_headers or not segments) and rule.get("flowing") and page >= rule["page"] and (page == rule["page"] or rule.get("continue_pages")):
+            # OCR may recognize every product but omit a white-on-dark header.
+            # Never invent its rows or silently discard that visible region
+            # merely because a later page supplies the first usable anchors.
+            start = rule["region"][1] if page == rule["page"] else 0
+            stop_labels = [label for label in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if label]
+            stops = [line["region"][1] for line in lines if line["page"] == page and line["region"][1] > start
+                     and any(anchor(line, label) for label in stop_labels)]
+            end = min([line["region"][1] for line, _, _ in page_headers] + stops, default=1)
+            groups = row_groups(lines, page, start, end, rule.get("row_tolerance", .018))
+            dx = page_headers[0][2] if page_headers else 0
+            bounds = [value + dx for value in rule["column_bounds"]]
+            occupied = [{i for word, _ in group for i, (left, right) in enumerate(pairwise(bounds))
+                         if left <= (word["region"][0] + word["region"][2]) / 2 < right} for group in groups]
+            # Require three aligned columns when available: a summary label
+            # plus one amount alone then cannot imply a product table. Respect
+            # the configured multiline tolerance without reconstructing rows.
+            if any(len(columns) >= min(3, len(labels)) for columns in occupied):
+                body = [item for group in groups for item in group]
+                rejected.append({"text": " ".join(word["text"] for word, _ in body), "page": page,
+                                 "region": box([word for word, _ in body]), "method": body[0][1]["method"],
+                                 "reason": "TABLE_HEADER_NOT_FOUND"})
         for header_bottom, header_top, dx in segments:
             end = 1 if rule.get("flowing") else min(1, header_top + rule["region"][3] - rule["region"][1] + rule.get("tolerance", .12))
             following_headers = [line["region"][1] for line, _, _ in page_headers if line["region"][1] > header_bottom]

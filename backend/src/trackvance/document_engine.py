@@ -146,11 +146,50 @@ def image_size(path):
     raise ValueError("DOCUMENT_FORMAT_INVALID")
 
 
-def ocr(path, page):
-    width, height = image_size(path)
-    if width < 1 or height < 1 or width * height > MAX_PIXELS:
-        raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
-    raw = command(["/usr/bin/tesseract", str(path), "stdout", "-l", "eng+spa", "--psm", "6", "tsv"])
+def merge_lines(primary, supplemental):
+    """Add spatially new words, preserving the first source and its values.
+
+    Different segmentation can split one physical text line into many runs.
+    Comparing line strings would repeat its words and corrupt table columns.
+    Equal text at distinct positions or on distinct pages remains distinct.
+    """
+    result = list(primary)
+    indexed: dict[tuple[int, int, int], list[dict]] = {}
+
+    def cells(word, page):
+        left, top, right, bottom = word["region"]
+        return ((page, x, y) for x in range(int(left * 50), int(right * 50) + 1)
+                for y in range(int(top * 50), int(bottom * 50) + 1))
+
+    def remember(word, page):
+        for key in cells(word, page):
+            indexed.setdefault(key, []).append(word)
+
+    def overlaps(first, second):
+        a, b = first["region"], second["region"]
+        area = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+        smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+        return smaller > 0 and area / smaller >= .45
+
+    for line in primary:
+        for word in _visual_rules.words(line):
+            remember(word, line["page"])
+    for line in supplemental:
+        selected = []
+        for word in _visual_rules.words(line):
+            if any(overlaps(word, previous) for key in cells(word, line["page"]) for previous in indexed.get(key, [])):
+                continue
+            selected.append(word)
+            remember(word, line["page"])
+        if selected:
+            confidence = [word["confidence"] for word in selected if word.get("confidence") is not None]
+            result.append({**line, "text": " ".join(word["text"] for word in selected), "words": selected,
+                           "region": _visual_rules.box(selected), "confidence": min(confidence) if confidence else line.get("confidence")})
+    return result
+
+
+def ocr_pass(path, page, width, height, mode):
+    raw = command(["/usr/bin/tesseract", str(path), "stdout", "-l", "eng+spa", "--psm", str(mode), "tsv"])
     groups: dict[tuple[str, ...], list[dict[str, str]]] = {}
     for item in csv.DictReader(io.StringIO(raw), delimiter="\t"):
         if item.get("level") != "5" or not item.get("text", "").strip():
@@ -169,6 +208,16 @@ def ocr(path, page):
                           (int(w["left"]) + int(w["width"])) / width, (int(w["top"]) + int(w["height"])) / height],
                           "confidence": float(w["conf"])} for w in words]})
     return lines
+
+
+def ocr(path, page):
+    width, height = image_size(path)
+    if width < 1 or height < 1 or width * height > MAX_PIXELS:
+        raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
+    # The block pass retains short numeric cells. The sparse pass recovers
+    # contrasting titles and table headings that the block pass can omit.
+    # Neither pass is an oracle: retain original confidence and review policy.
+    return merge_lines(ocr_pass(path, page, width, height, 6), ocr_pass(path, page, width, height, 11))
 
 
 def lines_from_file(source, folder, progress):
@@ -209,8 +258,7 @@ def lines_from_file(source, folder, progress):
             prefix = folder / f"page-{index + 1}"
             command(["/usr/bin/pdftoppm", "-f", str(index + 1), "-l", str(index + 1), "-singlefile",
                      "-scale-to", "4000", "-png", str(source), str(prefix)])
-            known = {line["text"] for line in page_lines}
-            page_lines += [line for line in ocr(prefix.with_suffix(".png"), index + 1) if line["text"] not in known]
+            page_lines = merge_lines(page_lines, ocr(prefix.with_suffix(".png"), index + 1))
             prefix.with_suffix(".png").unlink(missing_ok=True)
         output.extend(page_lines)
         if sum(len(line["text"]) for line in output) > MAX_TEXT:
