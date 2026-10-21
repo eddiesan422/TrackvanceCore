@@ -3,6 +3,8 @@ import copy
 from collections import Counter
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from trackvance.document_discovery import discover
@@ -17,6 +19,55 @@ from trackvance.document_models import (
 from trackvance.document_schemas import DocumentDefinition
 from trackvance.document_service import digest
 from trackvance.document_template_builder_rules import box
+
+
+def test_table_stop_aliases_separate_page_footers_and_final_page_summary():
+    header = line([(.05, "Descripción"), (.5, "Cantidad"), (.7, "Precio"), (.86, "Total")], .2)
+    repeated = copy.deepcopy(header)
+    repeated["page"] = 2
+    source = [header, line([(.05, "A001 producto"), (.5, "2"), (.7, "10.00"), (.86, "20.00")], .25),
+              line([(.05, "Documento de muestra")], .9), repeated,
+              line([(.05, "A002 servicio"), (.5, "1"), (.7, "3.00"), (.86, "3.00")], .25, 2),
+              line([(.05, "Resumen de pago")], .4, 2),
+              line([(.05, "Subtotal"), (.86, "23.00")], .45, 2),
+              line([(.05, "Documento de muestra")], .9, 2)]
+    table = {"name": "detalle", "fields": [{"name": "descripcion"},
+        *[{"name": key, "logical_type": "DECIMAL"} for key in ("cantidad", "precio", "total")]],
+        "visual": {"page": 1, "region": [.05, .2, .99, .24],
+            "header_labels": ["Descripción", "Cantidad", "Precio", "Total"],
+            "column_bounds": [0, .45, .65, .83, 1], "stop_label": "Documento de muestra",
+            "stop_label_aliases": ["Resumen de pago"], "flowing": True, "continue_pages": True,
+            "multiline_column": 0}}
+    configured = definition({"fields": [{"name": "opcional", "required": False}], "tables": [table]})
+    before = copy.deepcopy(source)
+    result = extract(source, configured)
+    assert [[row[key]["value"] for key in ("descripcion", "cantidad", "precio", "total")]
+            for row in result["tables"]["detalle"]] == [
+                ["A001 producto", "2", "10.00", "20.00"], ["A002 servicio", "1", "3.00", "3.00"]]
+    assert result["table_unparsed"]["detalle"] == []
+    assert source == before
+    assert configured["tables"][0]["visual"]["stop_label_aliases"] == ["Resumen de pago"]
+    # The historical single stop remains effective when aliases are absent.
+    table["visual"].pop("stop_label_aliases")
+    legacy = extract(source[:3], definition({"fields": [{"name": "opcional", "required": False}], "tables": [table]}))
+    assert len(legacy["tables"]["detalle"]) == 1
+    assert legacy["table_unparsed"]["detalle"] == []
+    table["visual"].update(stop_label="", stop_label_aliases=["Documento de muestra", "Resumen de pago"])
+    alias_only = extract(source, definition({"fields": [{"name": "opcional", "required": False}], "tables": [table]}))
+    assert alias_only["tables"] == result["tables"]
+    assert alias_only["table_unparsed"] == result["table_unparsed"]
+
+
+@pytest.mark.parametrize("aliases", [
+    [""], ["   "], ["Resumen", " resumen "], ["Subtotal"], ["x" * 161],
+    [f"Fin {index}" for index in range(21)],
+])
+def test_table_stop_aliases_reject_empty_duplicate_oversize_and_overflow(aliases):
+    from trackvance.document_template_builder_schemas import VisualTableRule
+    with pytest.raises(ValidationError):
+        VisualTableRule.model_validate({"page": 1, "region": [.05, .2, .99, .4],
+            "header_labels": ["Descripción", "Total"], "column_bounds": [0, .7, 1],
+            "stop_label": "Subtotal", "stop_label_aliases": aliases})
 
 
 def line(values, y=.1, page=1):
@@ -243,6 +294,42 @@ def test_arithmetic_uses_decimal_rounding_and_never_rewrites_discrepancies():
     assert payload["arithmetic"][0]["status"] == "DISCREPANCY"
     assert payload["fields"]["total"]["value"] == "3.01"
     assert payload["fields"]["total"]["observed"] == "3.01"
+
+
+@pytest.mark.parametrize(("operation", "values", "subtract", "expected"), [
+    ("PRODUCT", {"a": "10000000000000000000000000.000000000001", "b": "1"}, [],
+     "10000000000000000000000000.000000000001"),
+    ("SUM", {"a": "10000000000000000000000000.000000000001", "b": "1"}, [],
+     "10000000000000000000000001.000000000001"),
+    ("SUM", {"a": "10000000000000000000000000.000000000001", "b": "1",
+             "deduction": "10000000000000000000000000.000000000001"}, ["deduction"], "1.000000000000"),
+])
+def test_arithmetic_preserves_38_digit_values_through_sum_product_and_cancellation(operation, values, subtract, expected):
+    configured = definition({"fields": [{"name": name, "label": "VALUE_" + name.upper(), "logical_type": "DECIMAL"}
+        for name in [*values, "total"]], "arithmetic": [{"name": "exactitud", "operation": operation,
+            "terms": ["a", "b"], "subtract": subtract, "result": "total", "scale": 12, "tolerance": "0.00"}]})
+    observed = {**values, "total": expected}
+    source = [line([(.1, "VALUE_" + name.upper() + ":"), (.4, value)], .05 + .07 * index) for index, (name, value) in enumerate(observed.items())]
+    payload = extract(source, configured)
+    check = payload["arithmetic"][0]
+    assert all(cell["validity"] == "VALID" for cell in payload["fields"].values())
+    assert check["status"] == "VALID"
+    assert check["expected"] == expected
+    assert payload["fields"]["total"]["value"] == expected
+    assert payload["fields"]["a"]["observed"] == values["a"]
+
+
+def test_arithmetic_preserves_extreme_scale_and_reports_its_work_limit():
+    tiny = "0." + "0" * 5000 + "1"
+    configured = definition({"fields": [{"name": name, "label": "VALUE_" + name.upper(), "logical_type": "DECIMAL"}
+        for name in ("a", "b", "total")], "arithmetic": [{"name": "bounded", "operation": "SUM",
+            "terms": ["a", "b"], "result": "total", "scale": 12, "tolerance": "0.00"}]})
+    payload = extract([line([(.1, "VALUE_A:"), (.4, tiny)]), line([(.1, "VALUE_B:"), (.4, "1")], .2),
+                       line([(.1, "VALUE_TOTAL:"), (.4, "1.000000000000")], .3)], configured)
+    assert payload["fields"]["a"]["value"] == tiny
+    assert payload["fields"]["a"]["validity"] == "VALID"
+    assert payload["arithmetic"][0]["status"] == "NOT_EVALUATED"
+    assert payload["arithmetic"][0]["reason"] == "ARITHMETIC_PRECISION_LIMIT"
 
 
 def create_workspace(client, tmp_path, *, holdout=True):

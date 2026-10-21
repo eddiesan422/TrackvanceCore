@@ -25257,6 +25257,14 @@
             "title": "Stop Label",
             "default": ""
           },
+          "stop_label_aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Stop Label Aliases"
+          },
           "tolerance": {
             "type": "number",
             "maximum": 0.25,

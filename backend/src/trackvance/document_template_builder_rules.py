@@ -237,8 +237,9 @@ def table_candidates(lines, rule):
             following_headers = [line["region"][1] for line, _, _ in page_headers if line["region"][1] > header_bottom]
             if following_headers:
                 end = min(end, min(following_headers))
+            stop_labels = [label for label in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if label]
             stops = [line["region"][1] for line in lines if line["page"] == page and line["region"][1] > header_bottom
-                     and rule.get("stop_label") and anchor(line, rule["stop_label"])]
+                     and any(anchor(line, label) for label in stop_labels)]
             if stops:
                 end = min(end, min(stops))
             continuing = not bool(stops)

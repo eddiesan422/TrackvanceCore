@@ -16,6 +16,15 @@ decisiones se conservan. El cero medido sobre población positiva y el cero téc
 mantienen su semántica. Este ajuste corresponde al ID 7 del plan PDP y no acredita
 el cierre de los demás casos de su campaña.
 
+Las tablas visuales admiten etiquetas de fin alternativas para separar pies y
+resúmenes entre páginas sin limitar el detalle a la altura del ejemplo. Los
+borradores prueban y descubren reglas en un proceso documental acotado: 30 s,
+20 referencias, 64 MiB de entrada y salida y 768 MiB de memoria. Un fallo conserva
+el borrador y no registra una prueba parcial. La aritmética usa intermedios
+exactos hasta 4096 dígitos y sólo el redondeo final declarado; el exceso queda
+explícitamente no evaluado y requiere revisión. Estos cambios del ID 1 no
+acreditan exactitud del corpus ni sustituyen la revisión y activación nativas.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,

@@ -21,13 +21,14 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, Inexact, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any
 
 MAX_PAGES = 50
 MAX_PIXELS = 20_000_000
 MAX_TEXT = 2_000_000
+ARITHMETIC_PRECISION_LIMIT = 4096
 
 # -I intentionally excludes the script directory from sys.path. Load only this
 # fixed sibling before confinement; the definition cannot choose a module/path.
@@ -265,6 +266,14 @@ def validate_value(raw, field):
 
 
 def arithmetic_checks(payload, definition):
+    def require_precision(values, scale):
+        # Exact alignment must fit before an addition, cancellation or comparison.
+        # A scalar can be valid yet too widely scaled for bounded arithmetic.
+        high = max(value.adjusted() for value in values)
+        low = min(-scale, *(value.as_tuple().exponent for value in values))
+        if high - low + len(str(len(values))) + 3 > ARITHMETIC_PRECISION_LIMIT:
+            raise Inexact()
+
     checks = []
     for rule in definition.get("arithmetic", []):
         rows = payload["tables"].get(rule.get("table"), []) if rule.get("table") else [payload["fields"]]
@@ -275,14 +284,29 @@ def arithmetic_checks(payload, definition):
                 if any(row.get(key, {}).get("validity") != "VALID" for key in required):
                     raise ValueError()
                 numbers = [Decimal(str(row[key]["value"])) for key in rule["terms"]]
-                expected = sum(numbers, Decimal(0)) if rule["operation"] == "SUM" else Decimal(1)
-                if rule["operation"] == "PRODUCT":
-                    for number in numbers:
-                        expected *= number
-                expected -= sum((Decimal(str(row[key]["value"])) for key in rule.get("subtract", [])), Decimal(0))
-                expected = expected.quantize(Decimal(1).scaleb(-rule["scale"]), rounding=ROUND_HALF_UP)
+                deductions = [Decimal(str(row[key]["value"])) for key in rule.get("subtract", [])]
                 observed = Decimal(str(row[rule["result"]]["value"]))
-                result.update(status="VALID" if abs(observed - expected) <= Decimal(rule["tolerance"]) else "DISCREPANCY", expected=str(expected), observed=str(observed))
+                tolerance = Decimal(rule["tolerance"])
+                if any(not number.is_finite() for number in [*numbers, *deductions, observed, tolerance]):
+                    raise ValueError()
+                with localcontext() as context:
+                    context.prec = ARITHMETIC_PRECISION_LIMIT
+                    context.traps[Inexact] = True
+                    require_precision([*numbers, *deductions, observed, tolerance], rule["scale"])
+                    if sum(len(number.as_tuple().digits) for number in numbers) > ARITHMETIC_PRECISION_LIMIT:
+                        raise Inexact()
+                    expected = sum(numbers, Decimal(0)) if rule["operation"] == "SUM" else Decimal(1)
+                    if rule["operation"] == "PRODUCT":
+                        for number in numbers:
+                            expected *= number
+                    require_precision([expected, *deductions, observed, tolerance], rule["scale"])
+                    expected -= sum(deductions, Decimal(0))
+                    context.traps[Inexact] = False  # Only the declared final rounding is permitted.
+                    expected = expected.quantize(Decimal(1).scaleb(-rule["scale"]), rounding=ROUND_HALF_UP)
+                    context.traps[Inexact] = True
+                    result.update(status="VALID" if abs(observed - expected) <= tolerance else "DISCREPANCY", expected=str(expected), observed=str(observed))
+            except Inexact:
+                result.update(status="NOT_EVALUATED", reason="ARITHMETIC_PRECISION_LIMIT")
             except (KeyError, ValueError, InvalidOperation):
                 result["status"] = "NOT_EVALUATED"
             checks.append(result)

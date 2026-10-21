@@ -5,12 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import LargeBinary, Text, func, select, update
 from sqlalchemy.engine import CursorResult
 
 from .db import iso, utcnow
-from .document_discovery import discover
-from .document_engine import arithmetic_checks, extract, validate_value
+from .document_builder_executor import MAX_BYTES as BUILDER_MAX_BYTES
+from .document_builder_executor import run_builder
+from .document_engine import arithmetic_checks, validate_value
 from .document_models import (
     DocumentBuilderTest,
     DocumentDraft,
@@ -40,7 +41,7 @@ def authority(db, user):
 
 def processor_identity():
     return {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in
-            ("document_engine.py", "document_template_builder_rules.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py")}
+            ("document_engine.py", "document_template_builder_rules.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py")}
 
 
 def reference_dto(item, detail=False):
@@ -61,6 +62,15 @@ def verify_reference(item):
 def references_for(db, family_id, ids, user, *, ready=True):
     if not 1 <= len(ids) <= 20 or len(set(ids)) != len(ids):
         raise OperationError(422, "DOCUMENT_REFERENCE_SELECTION", "Selecciona de 1 a 20 referencias distintas.")
+    # Refuse oversized selections in SQL before ORM materializes JSON payloads,
+    # including draft saves that select references before they become READY.
+    serialized = DocumentReference.payload.cast(Text)
+    byte_length = (func.octet_length(serialized) if db.get_bind().dialect.name == "postgresql"
+                   else func.length(serialized.cast(LargeBinary)))
+    size = db.scalar(select(func.coalesce(func.sum(byte_length), 0)).where(
+        DocumentReference.organization_id == user.organization_id, DocumentReference.id.in_(ids)))
+    if size > BUILDER_MAX_BYTES:
+        raise OperationError(422, "DOCUMENT_BUILDER_BYTES_LIMIT", "Las referencias seleccionadas superan 64 MiB. Reduce la selección; el borrador se conserva.")
     references = [owned(db, DocumentReference, identity, user) for identity in ids]
     for item in references:
         if item.family_id != family_id:
@@ -125,7 +135,7 @@ def discover_draft(db, item, expected_version, user):
     references = [reference for reference in selected if reference.role == "CONFIGURATION"]
     if not references:
         raise OperationError(422, "DOCUMENT_DISCOVERY_REFERENCES", "Selecciona referencias de configuración; la variante reservada se utiliza solo para probar.")
-    result = discover(references)
+    result = run_builder("DISCOVER", [{"id": reference.id, "lines": reference.payload["lines"]} for reference in references])
     for reference in references:
         reference.configuration_used = True
     save_draft(db, item, expected_version, result["definition"], item.reference_ids, item.name, user,
@@ -158,8 +168,8 @@ def test_draft(db, item, expected_version, user):
     previous = db.scalar(select(DocumentBuilderTest).where(DocumentBuilderTest.draft_id == item.id, DocumentBuilderTest.snapshot_hash == hashed))
     if previous:
         return previous
-    results = {reference.id: extract(reference.payload["lines"], snapshot["definition"])
-               for reference in references_for(db, item.family_id, item.reference_ids, user)}
+    results = run_builder("EXTRACT", [{"id": reference.id, "lines": reference.payload["lines"]}
+        for reference in references_for(db, item.family_id, item.reference_ids, user)], snapshot["definition"])
     tested = DocumentBuilderTest(organization_id=user.organization_id, draft_id=item.id, draft_version=item.version,
         snapshot=snapshot, snapshot_hash=hashed, automatic_results=results, automatic_results_hash=digest(results), actor_id=user.id)
     db.add(tested)

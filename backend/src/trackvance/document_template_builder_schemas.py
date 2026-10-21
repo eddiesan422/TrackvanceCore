@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .document_template_builder_rules import normalized
+
 
 class VisualRegion(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -51,6 +53,7 @@ class VisualTableRule(VisualRegion):
     header_labels: list[str] = Field(min_length=2, max_length=40)
     column_bounds: list[float] = Field(min_length=3, max_length=41)
     stop_label: str = Field(default="", max_length=160)
+    stop_label_aliases: list[str] = Field(default_factory=list, max_length=20)
     tolerance: float = Field(default=0.12, ge=0, le=0.25)
     flowing: bool = False
     continue_pages: bool = False
@@ -59,6 +62,11 @@ class VisualTableRule(VisualRegion):
 
     @model_validator(mode="after")
     def columns(self):
+        if any(not label.strip() or len(label) > 160 for label in self.stop_label_aliases):
+            raise ValueError("Indica etiquetas de fin no vacías de hasta 160 caracteres.")
+        stops = [normalized(label) for label in [self.stop_label, *self.stop_label_aliases] if label.strip()]
+        if len(set(stops)) != len(stops):
+            raise ValueError("Las etiquetas de fin deben ser distintas.")
         if len(self.column_bounds) != len(self.header_labels) + 1:
             raise ValueError("Cada columna requiere dos límites consecutivos.")
         if any(not s.strip() or len(s) > 160 for s in self.header_labels):

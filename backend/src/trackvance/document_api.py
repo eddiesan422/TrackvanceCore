@@ -86,8 +86,14 @@ class PipelineBody(BaseModel):
 
 @router.get("/limits")
 def limits():
+    from .document_builder_executor import MAX_BYTES as BUILDER_MAX_BYTES
+    from .document_builder_executor import MAX_REFERENCES, MEMORY_BYTES, TIMEOUT_SECONDS
+    from .document_engine import ARITHMETIC_PRECISION_LIMIT
     return {"file_bytes": MAX_BYTES, "pages": 50, "image_pixels": 20000000, "timeout_seconds": 120,
             "batch_documents": 1000, "batch_rows_per_document": 10000,
+            "builder": {"timeout_seconds": TIMEOUT_SECONDS, "input_bytes": BUILDER_MAX_BYTES, "output_bytes": BUILDER_MAX_BYTES,
+                "references": MAX_REFERENCES, "process_memory_bytes": MEMORY_BYTES,
+                "arithmetic_precision_digits": ARITHMETIC_PRECISION_LIMIT},
             "formats": ["PDF", "PNG", "JPG"], "engine": "POPPLER_TESSERACT_CPU_V1"}
 
 

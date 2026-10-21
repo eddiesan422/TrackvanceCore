@@ -2,6 +2,9 @@
 
 ## 0.9.7 — Automatización, operación y experiencia documental
 
+- ID 1 PDP: finales alternativos de tablas multipágina; pruebas y descubrimiento
+  de borradores con proceso y presupuestos efectivos, sin pruebas parciales;
+  aritmética exacta acotada y diagnóstico explícito del exceso de precisión.
 - Centro de control exige una población evaluada positiva para mostrar calidad.
   Las ejecuciones vacías siguen visibles, pero no sesgan la salud ni las series;
   el rechazo medido en cero y el fallo técnico conservan su significado.
