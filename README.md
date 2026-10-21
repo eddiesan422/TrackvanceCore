@@ -8,6 +8,14 @@ documentales independientes. La [matriz oficial 0.9.7](https://github.com/eddies
 registra el estado de cierre, los gates, las limitaciones y la actualización de
 instalaciones. El cambio de versión no actualiza ni certifica una instalación.
 
+Centro de control sólo presenta una observación de calidad exitosa cuando tiene
+población evaluada positiva (`total_rows` en Intake/ReconOps y `total_checks` en
+Sentinel). Una tasa histórica de 100 sobre cero filas no contribuye a salud,
+ponderación ni muestras comparables. Las ejecuciones continúan visibles y sus
+decisiones se conservan. El cero medido sobre población positiva y el cero técnico
+mantienen su semántica. Este ajuste corresponde al ID 7 del plan PDP y no acredita
+el cierre de los demás casos de su campaña.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,

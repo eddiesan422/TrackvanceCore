@@ -2,6 +2,9 @@
 
 ## 0.9.7 — Automatización, operación y experiencia documental
 
+- Centro de control exige una población evaluada positiva para mostrar calidad.
+  Las ejecuciones vacías siguen visibles, pero no sesgan la salud ni las series;
+  el rechazo medido en cero y el fallo técnico conservan su significado.
 - Scheduler prepara trabajos sin resolver secretos ni abrir fuentes; mínimo 30 s,
   aislamiento de fallos y metadata acotada de despacho/ocurrencias.
 - Novedades personales en Operación, agrupación causal y lectura por instantánea.

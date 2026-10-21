@@ -72,6 +72,10 @@ def run_health_score(run: Run) -> float | None:
     if operational_status == "TECHNICAL_FAILURE":
         return 0.0
     metrics = run.metrics or {}
+    population = _metric_number(metrics, "total_checks" if run.module == "sentinel" else "total_rows")
+    # Historical empty-set rates describe processing, not observed quality.
+    if population is None or population <= 0:
+        return None
     if run.module == "intake":
         score = _metric_number(metrics, "acceptance_rate")
         total = _metric_number(metrics, "total_rows")
