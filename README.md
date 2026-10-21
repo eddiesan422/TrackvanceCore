@@ -45,6 +45,15 @@ escalar válido conserva la región para revisión. Texto desconocido, coinciden
 solapadas, tablas sólo STRING y productos con importes ilegibles siguen visibles.
 Este ajuste del ID 1 no acredita por sí solo la exactitud del corpus.
 
+Los títulos de columnas partidas pueden reconocerse mediante su etiqueta literal
+completa, un ancla observada y una banda geométrica local de la cabecera. Sólo
+se atribuyen los fragmentos completos de columnas de tipo distinto de STRING; cualquier escalar
+válido o indicio de producto anterior o solapado impide esa atribución. Los
+fragmentos de columnas STRING, incluidos `001` y `%`, permanecen visibles. No
+se adelanta el inicio del detalle ni se reconstruyen filas. Las regiones
+desconocidas o ambiguas siguen sujetas a revisión; el cambio no recupera píxeles
+que ninguno de los pases OCR haya reconocido.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,

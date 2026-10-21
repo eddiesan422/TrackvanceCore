@@ -280,7 +280,154 @@ def prefix_furniture_words(lines, page, start, end, rule, fields, header_values,
     return excluded
 
 
+def header_caption_word_ids(lines, rule, fields, validator) -> set[int]:
+    """Attribute complete captions in a local band of the observed header.
+
+    Product cues before or overlapping a caption retain the entire region for
+    review. No value is synthesized and the start of detail is never moved.
+    """
+    if (
+        not fields
+        or validator is None
+        or (not any(field.get("logical_type", "STRING") != "STRING" for field in fields))
+    ):
+        return set()
+    visual = visual_lines(lines, 0.012 if rule.get("flowing") else 0.004)
+    excluded: set[int] = set()
+    for header in visual:
+        anchors = table_header_anchors(header, rule["header_labels"])
+        if not anchors:
+            continue
+        dx = anchors[0][2][0] - rule["region"][0]
+        if abs(dx) > rule.get("tolerance", 0.12):
+            continue
+        top = min(anchor[2][1] for anchor in anchors)
+        # An example rectangle may contain products. Also require membership
+        # in a local band measured from the actual anchor glyphs.
+        anchor_height = max(anchor[2][3] - anchor[2][1] for anchor in anchors)
+        bottom = min(
+            top + rule["region"][3] - rule["region"][1],
+            max(anchor[2][3] for anchor in anchors) + 2 * anchor_height,
+        )
+        bounds = [value + dx for value in rule["column_bounds"]]
+        all_anchor_ids = {
+            id(word) for observed in anchors for word in words(header)[observed[0] : observed[1]]
+        }
+        header_excluded: set[int] = set()
+        for index, (field, observed) in enumerate(zip(fields, anchors)):
+            # A STRING fragment can itself be an identifier or description,
+            # including punctuation and leading zeros. Keep it for review.
+            if field.get("logical_type", "STRING") == "STRING":
+                continue
+            label = field.get("label", "")
+            if not label or anchor_key(label) == anchor_key(rule["header_labels"][index]):
+                continue
+            anchor_ids = {id(word) for word in words(header)[observed[0] : observed[1]]}
+            column = []
+            for entry in lines:
+                if entry["page"] != header["page"]:
+                    continue
+                for word in words(entry):
+                    x = (word["region"][0] + word["region"][2]) / 2
+                    if (
+                        bounds[index] <= x < bounds[index + 1]
+                        and top - 1e-09 <= word["region"][1]
+                        and (word["region"][3] <= bottom + 1e-09)
+                    ):
+                        column.append((word, entry))
+            if not column:
+                continue
+            column = column_reading_order(column)
+            if field.get("logical_type", "STRING") != "STRING":
+                # Valid scalars stay in the body, including before the last
+                # caption; they cannot become tokens of the caption match.
+                column = [
+                    (word, entry)
+                    for word, entry in column
+                    if id(word) in anchor_ids or validator(word["text"], field)[1] != "VALID"
+                ]
+            starts = [
+                position for position, (word, _) in enumerate(column) if id(word) in anchor_ids
+            ]
+            if not starts:
+                continue
+            first = min(starts)
+            matches = []
+            for last in range(first + 1, min(len(column), first + 24) + 1):
+                selected = column[first:last]
+                if anchor_ids <= {id(word) for word, _ in selected} and anchor_key(
+                    " ".join((word["text"] for word, _ in selected))
+                ) == anchor_key(label):
+                    matches.append(selected)
+            if len(matches) != 1:
+                continue
+            extra = [word for word, _ in matches[0] if id(word) not in anchor_ids]
+            if not extra:
+                continue
+            if field.get("logical_type", "STRING") != "STRING" and (
+                validator(" ".join(word["text"] for word in extra), field)[1] == "VALID"
+                or any(validator(word["text"], field)[1] == "VALID" for word in extra)
+            ):
+                continue
+            header_excluded.update(id(word) for word in extra)
+        body_regions: list[tuple[float, float]] = []
+        extra_bottoms: list[float] = []
+        for entry in lines:
+            if entry["page"] != header["page"]:
+                continue
+            for word in words(entry):
+                if id(word) in all_anchor_ids:
+                    continue
+                x = (word["region"][0] + word["region"][2]) / 2
+                if id(word) in header_excluded:
+                    extra_bottoms.append(word["region"][3])
+                column_index = next(
+                    (i for i in range(len(fields)) if bounds[i] <= x < bounds[i + 1]), None
+                )
+                if column_index is None:
+                    continue
+                kind = fields[column_index].get("logical_type", "STRING")
+                if column_index == rule.get("multiline_column") or (
+                    kind == "STRING" and id(word) not in header_excluded
+                ) or (
+                    kind != "STRING"
+                    and validator(word["text"], fields[column_index])[1] == "VALID"
+                ):
+                    body_regions.append((word["region"][1], word["region"][3]))
+        # A distinct later product does not invalidate a preceding caption.
+        # Earlier/overlapping cues make attribution ambiguous: preserve all
+        # original tokens from this header rather than part of the region.
+        if not any(
+            (
+                body_bottom >= top and body_top <= caption_bottom + 0.004
+                for caption_bottom in extra_bottoms
+                for body_top, body_bottom in body_regions
+            )
+        ):
+            excluded.update(header_excluded)
+    return excluded
+
+
+def without_caption_words(lines, excluded):
+    filtered = []
+    for entry in lines:
+        selected = [word for word in words(entry) if id(word) not in excluded]
+        if selected:
+            filtered.append(
+                {
+                    **entry,
+                    "words": selected,
+                    "text": " ".join(word["text"] for word in selected),
+                    "region": box(selected),
+                }
+            )
+    return filtered
+
+
 def table_candidates(lines, rule, fields=None, header_values=(), validator=None):
+    excluded = header_caption_word_ids(lines, rule, fields, validator)
+    if excluded:
+        lines = without_caption_words(lines, excluded)
     lines = visual_lines(lines, .012 if rule.get("flowing") else .004)
     rows: list[list[tuple[str, dict]]] = []
     rejected: list[dict] = []

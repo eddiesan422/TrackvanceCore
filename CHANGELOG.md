@@ -13,6 +13,10 @@
   valores ni colapsar columnas ambiguas. El prefijo de continuación reconoce
   cabeceras completas ya extraídas con procedencia, sin ocultar palabras
   desconocidas, solapamientos ni escalares de productos pendientes de revisión.
+- ID 1 PDP: atribución literal y geométrica de títulos de columna partidos, sin
+  consumir fragmentos STRING, identificadores con ceros iniciales ni regiones
+  con indicios de producto. La ambigüedad conserva todas las palabras para
+  revisión; no se desplaza el inicio de detalle ni se reconstruyen filas.
 - Los lotes manuales reconocen la prueba independiente e íntegra de la revisión
   activada desde Builder, sin exigir un ejemplo operativo del flujo anterior.
 - Centro de control exige una población evaluada positiva para mostrar calidad.
