@@ -6,7 +6,7 @@ from the actual OCR/PDF words, never synthesized by dividing line width.
 import math
 import re
 import unicodedata
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from itertools import pairwise
 from statistics import median
 
@@ -159,6 +159,53 @@ def table_header_anchors(line, labels):
         if covered != set(range(len(words(line)))):
             return None  # Never erase an extra STRING while extending a header.
     return resolved
+
+
+def header_neighborhoods(lines, rule, source_lines, legacy_headers):
+    """Alternative full headers only; body baseline grouping stays unchanged."""
+    labels = rule["header_labels"]
+    budget = sum(len(normalized(label).split()) for label in labels)
+    if not budget:
+        return []
+    legacy_words = {id(word) for line, _, _ in legacy_headers for word in words(line)}
+    candidates = {}
+    for page in sorted({line["page"] for line in lines}):
+        population = [word for line in source_lines if line["page"] == page for word in words(line)]
+        tops = sorted(word["region"][1] for word in population)
+        bottoms = sorted(word["region"][3] for word in population)
+        observed = sorted((line for line in lines if line["page"] == page), key=lambda line: line["region"][1])
+        for start in range(len(observed)):
+            selected, count = [], 0
+            for stop in range(start, min(len(observed), start + budget)):
+                selected.extend(words(observed[stop]))
+                count += sum(len(normalized(word["text"]).split()) for word in words(observed[stop]))
+                if count > budget:
+                    break
+                region = box(selected)
+                height = max(word["region"][3] - word["region"][1] for word in selected)
+                limit = min(rule["region"][3] - rule["region"][1], 4 * height, .06)
+                if region[3] - region[1] > limit:
+                    break
+                if count != budget or stop == start:
+                    continue
+                # Inclusive interval counts cover the complete page in O(log N),
+                # including a glyph whose visual-line center is outside this window.
+                intersecting = bisect_right(tops, region[3]) - bisect_left(bottoms, region[1])
+                if intersecting != len(selected) or any(id(word) in legacy_words for word in selected):
+                    break
+                tokens = sorted(selected, key=lambda word: (word["region"][0], word["region"][1]))
+                merged = {**observed[start], "words": tokens, "text": " ".join(word["text"] for word in tokens),
+                          "region": region}
+                anchors = table_header_anchors(merged, labels)
+                if anchors and {index for first, last, _ in anchors for index in range(first, last)} == set(range(len(tokens))):
+                    candidates[frozenset(id(word) for word in tokens)] = (merged, anchors)
+                break  # A full literal budget cannot grow into another valid header.
+    memberships: dict[int, list[frozenset[int]]] = {}
+    for identity in candidates:
+        for word_id in identity:
+            memberships.setdefault(word_id, []).append(identity)
+    ambiguous = {identity for group in memberships.values() if len(group) > 1 for identity in group}
+    return [candidate for identity, candidate in candidates.items() if identity not in ambiguous]
 
 
 def origin(line, selected):
@@ -632,6 +679,7 @@ def without_caption_words(lines, excluded):
 
 
 def table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None):
+    source_lines = lines
     excluded = header_caption_word_ids(lines, rule, fields, validator)
     if excluded:
         lines = without_caption_words(lines, excluded)
@@ -650,6 +698,12 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None,
         dx = anchors[0][2][0] - rule["region"][0]
         if abs(dx) <= rule.get("tolerance", .12):
             headers.append((line, anchors, dx))
+    for line, anchors in header_neighborhoods(lines, rule, source_lines, headers):
+        positions = [item[2][0] for item in anchors]
+        dx = anchors[0][2][0] - rule["region"][0]
+        if positions == sorted(positions) and abs(dx) <= rule.get("tolerance", .12):
+            headers.append((line, anchors, dx))
+    headers.sort(key=lambda header: (header[0]["page"], header[0]["region"][1], header[0]["region"][0]))
     previous_bounds, continuing = None, False
     for page in sorted({line["page"] for line in lines}):
         page_headers = [h for h in headers if h[0]["page"] == page]

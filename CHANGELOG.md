@@ -26,6 +26,11 @@
 - ID 1 PDP: anclas literales completas de varias líneas con apoyo horizontal y
   partición única del encabezado. No amplía anclas parciales ni usa alternativas
   verticales descartadas para aceptar encabezados horizontales ambiguos.
+- ID 1 PDP: detección local de encabezados que combinan inclinación, títulos
+  partidos y proporciones de página diferentes. La banda y el número de palabras
+  están acotados; se exige explicar todos los glifos y se conserva el rechazo de
+  texto adicional o interpretaciones ambiguas. Ordena encabezados originales y
+  recuperados antes de segmentar, sin alterar la agrupación del cuerpo.
 - Los lotes manuales reconocen la prueba independiente e íntegra de la revisión
   activada desde Builder, sin exigir un ejemplo operativo del flujo anterior.
 - Centro de control exige una población evaluada positiva para mostrar calidad.

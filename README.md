@@ -59,6 +59,13 @@ la misma columna. Esa lectura exige fragmentos contiguos, orden vertical, apoyo
 horizontal común y una única partición ordenada que explique todo el encabezado.
 No amplía un ancla parcial a partir de la etiqueta del campo. Las alternativas
 verticales no utilizadas no eliminan el rechazo de encabezados duplicados.
+Cuando inclinación y títulos partidos ocupan varias líneas observadas, se busca
+una vecindad local de encabezado: como máximo la altura seleccionada, cuatro
+alturas de glifo y 0,06 de página, con presupuesto de palabras literales.
+Todas las palabras cuyos glifos intersecten la banda deben quedar explicadas;
+texto adicional, duplicados o interpretaciones solapadas conservan la región.
+Los encabezados originales y recuperados se ordenan antes de segmentar, para
+mantener el orden de productos. La agrupación del cuerpo no se ensancha.
 
 Las nuevas lecturas conservan `page_geometry` con las dimensiones reales de cada
 página en puntos PDF o píxeles. Builder las vincula a su prueba e instantánea;
