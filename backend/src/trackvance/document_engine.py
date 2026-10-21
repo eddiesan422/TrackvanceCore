@@ -400,7 +400,10 @@ def extract(lines, definition):
         rows = []
         rejected = []
         if table.get("visual"):
-            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"])
+            header_values = [fields[field["name"]]["value"] for field in definition["fields"]
+                             if field.get("logical_type", "STRING") == "STRING" and fields[field["name"]]["validity"] == "VALID"
+                             and fields[field["name"]]["origin"] is not None]
+            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"], table["fields"], header_values, validate_value)
             for values in visual_rows:
                 row = {}
                 for field, (raw, source) in zip(table["fields"], values, strict=True):

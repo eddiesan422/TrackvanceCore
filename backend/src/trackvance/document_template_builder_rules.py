@@ -29,14 +29,48 @@ def box(items):
             max(w["region"][2] for w in items), max(w["region"][3] for w in items)]
 
 
-def anchor(line, label):
+def anchor_key(value):
+    """Only an optional single terminal abbreviation dot is label punctuation."""
+    value = normalized(value)
+    return value[:-1] if value.endswith(".") and not value.endswith("..") else value
+
+
+def anchor_matches(line, label):
     tokens = words(line)
-    target = normalized(label)
+    target = anchor_key(label)
+    result = []
+    if not target:
+        return result
     for start in range(len(tokens)):
         for end in range(start + 1, min(len(tokens), start + 24) + 1):
-            if normalized(" ".join(w["text"] for w in tokens[start:end])) == target:
-                return start, end, box(tokens[start:end])
-    return None
+            if anchor_key(" ".join(w["text"] for w in tokens[start:end])) == target:
+                result.append((start, end, box(tokens[start:end])))
+    return result
+
+
+def anchor(line, label):
+    matches = anchor_matches(line, label)
+    return matches[0] if matches else None
+
+
+def table_header_anchors(line, labels):
+    if len({anchor_key(label) for label in labels}) != len(labels):
+        return None  # Punctuation cannot distinguish two logical columns.
+    matches = [anchor_matches(line, label) for label in labels]
+    resolved = []
+    for index, candidates in enumerate(matches):
+        # "Amount" inside the declared longer "Net amount" cannot also stand
+        # for a separate Amount column. Its own distinct occurrence is needed.
+        candidates = [candidate for candidate in candidates if not any(
+            other[0] <= candidate[0] and candidate[1] <= other[1]
+            and other[1] - other[0] > candidate[1] - candidate[0]
+            for other_index, group in enumerate(matches) if other_index != index for other in group)]
+        if len(candidates) != 1:
+            return None
+        resolved.append(candidates[0])
+    if any(first[1] > second[0] for first, second in pairwise(resolved)):
+        return None  # Header spans must be distinct and in declared order.
+    return resolved
 
 
 def origin(line, selected):
@@ -210,15 +244,51 @@ def flowing_row_groups(lines, page, start, end, bounds, multiline, tolerance):
     return [group for group in result if group]
 
 
-def table_candidates(lines, rule):
+def prefix_furniture_words(lines, page, start, end, rule, fields, header_values, validator, dx=0):
+    """Positive whole-line provenance, never 'invalid numeric means metadata'."""
+    scalar_columns = [index for index, field in enumerate(fields or []) if field.get("logical_type", "STRING") != "STRING"]
+    if not scalar_columns or not header_values or validator is None:
+        return set()
+    values = {" ".join(value.split()) for value in header_values if isinstance(value, str) and any(c.isalpha() for c in value)}
+    excluded = set()
+    bounds = [value + dx for value in rule["column_bounds"]]
+    for group in row_groups(lines, page, start, end):
+        columns = [[] for _ in rule["header_labels"]]
+        for word, _ in group:
+            center = (word["region"][0] + word["region"][2]) / 2
+            target = next((index for index, (left, right) in enumerate(pairwise(bounds)) if left <= center < right), None)
+            if target is not None:
+                columns[target].append(word)
+        if sum(bool(column) for column in columns) < min(3, len(columns)):
+            continue
+        if any(columns[index] and validator(" ".join(word["text"] for word in columns[index]), fields[index])[1] == "VALID"
+               for index in scalar_columns):
+            continue  # Even one valid product scalar keeps the region visible.
+        reachable = {0}
+        for first in range(len(group)):
+            if first not in reachable:
+                continue
+            for last in range(first + 1, min(len(group), first + 24) + 1):
+                text = " ".join(" ".join(word["text"].split()) for word, _ in group[first:last])
+                if text in values:
+                    reachable.add(last)
+        if len(group) in reachable:
+            # Every actual token must belong to complete, already valid header
+            # values in a nonoverlapping partition. Unioning overlapping spans
+            # cannot prove the identity of the whole line.
+            excluded.update(id(word) for word, _ in group)
+    return excluded
+
+
+def table_candidates(lines, rule, fields=None, header_values=(), validator=None):
     lines = visual_lines(lines, .012 if rule.get("flowing") else .004)
     rows: list[list[tuple[str, dict]]] = []
     rejected: list[dict] = []
     labels = rule["header_labels"]
     headers = []
     for line in lines:
-        anchors = [anchor(line, label) for label in labels]
-        if not all(anchors):
+        anchors = table_header_anchors(line, labels)
+        if not anchors:
             continue
         positions = [item[2][0] for item in anchors]
         if positions != sorted(positions):
@@ -243,6 +313,10 @@ def table_candidates(lines, rule):
             end = min([line["region"][1] for line, _, _ in page_headers] + stops, default=1)
             groups = row_groups(lines, page, start, end, rule.get("row_tolerance", .018))
             dx = page_headers[0][2] if page_headers else 0
+            if page_headers and page > rule["page"]:
+                furniture = prefix_furniture_words(lines, page, start, end, rule, fields, header_values, validator, dx)
+                groups = [[item for item in group if id(item[0]) not in furniture] for group in groups]
+                groups = [group for group in groups if group]
             bounds = [value + dx for value in rule["column_bounds"]]
             occupied = [{i for word, _ in group for i, (left, right) in enumerate(pairwise(bounds))
                          if left <= (word["region"][0] + word["region"][2]) / 2 < right} for group in groups]

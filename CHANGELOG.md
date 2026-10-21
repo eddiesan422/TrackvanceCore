@@ -9,6 +9,10 @@
   palabras digitales de páginas mixtas ni perder multiplicidad entre filas/páginas.
   El detalle reconocido sin encabezado, incluido el anterior a un encabezado
   repetido, permanece visible y bloquea la publicación por regiones no interpretadas.
+- ID 1 PDP: anclas de abreviatura con punto terminal opcional, sin modificar
+  valores ni colapsar columnas ambiguas. El prefijo de continuación reconoce
+  cabeceras completas ya extraídas con procedencia, sin ocultar palabras
+  desconocidas, solapamientos ni escalares de productos pendientes de revisión.
 - Los lotes manuales reconocen la prueba independiente e íntegra de la revisión
   activada desde Builder, sin exigir un ejemplo operativo del flujo anterior.
 - Centro de control exige una población evaluada positiva para mostrar calidad.

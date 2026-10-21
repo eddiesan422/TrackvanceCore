@@ -34,6 +34,17 @@ siguen bloqueadas por filas no interpretadas. Este control depende de las palabr
 reconocidas: no demuestra que ambos pases hayan leído todos los píxeles del original.
 Los dos pases comparten los límites de ejecución existentes.
 
+Las anclas toleran un punto terminal de abreviatura (`UND.`/`UND`) sin cambiar
+los valores extraídos ni eliminar puntuación interna, guiones o porcentajes.
+Los encabezados de columnas deben tener posiciones distintas y no solapadas;
+una etiqueta ambigua no elige silenciosamente la primera columna. En el prefijo
+de una página de continuación, sólo se reconoce una cabecera repetida cuando
+todas sus palabras forman valores STRING completos ya extraídos con procedencia
+y validez. Se usan los límites trasladados del encabezado observado y cualquier
+escalar válido conserva la región para revisión. Texto desconocido, coincidencias
+solapadas, tablas sólo STRING y productos con importes ilegibles siguen visibles.
+Este ajuste del ID 1 no acredita por sí solo la exactitud del corpus.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,

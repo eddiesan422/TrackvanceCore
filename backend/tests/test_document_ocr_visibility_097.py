@@ -85,3 +85,64 @@ def test_missing_first_header_cannot_drop_body_above_a_repeated_header_on_the_sa
     assert any(region["page"] == 1 and region.get("reason") == "TABLE_HEADER_NOT_FOUND"
                and "QA-A first service" in region["text"] and "QA-B second service" in region["text"]
                for region in payload["table_unparsed"]["detail"])
+
+
+@pytest.mark.parametrize("known_headers", [False, True])
+@pytest.mark.parametrize("extra_unknown_word", [False, True])
+def test_continuation_prefix_requires_complete_positive_header_provenance(known_headers, extra_unknown_word):
+    source = [source_line([(.05, "Description"), (.5, "Qty"), (.8, "Amount")], .2, 1),
+              source_line([(.05, "QA-A"), (.5, "2"), (.8, "17.50")], .3, 1),
+              source_line([(.05, "Footer")], .95, 1),
+              source_line([(.05, "Example Company"), (.5, "Corporation"), (.8, "INV-2026-01")], .04, 2),
+              source_line([(.05, "Description"), (.5, "Qty"), (.8, "Amount")], .2, 2),
+              source_line([(.05, "QA-B"), (.5, "3"), (.8, "21.75")], .3, 2),
+              source_line([(.05, "Footer")], .95, 2)]
+    if extra_unknown_word:
+        source[3]["words"].append({"text": "UNMAPPED", "region": [.65, .04, .69, .052], "confidence": 95})
+    definition = table_definition()
+    if known_headers:
+        from trackvance.document_schemas import DocumentDefinition
+
+        definition["fields"] = [
+            {"name": "issuer", "logical_type": "STRING", "visual": {"page": 1, "region": [.05, .05, .99, .07], "label": "Issuer", "direction": "RIGHT"}},
+            {"name": "invoice", "logical_type": "STRING", "visual": {"page": 1, "region": [.05, .1, .99, .12], "label": "Invoice", "direction": "RIGHT"}}]
+        definition = DocumentDefinition.model_validate(definition).model_dump(mode="json")
+        source.extend([source_line([(.05, "Issuer"), (.3, "Example Company Corporation")], .05, 1),
+                       source_line([(.05, "Invoice"), (.8, "INV-2026-01")], .1, 1)])
+    payload = extract(source, definition)
+    assert [[cell["value"] for cell in row.values()] for row in payload["tables"]["detail"]] == [["QA-A", "2", "17.50"], ["QA-B", "3", "21.75"]]
+    assert bool(payload["table_unparsed"]["detail"]) is (not known_headers or extra_unknown_word)
+    all_strings = copy.deepcopy(definition)
+    for field in all_strings["tables"][0]["fields"]:
+        field["logical_type"] = "STRING"
+    # Without declared scalar evidence the region remains uncertain and visible.
+    assert extract(source, all_strings)["table_unparsed"]["detail"]
+
+
+@pytest.mark.parametrize("split_numeric_baseline", [False, True])
+def test_continuation_product_with_all_numeric_cells_illegible_remains_visible(split_numeric_baseline):
+    source = [source_line([(.05, "Description"), (.5, "Qty"), (.8, "Amount")], .2, 1),
+              source_line([(.05, "QA-A"), (.5, "2"), (.8, "17.50")], .3, 1),
+              source_line([(.05, "Footer")], .95, 1),
+              source_line([(.05, "QA-X actual service"), (.5, "unreadable"), (.8, "unknown")], .1, 2),
+              source_line([(.05, "Description"), (.5, "Qty"), (.8, "Amount")], .2, 2),
+              source_line([(.05, "QA-B"), (.5, "3"), (.8, "21.75")], .3, 2)]
+    if split_numeric_baseline:
+        for word in source[3]["words"][1:]:
+            word["region"][1] += .02
+            word["region"][3] += .02
+        source[3]["region"] = box(source[3]["words"])
+    payload = extract(source, table_definition())
+    assert any("QA-X actual service" in region["text"] and "unreadable" in region["text"]
+               and "unknown" in region["text"] for region in payload["table_unparsed"]["detail"])
+
+
+def test_invalid_scalar_in_a_real_product_prefix_still_stays_visible():
+    source = two_page_geometry()
+    source[0]["words"][1]["text"] = "unreadable"
+    source[0]["text"] = "QA-A first service unreadable 17.50"
+    source.extend([source_line([(.05, "Description"), (.5, "Qty"), (.8, "Amount")], .6, 1),
+                   source_line([(.05, "QA-D"), (.5, "5"), (.8, "3.00")], .7, 1)])
+    payload = extract(source, table_definition())
+    assert any("QA-A first service" in region["text"] and "unreadable" in region["text"]
+               for region in payload["table_unparsed"]["detail"])
