@@ -38,7 +38,7 @@ def anchor_key(value):
 def anchor_matches(line, label):
     tokens = words(line)
     target = anchor_key(label)
-    result = []
+    result: list[tuple[int, int, list[float]]] = []
     if not target:
         return result
     for start in range(len(tokens)):
@@ -250,10 +250,10 @@ def prefix_furniture_words(lines, page, start, end, rule, fields, header_values,
     if not scalar_columns or not header_values or validator is None:
         return set()
     values = {" ".join(value.split()) for value in header_values if isinstance(value, str) and any(c.isalpha() for c in value)}
-    excluded = set()
+    excluded: set[int] = set()
     bounds = [value + dx for value in rule["column_bounds"]]
     for group in row_groups(lines, page, start, end):
-        columns = [[] for _ in rule["header_labels"]]
+        columns: list[list[dict]] = [[] for _ in rule["header_labels"]]
         for word, _ in group:
             center = (word["region"][0] + word["region"][2]) / 2
             target = next((index for index, (left, right) in enumerate(pairwise(bounds)) if left <= center < right), None)
