@@ -8,6 +8,18 @@ documentales independientes. La [matriz oficial 0.9.7](https://github.com/eddies
 registra el estado de cierre, los gates, las limitaciones y la actualización de
 instalaciones. El cambio de versión no actualiza ni certifica una instalación.
 
+La recepción local automática de CSV, TXT y XLSX dispone del CLI opcional
+`scripts/file_inbox_agent.py`. Se inicia antes de que lleguen los archivos y
+permanece en primer plano, con una carpeta de entrada explícita en el equipo
+cliente. Cada ruta publica mediante la API en su dataset estable. Conserva
+originales, copias inmutables y un diario durable; contenido idéntico con otro
+nombre no crea otra adquisición. Un registro conocido se recupera por GET y una
+respuesta incierta bloquea nuevos envíos hasta su reconciliación. La
+[guía operativa](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/file-inbox-0.9.7.md)
+explica inicio, permisos, contratos, parada, recuperación, límites y retención.
+La carga manual y el procesamiento posterior conservan sus recorridos propios;
+el servidor sólo recibe los archivos transferidos por el cliente autorizado.
+
 Centro de control sólo presenta una observación de calidad exitosa cuando tiene
 población evaluada positiva (`total_rows` en Intake/ReconOps y `total_checks` en
 Sentinel). Una tasa histórica de 100 sobre cero filas no contribuye a salud,

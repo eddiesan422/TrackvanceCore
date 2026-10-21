@@ -5,6 +5,12 @@
 - Documentos / ID1: opción acotada `continuation_context` en reglas de tabla visual para atribuir metadatos de continuación mediante una región explícita y una leyenda literal completa. Exige cobertura de todas las palabras, una partición única y valores STRING de cabecera válidos con origen; conserva para revisión escalares de producto, duplicados, palabras adicionales y poblaciones ambiguas.
 - Compatibilidad: la opción ausente o nula no se añade a la serialización heredada ni modifica sus hashes. No cambia el estadio READ, su geometría, los valores extraídos o los orígenes. Modificar una opción explícita cambia la definición y exige una prueba y activación nuevas.
 - Comparación local de contexto: admite únicamente cinco marcas latinas declaradas sobre letras ASCII; preserva marcas sobre dígitos, trazos, caracteres de compatibilidad y demás signos. No aplica esta comparación a valores, claves o anclas de otras reglas.
+- ID 2 PDP: receptor local opcional para CSV/TXT/XLSX, operado en primer plano
+  y vinculado a datasets estables mediante la API pública. Detecta llegadas y
+  contenido cambiado, conserva originales y copias inmutables, deduplica por
+  contenido/contrato y recupera adquisiciones conocidas con un diario durable.
+  Una respuesta incierta impide nuevos POST; no instala servicios del sistema
+  ni modifica calendarios, pools o límites del servidor.
 - ID 1 PDP: finales alternativos de tablas multipágina; pruebas y descubrimiento
   de borradores con proceso y presupuestos efectivos, sin pruebas parciales;
   aritmética exacta acotada y diagnóstico explícito del exceso de precisión.
