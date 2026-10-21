@@ -19596,6 +19596,32 @@
         ],
         "title": "ContextBody"
       },
+      "ContinuationContext": {
+        "properties": {
+          "region": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Region"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "region",
+          "label"
+        ],
+        "title": "ContinuationContext"
+      },
       "DatasetFileInspection": {
         "properties": {
           "format": {
@@ -25301,6 +25327,16 @@
             "minimum": 0.004,
             "title": "Row Tolerance",
             "default": 0.018
+          },
+          "continuation_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContinuationContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
