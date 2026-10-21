@@ -1,6 +1,7 @@
 """DOC-097: independent references, exact snapshots and independent value oracles."""
 import copy
 from collections import Counter
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -414,6 +415,68 @@ def test_activation_requires_unused_variant_and_detects_reference_changes(authen
     with database() as db:
         assert db.scalar(select(func.count()).select_from(DocumentTemplate)) == 0
         assert db.get(DocumentDraft, draft["id"]).version == draft["version"]
+
+
+def test_exact_builder_activation_allows_native_manual_batch_without_legacy_example(authenticated, database, tmp_path):
+    """The draft's independent references must authorize the operational publication flow."""
+    from test_document_visual_builder_095 import invoice_pdf
+
+    from trackvance.document_worker import process_once
+
+    family, ids, draft = create_workspace(authenticated, tmp_path)
+    configured = copy.deepcopy(draft["definition"])
+    configured["publication"].update(mode="SCHEDULED", starts_at=(datetime.now(UTC) + timedelta(hours=4)).isoformat())
+    url = f"/api/v1/documents/builder/drafts/{draft['id']}"
+    saved = authenticated.put(url, json={"expected_version": draft["version"], "definition": configured, "reference_ids": ids})
+    assert saved.status_code == 200, saved.text
+    tested = authenticated.post(url + "/test", json={"expected_version": saved.json()["version"]}).json()
+    for identity in ids:
+        response = authenticated.post(f"/api/v1/documents/builder/tests/{tested['id']}/review", json={
+            "reference_id": identity, "expected_version": tested["review_version"], "confirmed": ["headers.0.invoice"],
+            "reason": "All existing independent reference values verified without edits"})
+        assert response.status_code == 200, response.text
+        tested = response.json()
+    activated = authenticated.post(f"/api/v1/documents/builder/tests/{tested['id']}/activate")
+    assert activated.status_code == 200, activated.text
+    template = activated.json()
+    assert template["tested_extraction_id"] is None  # References are not legacy operational examples.
+    source = invoice_pdf(tmp_path / "operational-builder.pdf")
+    uploaded = authenticated.post(f"/api/v1/documents/families/{family}/originals", data={"template_id": template["id"]},
+        files={"files": (source.name, source.read_bytes(), "application/pdf")})
+    assert uploaded.status_code == 200, uploaded.text
+    original_id = uploaded.json()["items"][0]["id"]
+    assert process_once()
+    original = authenticated.get(f"/api/v1/documents/originals/{original_id}").json()
+    assert original["extraction"]["payload"]["fields"]["invoice"]["value"] == "000001"
+    reviewed = authenticated.post(f"/api/v1/documents/originals/{original_id}/review", json={
+        "expected_extraction_id": original["extraction"]["id"], "confirmed": ["headers.0.invoice"],
+        "reason": "Operational value checked against independent invoice"})
+    assert reviewed.status_code == 200, reviewed.text
+    body = {"template_id": template["id"], "document_ids": [original_id], "idempotency_key": "native-builder-published-once"}
+    publication = authenticated.post(f"/api/v1/documents/families/{family}/batches", json=body)
+    assert publication.status_code == 200, publication.text
+    batch = publication.json()
+    assert batch["status"] == "PUBLISHED" and set(batch["published_versions"]) == {"headers"}
+    version_id = batch["published_versions"]["headers"]
+    profile = authenticated.get(f"/api/v1/dataset-versions/{version_id}/profile").json()
+    assert profile["row_count"] == profile["sampled_rows"] == 1
+    assert profile["sample"][0]["invoice"] == "000001"
+    assert profile["sample"][0]["document_id"] == original_id
+    repeated = authenticated.post(f"/api/v1/documents/families/{family}/batches", json=body)
+    assert repeated.status_code == 200 and repeated.json()["id"] == batch["id"]
+    assert repeated.json()["published_versions"] == batch["published_versions"]
+    untested = authenticated.post(f"/api/v1/documents/families/{family}/templates", json=configured).json()
+    rejected = authenticated.post(f"/api/v1/documents/families/{family}/batches", json={**body, "template_id": untested["id"], "idempotency_key": "untested-must-remain-blocked"})
+    assert rejected.status_code == 422 and rejected.json()["error"]["code"] == "DOCUMENT_TEMPLATE_TEST_REQUIRED"
+    other = authenticated.post("/api/v1/documents/families", json={"name": "Other publication family"}).json()["id"]
+    rejected = authenticated.post(f"/api/v1/documents/families/{other}/batches", json=body)
+    assert rejected.status_code == 422 and rejected.json()["error"]["code"] == "DOCUMENT_TEMPLATE_TEST_REQUIRED"
+    with database() as db:
+        evidence = db.get(DocumentBuilderTest, tested["id"])
+        evidence.automatic_results = {}
+        db.commit()
+    rejected = authenticated.post(f"/api/v1/documents/families/{family}/batches", json={**body, "idempotency_key": "changed-proof-must-remain-blocked"})
+    assert rejected.status_code == 409 and rejected.json()["error"]["code"] == "DOCUMENT_TEST_INTEGRITY"
 
 
 def test_reference_and_snapshot_integrity_fail_closed(authenticated, database, tmp_path):

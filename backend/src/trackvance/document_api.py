@@ -16,6 +16,7 @@ from .artifactstore import link_artifact, storage_provider
 from .db import get_db, utcnow
 from .document_models import (
     DocumentBatch,
+    DocumentBuilderTest,
     DocumentFamily,
     DocumentOriginal,
     DocumentTemplate,
@@ -349,7 +350,19 @@ def batches(identity: str, offset: int = Query(0, ge=0), limit: int = Query(25, 
 def new_batch(identity: str, body: BatchBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     item = owned(db, DocumentFamily, identity, user)
     template = owned(db, DocumentTemplate, body.template_id, user)
-    if template.family_id != item.id or not template.tested_extraction_id:
+    verified = bool(template.tested_extraction_id)
+    if template.family_id == item.id and not verified:
+        # Native builder activation records its independent reference proof here;
+        # it deliberately never fabricates a legacy operational example.
+        tested = db.scalar(select(DocumentBuilderTest).where(
+            DocumentBuilderTest.organization_id == user.organization_id,
+            DocumentBuilderTest.activated_template_id == template.id))
+        if tested is not None:
+            from .document_builder_workspace import test_dto
+
+            evidence = test_dto(tested)
+            verified = evidence["snapshot"]["definition"] == template.definition and not any(evidence["issues"].values())
+    if template.family_id != item.id or not verified:
         raise OperationError(422, "DOCUMENT_TEMPLATE_TEST_REQUIRED", "El lote requiere una plantilla probada de esta familia.")
     batch = open_batch(db, item, template, user, "manual:" + body.idempotency_key, document_ids=body.document_ids, correction=body.correction)
     publish_durable(db, batch, user)
