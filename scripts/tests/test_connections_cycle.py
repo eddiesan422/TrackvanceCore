@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 
 import pytest
@@ -125,3 +126,111 @@ def test_unexpected_proxy_body_retains_status_without_parsing_or_retrying(monkey
         api.post("/api/v1/connections/private-uuid/test", {}, expected=(200,))
     assert len(calls) == 1
     assert sanitize_compose_http_failure(vars(raised.value)) == {"http_status": 502}
+
+
+@pytest.mark.parametrize("upstream", ["ready", "http502_then_ready", "http502", "starting", "timeout"])
+def test_post_restart_sources_require_ready_web_route_without_repeating_posts(monkeypatch, tmp_path, upstream):
+    """A healthy static page is insufficient; model a stale/unready upstream."""
+    calls, posts, probes, waits = [], [], [], []
+    state = {"clock": 0.0, "backend_ready": False, "web_fresh": False, "restarting": False}
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: state["clock"],
+        sleep=lambda seconds: state.update(clock=state["clock"] + seconds)), raising=False)
+    monkeypatch.delenv("TRACKVANCE_LOCAL_EXECUTION_ID", raising=False)
+
+    def isolate(compose, _environment, evidence, _project):
+        (evidence / "private-compose.json").write_text('{"services": {}}', encoding="utf-8")
+        return compose
+
+    def execute(arguments, **kwargs):
+        calls.append(arguments)
+        if arguments == ["docker", "context", "show"]:
+            return "default"
+        if "restart" in arguments:
+            state["restarting"] = True
+            services = arguments[arguments.index("restart") + 1:]
+            if "api" in services:
+                state["backend_ready"] = False
+            if "web" in services:
+                state["web_fresh"] = state["backend_ready"]
+        if "up" in arguments and "--wait-timeout" in arguments:
+            timeout_index = arguments.index("--wait-timeout")
+            if state["restarting"]:
+                waits.append(int(arguments[timeout_index + 1]))
+            if not state["backend_ready"]:
+                state["backend_ready"] = True
+                state["clock"] += 181 if upstream == "timeout" else 50
+        if "python" in arguments and arguments[-1] == "-":
+            if "certify_sqlserver_streaming(" in kwargs.get("input_text", ""):
+                return json.dumps({"status": "PASS", "rows": 1028,
+                                   "full_scan": {"row_count": 1028}, "cancellation": {"status": "PASS"}})
+            return '{"roundtrip": "PASS"}'
+        return ""
+
+    instances = []
+
+    class Api:
+        def __init__(self, base_url, timeout):
+            self.base_url, self.timeout, self.csrf = base_url, timeout, None
+            instances.append(self)
+
+        def request(self, *_args, **_kwargs):
+            return None
+
+        def get(self, path):
+            if path == "/api/v1/health":
+                return {"version": "0.9.7"}
+            if path == "/api/v1/health/ready":
+                probes.append({"path": path, "timeout": self.timeout,
+                               "backend_ready": state["backend_ready"], "web_fresh": state["web_fresh"]})
+                transient = upstream == "http502_then_ready" and len(probes) == 1
+                state["clock"] += min(40, self.timeout) if upstream in {"http502", "starting"} or transient else .1
+                if upstream == "http502" or transient or not state["web_fresh"]:
+                    raise runner.smoke.SmokeFailure("Synthetic upstream failure", http_status=502)
+                return {"status": "starting" if upstream == "starting" else "ready"}
+            if path.startswith("/api/v1/runs/"):
+                return {"status": "SUCCESS"}
+            if path == "/api/v1/audit-events":
+                return []
+            raise AssertionError("Unexpected synthetic GET")
+
+        def post(self, path, _body, **_kwargs):
+            if path == "/api/v1/auth/demo":
+                return {"csrf_token": "synthetic-csrf"}
+            posts.append(path)
+            if not probes or upstream not in {"ready", "http502_then_ready"}:
+                raise runner.smoke.SmokeFailure("Unsafe POST reached synthetic unready upstream", http_status=502)
+            return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(runner, "isolate_compose", isolate)
+    monkeypatch.setattr(runner, "main_inventory", lambda _reader: [])
+    monkeypatch.setattr(runner, "assert_main_unchanged", lambda *_args: None)
+    monkeypatch.setattr(runner, "runtime_diagnostics", lambda *_args: {"services": []})
+    monkeypatch.setattr(runner, "execute", execute)
+    monkeypatch.setattr(runner, "certify_read_only_accounts", lambda *_args: None)
+    monkeypatch.setattr(runner, "certify_source", lambda _api, _checks, source, *_args: {
+        "source_type": source, "connection_id": source.lower(), "run_id": source.lower() + "-run"})
+    monkeypatch.setattr(runner, "certify_temporal_snapshots", lambda *_args: {})
+    monkeypatch.setattr(runner.smoke, "Api", Api)
+    monkeypatch.setattr(runner.sys, "argv", ["connections_cycle.py", "--project", "trackvance-connections-e2e-route",
+        "--port", "3200", "--streaming-rows", "1028", "--skip-playwright", "--skip-regression",
+        "--evidence-dir", str(tmp_path)])
+
+    success = upstream in {"ready", "http502_then_ready"}
+    assert runner.main() == (0 if success else 1)
+    assert instances[0].timeout == 60
+    if success:
+        assert len(probes) == (2 if upstream == "http502_then_ready" else 1)
+        assert all(p["backend_ready"] and p["web_fresh"] for p in probes)
+        assert posts == ["/api/v1/connections/postgresql/test", "/api/v1/connections/sqlserver/test"]
+        assert len(waits) == 2 and waits[0] == 180 and 0 < waits[1] < 180
+        assert 0 < probes[0]["timeout"] <= 60
+    else:
+        assert posts == [], "No uncertain POST may be submitted or retried before route readiness"
+        result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+        assert result["failed_stage"] == "restart_readiness"
+        if upstream == "http502":
+            assert result["http_failure"] == {"http_status": 502}
+        if upstream == "timeout":
+            assert result["error_type"] == "TimeoutError"
+            assert not probes
+            assert not any("restart" in call and call[-1] == "web" for call in calls)

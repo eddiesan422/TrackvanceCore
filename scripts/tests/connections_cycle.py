@@ -18,6 +18,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -445,6 +446,53 @@ def certify_source(api, checks, source_type: str, password: str, credentials: li
             "row_count": 6, "status": "PASS"}
 
 
+def restart_for_source_check(run, api, observations):
+    """Refresh web only after its upstream, then prove the actual proxied route.
+
+    Both waits and the read-only probe share the original 180s readiness budget.
+    No source-test POST is retried or submitted before this barrier succeeds.
+    """
+    upstream = ["postgres", "api", "worker", "delivery-worker"]
+    run(["restart", *upstream])
+    deadline = time.monotonic() + 180
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds < 1:
+            raise TimeoutError("Se agotó la espera de readiness tras el reinicio.")
+        return seconds
+
+    run(["up", "-d", "--wait", "--wait-timeout", "180", *upstream])
+    remaining()
+    run(["restart", "web"])
+    run(["up", "-d", "--wait", "--wait-timeout", str(int(remaining())), "web"])
+    original_timeout, last_error = api.timeout, None
+    while True:
+        try:
+            api.timeout = min(original_timeout, remaining())
+        except TimeoutError:
+            if last_error is not None:
+                raise last_error
+            raise
+        try:
+            ready = api.get("/api/v1/health/ready")
+        except smoke.SmokeFailure as error:
+            observations.append({"http_status": error.http_status, "ready": False})
+            if error.http_status not in {502, 503}:
+                raise
+            last_error = error
+        else:
+            is_ready = isinstance(ready, dict) and ready.get("status") == "ready"
+            observations.append({"http_status": 200, "ready": is_ready})
+            if is_ready:
+                remaining()
+                return
+            last_error = smoke.SmokeFailure("La ruta web hacia la API no quedó lista tras el reinicio.")
+        finally:
+            api.timeout = original_timeout
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
 def main() -> int:
     # Docker/browser output includes Unicode even when Windows redirects stdout
     # through a legacy console encoding. Keep the evidence portable and intact.
@@ -522,6 +570,7 @@ def main() -> int:
     started = False
     checks = smoke.Checks()
     streaming = None
+    restart_readiness = []
     stage = "docker"
     try:
         command(["docker", "info", "--format", "{{.OSType}}"])
@@ -591,8 +640,7 @@ def main() -> int:
             browser_args = [] if args.full_playwright else ["tests-e2e/connections.spec.ts"]
             run_browser(pnpm, browser_args, root=ROOT, project=project, environment=environment, evidence=evidence)
         stage = "restart_readiness"
-        run(["restart", "postgres", "api", "worker", "delivery-worker", "web"])
-        run(["up", "-d", "--wait", "--wait-timeout", "180"])
+        restart_for_source_check(run, api, restart_readiness)
         stage = "post_restart_source_check"
         for result in results:
             tested = api.post(f"/api/v1/connections/{result['connection_id']}/test", {}, expected=(200,))
@@ -611,6 +659,7 @@ def main() -> int:
         result = {"status": "PASS", "version": application_version, "project": project, "sources": results,
                   "sqlserver_streaming_probe": streaming,
                   "temporal_regressions": temporal_results,
+                  "restart_readiness": restart_readiness,
                   "checks": checks.completed, "playwright": "SKIPPED" if args.skip_playwright else "PASS",
                   "regression_smoke": "SKIPPED" if args.skip_regression else "PASS"}
         (evidence / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -622,13 +671,14 @@ def main() -> int:
         http_failure = sanitize_compose_http_failure({
             "http_status": getattr(error, "http_status", None),
             "api_error_code": getattr(error, "api_error_code", None),
-        }) if stage == "post_restart_source_check" else {}
+        }) if stage in {"restart_readiness", "post_restart_source_check"} else {}
         (evidence / "result.json").write_text(json.dumps({"status": "FAIL", "project": project,
                                                         "error_type": type(error).__name__, "failed_stage": stage,
                                                         **({"http_failure": http_failure} if http_failure else {}),
                                                         "failure_frames": capture_runner_frames(error),
                                                         "checks": checks.completed,
                                                         "sqlserver_streaming_probe": streaming,
+                                                        "restart_readiness": restart_readiness,
                                                         "error": redact(str(error), credentials)},
                                                        indent=2), encoding="utf-8")
         if started:
