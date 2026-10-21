@@ -3,7 +3,14 @@ import re
 from itertools import pairwise
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from .document_template_builder_rules import normalized
 
@@ -49,6 +56,21 @@ class VisualFieldRule(VisualRegion):
         return self
 
 
+class ContinuationContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    region: list[float] = Field(min_length=4, max_length=4)
+    label: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def bounded_literal(self):
+        left, top, right, bottom = self.region
+        if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1 and bottom - top <= .15):
+            raise ValueError("El contexto de continuación requiere una región de hasta 15 % de la página.")
+        if not any(character.isalpha() for character in self.label) or len(self.label.split()) > 24:
+            raise ValueError("Indica una etiqueta literal completa de hasta 24 palabras.")
+        return self
+
+
 class VisualTableRule(VisualRegion):
     header_labels: list[str] = Field(min_length=2, max_length=40)
     column_bounds: list[float] = Field(min_length=3, max_length=41)
@@ -59,6 +81,16 @@ class VisualTableRule(VisualRegion):
     continue_pages: bool = False
     multiline_column: int | None = Field(default=None, ge=0, le=39)
     row_tolerance: float = Field(default=.018, ge=.004, le=.03)
+    continuation_context: ContinuationContext | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_continuation_context(self, handler: SerializerFunctionWrapHandler):
+        result = handler(self)
+        # Existing normalized definitions/snapshots have no such property. Its
+        # absent default must not rehash or invalidate any historical template.
+        if self.continuation_context is None:
+            result.pop("continuation_context", None)
+        return result
 
     @model_validator(mode="after")
     def columns(self):

@@ -678,7 +678,85 @@ def without_caption_words(lines, excluded):
     return filtered
 
 
+def context_tokens(value: str) -> tuple[str, ...]:
+    # This comparison is deliberately private to explicit continuation context.
+    # No extracted value, table anchor or legacy prefix comparison is changed.
+    accents = {"\u0300", "\u0301", "\u0302", "\u0303", "\u0308"}
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    result: list[str] = []
+    for character in value:
+        decomposed = unicodedata.normalize("NFD", character)
+        if len(decomposed) > 1 and decomposed[0] in letters and all(mark in accents for mark in decomposed[1:]):
+            result.append(decomposed[0])
+        elif character in accents and result and result[-1] in letters:
+            continue
+        else:
+            result.append(character)
+    return tuple("".join(result).split())
+
+
+def continuation_context_word_ids(lines, rule, fields, header_values, validator):
+    context = rule.get("continuation_context")
+    scalar_fields = [field for field in fields or [] if field.get("logical_type", "STRING") != "STRING"]
+    if not context or not scalar_fields or not header_values or validator is None or not rule.get("continue_pages"):
+        return set()
+    label = context_tokens(context["label"])
+    values = {context_tokens(value) for value in header_values if isinstance(value, str)
+        and any(character.isalpha() for character in value) and len(value.split()) <= 24}
+    if not label or label in values:
+        return set()
+    region = context["region"]
+    excluded: set[int] = set()
+    for page in sorted({entry["page"] for entry in lines if entry["page"] > rule["page"]}):
+        population = [(word, entry) for entry in lines if entry["page"] == page for word in words(entry)
+            if word["region"][2] >= region[0] and word["region"][0] <= region[2]
+            and word["region"][3] >= region[1] and word["region"][1] <= region[3]]
+        # Include every intersecting glyph. A center-based crop cannot prove
+        # closure when an unknown word straddles the configured boundary.
+        if not population or len(population) > 96 or any(
+            not (region[0] <= word["region"][0] < word["region"][2] <= region[2]
+                and region[1] <= word["region"][1] < word["region"][3] <= region[3]) for word, _ in population):
+            continue
+        if any(validator(word["text"], field)[1] == "VALID" for word, _ in population for field in scalar_fields):
+            continue  # One recognized product scalar preserves the whole region.
+        selected = [{**entry, "words": [word for word, source in population if source is entry]}
+            for entry in lines if entry["page"] == page]
+        selected = [entry for entry in selected if entry["words"]]
+        ordered = [word for entry in visual_lines(selected, .012) for word in words(entry)]
+        actual = tuple(token for word in ordered for token in context_tokens(word["text"]))
+        if not actual or len(actual) > 96:
+            continue
+        # Counts are capped at two: any second complete partition is ambiguity,
+        # not an invitation to choose the first match or its confidence.
+        paths: dict[tuple[int, bool, bool], list[tuple[tuple[tuple[str, ...], str], ...]]] = {(0, False, False): [()]}
+        patterns = [(value, "HEADER") for value in values] + [(label, "CONTEXT")]
+        for first in range(len(actual)):
+            for used_label in (False, True):
+                for used_header in (False, True):
+                    state = (first, used_label, used_header)
+                    for path in paths.get(state, []):
+                        for pattern, kind in patterns:
+                            end = first + len(pattern)
+                            if actual[first:end] != pattern or kind == "CONTEXT" and used_label:
+                                continue
+                            target = (end, used_label or kind == "CONTEXT", used_header or kind == "HEADER")
+                            choices = paths.setdefault(target, [])
+                            if len(choices) < 2:
+                                choices.append((*path, (pattern, kind)))
+        complete = paths.get((len(actual), True, True), [])
+        if len(complete) != 1:
+            continue
+        headers = [pattern for pattern, kind in complete[0] if kind == "HEADER"]
+        if len(headers) != len(set(headers)):
+            continue  # Repeated known metadata is still an unexplained duplicate.
+        excluded.update(id(word) for word in ordered)
+    return excluded
+
+
 def table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None):
+    context_words = continuation_context_word_ids(lines, rule, fields, header_values, validator)
+    if context_words:
+        lines = without_caption_words(lines, context_words)
     source_lines = lines
     excluded = header_caption_word_ids(lines, rule, fields, validator)
     if excluded:

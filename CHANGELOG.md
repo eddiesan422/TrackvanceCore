@@ -2,6 +2,9 @@
 
 ## 0.9.7 — Automatización, operación y experiencia documental
 
+- Documentos / ID1: opción acotada `continuation_context` en reglas de tabla visual para atribuir metadatos de continuación mediante una región explícita y una leyenda literal completa. Exige cobertura de todas las palabras, una partición única y valores STRING de cabecera válidos con origen; conserva para revisión escalares de producto, duplicados, palabras adicionales y poblaciones ambiguas.
+- Compatibilidad: la opción ausente o nula no se añade a la serialización heredada ni modifica sus hashes. No cambia el estadio READ, su geometría, los valores extraídos o los orígenes. Modificar una opción explícita cambia la definición y exige una prueba y activación nuevas.
+- Comparación local de contexto: admite únicamente cinco marcas latinas declaradas sobre letras ASCII; preserva marcas sobre dígitos, trazos, caracteres de compatibilidad y demás signos. No aplica esta comparación a valores, claves o anclas de otras reglas.
 - ID 1 PDP: finales alternativos de tablas multipágina; pruebas y descubrimiento
   de borradores con proceso y presupuestos efectivos, sin pruebas parciales;
   aritmética exacta acotada y diagnóstico explícito del exceso de precisión.

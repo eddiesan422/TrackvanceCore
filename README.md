@@ -78,6 +78,12 @@ La proyección no modifica palabras, regiones originales ni procedencia. Este
 cambio requiere nuevas lecturas para validar su contrato y no certifica por sí
 solo el corpus ni la publicación operativa.
 
+Las tablas visuales que continúan en otras páginas pueden declarar `tables[].visual.continuation_context` desde **Configuración técnica avanzada del borrador**. La opción identifica una banda explícita de metadatos repetidos y una leyenda completa; sólo se atribuye como contexto cuando todas las palabras se explican de forma única mediante esa leyenda y valores STRING de cabecera ya extraídos, válidos y con procedencia. Los números de producto reconocidos, palabras adicionales, duplicados, límites atravesados o particiones ambiguas conservan la región para revisión.
+
+La región usa coordenadas normalizadas `[izquierda, arriba, derecha, abajo]` y tiene una altura máxima de `0.15`. La etiqueta admite hasta 160 caracteres y 24 palabras. La opción se aplica sólo a páginas posteriores a la página de la tabla y requiere `continue_pages: true`; no modifica READ, valores extraídos, orígenes ni filas. Al editarla hay que guardar, repetir la prueba conjunta, revisar y activar la instantánea exacta. Las definiciones existentes que omiten la opción conservan su serialización y sus hashes.
+
+La atribución del contexto no demuestra exactitud OCR ni autoriza publicar detalle incompleto. Los resultados automáticos, las correcciones puntuales y los valores finales revisados siguen siendo evidencias separadas.
+
 ### Antecedente 0.9.5
 
 La línea 0.9.5 añade familias documentales y extracción local con revisión,
