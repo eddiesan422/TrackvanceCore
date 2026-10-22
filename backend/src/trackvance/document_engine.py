@@ -413,13 +413,17 @@ def extract(lines, definition, page_geometry=None):
             header_values = [fields[field["name"]]["value"] for field in definition["fields"]
                              if field.get("logical_type", "STRING") == "STRING" and fields[field["name"]]["validity"] == "VALID"
                              and fields[field["name"]]["origin"] is not None]
-            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"], table["fields"], header_values, validate_value, page_geometry)
+            visual_rows, rejected = _visual_rules.table_candidates(lines, table["visual"], table["fields"], header_values,
+                validate_value, page_geometry, table_name=table["name"], definition=definition)
             for values in visual_rows:
                 row = {}
                 for field, (raw, source) in zip(table["fields"], values, strict=True):
                     value, validity = validate_value(raw, field)
+                    if source is None:
+                        value, validity = None, "MISSING"
                     row[field["name"]] = {"value": value, "observed": raw, "validity": validity,
-                        "confidence": source["confidence"], "origin": {k: source[k] for k in ("page", "region", "method", "continuation_origins") if k in source},
+                        "confidence": source["confidence"] if source else None,
+                        "origin": {k: source[k] for k in ("page", "region", "method", "continuation_origins") if k in source} if source else None,
                         "reviewed": False}
                 rows.append(row)
             tables[table["name"]], table_unparsed[table["name"]] = rows, rejected

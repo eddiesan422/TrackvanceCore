@@ -81,7 +81,11 @@ def _write_json(path, value):
 
 
 def _valid_result(result, request):
-    from trackvance.document_template_builder_rules import valid_page_geometry
+    from trackvance.document_template_builder_rules import (
+        source_digest,
+        valid_header_observation,
+        valid_page_geometry,
+    )
 
     if not isinstance(result, dict):
         return False
@@ -111,9 +115,11 @@ def _valid_result(result, request):
     sources = {reference["id"]: reference["lines"] for reference in request["references"]}
     geometries = {reference["id"]: reference.get("page_geometry") for reference in request["references"]}
     geometry_present = {reference["id"]: "page_geometry" in reference for reference in request["references"]}
+    definition_digest = None
     for identity, payload in result.items():
         if (not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict)
-            or not isinstance(payload.get("tables"), dict) or not isinstance(payload.get("table_unparsed"), dict)):
+            or not isinstance(payload.get("tables"), dict) or not isinstance(payload.get("table_unparsed"), dict)
+            or "header_resolutions" in payload):
             return False
         if (set(payload["fields"]) != names or set(payload["tables"]) != set(columns)
             or set(payload["table_unparsed"]) != set(columns) or payload.get("lines") != sources[identity]
@@ -141,6 +147,16 @@ def _valid_result(result, request):
         if any(not isinstance(regions, list) or any(not isinstance(region, dict) for region in regions)
                for regions in payload["table_unparsed"].values()):
             return False
+        observations = [(table, region) for table, regions in payload["table_unparsed"].items() for region in regions
+                        if region.get("reason") in {"HEADER_UNVERIFIED", "CONTINUATION_CONTEXT_UNVERIFIED"}
+                        or "header_observation" in region]
+        if observations:
+            source_hash = source_digest(sources[identity])
+            if definition_digest is None:
+                definition_digest = source_digest(definition)
+            if any(not valid_header_observation(region, sources[identity], definition, table,
+                       source_hash=source_hash, definition_hash=definition_digest) for table, region in observations):
+                return False
         period = definition.get("business_period_field")
         if payload.get("business_period") != ({"field": period, **payload["fields"][period]} if period else None):
             return False
@@ -220,6 +236,33 @@ def run_builder(operation, references, definition=None):
                 pass
             process.wait(timeout=5)
         shutil.rmtree(folder)
+
+
+def verify_automatic_payload(payload, definition):
+    """Recheck body coverage in the existing confined EXTRACT worker.
+
+    Only the server's immutable automatic result is eligible. This proof is
+    required before a header-only source confirmation, never a new OCR/READ or
+    a client-supplied assertion that a region contains no products.
+    """
+    from .document_template_builder_rules import source_digest
+
+    if not isinstance(payload, dict) or "header_resolutions" in payload or not isinstance(payload.get("lines"), list):
+        return False
+    reference = {"id": "header-source-verification", "lines": payload["lines"]}
+    if "page_geometry" in payload:
+        reference["page_geometry"] = payload["page_geometry"]
+    actual = run_builder("EXTRACT", [reference], definition)[reference["id"]]
+    # OCR operational envelopes may also contain diagnostics/processor metadata.
+    # Every extraction business value and every region must still match exactly.
+    keys = {"fields", "tables", "pages", "lines", "table_unparsed", "business_period"}
+    if "page_geometry" in actual or "page_geometry" in payload:
+        keys.add("page_geometry")
+    if "arithmetic" in actual or "arithmetic" in payload:
+        keys.add("arithmetic")
+    if not keys <= payload.keys() or not keys <= actual.keys():
+        return False
+    return source_digest({key: payload[key] for key in keys}) == source_digest({key: actual[key] for key in keys})
 
 
 def _child(folder):

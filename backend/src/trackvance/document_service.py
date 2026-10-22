@@ -14,6 +14,13 @@ from .artifactstore import link_artifact, storage_provider
 from .dataset_readers import DatasetReadResult
 from .db import iso, require_record, utcnow
 from .document_engine import arithmetic_checks, validate_value
+from .document_header_review import (
+    append_confirmations,
+    header_review_dto,
+    invalidate_confirmations,
+    reject_initial_resolutions,
+    resolved_observations,
+)
 from .document_models import (
     DocumentBatch,
     DocumentBatchMember,
@@ -67,10 +74,12 @@ def extraction_for(db, original):
     item = require_record(db, DocumentExtraction, original.extraction_id) if original.extraction_id else None
     if item and digest(item.payload) != item.payload_hash:
         raise OperationError(409, "DOCUMENT_EXTRACTION_INTEGRITY", "La extracción perdió su integridad.")
+    if item and not item.reviewed:
+        reject_initial_resolutions(item.payload)
     return item
 
 
-def issues(extraction, definition):
+def issues(extraction, definition, *, source_binding=None):
     if extraction is None:
         return ["EXTRACTION_PENDING"]
     payload = extraction.payload
@@ -79,25 +88,34 @@ def issues(extraction, definition):
     for check in payload.get("arithmetic", []):
         if check["status"] != "VALID":
             result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check['row']}")
+    resolved = (resolved_observations(payload, definition, reviewed=getattr(extraction, "reviewed", False),
+                source_binding=source_binding) if payload.get("header_resolutions") else set())
     for name, fields in structures(definition).items():
         rows = [payload["fields"]] if name == "headers" else payload["tables"].get(name, [])
         table = next((t for t in definition["tables"] if t["name"] == name), None)
         if not rows and table and table["required"]:
             result.append(f"TABLE_REQUIRED:{name}")
-        if payload.get("table_unparsed", {}).get(name):
+        if any(region.get("header_observation", {}).get("observation_id") not in resolved
+               for region in payload.get("table_unparsed", {}).get(name, [])):
             result.append(f"TABLE_ROWS_UNRECOGNIZED:{name}")
         for row_index, row in enumerate(rows):
-            for field in fields:
+            for column, field in enumerate(fields):
                 cell = row.get(field["name"])
                 path = f"{name}.{row_index}.{field['name']}"
                 if not cell or cell.get("validity") != "VALID":
                     result.append("VALUE_INVALID:" + path)
                     continue
                 confidence = cell.get("confidence")
+                declared_start = ((table or {}).get("visual") or {}).get("row_start")
                 needs_review = (policy["review_policy"] == "ALL" or field["critical"]
+                                or declared_start is not None and declared_start["column"] == column
                                 or confidence is not None and confidence < policy["minimum_confidence"])
                 if needs_review and not cell.get("reviewed"):
                     result.append("REVIEW_REQUIRED:" + path)
+    declared_tables = {table["name"] for table in definition["tables"]}
+    for name, regions in payload.get("table_unparsed", {}).items():
+        if name not in declared_tables and regions:
+            result.append(f"TABLE_ROWS_UNRECOGNIZED:{name}")
     return result
 
 
@@ -119,6 +137,10 @@ def original_dto(db, original, *, detail=False):
         result["template"] = template_dto(definition_for(db, original))
         result["extraction"] = extraction_dto(extraction) if extraction else None
         result["issues"] = issues(extraction, result["template"]["definition"])
+        if extraction:
+            header_review = header_review_dto(extraction.payload, result["template"]["definition"], reviewed=extraction.reviewed)
+            if header_review is not None:
+                result["header_review"] = header_review
         result["revisions"] = [{"id": e.id, "revision": e.revision, "reviewed": e.reviewed,
                                 "actor_id": e.actor_id, "reason": e.reason, "created_at": iso(e.created_at)}
                                for e in db.scalars(select(DocumentExtraction).where(DocumentExtraction.document_id == original.id)
@@ -273,8 +295,10 @@ def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bin
     return create_template(db, family, definition, user)
 
 
-def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None):
+def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None, header_confirmations=None):
     permission(db, user, "review")
+    if header_confirmations:
+        permission(db, user, "download")
     family = owned(db, DocumentFamily, original.family_id, user)
     lock_family(db, family)
     db.refresh(original)
@@ -285,6 +309,12 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
         raise OperationError(422, "DOCUMENT_REVIEW_REASON", "Registra el motivo de la revisión.")
     definition = definition_for(db, original).definition
     payload = copy.deepcopy(previous.payload)
+    if header_confirmations and (changes or confirmed or table_rows):
+        raise OperationError(422, "DOCUMENT_HEADER_CELLS_REQUIRED", "Guarda primero la revisión de valores; confirma después el encabezado exacto.")
+    if header_confirmations and not previous.reviewed:
+        raise OperationError(422, "DOCUMENT_HEADER_CELLS_REQUIRED", "Guarda primero la revisión humana de todos los valores.")
+    if table_rows and any(region.get("header_observation") for regions in payload.get("table_unparsed", {}).values() for region in regions):
+        raise OperationError(422, "DOCUMENT_HEADER_SOURCE_CHANGED", "Las observaciones de encabezado conservan las filas y regiones originales.")
     for name, rows in (table_rows or {}).items():
         table = next((t for t in definition["tables"] if t["name"] == name), None)
         if not table or len(rows) > 10000 or any(set(row) != {f["name"] for f in table["fields"]} for row in rows):
@@ -331,13 +361,32 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
                 cell["alternatives"] = []
     if definition.get("arithmetic"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
-    item = DocumentExtraction(organization_id=user.organization_id, document_id=original.id, template_id=original.template_id,
-                              revision=previous.revision + 1, previous_id=previous.id, payload=payload, payload_hash=digest(payload),
-                              engine=previous.engine, actor_id=user.id, reason=reason.strip(), reviewed=True)
     if definition.get("business_period_field"):
         field = definition["business_period_field"]
         payload["business_period"] = {"field": field, **payload["fields"][field]}
-        item.payload_hash = digest(payload)
+    if changes or confirmed:
+        payload = invalidate_confirmations(payload, user.id, iso(utcnow()), reason)
+    if header_confirmations:
+        automatic = previous
+        seen: set[str] = set()
+        while automatic.reviewed:
+            if not automatic.previous_id or automatic.id in seen or len(seen) >= 1000:
+                raise OperationError(409, "DOCUMENT_HEADER_INTEGRITY", "No se puede verificar la extracción automática original.")
+            seen.add(automatic.id)
+            automatic = owned(db, DocumentExtraction, automatic.previous_id, user)
+            if (automatic.document_id != original.id or automatic.template_id != original.template_id
+                or digest(automatic.payload) != automatic.payload_hash):
+                raise OperationError(409, "DOCUMENT_HEADER_INTEGRITY", "La cadena de revisiones perdió su integridad.")
+        if automatic.document_id != original.id or automatic.template_id != original.template_id:
+            raise OperationError(409, "DOCUMENT_HEADER_INTEGRITY", "La extracción automática pertenece a otro origen.")
+        payload = append_confirmations(payload, automatic.payload, definition, header_confirmations,
+            {"kind": "DOCUMENT", "document_id": original.id, "source_sha256": original.sha256,
+             "template_id": original.template_id, "definition_hash": digest(definition),
+             "automatic_extraction_id": automatic.id, "automatic_payload_hash": automatic.payload_hash},
+            user.id, iso(utcnow()), reason)
+    item = DocumentExtraction(organization_id=user.organization_id, document_id=original.id, template_id=original.template_id,
+                              revision=previous.revision + 1, previous_id=previous.id, payload=payload, payload_hash=digest(payload),
+                              engine=previous.engine, actor_id=user.id, reason=reason.strip(), reviewed=True)
     db.add(item)
     db.flush()
     preserve_extraction(db, item)
@@ -345,7 +394,8 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
     original.status = "REVIEW_REQUIRED" if issues(item, definition) else "REVIEWED"
     audit(db, "DOCUMENT_REVIEW_RECORDED", "document_extraction", item.id, "Revisión humana inmutable registrada", user.name,
           user.organization_id, {"document_id": original.id, "previous_id": previous.id,
-                                 "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reason": reason})
+                                 "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reason": reason,
+                                 **({"header_confirmations": payload["header_resolutions"][-len(header_confirmations):]} if header_confirmations else {})})
     return item
 
 

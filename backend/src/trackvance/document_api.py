@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .artifactstore import link_artifact, storage_provider
 from .db import get_db, utcnow
+from .document_header_review import HeaderConfirmation
 from .document_models import (
     DocumentBatch,
     DocumentBuilderTest,
@@ -69,6 +70,7 @@ class ReviewBody(BaseModel):
     confirmed: list[str] = Field(default_factory=list, max_length=10000)
     reason: str = Field(min_length=1, max_length=2000)
     table_rows: dict[str, list[dict[str, str | None]]] = Field(default_factory=dict, max_length=10)
+    header_confirmations: list[HeaderConfirmation] = Field(default_factory=list, max_length=50)
 
 
 class BatchBody(BaseModel):
@@ -293,7 +295,8 @@ async def page_preview(identity: str, page: int, db: Session = Depends(get_db), 
 @router.post("/originals/{identity}/review")
 def review_original(identity: str, body: ReviewBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     item = owned(db, DocumentOriginal, identity, user)
-    review(db, item, body.expected_extraction_id, body.changes, body.confirmed, body.reason, user, body.table_rows)
+    review(db, item, body.expected_extraction_id, body.changes, body.confirmed, body.reason, user, body.table_rows,
+           [value.model_dump() for value in body.header_confirmations])
     # A successful human review remains durable even if a separate publication is blocked.
     db.commit()
     try:

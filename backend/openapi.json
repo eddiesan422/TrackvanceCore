@@ -19851,6 +19851,45 @@
         ],
         "title": "DatasetSchemaResponse"
       },
+      "DeclaredRowStart": {
+        "properties": {
+          "column": {
+            "type": "integer",
+            "maximum": 39.0,
+            "minimum": 0.0,
+            "title": "Column"
+          },
+          "separator": {
+            "type": "string",
+            "const": "-",
+            "title": "Separator",
+            "default": "-"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/IdentifierSegment"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 2,
+            "title": "Segments"
+          },
+          "maximum_start_inset": {
+            "type": "number",
+            "maximum": 0.05,
+            "minimum": 0.0,
+            "title": "Maximum Start Inset",
+            "default": 0.035
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "column",
+          "segments"
+        ],
+        "title": "DeclaredRowStart"
+      },
       "DefinitionBody": {
         "properties": {
           "name": {
@@ -21990,6 +22029,79 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HeaderConfirmation": {
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Observation Id"
+          },
+          "expected_observation_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Observation Hash"
+          },
+          "expected_payload_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Payload Hash"
+          },
+          "decision": {
+            "type": "string",
+            "const": "SOURCE_HEADER_ONLY_NO_PRODUCTS_CONFIRMED",
+            "title": "Decision"
+          },
+          "source_note": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Source Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "observation_id",
+          "expected_observation_hash",
+          "expected_payload_hash",
+          "decision",
+          "source_note"
+        ],
+        "title": "HeaderConfirmation"
+      },
+      "IdentifierSegment": {
+        "properties": {
+          "alphabet": {
+            "type": "string",
+            "enum": [
+              "ASCII_ALPHA",
+              "ASCII_DIGIT",
+              "ASCII_VISIBLE"
+            ],
+            "title": "Alphabet"
+          },
+          "minimum": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Minimum"
+          },
+          "maximum": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Maximum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "alphabet",
+          "minimum",
+          "maximum"
+        ],
+        "title": "IdentifierSegment"
+      },
       "InboxResponse": {
         "properties": {
           "items": {
@@ -23602,6 +23714,14 @@
             "type": "object",
             "maxProperties": 10,
             "title": "Table Rows"
+          },
+          "header_confirmations": {
+            "items": {
+              "$ref": "#/components/schemas/HeaderConfirmation"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Header Confirmations"
           }
         },
         "type": "object",
@@ -23650,6 +23770,14 @@
             "maxLength": 2000,
             "minLength": 1,
             "title": "Reason"
+          },
+          "header_confirmations": {
+            "items": {
+              "$ref": "#/components/schemas/HeaderConfirmation"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Header Confirmations"
           }
         },
         "type": "object",
@@ -25337,6 +25465,46 @@
                 "type": "null"
               }
             ]
+          },
+          "header_label_aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "array",
+                "maxItems": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Label Aliases"
+          },
+          "row_start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeclaredRowStart"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "header_observation_policy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "SOURCE_REVIEW_REQUIRED"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Observation Policy"
           }
         },
         "additionalProperties": false,

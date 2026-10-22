@@ -7,12 +7,14 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    FiniteFloat,
     SerializerFunctionWrapHandler,
+    StrictInt,
     model_serializer,
     model_validator,
 )
 
-from .document_template_builder_rules import normalized
+from .document_template_builder_rules import anchor_key, normalized
 
 
 class VisualRegion(BaseModel):
@@ -71,6 +73,33 @@ class ContinuationContext(BaseModel):
         return self
 
 
+class IdentifierSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    alphabet: Literal["ASCII_ALPHA", "ASCII_DIGIT", "ASCII_VISIBLE"]
+    minimum: StrictInt = Field(ge=1, le=12)
+    maximum: StrictInt = Field(ge=1, le=12)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.minimum > self.maximum:
+            raise ValueError("Ordena las longitudes del segmento identificador.")
+        return self
+
+
+class DeclaredRowStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    column: StrictInt = Field(ge=0, le=39)
+    separator: Literal["-"] = "-"
+    segments: list[IdentifierSegment] = Field(min_length=2, max_length=6)
+    maximum_start_inset: FiniteFloat = Field(default=.035, ge=0, le=.05)
+
+    @model_validator(mode="after")
+    def bounded_identifier(self):
+        if sum(item.maximum for item in self.segments) + len(self.segments) - 1 > 96:
+            raise ValueError("El identificador admite hasta 96 caracteres.")
+        return self
+
+
 class VisualTableRule(VisualRegion):
     header_labels: list[str] = Field(min_length=2, max_length=40)
     column_bounds: list[float] = Field(min_length=3, max_length=41)
@@ -82,14 +111,18 @@ class VisualTableRule(VisualRegion):
     multiline_column: int | None = Field(default=None, ge=0, le=39)
     row_tolerance: float = Field(default=.018, ge=.004, le=.03)
     continuation_context: ContinuationContext | None = None
+    header_label_aliases: list[list[str]] | None = Field(default=None, max_length=40)
+    row_start: DeclaredRowStart | None = None
+    header_observation_policy: Literal["SOURCE_REVIEW_REQUIRED"] | None = None
 
     @model_serializer(mode="wrap")
     def serialize_continuation_context(self, handler: SerializerFunctionWrapHandler):
         result = handler(self)
         # Existing normalized definitions/snapshots have no such property. Its
         # absent default must not rehash or invalidate any historical template.
-        if self.continuation_context is None:
-            result.pop("continuation_context", None)
+        for name in ("continuation_context", "header_label_aliases", "row_start", "header_observation_policy"):
+            if getattr(self, name) is None:
+                result.pop(name, None)
         return result
 
     @model_validator(mode="after")
@@ -107,6 +140,19 @@ class VisualTableRule(VisualRegion):
             raise ValueError("Cada columna requiere una etiqueta distinta.")
         if not all(0 <= a < b <= 1 for a, b in pairwise(self.column_bounds)):
             raise ValueError("Ordena los límites de columna de izquierda a derecha.")
+        if self.row_start and self.row_start.column >= len(self.header_labels):
+            raise ValueError("El inicio de fila debe pertenecer a una columna declarada.")
+        if self.header_observation_policy and self.row_start is None:
+            raise ValueError("La revisión de cabecera requiere un inicio de fila declarado.")
+        if self.header_label_aliases is not None:
+            if len(self.header_label_aliases) != len(self.header_labels) or sum(map(len, self.header_label_aliases)) > 20:
+                raise ValueError("Indica una lista por columna y hasta 20 alias literales en total.")
+            labels = [*self.header_labels, *(value for group in self.header_label_aliases for value in group)]
+            if any(not value.strip() or len(value) > 160 or len(value.split()) > 24 for value in labels):
+                raise ValueError("Cada etiqueta literal requiere hasta 160 caracteres y 24 palabras.")
+            keys = [anchor_key(value) for value in labels]
+            if len(set(keys)) != len(keys):
+                raise ValueError("Las etiquetas y sus alias deben distinguir inequívocamente las columnas.")
         return self
 
 

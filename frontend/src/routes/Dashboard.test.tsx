@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
@@ -78,5 +78,42 @@ describe('Operational control center', () => {
     await waitFor(() => expect(api).toHaveBeenLastCalledWith('/dashboard?period=7d&dataset_id=ds-1&module=intake&status=ATTENTION&criticality=CRITICAL'))
     await user.click(screen.getByRole('button', { name: 'Restablecer filtros' }))
     await waitFor(() => expect(api).toHaveBeenLastCalledWith('/dashboard?period=30d'))
+  })
+
+  it('shows unfinished module work as in progress without a fabricated health score', async () => {
+    vi.mocked(api).mockResolvedValue({
+      ...response,
+      stats: { ...response.stats, runs: 1, health_score: null, controls_failed: 0 },
+      attention: [], datasets_attention: [], health_history: [],
+      module_status: [
+        { module: 'intake', status: 'IN_PROGRESS', runs: 1, activity_count: 1, activity_label: 'ejecuciones', issues: 0, processed_records: 0, health_score: null },
+        { module: 'recon', status: 'NO_DATA', runs: 0, activity_count: 0, issues: 0, processed_records: 0, health_score: null },
+        { module: 'sentinel', status: 'NO_DATA', runs: 0, activity_count: 0, issues: 0, processed_records: 0, health_score: null },
+      ],
+      recent_runs: [],
+    })
+    renderApp(<Dashboard/>)
+    const modules = await screen.findByRole('region', { name: 'Resumen operativo por módulo' })
+    const intake = within(modules).getByRole('link', { name: /Data Intake/ })
+    expect(within(intake).getByText('En curso')).toHaveClass('in_progress')
+    expect(within(intake).queryByText('Saludable')).not.toBeInTheDocument()
+    expect(within(intake).getByText('—')).toBeVisible()
+    expect(within(intake).getByText('1 ejecuciones')).toBeVisible()
+  })
+
+  it('keeps an unscored completed module neutral while preserving its activity count', async () => {
+    vi.mocked(api).mockResolvedValue({
+      ...response,
+      stats: { ...response.stats, runs: 1, health_score: null, controls_failed: 0 },
+      module_status: [{ module: 'intake', status: 'NO_DATA', runs: 1, activity_count: 1, activity_label: 'ejecuciones', issues: 0, processed_records: 0, health_score: null }],
+      attention: [], datasets_attention: [], health_history: [], recent_runs: [],
+    })
+    renderApp(<Dashboard/>)
+    const modules = await screen.findByRole('region', { name: 'Resumen operativo por módulo' })
+    const intake = within(modules).getByRole('link', { name: /Data Intake/ })
+    expect(within(intake).getByText('Sin datos')).toHaveClass('no_data')
+    expect(within(intake).queryByText('Saludable')).not.toBeInTheDocument()
+    expect(within(intake).getByText('—')).toBeVisible()
+    expect(within(intake).getByText('1 ejecuciones')).toBeVisible()
   })
 })

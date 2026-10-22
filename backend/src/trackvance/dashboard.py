@@ -379,9 +379,16 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
         alerts = sum(run_operational_status(run) == "ATTENTION" for run in relevant)
         latest = max(relevant, key=lambda run: _utc(run.created_at) or datetime.min.replace(tzinfo=UTC), default=None)
         activity_count = len({run.config_id for run in relevant}) if module == "sentinel" else len(relevant)
+        module_health = aggregate_health(relevant)
+        if technical or alerts:
+            module_state = "ATTENTION"
+        elif any(run_operational_status(run) == "IN_PROGRESS" for run in relevant):
+            module_state = "IN_PROGRESS"
+        else:
+            module_state = "HEALTHY" if module_health is not None else "NO_DATA"
         module_status.append({
             "module": module,
-            "status": "ATTENTION" if technical or alerts else "HEALTHY" if relevant else "NO_DATA",
+            "status": module_state,
             "runs": len(relevant),
             "activity_count": activity_count,
             "activity_label": "monitores" if module == "sentinel" else "conciliaciones" if module == "recon" else "ejecuciones",
@@ -390,7 +397,7 @@ def build_dashboard(db: Session, organization_id: str, filters: DashboardFilters
             "issues": technical + alerts,
             "findings": sum(len(findings_by_run.get(run.id, [])) for run in relevant),
             "processed_records": sum(processed_records(run) or 0 for run in relevant),
-            "health_score": aggregate_health(relevant),
+            "health_score": module_health,
             "latest_run_at": iso(latest.created_at) if latest else None,
         })
 

@@ -206,6 +206,7 @@
 .operational-module-head strong { margin-top:3px; color:#385869; font-size:14px; }
 .operational-state { margin-left:auto; padding:4px 6px; border-radius:4px; color:#5d8d7c; background:#edf7f2; font-size:9px; font-weight:700; white-space:nowrap; }
 .operational-state.attention,.operational-state.technical_failure { color:#aa625d; background:#fff0ef; }
+.operational-state.in_progress { color:#597ea4; background:#edf3fa; }
 .operational-state.no_data { color:#8899a3; background:#f0f3f5; }
 .module-operational-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin-top:17px; padding:14px 0; border-top:1px solid #edf1f3; border-bottom:1px solid #edf1f3; }
 .module-operational-stats div { min-width:0; }

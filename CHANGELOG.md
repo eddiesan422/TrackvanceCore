@@ -2,6 +2,15 @@
 
 ## 0.9.7 — Automatización, operación y experiencia documental
 
+- ID 1 PDP: inicio de fila visual declarado y acotado, con separación de productos
+  multilínea y observaciones visibles de encabezados parciales. Confirmación de
+  origen ligada a hashes, versión, fuente y celdas revisadas, con reproducción
+  EXTRACT confinada; conserva las regiones originales y bloquea omisiones del
+  cuerpo. Las revisiones posteriores invalidan la confirmación anterior. Incluye
+  API, visualización del original y regresiones de proceso real, timeout y cierre.
+- ID 7 PDP: tarjetas de módulo con prioridad ATTENTION, IN_PROGRESS, HEALTHY con
+  medición comparable y NO_DATA sin ella. Conserva conteos, poblaciones, decisiones
+  y ceros medidos; una ejecución pendiente no se presenta como Saludable.
 - Documentos / ID1: opción acotada `continuation_context` en reglas de tabla visual para atribuir metadatos de continuación mediante una región explícita y una leyenda literal completa. Exige cobertura de todas las palabras, una partición única y valores STRING de cabecera válidos con origen; conserva para revisión escalares de producto, duplicados, palabras adicionales y poblaciones ambiguas.
 - Compatibilidad: la opción ausente o nula no se añade a la serialización heredada ni modifica sus hashes. No cambia el estadio READ, su geometría, los valores extraídos o los orígenes. Modificar una opción explícita cambia la definición y exige una prueba y activación nuevas.
 - Comparación local de contexto: admite únicamente cinco marcas latinas declaradas sobre letras ASCII; preserva marcas sobre dígitos, trazos, caracteres de compatibilidad y demás signos. No aplica esta comparación a valores, claves o anclas de otras reglas.

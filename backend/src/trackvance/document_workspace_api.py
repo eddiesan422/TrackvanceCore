@@ -25,6 +25,7 @@ from .document_builder_workspace import (
     test_draft,
     test_dto,
 )
+from .document_header_review import HeaderConfirmation
 from .document_models import DocumentBuilderTest, DocumentDraft, DocumentFamily, DocumentReference
 from .document_schemas import DocumentDraftDefinition
 from .document_service import MAX_BYTES, lock_family, owned
@@ -274,11 +275,13 @@ class ReviewTest(BaseModel):
     changes: dict[str, str | None] = Field(default_factory=dict, max_length=10000)
     confirmed: list[str] = Field(default_factory=list, max_length=10000)
     reason: str = Field(min_length=1, max_length=2000)
+    header_confirmations: list[HeaderConfirmation] = Field(default_factory=list, max_length=50)
 
 
 @router.post("/builder/tests/{identity}/review")
 def review(identity: str, body: ReviewTest, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    item = review_test(db, owned(db, DocumentBuilderTest, identity, user), body.reference_id, body.expected_version, body.changes, body.confirmed, body.reason, user)
+    item = review_test(db, owned(db, DocumentBuilderTest, identity, user), body.reference_id, body.expected_version, body.changes, body.confirmed, body.reason, user,
+                       [value.model_dump() for value in body.header_confirmations])
     db.commit()
     return test_dto(item)
 

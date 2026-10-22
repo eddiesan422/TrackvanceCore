@@ -28,6 +28,23 @@ decisiones se conservan. El cero medido sobre población positiva y el cero téc
 mantienen su semántica. Este ajuste corresponde al ID 7 del plan PDP y no acredita
 el cierre de los demás casos de su campaña.
 
+La tarjeta de cada módulo distingue `IN_PROGRESS` cuando hay ejecuciones en
+curso y `NO_DATA` cuando falta una medición comparable. `ATTENTION` conserva
+prioridad; `HEALTHY` requiere evidencia evaluada. Un cero medido conserva su
+valor y una ejecución en curso no recibe por sí sola la etiqueta Saludable.
+
+Las reglas visuales avanzadas admiten un inicio de fila declarado por columna,
+segmentos de identificador y margen horizontal acotado. La opción
+`header_observation_policy: SOURCE_REVIEW_REQUIRED` conserva encabezados parciales
+y contextos sin verificar como observaciones visibles. Su confirmación exige
+revisar las celdas, abrir el original y comprobar que la región contiene sólo
+encabezado. El servidor verifica el cuerpo mediante el proceso EXTRACT acotado,
+conserva fuente y observaciones, registra una revisión inmutable y rechaza filas
+o celdas omitidas. Cambiar valores o su revisión invalida las confirmaciones
+previas; activar requiere la prueba exacta de la definición vigente. Las
+opciones ausentes conservan la serialización heredada. Esta funcionalidad no
+certifica por sí sola la exactitud automática del corpus ni el cierre del PDP.
+
 Las tablas visuales admiten etiquetas de fin alternativas para separar pies y
 resúmenes entre páginas sin limitar el detalle a la altura del ejemplo. Los
 borradores prueban y descubren reglas en un proceso documental acotado: 30 s,

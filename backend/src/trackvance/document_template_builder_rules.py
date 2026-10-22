@@ -3,6 +3,8 @@
 The caller retains scalar validation and provenance. Coordinates are measured
 from the actual OCR/PDF words, never synthesized by dividing line width.
 """
+import hashlib
+import json
 import math
 import re
 import unicodedata
@@ -753,7 +755,7 @@ def continuation_context_word_ids(lines, rule, fields, header_values, validator)
     return excluded
 
 
-def table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None):
+def _legacy_table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None):
     context_words = continuation_context_word_ids(lines, rule, fields, header_values, validator)
     if context_words:
         lines = without_caption_words(lines, context_words)
@@ -765,23 +767,7 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None,
     rows: list[list[tuple[str, dict]]] = []
     rejected: list[dict] = []
     labels = rule["header_labels"]
-    headers = []
-    for line in lines:
-        anchors = table_header_anchors(line, labels)
-        if not anchors:
-            continue
-        positions = [item[2][0] for item in anchors]
-        if positions != sorted(positions):
-            continue
-        dx = anchors[0][2][0] - rule["region"][0]
-        if abs(dx) <= rule.get("tolerance", .12):
-            headers.append((line, anchors, dx))
-    for line, anchors in header_neighborhoods(lines, rule, source_lines, headers):
-        positions = [item[2][0] for item in anchors]
-        dx = anchors[0][2][0] - rule["region"][0]
-        if positions == sorted(positions) and abs(dx) <= rule.get("tolerance", .12):
-            headers.append((line, anchors, dx))
-    headers.sort(key=lambda header: (header[0]["page"], header[0]["region"][1], header[0]["region"][0]))
+    headers = declared_headers(source_lines, rule, visual=lines)
     previous_bounds, continuing = None, False
     for page in sorted({line["page"] for line in lines}):
         page_headers = [h for h in headers if h[0]["page"] == page]
@@ -888,6 +874,560 @@ def infer_type(value):
     if value in {"true", "false"}:
         return "BOOLEAN"
     return "STRING"
+
+
+def source_digest(value):
+    """Hash exact ordered JSON observations; never normalize extracted text."""
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, allow_nan=False,
+        sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def declared_row_start(text, grammar):
+    """Finite linear identifier grammar, also fail closed without DTO parsing."""
+    if not isinstance(grammar, dict) or not isinstance(text, str) or len(text) > 96:
+        return False
+    segments = grammar.get("segments")
+    if grammar.get("separator", "-") != "-" or not isinstance(segments, list) or not 2 <= len(segments) <= 6:
+        return False
+    parts = text.split("-")
+    if len(parts) != len(segments):
+        return False
+    for part, segment in zip(parts, segments, strict=True):
+        if not isinstance(segment, dict):
+            return False
+        alphabet = segment.get("alphabet")
+        lower, upper = segment.get("minimum"), segment.get("maximum")
+        if (alphabet not in {"ASCII_ALPHA", "ASCII_DIGIT", "ASCII_VISIBLE"}
+            or type(lower) is not int or type(upper) is not int or not 1 <= lower <= upper <= 12
+            or not lower <= len(part) <= upper):
+            return False
+        if alphabet == "ASCII_ALPHA" and not all("A" <= c <= "Z" or "a" <= c <= "z" for c in part):
+            return False
+        if alphabet == "ASCII_DIGIT" and not all("0" <= c <= "9" for c in part):
+            return False
+        if alphabet == "ASCII_VISIBLE" and not all(33 <= ord(c) <= 126 and c != "-" for c in part):
+            return False
+    return True
+
+
+def _alias_anchors(line, rule):
+    choices = [[label, *aliases] for label, aliases in zip(
+        rule["header_labels"], rule["header_label_aliases"], strict=True)]
+    candidates = []
+    for labels in choices:
+        found = {}
+        for label in labels:
+            for item in table_anchor_matches(line, label)[0]:
+                found[(item[0], item[1])] = item
+        candidates.append(list(found.values()))
+    paths: list[list[tuple[int, int, list[float]]]] = [[]]
+    for matches in candidates:
+        following = []
+        for path in paths:
+            for item in matches:
+                if not path or path[-1][1] <= item[0]:
+                    following.append([*path, item])
+                    if len(following) > 1:
+                        return None  # A second interpretation is not confidence arbitration.
+        paths = following
+    if len(paths) != 1:
+        return None
+    chosen = paths[0]
+    if {index for first, last, _ in chosen for index in range(first, last)} != set(range(len(words(line)))):
+        return None  # New alias paths must explain every observed glyph.
+    return chosen
+
+
+def declared_headers(source, rule, visual=None):
+    """Whole canonical pages retain authority before any declared alias path."""
+    if visual is None:
+        visual = visual_lines(source, .012 if rule.get("flowing") else .004)
+    found = []
+    for line in visual:
+        anchors = table_header_anchors(line, rule["header_labels"])
+        if anchors:
+            positions = [item[2][0] for item in anchors]
+            dx = anchors[0][2][0] - rule["region"][0]
+            if positions == sorted(positions) and abs(dx) <= rule.get("tolerance", .12):
+                found.append((line, anchors, dx))
+    for line, anchors in header_neighborhoods(visual, rule, source, found):
+        positions = [item[2][0] for item in anchors]
+        dx = anchors[0][2][0] - rule["region"][0]
+        if positions == sorted(positions) and abs(dx) <= rule.get("tolerance", .12):
+            found.append((line, anchors, dx))
+    if rule.get("header_label_aliases") is not None:
+        canonical_pages = {line["page"] for line, _, _ in found}
+        for merged in _header_windows(source, rule, canonical_pages):
+            anchors = _alias_anchors(merged, rule)
+            if anchors:
+                dx = anchors[0][2][0] - rule["region"][0]
+                if abs(dx) <= rule.get("tolerance", .12):
+                    found.append((merged, anchors, dx))
+    unique = {tuple(sorted(id(word) for word in words(line))): (line, anchors, dx)
+              for line, anchors, dx in found}
+    return sorted(unique.values(), key=lambda item: (item[0]["page"], item[0]["region"][1], item[0]["region"][0]))
+
+
+def _header_windows(source, rule, excluded_pages=(), word_budget=None):
+    """Bounded local neighborhoods with complete intersecting source population."""
+    visual = visual_lines(source, .004)
+    if word_budget is None:
+        aliases = rule.get("header_label_aliases") or [[] for _ in rule["header_labels"]]
+        word_budget = min(160, sum(max(len(normalized(value).split()) for value in [label, *group])
+            for label, group in zip(rule["header_labels"], aliases, strict=True)))
+    for page in sorted({line["page"] for line in source} - set(excluded_pages)):
+        population = [word for line in source if line["page"] == page for word in words(line)]
+        tops = sorted(word["region"][1] for word in population)
+        bottoms = sorted(word["region"][3] for word in population)
+        observed = sorted((line for line in visual if line["page"] == page), key=lambda line: line["region"][1])
+        for first in range(len(observed)):
+            selected = []
+            for last in range(first, min(len(observed), first + word_budget)):
+                selected.extend(words(observed[last]))
+                if len(selected) > word_budget:
+                    break
+                region = box(selected)
+                glyph = max(word["region"][3] - word["region"][1] for word in selected)
+                if region[3] - region[1] > min(.06, 4 * glyph, rule["region"][3] - rule["region"][1]):
+                    break
+                if bisect_right(tops, region[3]) - bisect_left(bottoms, region[1]) != len(selected):
+                    continue
+                tokens = sorted(selected, key=lambda word: (word["region"][0], word["region"][1]))
+                yield {**observed[first], "text": " ".join(word["text"] for word in tokens),
+                       "words": tokens, "region": region}
+
+
+def partial_header_candidates(source, rule, fields, validator):
+    if rule.get("header_observation_policy") != "SOURCE_REVIEW_REQUIRED" or not fields or validator is None:
+        return []
+    if any(not line.get("words") for line in source):
+        return []  # Line boxes cannot invent per-word provenance for confirmation.
+    complete_pages = {item[0]["page"] for item in declared_headers(source, rule)}
+    candidates = {}
+    budget = min(160, 2 * sum(len(normalized(label).split()) for label in rule["header_labels"]))
+    for merged in _header_windows(source, rule, complete_pages, budget):
+        selected = words(merged)
+        if any(declared_row_start(word["text"], rule.get("row_start")) for word in selected):
+            continue
+        choices = [[label, *((rule.get("header_label_aliases") or [[] for _ in fields])[index])]
+                   for index, label in enumerate(rule["header_labels"])]
+        matches = []
+        for labels in choices:
+            observed = {(item[0], item[1]): item for label in labels for item in table_anchor_matches(merged, label)[0]}
+            matches.append(list(observed.values()))
+        if any(len(items) > 1 for items in matches):
+            continue
+        supported = [(index, items[0]) for index, items in enumerate(matches) if items]
+        if len(supported) < 3 or sum(fields[index].get("logical_type", "STRING") != "STRING" for index, _ in supported) < 2:
+            continue
+        if any(a[1][1] > b[1][0] for a, b in pairwise(supported)):
+            continue
+        centers = [(item[2][0] + item[2][2]) / 2 for _, item in supported]
+        bounds = rule["column_bounds"]
+        if centers[-1] - centers[0] < .35 or any(not bounds[index] <= x < bounds[index + 1]
+            for (index, _), x in zip(supported, centers, strict=True)):
+            continue
+        if any(field.get("logical_type", "STRING") != "STRING"
+            and bounds[index] <= (word["region"][0] + word["region"][2]) / 2 < bounds[index + 1]
+            and validator(word["text"], field)[1] == "VALID"
+            for index, field in enumerate(fields) for word in selected):
+            continue
+        identity = frozenset(id(word) for word in selected)
+        candidates[identity] = (merged, supported)
+    maximal = {key: value for key, value in candidates.items() if not any(key < other for other in candidates)}
+    return [(line, supported) for identity, (line, supported) in maximal.items()
+            if not any(identity != other and identity & other for other in maximal)]
+
+
+def _unparsed(items, reason):
+    return {"page": items[0][1]["page"], "region": box([word for word, _ in items]),
+            "text": " ".join(word["text"] for word, _ in items),
+            "method": items[0][1]["method"], "reason": reason}
+
+
+def _source_word_records(source, selected):
+    selected_ids = {id(word) for word in selected}
+    return [{"line_index": index, "word_index": number, "text": word["text"],
+             "region": list(word["region"]), "method": line["method"]}
+            for index, line in enumerate(source) for number, word in enumerate(words(line))
+            if id(word) in selected_ids]
+
+
+def _header_observation(source, definition, table_name, line, supported, kind, header_evidence=()):
+    table = next(table for table in definition["tables"] if table["name"] == table_name)
+    rule = table["visual"]
+    record = {"version": 1, "kind": kind, "table": table_name, "page": line["page"],
+        "region": list(line["region"]), "source_lines_hash": source_digest(source),
+        "definition_hash": source_digest(definition), "column_bounds": list(rule["column_bounds"]),
+        "supported_columns": [{"column": index, "declared_label": rule["header_labels"][index],
+            "region": list(item[2])} for index, item in supported],
+        "supported_headers": list(header_evidence),
+        "source_words": _source_word_records(source, words(line))}
+    record["observation_id"] = source_digest(record)
+    return {"page": line["page"], "region": list(line["region"]), "text": line["text"],
+            "method": line["method"], "reason": kind, "header_observation": record}
+
+
+def _observation_region(value):
+    return (isinstance(value, list) and len(value) == 4
+        and all(type(item) in {int, float} and (type(item) is int or math.isfinite(item)) for item in value)
+        and 0 <= value[0] < value[2] <= 1 and 0 <= value[1] < value[3] <= 1)
+
+
+def valid_header_observation(region, source, definition, table_name, *, source_hash=None, definition_hash=None):
+    """Bounded transport/provenance only, never global semantic search in API.
+
+    Digests can be computed once per payload by a trusted server caller. The
+    separate confined EXTRACT replay remains mandatory before confirmation.
+    """
+    try:
+        observed = region["header_observation"]
+        keys = {"version", "kind", "table", "page", "region", "source_lines_hash", "definition_hash",
+                "column_bounds", "supported_columns", "supported_headers", "source_words", "observation_id"}
+        if not isinstance(observed, dict) or set(observed) != keys or type(observed["version"]) is not int or observed["version"] != 1:
+            return False
+        table = next(table for table in definition["tables"] if table["name"] == table_name)
+        rule = table.get("visual") or {}
+        kind = observed["kind"]
+        if (kind not in {"HEADER_UNVERIFIED", "CONTINUATION_CONTEXT_UNVERIFIED"}
+            or rule.get("header_observation_policy") != "SOURCE_REVIEW_REQUIRED"
+            or region.get("reason") != kind or observed["table"] != table_name
+            or type(observed["page"]) is not int or not 1 <= observed["page"] <= 50
+            or observed["page"] != region.get("page") or observed["region"] != region.get("region")
+            or not _observation_region(observed["region"])
+            or observed["column_bounds"] != rule["column_bounds"]
+            or observed["source_lines_hash"] != (source_hash if source_hash is not None else source_digest(source))
+            or observed["definition_hash"] != (definition_hash if definition_hash is not None else source_digest(definition))):
+            return False
+        unsigned = {key: value for key, value in observed.items() if key != "observation_id"}
+        if observed["observation_id"] != source_digest(unsigned):
+            return False
+        records = observed["source_words"]
+        if not isinstance(records, list) or not 1 <= len(records) <= (160 if kind == "HEADER_UNVERIFIED" else 96):
+            return False
+        selected, locations, local = [], [], []
+        for record in records:
+            if not isinstance(record, dict) or set(record) != {"line_index", "word_index", "text", "region", "method"}:
+                return False
+            index, number = record["line_index"], record["word_index"]
+            if type(index) is not int or type(number) is not int or not 0 <= index < len(source):
+                return False
+            line = source[index]
+            if not line.get("words") or not 0 <= number < len(line["words"]) or line["page"] != observed["page"]:
+                return False
+            word = line["words"][number]
+            if record != {"line_index": index, "word_index": number, "text": word["text"],
+                "region": word["region"], "method": line["method"]}:
+                return False
+            selected.append(word)
+            locations.append((index, number))
+            local.append({**line, "words": [word]})
+        if (locations != sorted(set(locations)) or box(selected) != observed["region"]
+            or region.get("method") not in {item["method"] for item in records}):
+            return False
+        support = observed["supported_columns"]
+        headers = observed["supported_headers"]
+        if kind == "HEADER_UNVERIFIED":
+            if not isinstance(support, list) or not 3 <= len(support) <= len(table["fields"]) or headers != []:
+                return False
+            indices = []
+            for item in support:
+                if not isinstance(item, dict) or set(item) != {"column", "declared_label", "region"}:
+                    return False
+                index = item["column"]
+                if (type(index) is not int or not 0 <= index < len(table["fields"])
+                    or item["declared_label"] != rule["header_labels"][index]
+                    or not _observation_region(item["region"])
+                    or not (observed["region"][0] <= item["region"][0] < item["region"][2] <= observed["region"][2]
+                        and observed["region"][1] <= item["region"][1] < item["region"][3] <= observed["region"][3])):
+                    return False
+                indices.append(index)
+            if indices != sorted(set(indices)) or sum(table["fields"][index].get("logical_type", "STRING") != "STRING" for index in indices) < 2:
+                return False
+            height = max(word["region"][3] - word["region"][1] for word in selected)
+            if observed["region"][3] - observed["region"][1] > min(.06, 4 * height, rule["region"][3] - rule["region"][1]):
+                return False
+            ordered = sorted(selected, key=lambda word: (word["region"][0], word["region"][1]))
+        else:
+            context = (rule.get("continuation_context") or {}).get("region")
+            if not isinstance(context, list):
+                return False
+            if (support != [] or not _observation_region(context) or context[3] - context[1] > .15
+                or not rule.get("continue_pages") or observed["page"] <= rule["page"]
+                or not (context[0] <= observed["region"][0] < observed["region"][2] <= context[2]
+                    and context[1] <= observed["region"][1] < observed["region"][3] <= context[3])
+                or not isinstance(headers, list) or not 1 <= len(headers) <= len(definition["fields"])):
+                return False
+            names = {field["name"] for field in definition["fields"] if field.get("logical_type", "STRING") == "STRING"}
+            seen = set()
+            for item in headers:
+                if (not isinstance(item, dict) or set(item) != {"name", "value", "observed", "origin"}
+                    or not isinstance(item["name"], str) or item["name"] not in names or item["name"] in seen
+                    or not isinstance(item["value"], str) or not isinstance(item["observed"], str)):
+                    return False
+                seen.add(item["name"])
+                origin = item["origin"]
+                if (not isinstance(origin, dict) or set(origin) != {"page", "region", "method"}
+                    or type(origin["page"]) is not int or not 1 <= origin["page"] <= 50
+                    or origin["method"] not in {"DIGITAL", "OCR"} or not _observation_region(origin["region"])):
+                    return False
+            ordered = [word for entry in visual_lines(local, .012) for word in words(entry)]
+        return region.get("text") == " ".join(word["text"] for word in ordered)
+    except (KeyError, TypeError, ValueError, IndexError, StopIteration, OverflowError):
+        return False
+
+
+def _header_scalar_evidence(source, definition, validator):
+    # Same scalar matching semantics as extract(), without recursively calling
+    # tables or importing the application in the standalone confined process.
+    evidence = []
+    for field in definition["fields"]:
+        if field.get("logical_type", "STRING") != "STRING":
+            continue
+        matches = []
+        if field.get("visual"):
+            for rule in [field["visual"], *field.get("visual_alternatives", [])]:
+                matches.extend(field_candidates(source, rule))
+            matches = list({(raw, entry["page"], tuple(entry["region"])): (raw, entry)
+                            for raw, entry in matches}.values())
+        else:
+            for line in source:
+                text = line["text"]
+                if field.get("label"):
+                    label = re.search(re.escape(field["label"]) + r"\s*[:=]?\s*", text, re.IGNORECASE)
+                    if not label:
+                        continue
+                    text = text[label.end():]
+                matched = re.search(field["pattern"], text)
+                if matched:
+                    matches.append((matched[1], line))
+        if not matches or len({raw for raw, _ in matches}) != 1 or (
+            len(matches) > 1 and (field.get("visual") or {}).get("require_unique_origin", False)):
+            continue
+        raw, entry = matches[0]
+        value, validity = validator(raw, field)
+        if validity == "VALID" and isinstance(value, str):
+            evidence.append({"name": field["name"], "value": value, "observed": raw,
+                             "origin": {key: entry[key] for key in ("page", "region", "method")}})
+    return evidence
+
+
+def continuation_observations(source, rule, fields, validator, definition, table_name):
+    """Unknown prefix is visible, with only bounded source-confirmable scope."""
+    context = rule.get("continuation_context")
+    scalar_fields = [field for field in fields if field.get("logical_type", "STRING") != "STRING"]
+    if (rule.get("header_observation_policy") != "SOURCE_REVIEW_REQUIRED" or not context
+        or not rule.get("continue_pages") or not scalar_fields or validator is None):
+        return []
+    region = context.get("region")
+    if (not isinstance(region, list) or len(region) != 4
+        or any(type(value) not in {int, float} or type(value) is float and not math.isfinite(value) for value in region)
+        or not (0 <= region[0] < region[2] <= 1 and 0 <= region[1] < region[3] <= 1 and region[3] - region[1] <= .15)):
+        return []
+    if any(not line.get("words") for line in source):
+        return []
+    evidence = _header_scalar_evidence(source, definition, validator)
+    patterns = {context_tokens(item["value"]) for item in evidence if any(c.isalpha() for c in item["value"])
+                and len(item["value"].split()) <= 24}
+    if not patterns:
+        return []
+    headers = declared_headers(source, rule)
+    result = []
+    for page in sorted({line["page"] for line in source if line["page"] > rule["page"]}):
+        population = [(word, line) for line in source if line["page"] == page for word in words(line)
+            if word["region"][2] >= context["region"][0] and word["region"][0] <= context["region"][2]
+            and word["region"][3] >= context["region"][1] and word["region"][1] <= context["region"][3]]
+        if not population or len(population) > 96:
+            continue
+        page_headers = [line for line, _, _ in headers if line["page"] == page]
+        if not page_headers:
+            page_headers = [line for line, _ in partial_header_candidates(source, rule, fields, validator) if line["page"] == page]
+        if not page_headers or any(word["region"][3] >= min(line["region"][1] for line in page_headers)
+                                   or not (context["region"][0] <= word["region"][0] < word["region"][2] <= context["region"][2]
+                                       and context["region"][1] <= word["region"][1] < word["region"][3] <= context["region"][3])
+                                   for word, _ in population):
+            continue
+        if any(declared_row_start(word["text"], rule.get("row_start"))
+            or any(validator(word["text"], field)[1] == "VALID" for field in scalar_fields)
+            for word, _ in population):
+            continue
+        selected_ids = {id(word) for word, _ in population}
+        selected_lines = without_caption_words(source, {id(word) for line in source for word in words(line)
+                                                      if id(word) not in selected_ids})
+        ordered = [word for line in visual_lines(selected_lines, .012) for word in words(line)]
+        actual = tuple(token for word in ordered for token in context_tokens(word["text"]))
+        matches = [sum(actual[index:index + len(pattern)] == pattern for index in range(len(actual)))
+                   for pattern in patterns]
+        if not any(matches) or any(count > 1 for count in matches):
+            continue  # At least one complete, unambiguous known HEADER value.
+        line = {**population[0][1], "region": box(ordered), "words": ordered,
+                "text": " ".join(word["text"] for word in ordered)}
+        result.append(_header_observation(source, definition, table_name, line, [],
+                                         "CONTINUATION_CONTEXT_UNVERIFIED", evidence))
+    return result
+
+
+def _retain_context_observations(regions, source, rule, fields, validator, definition, table_name):
+    if definition is None or table_name is None:
+        return regions
+    candidates = continuation_observations(source, rule, fields, validator, definition, table_name)
+    output = []
+    for region in regions:
+        observed = next((candidate for candidate in candidates if candidate["page"] == region["page"]
+                         and candidate["region"] == region["region"] and candidate["text"] == region["text"]), None)
+        output.append(observed if observed is not None else region)
+    return output
+
+
+def _declared_segment(population, anchors, dx, end, rule, fields, geometry):
+    grammar = rule["row_start"]
+    column_index = grammar["column"]
+    bounds = [value + dx for value in rule["column_bounds"]]
+    slope = header_baseline_slope(anchors)
+    frame = None
+    if slope and geometry:
+        ratio = geometry["width"] / geometry["height"]
+        angle = math.atan(slope / ratio)
+        frame = {"slope": slope, "aspect": ratio,
+            "pivot": ((anchors[0][2][0] + anchors[0][2][2]) / 2, (anchors[0][2][1] + anchors[0][2][3]) / 2),
+            "cosine": math.cos(angle), "sine": math.sin(angle)}
+        shift = projected_region({"region": anchors[0][2]}, frame)[0] - anchors[0][2][0]
+        bounds = [value + shift for value in bounds]
+    projected = {id(word): projected_region(word, frame) for word, _ in population}
+    def column(word):
+        x = projected_center(word, frame)[0]
+        return next((index for index, (left, right) in enumerate(pairwise(bounds)) if left <= x < right), None)
+    starts = sorted([item for item in population if column(item[0]) == column_index
+        and declared_row_start(item[0]["text"], grammar)
+        and 0 <= projected[id(item[0])][0] - bounds[column_index] <= grammar.get("maximum_start_inset", .035)],
+        key=lambda item: (projected[id(item[0])][1], projected[id(item[0])][0]))
+    if not starts:
+        return [], [_unparsed(population, "DECLARED_ROW_START_NOT_FOUND")] if population else [], False
+    if len(starts) > 10000:
+        raise ValueError("DOCUMENT_ROW_LIMIT")
+    boundaries = [projected[id(marker)][1] for marker, _ in starts]
+    for word, _ in population:
+        location = bisect_right(boundaries, projected[id(word)][1])
+        if location < len(boundaries) and boundaries[location] < projected[id(word)][3]:
+            return [], [_unparsed(population, "DECLARED_ROW_START_BOUNDARY_AMBIGUOUS")], True
+    if any(projected[id(a[0])][3] >= projected[id(b[0])][1] for a, b in pairwise(starts)):
+        return [], [_unparsed(population, "DECLARED_ROW_START_BOUNDARY_AMBIGUOUS")], True
+    buckets: list[list[tuple[dict, dict]]] = [[] for _ in starts]
+    unassigned: list[tuple[dict, dict]] = []
+    for item in population:
+        location = bisect_right(boundaries, projected_center(item[0], frame)[1]) - 1
+        (buckets[location] if location >= 0 else unassigned).append(item)
+    rows, rejected = [], []
+    if unassigned:
+        rejected.append(_unparsed(unassigned, "DECLARED_ROW_START_UNASSIGNED_WORDS"))
+    for group in buckets:
+        columns: list[list[tuple[dict, dict]]] = [[] for _ in fields]
+        outside: list[tuple[dict, dict]] = []
+        for item in group:
+            target = column(item[0])
+            (outside if target is None else columns[target]).append(item)
+        if not any(columns[index] for index, field in enumerate(fields)
+                   if index != column_index and field.get("logical_type", "STRING") != "STRING"):
+            return [], [*rejected, _unparsed(group, "DECLARED_START_HAS_NO_OWN_TYPED_BACKBONE")], True
+        if outside:
+            rejected.append(_unparsed(group, "DECLARED_ROW_OUTSIDE_COLUMNS"))
+            continue
+        uncertain = False
+        for field, items in zip(fields, columns, strict=True):
+            if items and field.get("logical_type", "STRING") != "STRING":
+                cores = [(projected[id(word)][1] + (projected[id(word)][3] - projected[id(word)][1]) / 3,
+                          projected[id(word)][3] - (projected[id(word)][3] - projected[id(word)][1]) / 3)
+                         for word, _ in items]
+                if max(first for first, _ in cores) > min(last for _, last in cores):
+                    uncertain = True
+        if uncertain:
+            rejected.append(_unparsed(group, "DECLARED_ROW_SCALAR_BASELINE_CONFLICT"))
+            continue
+        ordered = [column_reading_order(items, coordinate_frame=frame) for items in columns]
+        rows.append([(" ".join(word["text"] for word, _ in items), origin(items[0][1], [word for word, _ in items]))
+                     if items else (None, None) for items in ordered])
+    return rows, rejected, False
+
+
+def table_candidates(lines, rule, fields=None, header_values=(), validator=None, page_geometry=None,
+                     table_name=None, definition=None):
+    primary, rejected = _legacy_table_candidates(lines, rule, fields, header_values, validator, page_geometry)
+    if len(primary) > 10000:
+        raise ValueError("DOCUMENT_ROW_LIMIT")
+    grammar = rule.get("row_start")
+    if not grammar or not fields:
+        return primary, _retain_context_observations(rejected, lines, rule, fields or [], validator, definition, table_name)
+    if (type(grammar.get("column")) is not int or not 0 <= grammar["column"] < len(fields)
+        or not all(declared_row_start("-".join("A" * item["minimum"] if item.get("alphabet") != "ASCII_DIGIT"
+            else "0" * item["minimum"] for item in grammar.get("segments", [])), grammar) for _ in [0])):
+        raise ValueError("DOCUMENT_ROW_START_RULE")
+    key_column = grammar["column"]
+    if any(not line.get("words") for line in lines):
+        return primary, rejected  # Legacy line-only input has no new word-level authority.
+    def row_page(row):
+        source = row[key_column][1]
+        return source["page"] if source else None
+    def contradicts(rows):
+        return any(sum(declared_row_start(token, grammar) for token in str(row[key_column][0] or "").split()) > 1 for row in rows)
+    if not rejected and not contradicts(primary):
+        return primary, rejected
+    source = lines
+    known_context = continuation_context_word_ids(source, rule, fields, header_values, validator)
+    source = without_caption_words(source, known_context) if known_context else source
+    captions = header_caption_word_ids(source, rule, fields, validator)
+    source = without_caption_words(source, captions) if captions else source
+    headers = [(line, anchors, dx, None) for line, anchors, dx in declared_headers(source, rule)]
+    if definition is not None and table_name is not None:
+        for line, supported in partial_header_candidates(source, rule, fields, validator):
+            headers.append((line, [item for _, item in supported], 0, supported))
+    headers.sort(key=lambda item: (item[0]["page"], item[0]["region"][1]))
+    rows, remaining, ambiguous = [], [], []
+    for page in sorted({line["page"] for line in source}):
+        page_headers = [item for item in headers if item[0]["page"] == page]
+        old_rows = [row for row in primary if row_page(row) == page]
+        old_regions = [item for item in rejected if item["page"] == page]
+        if not page_headers:
+            rows.extend(old_rows)
+            remaining.extend(old_regions)
+            continue
+        first_bottom = page_headers[0][0]["region"][3]
+        cross_page = any(part.get("page") != page for row in old_rows for _, cell in row if cell
+                         for part in cell.get("continuation_origins", []))
+        if old_rows and not any(item["region"][3] > first_bottom for item in old_regions) and not cross_page and not contradicts(old_rows):
+            rows.extend(old_rows)
+            remaining.extend(old_regions)
+            continue
+        for number, (header, anchors, dx, supported) in enumerate(page_headers):
+            bottom = header["region"][3] if supported is not None else max(item[2][3] for item in anchors)
+            end = page_headers[number + 1][0]["region"][1] if number + 1 < len(page_headers) else 1
+            stops = [line["region"][1] for line in source if line["page"] == page and line["region"][1] > bottom
+                and any(anchor(line, stop) for stop in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if stop)]
+            end = min([end, *stops])
+            population = [(word, line) for line in source if line["page"] == page for word in words(line)
+                          if bottom < (word["region"][1] + word["region"][3]) / 2 < end]
+            candidate, unknown, uncertain = _declared_segment(population, anchors, dx, end, rule, fields,
+                                                             (page_geometry or {}).get(str(page)))
+            rows.extend(candidate)
+            remaining.extend(unknown)
+            if uncertain:
+                ambiguous.extend(unknown)
+            if supported is not None:
+                remaining.append(_header_observation(lines, definition, table_name, header, supported, "HEADER_UNVERIFIED"))
+        # Retain all pre-header source material from original blocking regions.
+        prefix = [(word, line) for line in source if line["page"] == page for word in words(line)
+                  if word["region"][3] < page_headers[0][0]["region"][1]
+                  and any(inside(word, item["region"]) for item in old_regions)]
+        if prefix:
+            remaining.append(_unparsed(prefix, "PARTIAL_HEADER_PREFIX_UNEXPLAINED"))
+        remaining.extend(item for item in old_regions if item["region"][3] <= first_bottom
+                         and not any(inside(word, item["region"]) for word, _ in prefix))
+        if len(rows) > 10000:
+            raise ValueError("DOCUMENT_ROW_LIMIT")
+    if ambiguous:
+        return primary, [*rejected, *ambiguous]
+    if len(rows) > 10000:
+        raise ValueError("DOCUMENT_ROW_LIMIT")
+    return rows, _retain_context_observations(remaining, lines, rule, fields, validator, definition, table_name)
 
 
 def field_name(label, fallback="campo"):

@@ -12,6 +12,12 @@ from .db import iso, utcnow
 from .document_builder_executor import MAX_BYTES as BUILDER_MAX_BYTES
 from .document_builder_executor import run_builder
 from .document_engine import arithmetic_checks, validate_value
+from .document_header_review import (
+    append_confirmations,
+    header_review_dto,
+    invalidate_confirmations,
+    reject_initial_resolutions,
+)
 from .document_models import (
     DocumentBuilderTest,
     DocumentDraft,
@@ -41,7 +47,7 @@ def authority(db, user):
 
 def processor_identity():
     return {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in
-            ("document_engine.py", "document_template_builder_rules.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py")}
+            ("document_engine.py", "document_template_builder_rules.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py")}
 
 
 def reference_dto(item, detail=False):
@@ -195,19 +201,25 @@ def measure(payload):
 def test_dto(item):
     if digest(item.snapshot) != item.snapshot_hash or digest(item.automatic_results) != item.automatic_results_hash:
         raise OperationError(409, "DOCUMENT_TEST_INTEGRITY", "La instantánea de prueba perdió su integridad.")
+    for payload in item.automatic_results.values():
+        reject_initial_resolutions(payload)
     reviewed_hashes = {entry["reference_id"]: entry.get("reviewed_payload_hash") for entry in item.review_history}
     if any(identity not in item.automatic_results or digest(payload) != reviewed_hashes.get(identity)
            for identity, payload in item.reviewed_results.items()):
         raise OperationError(409, "DOCUMENT_TEST_INTEGRITY", "La revisión de referencia perdió su integridad.")
     final = {**item.automatic_results, **item.reviewed_results}
     definition = item.snapshot["definition"]
+    header_review = {identity: header_review_dto(payload, definition, reviewed=identity in item.reviewed_results,
+                     source_binding=header_source_binding(item, identity)) for identity, payload in final.items()}
     return {"id": item.id, "draft_id": item.draft_id, "draft_version": item.draft_version, "snapshot": item.snapshot,
             "snapshot_hash": item.snapshot_hash, "automatic_results": item.automatic_results, "automatic_results_hash": item.automatic_results_hash, "reviewed_results": item.reviewed_results,
             "review_version": item.review_version, "review_history": item.review_history, "activated_template_id": item.activated_template_id,
             "automatic_metrics": {identity: measure(payload) for identity, payload in item.automatic_results.items()},
             "reviewed_metrics": {identity: measure(payload) for identity, payload in final.items()},
-            "issues": {identity: issues(SimpleNamespace(payload=payload), definition) for identity, payload in final.items()},
-            "comparisons": compare_associations(item.snapshot, item.automatic_results)}
+            "issues": {identity: issues(SimpleNamespace(payload=payload, reviewed=identity in item.reviewed_results), definition,
+                       source_binding=header_source_binding(item, identity)) for identity, payload in final.items()},
+            "comparisons": compare_associations(item.snapshot, item.automatic_results),
+            **({"header_review": header_review} if any(value is not None for value in header_review.values()) else {})}
 
 
 def compare_associations(snapshot, results):
@@ -222,7 +234,17 @@ def compare_associations(snapshot, results):
              "basis": "USER_CONFIRMED_ASSOCIATION"} for name, ids in groups.items() if len(ids) > 1]
 
 
-def review_test(db, item, reference_id, expected_version, changes, confirmed, reason, user):
+def header_source_binding(item, reference_id):
+    payload = item.reviewed_results.get(reference_id, item.automatic_results[reference_id])
+    if not any(region.get("header_observation") for regions in payload.get("table_unparsed", {}).values() for region in regions):
+        return None
+    reference = next(value for value in item.snapshot["references"] if value["id"] == reference_id)
+    return {"kind": "BUILDER_REFERENCE", "test_id": item.id, "snapshot_hash": item.snapshot_hash,
+            "reference_id": reference_id, "source_sha256": reference["sha256"],
+            "source_payload_hash": reference["payload_hash"], "definition_hash": item.snapshot["definition_hash"]}
+
+
+def review_test(db, item, reference_id, expected_version, changes, confirmed, reason, user, header_confirmations=None):
     authority(db, user)
     permission(db, user, "review")
     if not reason.strip():
@@ -231,12 +253,26 @@ def review_test(db, item, reference_id, expected_version, changes, confirmed, re
     lock_family(db, owned(db, DocumentFamily, draft.family_id, user))
     db.refresh(item)
     test_dto(item)
+    if item.review_version != expected_version:
+        raise OperationError(409, "DOCUMENT_REVIEW_CONFLICT", "La revisión cambió. Recarga antes de guardar.")
     if item.activated_template_id:
         raise OperationError(409, "DOCUMENT_TEST_ACTIVATED", "Esta prueba activada es inmutable. Crea una prueba de otro borrador para cambiarla.")
     if reference_id not in item.automatic_results:
         raise OperationError(422, "DOCUMENT_TEST_REFERENCE", "La referencia no forma parte de esta prueba.")
     payload = copy.deepcopy(item.reviewed_results.get(reference_id, item.automatic_results[reference_id]))
     definition = item.snapshot["definition"]
+    if header_confirmations:
+        if changes or confirmed:
+            raise OperationError(422, "DOCUMENT_HEADER_CELLS_REQUIRED", "Guarda primero los valores confirmados; revisa después el encabezado.")
+        if reference_id not in item.reviewed_results:
+            raise OperationError(422, "DOCUMENT_HEADER_CELLS_REQUIRED", "Guarda primero la revisión humana de esta referencia.")
+        if digest(snapshot_for(db, draft, user)) != item.snapshot_hash:
+            raise OperationError(409, "DOCUMENT_TEST_STALE", "Cambió la fuente o definición. Prueba de nuevo antes de confirmar el encabezado.")
+        reference = next(value for value in references_for(db, draft.family_id, [reference_id], user) if value.id == reference_id)
+        automatic = item.automatic_results[reference_id]
+        if (automatic.get("lines") != reference.payload["lines"]
+            or automatic.get("page_geometry") != reference.payload.get("page_geometry")):
+            raise OperationError(409, "DOCUMENT_HEADER_SOURCE_CHANGED", "La lectura automática no coincide con la referencia original.")
     all_cells = {}
     for name, fields in structures(definition).items():
         rows = [payload["fields"]] if name == "headers" else payload["tables"].get(name, [])
@@ -248,7 +284,8 @@ def review_test(db, item, reference_id, expected_version, changes, confirmed, re
     for path, raw in changes.items():
         cell, field = all_cells[path]
         value, validity = validate_value(raw, field)
-        cell.update(value=value, validity=validity, corrected=True, reviewed=False, origin=None, confidence=None)
+        cell.update(value=value, validity=validity, corrected=True, reviewed=False,
+                    observed_origin=cell.get("observed_origin", cell.get("origin")), origin=None, confidence=None)
     for path in confirmed:
         cell, _ = all_cells[path]
         if cell["validity"] != "VALID":
@@ -256,9 +293,14 @@ def review_test(db, item, reference_id, expected_version, changes, confirmed, re
         cell["reviewed"] = True
     if definition.get("arithmetic"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
+    if changes or confirmed:
+        payload = invalidate_confirmations(payload, user.id, iso(utcnow()), reason)
+    payload = append_confirmations(payload, item.automatic_results[reference_id], definition,
+        header_confirmations, header_source_binding(item, reference_id), user.id, iso(utcnow()), reason)
     results = {**item.reviewed_results, reference_id: payload}
     history = [*item.review_history, {"reference_id": reference_id, "actor_id": user.id, "reason": reason.strip(), "reviewed_at": iso(utcnow()),
-               "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reviewed_payload_hash": digest(payload)}]
+               "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reviewed_payload_hash": digest(payload),
+               **({"header_confirmations": payload["header_resolutions"][-len(header_confirmations):]} if header_confirmations else {})}]
     result = db.execute(update(DocumentBuilderTest).where(DocumentBuilderTest.id == item.id, DocumentBuilderTest.review_version == expected_version,
         DocumentBuilderTest.activated_template_id.is_(None)).values(reviewed_results=results, review_history=history, review_version=DocumentBuilderTest.review_version + 1))
     if cast(CursorResult, result).rowcount != 1:
