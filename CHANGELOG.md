@@ -2,6 +2,10 @@
 
 ## 0.9.7 — Automatización, operación y experiencia documental
 
+- ID 1 PDP: asociación del contexto por la misma población RAW exacta aunque
+  cambie el orden de glifos. Conserva palabras, índices, coordenadas y procedencia;
+  no acepta automáticamente la región ni modifica RAW, cuerpo o valores. Los
+  miembros ausentes o adicionales y la ambigüedad mantienen el bloqueo.
 - ID 1 PDP: inicio de fila visual declarado y acotado, con separación de productos
   multilínea y observaciones visibles de encabezados parciales. Confirmación de
   origen ligada a hashes, versión, fuente y celdas revisadas, con reproducción

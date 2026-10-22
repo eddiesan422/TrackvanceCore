@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from trackvance import document_template_builder_rules as rules
-from trackvance.document_engine import extract
+from trackvance.document_engine import extract, validate_value
 from trackvance.document_template_builder_schemas import VisualTableRule
 
 
@@ -399,3 +399,75 @@ def test_executor_hashes_raw_and_definition_once_for_multiple_observations(monke
                "references": [{"id": "generic-reference", "lines": source}]}
     assert _valid_result({"generic-reference": payload}, request)
     assert counted == {"source": 1, "definition": 1}
+
+
+def reordered_context_source(glyph="("):
+    source, declared = continuation_source()
+    for item in source:
+        if item["page"] == 2 and item["text"] == "Qty":
+            item["text"] = item["words"][0]["text"] = "Qxx"
+    # Source enumeration appends this word; geometric reading inserts it
+    # before the caption. Every observed character must remain visible.
+    source.append(line(glyph, .74, .03, .015, page=2))
+    return source, declared
+
+
+@pytest.mark.parametrize("glyph", ["(", "¢"])
+def test_context_population_preserves_source_words_despite_geometric_text_order(glyph):
+    source, declared = reordered_context_source(glyph)
+    before = copy.deepcopy(source)
+    result = extract(source, declared)
+    regions = result["table_unparsed"]["detail"]
+    assert len(result["tables"]["detail"]) == 4
+    assert [region["reason"] for region in regions].count("CONTINUATION_CONTEXT_UNVERIFIED") == 1
+    assert not any(region["reason"] == "PARTIAL_HEADER_PREFIX_UNEXPLAINED" for region in regions)
+    region = next(region for region in regions if region["reason"] == "CONTINUATION_CONTEXT_UNVERIFIED")
+    observed = region["header_observation"]
+    assert observed["source_words"][-1]["text"] == glyph and glyph in region["text"]
+    assert rules.valid_header_observation(region, source, declared, "detail")
+    assert source == before
+
+
+@pytest.mark.parametrize("change", ["extra", "missing", "duplicate", "index", "word_box", "method", "page", "region", "ambiguous"])
+def test_context_population_rejects_changed_members_even_with_same_bounding_box(change, monkeypatch):
+    source, declared = reordered_context_source()
+    rule = declared["tables"][0]["visual"]
+    fields = declared["tables"][0]["fields"]
+    candidates = rules.continuation_observations(source, rule, fields, validate_value, declared, "detail")
+    assert len(candidates) == 1
+    candidate = copy.deepcopy(candidates[0])
+    bounds = candidate["region"]
+    members = [(word, item) for item in source if item["page"] == 2 for word in rules.words(item)
+               if rules.inside(word, bounds)]
+    original = rules._unparsed(members, "PARTIAL_HEADER_PREFIX_UNEXPLAINED")
+    assert original["text"] != candidate["text"]
+    if change == "extra":
+        source.append(line("UNEXPLAINED", .6, .03, .08, page=2))
+    elif change == "missing":
+        candidate["header_observation"]["source_words"].pop()
+    elif change == "duplicate":
+        candidate["header_observation"]["source_words"].append(copy.deepcopy(candidate["header_observation"]["source_words"][-1]))
+    elif change == "index":
+        candidate["header_observation"]["source_words"][-1]["word_index"] += 1
+    elif change == "word_box":
+        candidate["header_observation"]["source_words"][-1]["region"][0] += .001
+    elif change == "method":
+        candidate["method"] = "DIGITAL"
+    elif change == "page":
+        candidate["page"] = 3
+    elif change == "region":
+        candidate["region"][0] += .001
+    monkeypatch.setattr(rules, "continuation_observations", lambda *args: [candidate, copy.deepcopy(candidate)] if change == "ambiguous" else [candidate])
+    before = copy.deepcopy(original)
+    assert rules._retain_context_observations([original], source, rule, fields, None, declared, "detail") == [before]
+    assert original == before
+
+
+@pytest.mark.parametrize("product", ["2", "SKU-12345-99"])
+def test_context_population_keeps_scalar_and_product_veto(product):
+    source, declared = reordered_context_source()
+    source.append(line(product, .6, .06, .15, page=2))
+    result = extract(source, declared)
+    assert result["table_unparsed"]["detail"]
+    assert not any(region["reason"] == "CONTINUATION_CONTEXT_UNVERIFIED"
+                   for region in result["table_unparsed"]["detail"])

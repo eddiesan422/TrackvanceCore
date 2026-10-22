@@ -45,6 +45,12 @@ previas; activar requiere la prueba exacta de la definición vigente. Las
 opciones ausentes conservan la serialización heredada. Esta funcionalidad no
 certifica por sí sola la exactitud automática del corpus ni el cierre del PDP.
 
+La asociación de un contexto de continuación conserva la población RAW exacta,
+incluidos los glifos cuyo orden geométrico difiere del orden de origen. Comprueba
+palabras, índices, coordenadas y procedencia; los miembros adicionales, ausentes
+o ambiguos mantienen el bloqueo. La región sigue sin verificar y exige revisión;
+no modifica RAW, cuerpo ni valores.
+
 Las tablas visuales admiten etiquetas de fin alternativas para separar pies y
 resúmenes entre páginas sin limitar el detalle a la altura del ejemplo. Los
 borradores prueban y descubren reglas en un proceso documental acotado: 30 s,

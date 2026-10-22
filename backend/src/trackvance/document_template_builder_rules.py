@@ -1267,15 +1267,36 @@ def continuation_observations(source, rule, fields, validator, definition, table
     return result
 
 
+def _same_context_source_population(region, candidate, source):
+    """Reconstruct the blocking prefix in source order, without dropping words."""
+    if region.get("reason") != "PARTIAL_HEADER_PREFIX_UNEXPLAINED":
+        return False
+    bounds = region["region"]
+    population = [(word, line) for line in source if line["page"] == region["page"] for word in words(line)
+                  if word["region"][2] > bounds[0] and word["region"][0] < bounds[2]
+                  and word["region"][3] > bounds[1] and word["region"][1] < bounds[3]]
+    if (not 1 <= len(population) <= 96
+        or any(not (bounds[0] <= word["region"][0] < word["region"][2] <= bounds[2]
+                    and bounds[1] <= word["region"][1] < word["region"][3] <= bounds[3]) for word, _ in population)
+        or _unparsed(population, region["reason"]) != region):
+        return False
+    # Indices retain multiplicity and distinguish repeated text/coordinates.
+    # The candidate keeps its geometric text for the existing validator.
+    return (_source_word_records(source, [word for word, _ in population])
+            == candidate["header_observation"]["source_words"])
+
+
 def _retain_context_observations(regions, source, rule, fields, validator, definition, table_name):
     if definition is None or table_name is None:
         return regions
     candidates = continuation_observations(source, rule, fields, validator, definition, table_name)
     output = []
     for region in regions:
-        observed = next((candidate for candidate in candidates if candidate["page"] == region["page"]
-                         and candidate["region"] == region["region"] and candidate["text"] == region["text"]), None)
-        output.append(observed if observed is not None else region)
+        matching = [candidate for candidate in candidates if candidate["page"] == region["page"]
+                    and candidate["region"] == region["region"] and candidate["method"] == region["method"]
+                    and (candidate["text"] == region["text"]
+                         or _same_context_source_population(region, candidate, source))]
+        output.append(matching[0] if len(matching) == 1 else region)
     return output
 
 
