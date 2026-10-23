@@ -115,7 +115,7 @@ def _observed_in_source(cell, lines, field):
     if not origin or not _region(origin.get("region")):
         return False
     origins = [origin, *origin.get("continuation_origins", [])]
-    words = []
+    words: list[str] = []
     for line in lines:
         for area in origins:
             if not isinstance(area, dict) or line.get("page") != area.get("page") or not _region(area.get("region")):
@@ -143,7 +143,7 @@ def cell_is_valid(cell, field):
 
 
 def _arithmetic_fields(definition):
-    covered = set()
+    covered: set[tuple[str, str]] = set()
     for rule in definition.get("arithmetic", []):
         if rule["result"] in [*rule["terms"], *rule.get("subtract", [])]:
             # A tautological/model-suggested self check cannot establish an

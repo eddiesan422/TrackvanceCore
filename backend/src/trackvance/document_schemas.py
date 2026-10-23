@@ -150,10 +150,10 @@ class DocumentDefinition(BaseModel):
             scope = next((t.fields for t in self.tables if t.name == check.table), None) if check.table else self.fields
             if scope is None or not {check.result, *check.terms, *check.subtract}.issubset({f.name for f in scope}):
                 raise ValueError("La comprobación aritmética requiere campos declarados en su estructura.")
-        for check in self.cross_totals:
-            table = next((item for item in self.tables if item.name == check.table), None)
-            column = next((item for item in table.fields if item.name == check.column), None) if table else None
-            header = next((item for item in self.fields if item.name == check.header), None)
+        for total_check in self.cross_totals:
+            total_table = next((item for item in self.tables if item.name == total_check.table), None)
+            column = next((item for item in total_table.fields if item.name == total_check.column), None) if total_table else None
+            header = next((item for item in self.fields if item.name == total_check.header), None)
             if not column or not header or column.logical_type not in {"DECIMAL", "INT64"} or header.logical_type not in {"DECIMAL", "INT64"}:
                 raise ValueError("El total cruzado requiere una columna de detalle y una cabecera numéricas declaradas.")
         return self

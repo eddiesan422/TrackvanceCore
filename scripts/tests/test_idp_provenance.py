@@ -11,7 +11,8 @@ def source(tmp_path):
     files = {"backend/src/trackvance/__init__.py": '__version__ = "0.9.8"\n',
         "backend/src/trackvance/engine.py": 'MODEL = "synthetic"\n',
         "backend/pyproject.toml": '[project]\nversion = "0.9.8"\n', "backend/uv.lock": "version = 1\n",
-        "scripts/idp_corpus.py": "# corpus runner\n", "scripts/idp_benchmark.py": "# host runner\n"}
+        "scripts/idp_corpus.py": "# corpus runner\n", "scripts/idp_benchmark.py": "# host runner\n",
+        "scripts/idp_capacity.py": "# capacity estimator\n"}
     for relative, content in files.items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -23,7 +24,7 @@ def test_implementation_hashes_actual_backend_and_lock_bytes_without_oracle_data
     record = implementation_record(source, "a" * 40)
     assert record["version"] == "0.9.8" and record["source_sha"] == "a" * 40
     assert record["source_sha_origin"] == "CALLER_DECLARED" and not record["source_sha_verified_in_workload"]
-    assert len(record["files"]) == 6 and all(not item["path"].startswith("/") for item in record["files"])
+    assert len(record["files"]) == 7 and all(not item["path"].startswith("/") for item in record["files"])
     (source / "oracle.private.json").write_text('{"sensitive_expected": "not source code"}', encoding="utf-8")
     assert implementation_record(source)["manifest_sha256"] == record["manifest_sha256"]
     (source / "backend/src/trackvance/engine.py").write_text('MODEL = "changed"\n', encoding="utf-8")

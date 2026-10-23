@@ -180,3 +180,21 @@ def test_failed_and_successful_documents_share_all_accuracy_denominators():
     assert result["header_accuracy"] == result["row_accuracy"] == .5
     assert result["correct_auto_verified"] == 1 and result["document_exact"] == 1
     assert not result["primary_reference_complete"]
+
+
+@pytest.mark.parametrize("policy", [None, "AUTO_VERIFIED"])
+def test_independent_eligibility_never_claims_native_approval_under_either_policy(policy):
+    payload, document, definition, literals = fixture()
+    if policy is not None:
+        definition["publication"] = {"review_policy": policy}
+    effective = policy or "ALL"
+    row = evaluate(payload, document, definition, literals)
+    row.update(status="PROCESSED", latency_seconds=1, auto_approval_eligible=True)
+    assert row["policy_effective"] == effective and not row["native_approval_measured"]
+    assert row["native_auto_approved"] is None
+    report = summarize([row], 1)
+    assert report["auto_approval_eligible"] == report["correct_auto_approval_eligible"] == 1
+    assert report["policy_effective_counts"] == {effective: 1}
+    assert not report["native_approval_measured"] and report["native_auto_approved"] is None
+    assert report["auto_verified"] == 1 and report["deprecated_eligibility_aliases"]["auto_verified"] == "auto_approval_eligible"
+    assert not report["publication_measured"]

@@ -124,7 +124,7 @@ def apply_semantics(payload, candidate, definition, lines):
         if set(candidate["tables"]) != {table["name"] for table in definition["tables"]}:
             raise ValueError()
         fields = {field["name"]: _semantic_cell(candidate["fields"][field["name"]], field, lines) for field in definition["fields"]}
-        tables = {}
+        tables: dict[str, list[dict[str, dict]]] = {}
         for table in definition["tables"]:
             rows = candidate["tables"][table["name"]]
             if not isinstance(rows, list) or len(rows) > 10000:

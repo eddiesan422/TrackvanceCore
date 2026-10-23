@@ -43,6 +43,17 @@ def test_capacity_resources_and_storage_depend_on_observations_and_explicit_assu
     assert row["estimated_retained_storage_gib"] == 2.93
 
 
+def test_capacity_does_not_report_validator_eligibility_as_native_approval():
+    source = measured()
+    source["summary"].update(auto_approval_eligible=8, correct_auto_approval_eligible=7,
+        policy_effective_counts={"ALL": 10})
+    reference = estimate([source])["reference"]
+    assert reference["auto_approval_eligible"] == 8 and reference["correct_auto_approval_eligible"] == 7
+    assert reference["policy_effective_counts"] == {"ALL": 10}
+    assert not reference["native_approval_measured"] and reference["native_auto_approved"] is None
+    assert not reference["publication_measured"] and "correct_auto_verified" not in reference
+
+
 def test_benchmark_rejects_protected_workloads_missing_caps_and_wrong_output_bind(tmp_path):
     row = {"Name": "/owned-idp", "Config": {"Labels": {}}, "Image": "sha256:example",
         "State": {"Running": True}, "HostConfig": {"Memory": 1024, "PidsLimit": 32, "NanoCpus": 1_000_000_000},

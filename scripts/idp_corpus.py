@@ -64,7 +64,7 @@ def implementation_record(repository, source_sha=None):
     repository = repository.resolve()
     paths = sorted({*repository.joinpath("backend/src").rglob("*.py"),
         *(repository / name for name in ("backend/pyproject.toml", "backend/uv.lock",
-            "scripts/idp_corpus.py", "scripts/idp_benchmark.py"))}, key=lambda path: path.relative_to(repository).as_posix())
+            "scripts/idp_corpus.py", "scripts/idp_benchmark.py", "scripts/idp_capacity.py"))}, key=lambda path: path.relative_to(repository).as_posix())
     if not any(path.suffix == ".py" and path.is_relative_to(repository / "backend/src") for path in paths):
         raise ValueError("IDP_IMPLEMENTATION_BACKEND_SOURCE_REQUIRED")
     files = []
@@ -263,6 +263,8 @@ def evaluate(payload, doc, definition, source_literals=None):
             and not (missing or extra or unresolved or invalid),
         "table_exact": exact_rows == len(expected_rows) and not (missing or extra or unresolved or invalid_detail or literal_missing),
         "failed_paths": [check["path"] for check in checks if not check["correct"]],
+        "policy_effective": definition.get("publication", {}).get("review_policy", "ALL"),
+        "native_approval_measured": False, "native_auto_approved": None, "publication_measured": False,
         "human_corrections": 0}
 
 
@@ -274,7 +276,9 @@ def failed_evaluation(doc, definition, error):
         "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"],
         "literal_expected_cells": doc["line_count"] * sum(field["name"] in PERCENTAGE_FIELDS
             and field.get("logical_type", "STRING") == "STRING" and field["name"] in doc["visible_line_fields"]
-            for table in definition["tables"] if table["name"] == "detalle" for field in table["fields"])}
+            for table in definition["tables"] if table["name"] == "detalle" for field in table["fields"]),
+        "policy_effective": definition.get("publication", {}).get("review_policy", "ALL"),
+        "native_approval_measured": False, "native_auto_approved": None, "publication_measured": False}
 
 
 def percentile(values, fraction):
@@ -284,6 +288,8 @@ def percentile(values, fraction):
 
 def summarize(rows, elapsed):
     complete = [row for row in rows if row.get("status") == "PROCESSED"]
+    eligible = sum(row.get("auto_approval_eligible", row.get("auto_verified", False)) for row in complete)
+    correct_eligible = sum(row.get("auto_approval_eligible", row.get("auto_verified", False)) and row["document_exact"] for row in complete)
     counts = {key: sum(row.get(key, 0) for row in complete) for key in (
         "cells", "exact_cells", "header_fields", "exact_header_fields", "expected_rows", "actual_rows",
         "exact_rows", "missing_rows", "extra_rows", "duplicate_rows", "critical_errors", "pages",
@@ -307,8 +313,11 @@ def summarize(rows, elapsed):
         "document_exact": sum(row["document_exact"] for row in complete),
         "semantic_document_exact": sum(row.get("semantic_document_exact", False) for row in complete),
         "table_exact": sum(row["table_exact"] for row in complete),
-        "auto_verified": sum(row.get("auto_verified", False) for row in complete),
-        "correct_auto_verified": sum(row.get("auto_verified", False) and row["document_exact"] for row in complete),
+        "auto_approval_eligible": eligible, "correct_auto_approval_eligible": correct_eligible,
+        "native_approval_measured": False, "native_auto_approved": None,
+        "policy_effective_counts": dict(Counter(row.get("policy_effective", "UNREPORTED") for row in rows)),
+        "auto_verified": eligible, "correct_auto_verified": correct_eligible,
+        "deprecated_eligibility_aliases": {"auto_verified": "auto_approval_eligible", "correct_auto_verified": "correct_auto_approval_eligible"},
         "elapsed_seconds": elapsed, "documents_per_minute": len(complete) * 60 / elapsed if elapsed else None,
         "processed_pages": processed_pages,
         "pages_per_minute": processed_pages * 60 / elapsed if elapsed else None,
@@ -416,7 +425,7 @@ def main():
                 phases["independent_validation_seconds"] = time.monotonic() - control_began
                 quality = quality_report(SimpleNamespace(payload=result["payload"], engine=result["engine"], reviewed=False), definition)
                 row = evaluate(result["payload"], doc, definition, document_literals(doc))
-                row.update(status="PROCESSED", auto_verified=quality["status"] == "AUTO_VERIFIED",
+                row.update(status="PROCESSED", auto_approval_eligible=quality["status"] == "AUTO_VERIFIED",
                     validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
             row = failed_evaluation(doc, definition, error)
