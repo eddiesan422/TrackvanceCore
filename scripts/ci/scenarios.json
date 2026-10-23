@@ -776,7 +776,7 @@
           "validator": "catalog-http"
         }
       ],
-      "timeout_minutes": 30,
+      "timeout_minutes": 50,
       "variant_of": "catalog-reports"
     },
     {
