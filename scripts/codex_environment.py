@@ -563,9 +563,10 @@ def execute_stage(args, directory, value, values, sha):
                     save(intent_path, {"status": "INTENT", **intent})
                 for role in change["changed_components"]:
                     supplied = getattr(args, role + "_image")
-                    image_sha = args.image_source_sha or sha
+                    image_sha = getattr(args, role + "_image_source_sha", None) or args.image_source_sha or sha
                     if supplied:
                         identifier = supplied
+                        require(re.fullmatch(r"[a-f0-9]{40}", image_sha), "EXACT_COMPONENT_IMAGE_SOURCE_SHA_REQUIRED")
                         require(fingerprint(role, image_sha)["sha256"] == fingerprint(role, sha)["sha256"], "SUPPLIED_IMAGE_COMPONENT_EXECUTABLES_DIFFER_FROM_SOURCE")
                     else:
                         require(args.build_changed, "EXPLICIT_BUILD_CHANGED_COMPONENTS_OR_CERTIFIED_IMAGE_REQUIRED")
@@ -714,6 +715,9 @@ def main():
     parser.add_argument("case", nargs="?", choices=["c08503"])
     parser.add_argument("--directory", type=Path, help="Exact Git common-directory parent/.codex-local/codex-permanent (default; shared across worktrees)")
     for role in ("backend", "web", "postgres"):parser.add_argument("--" + role + "-image")
+    for role in ("backend", "web"):
+        parser.add_argument("--" + role + "-image-source-sha",
+                            help="True OCI source of this supplied component; executable fingerprint must match the checkout.")
     parser.add_argument("--image-source-sha"); parser.add_argument("--engine-id")
     parser.add_argument("--web-port", type=int, default=3205); parser.add_argument("--api-port", type=int, default=3206)
     parser.add_argument("--services", nargs="+"); parser.add_argument("--build-changed", action="store_true")

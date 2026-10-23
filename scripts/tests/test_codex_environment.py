@@ -285,6 +285,57 @@ def test_update_unchanged_component_bytes_is_verified_noop(fixture, monkeypatch)
     assert result["status"] == "PASS_NOOP" and len(calls) == 1 and value["images"]["backend"]["source_sha"] == OLD
 
 
+@pytest.mark.parametrize("invalid_source", [False, True])
+def test_supplied_components_preserve_distinct_true_oci_sources_without_rebuilding(fixture, monkeypatch, invalid_source):
+    directory, value, values, defaults = fixture
+    web_source = "c" * 40
+    backend_image = "sha256:" + "5" * 64
+    empty = {"containers": [], "volumes": [], "networks": []}
+    calls, started = [], False
+    monkeypatch.setattr(codex, "fingerprint", lambda role, sha: {"sha256": role + ("-old" if sha == OLD else "-new"), "files": 10})
+    monkeypatch.setattr(codex, "prepare", lambda *_args: (["docker", "compose"], {}, resolved(values), empty, codex.stable_inventory(empty), {}))
+    monkeypatch.setattr(codex, "inventory", lambda project, _env: runtime(resolved(values), defaults) if project == codex.PROJECT and started else empty)
+    monkeypatch.setattr(codex, "check_health", lambda *_args: {})
+
+    def command(arguments, **kwargs):
+        nonlocal started
+        calls.append(arguments)
+        if arguments[:2] == ["git", "diff"]:
+            return ""
+        if arguments[:3] == ["docker", "image", "inspect"]:
+            backend = arguments[-1] == backend_image
+            role = "backend" if backend else "web"
+            return json.dumps([{"Id": backend_image if backend else NEW_WEB, "Config": {**defaults[role],
+                "Labels": {"org.opencontainers.image.revision": NEW if backend else web_source,
+                    "org.opencontainers.image.version": "0.8.5"}}}])
+        if "config" in arguments:
+            return json.dumps(resolved(values))
+        assert "up" in arguments and "--no-build" in arguments
+        started = True
+        return ""
+
+    class Socket:
+        def __enter__(self):return self
+        def __exit__(self, *args):pass
+        def bind(self, address):assert address[0] == "127.0.0.1"
+
+    monkeypatch.setattr(codex, "command", command)
+    monkeypatch.setattr(codex.socket, "socket", Socket)
+    args = SimpleNamespace(stage="update", services=None, build_changed=False, backend_image=backend_image,
+        web_image=NEW_WEB, image_source_sha=None, backend_image_source_sha=NEW,
+        web_image_source_sha=OLD if invalid_source else web_source)
+    if invalid_source:
+        with pytest.raises(ValueError, match="SUPPLIED_IMAGE_COMPONENT_EXECUTABLES_DIFFER_FROM_SOURCE"):
+            codex.execute_stage(args, directory, value, values, NEW)
+        assert not started
+    else:
+        assert codex.execute_stage(args, directory, value, values, NEW)["status"] == "PASS"
+        assert value["images"]["backend"]["source_sha"] == NEW
+        assert value["images"]["web"]["source_sha"] == web_source
+        assert value["images"]["web"]["fingerprint"] == codex.fingerprint("web", NEW)
+    assert not any("build" in arguments or "tag" in arguments for arguments in calls)
+
+
 def test_bounded_restart_drill_stops_only_explicit_worker_and_records_grace(fixture, monkeypatch):
     directory, value, values, defaults = fixture
     config = resolved(values)
