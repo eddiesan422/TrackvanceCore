@@ -12,6 +12,7 @@ import math
 import re
 import time
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .s3_artifactstore import error_code, require_simulation
@@ -126,7 +127,8 @@ def normalize_expenses(responses: list[dict]) -> dict:
     return {"provider": "AWS_TEXTRACT", "lines": lines,
             "expense_documents": [documents[k] for k in sorted(documents)],
             "pages": next(iter(page_counts), max((v["page"] for v in lines), default=0)),
-            "model_version": next(iter(versions), None), "warnings": warnings, "simulation": True}
+            "model_version": next(iter(versions), None), "warnings": warnings, "simulation": True,
+            "status": "PARTIAL_SUCCESS" if any(r.get("JobStatus") == "PARTIAL_SUCCESS" for r in responses) else "SUCCEEDED"}
 
 
 @dataclass
@@ -150,6 +152,45 @@ class TextractAnalyzeExpenseAdapter:
             raise ValueError("TEXTRACT_LIMITS_INVALID")
         self.client, self.attempts, self.timeout = client, attempts, timeout_seconds
         self.check, self.sleep, self.clock = check, sleep, clock
+
+    def candidate(self, normalized: dict, definition: dict, *, source_sha256: str,
+                  configuration: dict | None = None) -> dict:
+        """Map fixture observations into the same candidate boundary as local OCR.
+
+        The caller retains the normalized response as evidence. No AWS type is
+        guessed to be a family field: the existing declared family rules perform
+        that mapping. Missing geometry is rejected rather than synthesized.
+        A simulated provider can never approve or publish an operational result.
+        """
+        from .document_engine import extract
+        from .document_providers import EngineConfiguration, hash_value
+        from .document_quality import validate_candidate_contract
+
+        require_simulation(self.client)
+        if (normalized.get("provider") != "AWS_TEXTRACT" or normalized.get("simulation") is not True
+                or normalized.get("status") not in {"SUCCEEDED", "PARTIAL_SUCCESS"}
+                or not re.fullmatch(r"[a-f0-9]{64}", source_sha256)
+                or type(normalized.get("pages")) is not int or not 1 <= normalized["pages"] <= 50):
+            raise TextractError("TEXTRACT_CANDIDATE_SCOPE_INVALID")
+        effective = EngineConfiguration.model_validate(configuration or {"provider": "AWS_TEXTRACT"}).model_dump()
+        if effective["provider"] != "AWS_TEXTRACT":
+            raise TextractError("TEXTRACT_CANDIDATE_PROVIDER_INVALID")
+        lines = deepcopy(normalized["lines"])
+        if (not lines or any(not isinstance(line.get("region"), list) or len(line["region"]) != 4
+                or any(word.get("region") is None for word in line.get("words", [])) for line in lines)):
+            raise TextractError("TEXTRACT_CANDIDATE_GEOMETRY_MISSING")
+        payload = extract(lines, definition)
+        payload["pages"] = list(range(1, normalized["pages"] + 1))
+        payload["semantic_conflicts"] = ["SIMULATED_PROVIDER"]
+        result = {"payload": payload, "engine": {"key": "AWS_TEXTRACT_SIMULATION_098", "provider": "AWS_TEXTRACT",
+            "source_sha256": source_sha256, "configuration": effective,
+            "configuration_sha256": hash_value(effective), "model_version": normalized.get("model_version"),
+            "status": normalized["status"], "simulation": True, "automatic_approval_eligible": False,
+            "normalization_sha256": hash_value(normalized),
+            "expense_indices": [item["expense_index"] for item in normalized["expense_documents"]],
+            "independent_row_coverage": False, "warning_count": len(normalized.get("warnings", []))}}
+        validate_candidate_contract(result, definition)
+        return result
 
     def _call(self, operation: str, **request) -> dict:
         require_simulation(self.client)

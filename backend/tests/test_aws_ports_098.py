@@ -231,3 +231,55 @@ def test_textract_rejects_identity_metadata_geometry_and_missing_word_evidence()
         "Text": "12,25", "Geometry": response["ExpenseDocuments"][0]["Blocks"][0]["Geometry"]})
     with pytest.raises(TextractError, match="WORD_PAGE_MISMATCH"):
         normalize_expenses([malformed])
+
+
+@pytest.mark.parametrize("status", ["SUCCEEDED", "PARTIAL_SUCCESS"])
+def test_textract_simulation_uses_unified_candidate_contract_and_cannot_autoapprove(status):
+    from trackvance.document_providers import hash_value
+    from trackvance.document_quality import (
+        certify_candidate,
+        quality_report,
+        validate_candidate_contract,
+    )
+    from trackvance.document_schemas import DocumentDefinition
+
+    definition = DocumentDefinition.model_validate({"fields": [{"name": "amount", "pattern": r"([0-9,]+)",
+        "logical_type": "STRING"}]}).model_dump(mode="json")
+    client = LocalTextract([expense_response(status=status)])
+    adapter = TextractAnalyzeExpenseAdapter(client)
+    normalized = adapter.analyze(b"synthetic")
+    configuration = {"provider": "AWS_TEXTRACT", "timeout_seconds": 60}
+    result = adapter.candidate(normalized, definition, source_sha256="a" * 64, configuration=configuration)
+    validate_candidate_contract(result, definition)
+    assert set(result) == {"payload", "engine"} and len(client.calls) == 1
+    assert result["payload"]["fields"]["amount"]["value"] == "12,25"
+    assert result["payload"]["fields"]["amount"]["reviewed"] is False
+    assert result["engine"]["status"] == status and result["engine"]["simulation"] is True
+    assert result["engine"]["configuration"]["timeout_seconds"] == 60
+    assert result["engine"]["configuration_sha256"] == hash_value(result["engine"]["configuration"])
+    assert result["engine"]["normalization_sha256"] == hash_value(normalized)
+    assert result["engine"]["expense_indices"] == [1]
+    result["engine"]["validation"] = certify_candidate(result, copy.deepcopy(result), definition, "a" * 64)
+    from types import SimpleNamespace
+    quality = quality_report(SimpleNamespace(payload=result["payload"], engine=result["engine"], reviewed=False), definition)
+    assert quality["status"] == "REVIEW_REQUIRED"
+    assert "SEMANTIC_CONFLICT:SIMULATED_PROVIDER" in quality["issues"]
+    assert result["engine"]["automatic_approval_eligible"] is False
+
+
+def test_textract_candidate_rejects_missing_evidence_and_provider_substitution():
+    from trackvance.document_schemas import DocumentDefinition
+
+    definition = DocumentDefinition.model_validate({"fields": [{"name": "amount", "pattern": r"([0-9,]+)"}]}).model_dump(mode="json")
+    adapter = TextractAnalyzeExpenseAdapter(LocalTextract([expense_response()]))
+    normalized = adapter.analyze(b"synthetic")
+    with pytest.raises(TextractError, match="CANDIDATE_PROVIDER_INVALID"):
+        adapter.candidate(normalized, definition, source_sha256="a" * 64, configuration={"provider": "PADDLE_QWEN_LOCAL"})
+    absent = copy.deepcopy(normalized)
+    absent["lines"][0]["region"] = None
+    with pytest.raises(TextractError, match="GEOMETRY_MISSING"):
+        adapter.candidate(absent, definition, source_sha256="a" * 64)
+    absent = copy.deepcopy(normalized)
+    absent["simulation"] = False
+    with pytest.raises(TextractError, match="SCOPE_INVALID"):
+        adapter.candidate(absent, definition, source_sha256="a" * 64)
