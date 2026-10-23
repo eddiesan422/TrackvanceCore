@@ -1,6 +1,6 @@
 # Independent GPU identity; never merge into the permanent Codex compose stack.
 # Download models first: python scripts/idp_models.py --destination <private-cache>
-# Set IDP_MODEL_ROOT and run docker compose -f compose.idp-local.yml up -d.
+# Prepare scripts/idp_runtime.py, then use its private runtime.env with --env-file.
 name: trackvance-idp098
 services:
   idp-ollama:
@@ -36,7 +36,7 @@ services:
               device_ids: ["0"]
               capabilities: [gpu]
   idp-gateway:
-    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487
+    image: ${IDP_PADDLE_IMAGE:?Build the verified private runtime first}
     user: "65532:65532"
     read_only: true
     cap_drop: [ALL]
@@ -45,7 +45,7 @@ services:
     mem_limit: 6g
     pids_limit: 192
     shm_size: 256m
-    entrypoint: [python, -I, -B, /app/server.py]
+    entrypoint: [/opt/venv/bin/python, -I, -B, /app/server.py]
     environment:
       HOME: /tmp
       XDG_CACHE_HOME: /tmp/cache
@@ -54,11 +54,15 @@ services:
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
-      OMP_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      FLAGS_allocator_strategy: auto_growth
+      FLAGS_gpu_memory_limit_mb: "10000"
     volumes:
       - ${IDP_MODEL_ROOT:?Set private model cache}/paddle:/models/paddle:ro
       - ${IDP_MODEL_ROOT:?Set private model cache}/layout:/models/layout:ro
-      - ./deploy/idp:/app:ro
+      - idp-runtime:/opt/venv:ro
     tmpfs: ["/tmp:size=768m,mode=1777"]
     networks: [inference]
     depends_on: [idp-ollama]
@@ -88,3 +92,7 @@ networks:
   inference:
     internal: true
   ingress: {}
+volumes:
+  idp-runtime:
+    external: true
+    name: ${IDP_RUNTIME_VOLUME:?Initialize the verified private runtime volume first}

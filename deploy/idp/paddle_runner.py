@@ -17,6 +17,23 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 
+APP_ROOT = Path(__file__).resolve().parent
+RUNNER_BYTES = Path(__file__).read_bytes()
+PIPELINE_BYTES = (APP_ROOT / "pipeline.yml").read_bytes()
+STARTUP_HASHES = {"paddle_runner.py": hashlib.sha256(RUNNER_BYTES).hexdigest(),
+                  "pipeline.yml": hashlib.sha256(PIPELINE_BYTES).hexdigest()}
+
+
+def startup_provenance():
+    return {"capture": "PROCESS_STARTUP", "files_sha256": dict(STARTUP_HASHES)}
+
+
+def captured_pipeline(folder):
+    """Give Paddle the exact configuration bytes recorded by this child."""
+    path = folder / "pipeline.snapshot.yml"
+    path.write_bytes(PIPELINE_BYTES)
+    return str(path)
+
 
 class TableText(HTMLParser):
     def __init__(self):
@@ -130,7 +147,7 @@ def main():
     request = json.loads((folder / "request.json").read_text())
     if not paddle.is_compiled_with_cuda() or paddle.device.cuda.device_count() != 1:
         raise RuntimeError("GPU_REQUIRED")
-    pipeline = PaddleOCRVL(pipeline_version="v1.6", device="gpu:0", paddlex_config="/app/pipeline.yml",
+    pipeline = PaddleOCRVL(pipeline_version="v1.6", device="gpu:0", paddlex_config=captured_pipeline(folder),
         vl_rec_model_dir="/models/paddle", layout_detection_model_dir="/models/layout",
         use_doc_orientation_classify=False, use_doc_unwarping=False,
         vl_rec_max_concurrency=1, use_queues=False)
@@ -193,6 +210,7 @@ def main():
             "paddleocr_version": importlib.metadata.version("paddleocr"),
             "model_sha256": model_hash,
             "device": paddle.device.cuda.get_device_name(0), "raw_observations_sha256": raw_hash,
+            "runtime_provenance": {"paddle_runner": startup_provenance()},
             "evidence_resolution": "MODEL_SPOTTING" if regions else "LAYOUT_BLOCK", "independent_row_coverage": False,
             "phases": {"paddle_seconds": round(time.monotonic() - started, 4)}}}
     (folder / "result.json").write_text(json.dumps(output, ensure_ascii=False, allow_nan=False))

@@ -25,8 +25,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_BYTES = 48 * 1024**2
-LOCK_BYTES = Path("/app/models.lock.json").read_bytes()
+APP_ROOT = Path(__file__).resolve().parent
+# Capture this process's inputs once. A later bind-mount edit must not rewrite
+# the provenance of an already running gateway or change its prompt/lock.
+STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
+    "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "models.lock.json")}
+STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
+LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
+PROMPT = STARTUP_FILES["prompt-v1.txt"].decode("utf-8")
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
@@ -40,6 +47,17 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 VERIFIED_SIGNATURES = None
 RUNTIME = {"ready": False, "kernel_probe": "PENDING", "model_inference": False}
 OBSERVED_INFERENCE = {"paddle": False, "qwen": False}
+
+
+def startup_provenance():
+    return {"capture": "PROCESS_STARTUP", "files_sha256": dict(STARTUP_HASHES)}
+
+
+def ollama_metrics(reply):
+    """Actual Ollama final-response observations; unavailable is never zero."""
+    return {name: value if type(value := reply.get(name)) is int and 0 <= value <= 2**63 - 1 else None
+            for name in ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration",
+                         "prompt_eval_count", "eval_count")}
 
 
 def probe_runtime():
@@ -152,6 +170,7 @@ def health():
     return {"ready": ready, "reason": "Modelos verificados y kernel CUDA comprobado; aceptación del corpus registrada por separado." if ready else "Modelos o runtime CUDA pendientes/no disponibles.",
             "models_installed": {"paddle": installed, "qwen": qwen_installed}, "runtime": RUNTIME,
             "observed_model_inference": dict(OBSERVED_INFERENCE),
+            "runtime_provenance": {"gateway": startup_provenance()},
             "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
 
 
@@ -319,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         result["engine"].update(model_lock_sha256=hashlib.sha256(LOCK_BYTES).hexdigest(),
             paddle_revision=LOCK["paddle"]["revision"], layout_revision=LOCK["layout"]["revision"],
             layout_model_sha256=LOCK["layout"]["files"]["inference.pdiparams"])
+        result["engine"].setdefault("runtime_provenance", {})["gateway"] = startup_provenance()
         return result
 
     def interpret(self, body):
@@ -340,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("CANCELLED")
             remaining = max(1, timeout - (time.monotonic() - started))
             STATES[body["request_id"]] = {"phase": "QWEN", "progress": 65}
-            prompt = Path("/app/prompt-v1.txt").read_text()
+            prompt = PROMPT
             content = json.dumps({"definition": body["definition"], "evidence": [dict(line, evidence_id=index) for index, line in enumerate(result["lines"])]}, ensure_ascii=False)
             if len(content) > 120000:
                 raise ValueError("LLM_CONTEXT_LIMIT")
@@ -356,9 +376,13 @@ class Handler(BaseHTTPRequestHandler):
             result["engine"]["llm_model"] = LOCK["qwen"]["model"]
             result["engine"]["llm_manifest_sha256"] = LOCK["qwen"]["manifest_sha256"]
             result["engine"]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
-            result["engine"]["phases"]["llm_seconds"] = round(reply.get("total_duration", 0) / 1e9, 4)
+            metrics = ollama_metrics(reply)
+            result["engine"]["ollama_metrics"] = metrics
+            result["engine"]["phases"]["llm_seconds"] = (
+                round(metrics["total_duration"] / 1e9, 4) if metrics["total_duration"] is not None else None)
         result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)
         result["engine"]["model_lock_sha256"] = hashlib.sha256(LOCK_BYTES).hexdigest()
+        result["engine"]["runtime_provenance"] = {"gateway": startup_provenance()}
         return result
 
 

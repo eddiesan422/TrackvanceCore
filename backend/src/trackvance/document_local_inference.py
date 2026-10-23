@@ -333,7 +333,12 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
                 or interpretation.get("observations_sha256") != observation_hash or "semantics" not in interpretation):
             raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La interpretación no corresponde a la evidencia OCR solicitada.")
         result["payload"] = apply_semantics(result["payload"], interpretation["semantics"], definition, response["lines"])
-        response["engine"].update({key: value for key, value in interpretation["engine"].items() if key != "phases"})
+        response["engine"].update({key: value for key, value in interpretation["engine"].items()
+                                   if key not in {"phases", "runtime_provenance"}})
+        if "runtime_provenance" in interpretation["engine"]:
+            response["engine"]["runtime_provenance"] = {
+                **response["engine"].get("runtime_provenance", {}),
+                **interpretation["engine"]["runtime_provenance"]}
         response["engine"].setdefault("phases", {}).update(interpretation["engine"].get("phases", {}))
         semantic_used = True
     result["engine"].update(response["engine"], key="PADDLE_QWEN_LOCAL_098", route="PADDLE_QWEN" if semantic_used else "PADDLE",

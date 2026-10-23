@@ -38,8 +38,21 @@
     "projector_sha256": "f836f08f921193f4d6b6a6952dba0a6fb116759d26a757bcb395d570d73976ca"
   },
   "images": {
-    "paddle": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487",
     "ollama": "ollama/ollama@sha256:ca389885d4c03971d9bdc1c082452c128819b48425b5633c73d7b208b1e3d11a",
-    "ingress": "python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0"
+    "ingress": "python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0",
+    "paddle_vendor_unusable": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487",
+    "runtime_base": "python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0",
+    "buildkit": "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
+  },
+  "runtime": {
+    "paddle_wheel_sha256": "01924dc83214a041bcc78de01c6be67ffe42e88909c7f4b6d13c31b363851b0a",
+    "paddlex_version": "3.6.0",
+    "cuda": "12.9",
+    "vendor_image_status": "PULL_INTEGRITY_FAILED_TWICE_NEVER_EXECUTED",
+    "paddle_version": "3.2.1",
+    "installation": "private_offline_venv_read_only",
+    "paddle_wheel_url": "https://paddle-whl.cdn.bcebos.com/stable/cu129/paddlepaddle-gpu/paddlepaddle_gpu-3.2.1-cp312-cp312-linux_x86_64.whl",
+    "paddleocr_version": "3.6.0",
+    "requirements_lock_sha256": "cdd670f9e1d606ed6f743605667d2da927d739eccc802e36a4dc3df5bee832bf"
   }
 }

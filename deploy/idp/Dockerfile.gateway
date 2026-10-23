@@ -1,0 +1,8 @@
+FROM python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HOME=/tmp XDG_CACHE_HOME=/tmp/cache PADDLE_HOME=/tmp/paddle PADDLE_PDX_CACHE_HOME=/tmp/paddlex
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/venv && chown 65532:65532 /opt/venv
+COPY app /app
+USER 65532:65532
+WORKDIR /tmp
+ENTRYPOINT ["/opt/venv/bin/python", "-I", "-B", "/app/server.py"]

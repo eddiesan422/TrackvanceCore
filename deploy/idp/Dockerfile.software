@@ -1,0 +1,7 @@
+FROM python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HOME=/tmp XDG_CACHE_HOME=/tmp/cache PADDLE_HOME=/tmp/paddle PADDLE_PDX_CACHE_HOME=/tmp/paddlex
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+COPY requirements.lock /install/requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes -r /install/requirements.lock
+RUN --mount=type=bind,source=paddlepaddle_gpu-3.2.1-cp312-cp312-linux_x86_64.whl,target=/tmp/paddlepaddle_gpu-3.2.1-cp312-cp312-linux_x86_64.whl echo '01924dc83214a041bcc78de01c6be67ffe42e88909c7f4b6d13c31b363851b0a  /tmp/paddlepaddle_gpu-3.2.1-cp312-cp312-linux_x86_64.whl' | sha256sum -c - && python -m pip install --no-cache-dir --no-deps /tmp/paddlepaddle_gpu-3.2.1-cp312-cp312-linux_x86_64.whl
+RUN python -m pip check && python -m pip freeze > /install/runtime-packages.txt && dpkg-query -W > /install/runtime-system-packages.txt

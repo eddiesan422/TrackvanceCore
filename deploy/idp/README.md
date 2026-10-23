@@ -10,21 +10,46 @@ La autorización del usuario permite modelos oficiales; nunca usar AWS real.
    repositorio. El lock fija revisiones y SHA-256; el reporte `acquisition.json`
    registra cada archivo. El script sólo descarga de PaddlePaddle en Hugging Face
    y del registro oficial de Ollama. No ejecuta Python remoto de los modelos.
-2. Definir `IDP_MODEL_ROOT=<cache-privada>` y ejecutar
-   `docker compose -f compose.idp-local.yml up -d`. Las imágenes están fijadas por
-   digest. Se mantiene seccomp por defecto, usuario 65532, sistema raíz de sólo
+2. Ejecutar `python scripts/idp_runtime.py --cache <runtime-privado> --models
+   <cache-privada>`. El instalador descarga la rueda oficial cu129 3.2.1 y verifica
+   su SHA-256; `requirements.lock` fija con hashes las 114 dependencias. Usa
+   `Dockerfile.software` y un builder propio limitado a 3 GiB/dos CPU. Exporta
+   el software a un archivo privado, sin importar sus grandes capas al daemon.
+   Carga sólo `Dockerfile.gateway`, basado en Python 3.12.15 por digest, e
+   inicializa un volumen nuevo con un contenedor sin red ni GPU, usuario 65532,
+   512 MiB de RAM/swap y una CPU. Verifica los SHA-256 de ambas capas antes de
+   extraerlas. El builder propio se elimina al terminar; no se limpian cachés
+   globales ni recursos de Codex. `runtime-receipt.json` registra imagen local
+   inmutable, etiquetas propias, capas, rueda, lock y archivos fuente.
+3. Ejecutar `docker compose --env-file <runtime-privado>/runtime.env -f
+   compose.idp-local.yml up -d`. El compose exige la identidad local verificada
+   y monta el volumen de software sólo lectura. El código del gateway está
+   incluido en la imagen inmutable. Se mantiene seccomp por defecto, usuario 65532, sistema raíz de sólo
    lectura, capabilities vacías y `no-new-privileges`. Únicamente `/tmp` y el
    índice efímero `manifests-v2` de Ollama permiten escrituras.
-3. Consultar `http://127.0.0.1:3288/health`. Distingue modelos instalados,
+4. Consultar `http://127.0.0.1:3288/health`. Distingue modelos instalados,
    importación de Paddle y un kernel CUDA pequeño real, e inferencias de modelos
    observadas por este gateway. La disponibilidad exige runtime y hashes válidos.
    Estos diagnósticos no acreditan exactitud sobre el corpus ni aceptación final.
-4. El proceso coordinador documental utiliza `TRACKVANCE_IDP_LOCAL_URL`, con
+5. El proceso coordinador documental utiliza `TRACKVANCE_IDP_LOCAL_URL`, con
    origen permitido `http://127.0.0.1:3288`, `http://host.docker.internal:3288`,
    `http://idp-ingress:8088` o `http://idp-gateway:8088` en una red
    interna explícitamente conectada. Docker Desktop puede acceder al relay por
    `host.docker.internal` desde su red ordinaria, sin conectar la red GPU a la
    base de datos. No cambiar el sandbox del hijo OCR.
+
+Un archivo de software creado por este procedimiento puede reutilizarse con
+`--software-archive <archivo-propio> --software-sha256 <sha-del-recibo>`;
+el instalador exige el hash completo y comprueba el lock incrustado y la rueda
+oficial en su historial de construcción. No adoptar archivos ajenos. Un volumen
+previo exige `--runtime-volume <nombre-propio>` y etiquetas de propietario
+coincidentes; su recibo debe acreditar exactamente las dos capas esperadas.
+El instalador no inicia automáticamente servicios ni declara inferencia válida.
+
+La imagen oficial SM120 se conserva en el manifiesto como referencia fallida:
+dos descargas independientes devolvieron capas con SHA-256 distintos de los
+esperados. Nunca se ejecutó, no se omitió la verificación y no es el runtime del
+compose. La instalación manual sigue la ruta cu129 de la guía oficial Blackwell.
 
 El compose limita ambos servicios a 6 GiB de RAM y tres CPU cada uno, y GPU 0.
 La red `inference` es interna: sus intérpretes no tienen salida a Internet. Un
@@ -48,7 +73,9 @@ cuando se admiten cuatro solicitudes.
 
 El proceso Paddle termina antes de iniciar Qwen. Ollama usa un trabajo, contexto
 8192 por defecto y `keep_alive=0`, evitando retener ambos modelos en VRAM. El
-timeout efectivo admite 30–1800 segundos; no se garantiza throughput.
+asignador Paddle crece bajo demanda y limita su proceso a 10.000 MiB de VRAM;
+una asignación que exceda ese límite falla en lugar de tomar toda la GPU.
+El timeout efectivo admite 30–1800 segundos; no se garantiza throughput.
 `use_llm=false` mide Paddle solo y `use_llm=true` añade interpretación semántica.
 La ruta digital suficiente registra `inference_skipped=true`.
 La extracción por reglas se ejecuta antes del LLM; si ya es suficiente, Qwen se

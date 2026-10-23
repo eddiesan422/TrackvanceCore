@@ -203,3 +203,27 @@ def test_scanned_route_refines_only_failed_region_and_skips_unneeded_llm(tmp_pat
     assert result["engine"]["route"] == "PADDLE"
     assert len(result["engine"]["focused_reextraction"]) == 1
     assert result["payload"]["inference_observation_history"][0]["observations"][0]["text"] == "unclear"
+
+
+def test_qwen_interpretation_preserves_paddle_child_and_gateway_provenance(tmp_path, monkeypatch):
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"synthetic provenance fixture")
+    provenance = {"gateway": {"files_sha256": {"server.py": "a" * 64}},
+                  "paddle_runner": {"files_sha256": {"paddle_runner.py": "b" * 64}}}
+
+    def invoke(path, body, **kwargs):
+        if path == "/extract":
+            return {"source_sha256": body["source_sha256"], "lines": [line()],
+                "engine": {"runtime_provenance": copy.deepcopy(provenance), "phases": {"paddle_seconds": .25}}}
+        assert path == "/interpret"
+        return {"source_sha256": body["source_sha256"], "observations_sha256": body["observations_sha256"],
+            "semantics": {"fields": {"invoice": {"observed": "A-1", "evidence_id": 0}}, "tables": {}},
+            "engine": {"runtime_provenance": {"gateway": provenance["gateway"]},
+                       "ollama_metrics": {"load_duration": 123, "eval_count": 7}, "phases": {"llm_seconds": .5}}}
+
+    monkeypatch.setattr(local, "_invoke", invoke)
+    result = local.run_local(source, definition(), {"max_retries": 0, "use_llm": True},
+        legacy_runner=lambda *args, **kwargs: {"payload": payload(), "engine": {}}, check=lambda _: None)
+    assert result["engine"]["runtime_provenance"] == provenance
+    assert result["engine"]["ollama_metrics"] == {"load_duration": 123, "eval_count": 7}
+    assert result["engine"]["phases"] == {"paddle_seconds": .25, "llm_seconds": .5}
