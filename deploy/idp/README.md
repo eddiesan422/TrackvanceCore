@@ -40,6 +40,12 @@ insuficientes, envía bytes acotados al gateway. El gateway procesa un documento
 a la vez; los trabajos adicionales esperan dentro de su timeout. Nunca cambia hacia un
 proveedor externo. Cada trabajo fija proveedor, modelos, prompt y configuración.
 
+`max_parallel_jobs` limita realmente las solicitudes de inferencia admitidas,
+incluyendo activa y cola, entre uno y cuatro. El mínimo configurado por las
+solicitudes concurrentes prevalece sobre la GPU compartida; el exceso devuelve
+ocupación explícita. La ejecución física GPU continúa limitada a uno, incluso
+cuando se admiten cuatro solicitudes.
+
 El proceso Paddle termina antes de iniciar Qwen. Ollama usa un trabajo, contexto
 8192 por defecto y `keep_alive=0`, evitando retener ambos modelos en VRAM. El
 timeout efectivo admite 30–1800 segundos; no se garantiza throughput.

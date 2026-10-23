@@ -88,18 +88,26 @@ def transport(monkeypatch, tmp_path):
             helper["Mounts"] = [{**item, "RW": False} for item in helper["Mounts"]]
             holder.update(helper=helper, token=token, env_file=env_file)
             return helper_id
-        if arguments[:2] == ["docker", "exec"]:
-            assert arguments[2] == helper_id and kwargs["timeout"] == 600
-            assert state.digest(state.VERIFY_SCRIPT) in arguments[-2]
-            if holder.get("bad_cleanup"):
-                holder["helper"]["Config"]["Labels"]["io.trackvance.snapshot-token"] = "other"
-            return json.dumps({"schema_version": 12, "migration": state.CORE097_MIGRATION, "tables": {"documents": {"exact": "d" * 64}}})
         if arguments[:2] == ["docker", "start"] and holder.get("bad_read_only"):
             holder["helper"]["Mounts"][0]["RW"] = True
         return ""
 
+    def execute_stream(arguments, *, stdin, stdout, timeout):
+        calls.append(arguments)
+        assert arguments == ["docker", "exec", "--interactive", helper_id, "python", "-", "snapshot"]
+        assert timeout == 600
+        bootstrap = stdin.read().decode("utf-8")
+        assert state.digest(state.VERIFY_SCRIPT) in bootstrap
+        assert state.digest(state.PHYSICAL_SCHEMA_GUARD) in bootstrap
+        assert "hashlib.sha256(contents).hexdigest()!=checks[name]" in bootstrap
+        if holder.get("bad_cleanup"):
+            holder["helper"]["Config"]["Labels"]["io.trackvance.snapshot-token"] = "other"
+        stdout.write(json.dumps({"schema_version": 12, "migration": state.CORE097_MIGRATION,
+            "tables": {"documents": {"exact": "d" * 64}}}).encode())
+
     monkeypatch.setattr(state, "docker_json", docker_json)
     monkeypatch.setattr(state, "execute", execute)
+    monkeypatch.setattr(state, "execute_stream", execute_stream)
     return api, calls, holder
 
 
@@ -113,6 +121,7 @@ def test_snapshot_sidecar_keeps_exact_output_assertions_ro_mounts_and_owned_clea
     create = next(call for call in calls if call[:2] == ["docker", "create"])
     assert all(value.endswith(",readonly") for index, value in enumerate(create) if index and create[index - 1] == "--mount")
     assert "postgres_data" not in " ".join(create) and "--privileged" not in create
+    assert not any(call[:2] == ["docker", "cp"] for call in calls)
     assert ["docker", "rm", "--force", "c" * 64] in calls
     assert not holder["env_file"].exists()
     receipts = list((tmp_path / ".codex-local/snapshot-transports").glob("*.json"))

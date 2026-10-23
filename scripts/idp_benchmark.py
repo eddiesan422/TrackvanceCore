@@ -207,6 +207,7 @@ def main():
     parser.add_argument("--container-output", required=True)
     parser.add_argument("--corpus", required=True, help="Read-only original ZIP path inside the container.")
     parser.add_argument("--definitions", required=True, help="Independent frozen definitions path inside the container.")
+    parser.add_argument("--source-literals", help="Private original-source literal evidence inside the container; evaluator only.")
     parser.add_argument("--sizes", default="5")
     parser.add_argument("--concurrencies", default="1")
     parser.add_argument("--mode", choices=["legacy", "paddle", "paddle-qwen"], default="paddle-qwen")
@@ -260,6 +261,8 @@ def main():
                 "--definitions", args.definitions, "--output", args.container_output.rstrip("/") + "/" + name,
                 "--mode", args.mode, "--kind", args.kind, "--limit", str(size),
                 "--concurrency", str(concurrency), "--timeout-seconds", str(args.timeout_seconds)]
+            if args.source_literals:
+                workload.extend(["--source-literals", args.source_literals])
             samples, reason, control_errors = [], None, []
             termination_confirmed = True
             with (host_output / (name + ".log")).open("x", encoding="utf-8") as log:

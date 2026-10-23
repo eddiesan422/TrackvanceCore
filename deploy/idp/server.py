@@ -30,6 +30,8 @@ LOCK = json.loads(LOCK_BYTES)
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
+ADMISSION_LOCK = threading.Lock()
+ADMISSIONS = {}
 ACTIVE = {}
 UPSTREAM = {}
 CANCELLED = set()
@@ -181,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         slot = False
         control_slot = False
+        admitted = False
+        identity = None
         try:
             if self.path not in {"/extract", "/interpret", "/refine", "/cancel"}:
                 self.close_connection = True
@@ -224,6 +228,18 @@ class Handler(BaseHTTPRequestHandler):
             if self.path not in {"/extract", "/interpret", "/refine"}:
                 self.send(404, {"error": "NOT_FOUND"})
                 return
+            maximum = body["configuration"].get("max_parallel_jobs", 1)
+            if type(maximum) is not int or not 1 <= maximum <= 4:
+                raise ValueError("ADMISSION_CONFIGURATION")
+            with ADMISSION_LOCK:
+                effective = min(maximum, *ADMISSIONS.values()) if ADMISSIONS else maximum
+                if len(ADMISSIONS) >= effective:
+                    self.send(503, {"error": "CONFIGURED_INFERENCE_CAPACITY"})
+                    return
+                if identity in ADMISSIONS:
+                    raise ValueError("DUPLICATE_REQUEST")
+                ADMISSIONS[identity] = maximum
+                admitted = True
             queued = time.monotonic()
             queue_timeout = min(1800, max(30, int(body["configuration"].get("timeout_seconds", 300))))
             STATES[identity] = {"phase": "QUEUED", "progress": 15}
@@ -250,6 +266,9 @@ class Handler(BaseHTTPRequestHandler):
                 REQUEST_SLOTS.release()
             if control_slot:
                 CONTROL_SLOTS.release()
+            if admitted:
+                with ADMISSION_LOCK:
+                    ADMISSIONS.pop(identity, None)
 
     def extract(self, body):
         if RUNTIME.get("ready") is not True:

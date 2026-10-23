@@ -671,9 +671,13 @@ def _snapshot_via_sidecar(api_id: str, command: str, memory_mib: int, destinatio
                         != {(item["Name"], item["Destination"], False) for item in plan["mounts"]}):
                 raise OperationError("SNAPSHOT_SIDECAR_RUNTIME_CONFINEMENT_INVALID")
             receipt["helper_limits_and_read_only_mounts_verified"] = True
-            for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
-                execute(["docker", "cp", str(script), f"{helper_id}:/tmp/{script.name}"])
-            output = str(execute(["docker", "exec", helper_id, "python", "-c", snapshot_bootstrap(), command], timeout=600))
+            bootstrap_file = Path(directory) / "snapshot.py"
+            output_file = Path(directory) / "snapshot.json"
+            bootstrap_file.write_text(snapshot_stdin_source(), encoding="utf-8")
+            with bootstrap_file.open("rb") as bootstrap, output_file.open("wb") as result:
+                execute_stream(["docker", "exec", "--interactive", helper_id, "python", "-", command],
+                    stdin=bootstrap, stdout=result, timeout=600)
+            output = output_file.read_text(encoding="utf-8")
             json.loads(output)  # The identical canonical verifier must produce JSON.
             receipt["status"] = "PASS"
             return output

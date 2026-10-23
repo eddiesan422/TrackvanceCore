@@ -316,7 +316,7 @@ def main():
     definitions = json.loads(args.definitions.read_text(encoding="utf-8"))
     selected = [doc for doc in oracle["invoices"] if args.kind == "all" or document_kind(doc) == args.kind][:args.limit]
     configuration = EngineConfiguration(provider="PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
-        timeout_seconds=args.timeout_seconds, max_parallel_jobs=1).model_dump()
+        timeout_seconds=args.timeout_seconds, max_parallel_jobs=args.concurrency).model_dump()
     began = time.monotonic()
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopped.set())

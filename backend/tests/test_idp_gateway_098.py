@@ -60,6 +60,22 @@ def test_full_queue_does_not_buffer_request_body(gateway, endpoint):
             gateway.REQUEST_SLOTS.release()
 
 
+@pytest.mark.parametrize("limit,active,expected", [(1, 1, 503), (4, 4, 503), (4, 3, 200)])
+def test_configured_admission_limits_active_and_queued_requests(gateway, endpoint, monkeypatch, limit, active, expected):
+    gateway.ADMISSIONS.update({str(index): limit for index in range(active)})
+    monkeypatch.setattr(gateway.Handler, "extract", lambda self, body: {"engine": {"elapsed_seconds": 0}})
+    code, _ = post(endpoint, "/extract", {"request_id": "c" * 32, "configuration": {"max_parallel_jobs": limit}})
+    assert code == expected
+    assert len(gateway.ADMISSIONS) == active
+
+
+@pytest.mark.parametrize("limit", [0, 5, True, "4", None])
+def test_untrusted_admission_limit_cannot_expand_hard_capacity(gateway, endpoint, limit):
+    code, _ = post(endpoint, "/extract", {"request_id": "d" * 32, "configuration": {"max_parallel_jobs": limit}})
+    assert code == 422
+    assert not gateway.ADMISSIONS
+
+
 def test_health_requires_exact_model_tag_and_digest(gateway, monkeypatch):
     expected = gateway.LOCK["qwen"]
     monkeypatch.setattr(gateway, "ollama", lambda _: {"models": [
