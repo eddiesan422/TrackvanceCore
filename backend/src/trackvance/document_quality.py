@@ -160,9 +160,9 @@ def semantic_issues(payload, *, reviewed=False):
     result = []
     for conflict in payload.get("semantic_conflicts", []):
         kind, _, name = conflict.partition(":")
-        if kind == "FIELD":
+        if kind in {"FIELD", "REEXTRACTION_FIELD"}:
             resolved = reviewed and payload.get("fields", {}).get(name, {}).get("reviewed")
-        elif kind == "TABLE":
+        elif kind in {"TABLE", "REEXTRACTION_TABLE"}:
             rows = payload.get("tables", {}).get(name, [])
             resolved = reviewed and bool(rows) and all(cell.get("reviewed") for row in rows for cell in row.values())
         else:

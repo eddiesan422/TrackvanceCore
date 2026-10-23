@@ -33,6 +33,16 @@ HEADER_ALIASES = {"invoice_number": "numero_factura", "issue_date": "fecha_emisi
 LINE_ALIASES = {"unidad": "unit", "cantidad": "quantity", "valor_unitario": "unit_price",
     "descuento_pct": "discount_pct", "impuesto_pct": "tax_pct"}
 NUMERIC_LINES = {"cantidad", "valor_unitario", "descuento_pct", "impuesto_pct", "line_base", "line_total", "tax_amount"}
+PERCENTAGE_FIELDS = {"descuento_pct", "impuesto_pct"}
+METRIC_POLICY = {
+    "version": 2,
+    "primary": "Declared field types; STRING percentages use independently recorded original-source literals. Missing literals count as unverified, never synthesized.",
+    "row_identity": "Unique original code plus exact description when visible; every row cell requires that full identity. Reordered unique rows are aligned by code.",
+    "positional": "Declared-type cell comparison at the original row position, without identity gating; diagnostic only.",
+    "semantic_oracle": "Same full-row identity; percentage fields compare numeric percentage points with an optional percent suffix. No scaling, sign or magnitude repair; diagnostic only.",
+    "text": "Unicode NFKC and whitespace normalization; internal spacing remains significant, including before percent signs.",
+    "failures": "All selected documents, pages, expected rows and cells remain in accuracy denominators; failed documents contribute zero correct cells.",
+}
 
 
 def digest(value):
@@ -113,16 +123,40 @@ def row_values(row):
     return result
 
 
-def evaluate(payload, doc, definition):
-    """Reuse 0.9.7 oracle mappings, with separate positional and identity checks.
+def declared_equal(actual, expected, logical_type):
+    if logical_type == "STRING" and not isinstance(actual, str):
+        return False
+    return equal(actual, expected, logical_type in {"DECIMAL", "INT64"})
 
-    Numeric interpretation follows the declared field type. Percentage STRINGs
-    retain the literal percent suffix; the evaluator never coerces them to reach
-    a higher score. Row identity must be unique before cells can count as exact.
-    """
+
+def percentage_equal(actual, expected):
+    """Diagnostic percentage-point comparison, with no division or sign repair."""
+    value = normalized(actual)
+    return equal(value.removesuffix("%").strip() if value is not None else None, expected, True)
+
+
+def source_literal_rows(doc, source_literals):
+    """Bind evidence to source bytes/row numbers; verify independently seen codes."""
+    if source_literals is None:
+        return {}
+    if len(source_literals) != len(doc["expected"]["lines"]):
+        raise ValueError("CORPUS_LITERAL_ROW_COUNT_MISMATCH")
+    result = {}
+    for index, (record, expected) in enumerate(zip(source_literals, doc["expected"]["lines"], strict=True), 1):
+        if (record.get("invoice_id") != doc["id"] or record.get("source_sha256") != doc.get("sha256")
+                or not doc.get("sha256") or record.get("row_number") != index
+                or ("code_observed_in_source" in record and record["code_observed_in_source"] != expected["code"])):
+            raise ValueError("CORPUS_LITERAL_SOURCE_BINDING_MISMATCH")
+        result[index - 1] = record
+    return result
+
+
+def evaluate(payload, doc, definition, source_literals=None):
+    """Score frozen automatic output; literal evidence never enters inference."""
     fields = {field["name"]: field for field in definition["fields"]}
     table = next((item for item in definition["tables"] if item["name"] == "detalle"), {"fields": []})
     row_fields = {field["name"]: field for field in table["fields"]}
+    literals = source_literal_rows(doc, source_literals)
     checks = []
     for path in doc["visible_header_fields"]:
         key = path.replace("totals.", "").replace(".", "_")
@@ -131,44 +165,78 @@ def evaluate(payload, doc, definition):
         value = payload.get("fields", {}).get(key, {}).get("value")
         field = fields.get(key, {})
         expected = nested(doc["expected"], path)
-        checks.append({"path": "headers." + path, "correct": equal(value, expected,
-            field.get("logical_type") in {"DECIMAL", "INT64"}),
+        correct = declared_equal(value, expected, field.get("logical_type"))
+        checks.append({"path": "headers." + path, "correct": correct, "semantic_correct": correct,
             "critical": path.startswith("totals.") or path.endswith("nit") or path in {"invoice_number", "issue_date", "due_date"}})
     rows = [row_values(row) for row in payload.get("tables", {}).get("detalle", [])]
     expected_rows = doc["expected"]["lines"]
     expected_counts = Counter(row["code"] for row in expected_rows)
-    actual_counts = Counter(row.get("code") for row in rows)
-    exact_rows, positional_exact = 0, 0
+    actual_codes = [normalized(row.get("code")) if isinstance(row.get("code"), str) else None for row in rows]
+    actual_counts = Counter(code or None for code in actual_codes)
+    exact_rows, semantic_rows, positional_exact, code_aligned_exact = 0, 0, 0, 0
+    identity_failed, literal_expected, literal_missing = 0, 0, 0
     for index, expected_row in enumerate(expected_rows):
         code = expected_row["code"]
-        matches = [row for row in rows if row.get("code") == code]
+        matches = [row for row, actual_code in zip(rows, actual_codes, strict=True) if actual_code == code]
         row = matches[0] if len(matches) == 1 and expected_counts[code] == 1 else {}
-        row_ok = True
+        identity_ok = bool(row) and equal(row.get("code"), code)
+        if "description" in doc["visible_line_fields"]:
+            identity_ok &= declared_equal(row.get("description"), expected_row["description"], "STRING")
+        identity_failed += not identity_ok
+        row_ok, semantic_ok = identity_ok, identity_ok
         for key in doc["visible_line_fields"]:
             expected = expected_row[LINE_ALIASES.get(key, key)]
-            numeric = row_fields.get(key, {}).get("logical_type") in {"DECIMAL", "INT64"}
-            if key in {"descuento_pct", "impuesto_pct"} and not numeric:
-                expected = str(expected) + "%"
-            correct = equal(row.get(key), expected, numeric)
-            positional_exact += index < len(rows) and equal(rows[index].get(key), expected, numeric)
+            logical_type = "STRING" if key in {"code", "description"} else row_fields.get(key, {}).get("logical_type")
+            string_percentage = key in PERCENTAGE_FIELDS and logical_type == "STRING"
+            reference = literals.get(index, {}).get(key) if string_percentage else expected
+            reference_available = not string_percentage or isinstance(reference, str)
+            literal_expected += string_percentage
+            literal_missing += not reference_available
+            matches_value = reference_available and declared_equal(row.get(key), reference, logical_type)
+            semantic = percentage_equal(row.get(key), expected) if key in PERCENTAGE_FIELDS else matches_value
+            correct = identity_ok and matches_value
+            semantic = identity_ok and semantic
+            code_aligned_exact += matches_value
+            positional_exact += (index < len(rows) and reference_available
+                and declared_equal(rows[index].get(key), reference, logical_type))
             row_ok &= correct
-            checks.append({"path": f"detalle.{index}.{key}", "correct": correct,
-                "critical": key in NUMERIC_LINES or key == "code"})
+            semantic_ok &= semantic
+            checks.append({"path": f"detalle.{index}.{key}", "correct": correct, "semantic_correct": semantic,
+                "critical": key in NUMERIC_LINES or key in {"code", "description"}})
         exact_rows += row_ok
+        semantic_rows += semantic_ok
     missing = sum((expected_counts - actual_counts).values())
     extra = sum((actual_counts - expected_counts).values())
-    duplicate = sum(max(0, count - max(1, expected_counts.get(code, 0))) for code, count in actual_counts.items())
+    duplicate = sum(max(0, count - max(1, expected_counts.get(code, 0)))
+        for code, count in actual_counts.items() if code is not None)
     unresolved = sum(len(values) for values in payload.get("table_unparsed", {}).values())
+    invalid_headers = sum(cell.get("validity") != "VALID" for cell in payload.get("fields", {}).values())
+    invalid_detail = sum(cell.get("validity") != "VALID" for table_row in payload.get("tables", {}).get("detalle", [])
+        for cell in table_row.values())
+    invalid = invalid_headers + sum(cell.get("validity") != "VALID" for table_rows in payload.get("tables", {}).values()
+        for table_row in table_rows for cell in table_row.values())
+    exact_headers = sum(check["correct"] for check in checks if check["path"].startswith("headers."))
+    blocked = bool(missing or extra or unresolved or invalid or literal_missing)
     return {"id": doc["id"], "family": doc["family_id"], "kind": document_kind(doc), "pages": doc["page_count"],
         "cells": len(checks), "exact_cells": sum(check["correct"] for check in checks),
         "header_fields": len(doc["visible_header_fields"]),
-        "exact_header_fields": sum(check["correct"] for check in checks if check["path"].startswith("headers.")),
-        "positional_detail_exact_cells": positional_exact, "expected_rows": len(expected_rows),
+        "exact_header_fields": exact_headers,
+        "positional_detail_exact_cells": positional_exact, "positional_exact_cells": exact_headers + positional_exact,
+        "code_aligned_exact_cells": exact_headers + code_aligned_exact,
+        "semantic_exact_cells": sum(check["semantic_correct"] for check in checks),
+        "semantic_exact_rows": semantic_rows, "expected_rows": len(expected_rows),
         "actual_rows": len(rows), "exact_rows": exact_rows, "missing_rows": missing,
-        "extra_rows": extra, "duplicate_rows": duplicate, "unparsed_regions": unresolved,
+        "extra_rows": extra, "duplicate_rows": duplicate, "unknown_rows": actual_counts.get(None, 0),
+        "ambiguous_expected_rows": sum(count for count in expected_counts.values() if count > 1),
+        "identity_failed_rows": identity_failed, "unparsed_regions": unresolved, "invalid_cells": invalid,
+        "invalid_header_cells": invalid_headers, "invalid_detail_cells": invalid_detail,
+        "literal_expected_cells": literal_expected, "literal_reference_missing_cells": literal_missing,
+        "primary_reference_complete": not literal_missing,
         "critical_errors": sum(not check["correct"] and check["critical"] for check in checks),
-        "document_exact": all(check["correct"] for check in checks) and not (missing or extra or unresolved),
-        "table_exact": exact_rows == len(expected_rows) and not (missing or extra or unresolved),
+        "document_exact": all(check["correct"] for check in checks) and not blocked,
+        "semantic_document_exact": all(check["semantic_correct"] for check in checks)
+            and not (missing or extra or unresolved or invalid),
+        "table_exact": exact_rows == len(expected_rows) and not (missing or extra or unresolved or invalid_detail or literal_missing),
         "failed_paths": [check["path"] for check in checks if not check["correct"]],
         "human_corrections": 0}
 
@@ -182,15 +250,26 @@ def summarize(rows, elapsed):
     complete = [row for row in rows if row.get("status") == "PROCESSED"]
     counts = {key: sum(row.get(key, 0) for row in complete) for key in (
         "cells", "exact_cells", "header_fields", "exact_header_fields", "expected_rows", "actual_rows",
-        "exact_rows", "missing_rows", "extra_rows", "duplicate_rows", "critical_errors", "pages")}
-    for key in ("cells", "header_fields", "expected_rows", "pages"):
+        "exact_rows", "missing_rows", "extra_rows", "duplicate_rows", "critical_errors", "pages",
+        "positional_exact_cells", "positional_detail_exact_cells", "code_aligned_exact_cells", "semantic_exact_cells",
+        "semantic_exact_rows", "unknown_rows", "ambiguous_expected_rows", "identity_failed_rows", "invalid_cells",
+        "invalid_header_cells", "invalid_detail_cells",
+        "literal_expected_cells", "literal_reference_missing_cells")}
+    for key in ("cells", "header_fields", "expected_rows", "pages", "literal_expected_cells"):
         counts[key] = sum(row.get(key, 0) for row in rows)
     processed_pages = sum(row.get("pages", 0) for row in complete)
     return {"documents": len(rows), "processed": len(complete), "failed": len(rows) - len(complete), **counts,
         "cell_accuracy": counts["exact_cells"] / counts["cells"] if counts["cells"] else None,
+        "semantic_oracle_cell_accuracy": counts["semantic_exact_cells"] / counts["cells"] if counts["cells"] else None,
+        "positional_cell_accuracy": counts["positional_exact_cells"] / counts["cells"] if counts["cells"] else None,
+        "row_accuracy": counts["exact_rows"] / counts["expected_rows"] if counts["expected_rows"] else None,
+        "header_accuracy": counts["exact_header_fields"] / counts["header_fields"] if counts["header_fields"] else None,
+        "primary_reference_complete": len(complete) == len(rows)
+            and all(row.get("primary_reference_complete", False) for row in complete),
         "accuracy_failed_documents_count_as_zero": True,
         "unprocessed_expected_rows": sum(row.get("expected_rows", 0) for row in rows if row.get("status") != "PROCESSED"),
         "document_exact": sum(row["document_exact"] for row in complete),
+        "semantic_document_exact": sum(row.get("semantic_document_exact", False) for row in complete),
         "table_exact": sum(row["table_exact"] for row in complete),
         "auto_verified": sum(row.get("auto_verified", False) for row in complete),
         "correct_auto_verified": sum(row.get("auto_verified", False) and row["document_exact"] for row in complete),
@@ -209,6 +288,8 @@ def main():
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--definitions", type=Path)
+    parser.add_argument("--source-literals", type=Path,
+        help="Private independent original-source percentage literals, used only after inference by the evaluator.")
     parser.add_argument("--mode", choices=["inventory", "legacy", "paddle", "paddle-qwen"], default="inventory")
     parser.add_argument("--limit", type=int, choices=[5, 10, 25, 50, 100], default=100)
     parser.add_argument("--concurrency", type=int, choices=[1, 2, 3, 4], default=1)
@@ -240,6 +321,20 @@ def main():
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopped.set())
     signal.signal(signal.SIGINT, lambda *_: stopped.set())
+    literal_evidence = {}
+    literal_lock = threading.Lock()
+
+    def document_literals(doc):
+        if args.source_literals is None:
+            return None
+        # Load the independent oracle only within evaluation, after automatic
+        # extraction and validation. Never attach it to definitions/model input.
+        with literal_lock:
+            if not literal_evidence:
+                content = args.source_literals.read_bytes()
+                evidence = json.loads(content)
+                literal_evidence.update(rows=evidence["rows"], sha256=hashlib.sha256(content).hexdigest())
+            return literal_evidence["rows"].get(doc["id"])
 
     def checkpoint(_progress):
         if stopped.is_set():
@@ -274,14 +369,17 @@ def main():
                     result["engine"]["validation_failure"] = {"error_code": error.code, "automatic_approval_blocked": True}
                 phases["independent_validation_seconds"] = time.monotonic() - control_began
                 quality = quality_report(SimpleNamespace(payload=result["payload"], engine=result["engine"], reviewed=False), definition)
-                row = evaluate(result["payload"], doc, definition)
+                row = evaluate(result["payload"], doc, definition, document_literals(doc))
                 row.update(status="PROCESSED", auto_verified=quality["status"] == "AUTO_VERIFIED",
                     validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
             row = {"id": doc["id"], "family": doc["family_id"], "kind": document_kind(doc),
                 "status": "FAILED", "error_type": type(error).__name__, "error_code": getattr(error, "code", None),
                 "cells": len(doc["visible_header_fields"]) + len(doc["visible_line_fields"]) * doc["line_count"],
-                "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"]}
+                "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"],
+                "literal_expected_cells": doc["line_count"] * sum(field["name"] in PERCENTAGE_FIELDS
+                    and field["logical_type"] == "STRING" and field["name"] in doc["visible_line_fields"]
+                    for table in definition["tables"] if table["name"] == "detalle" for field in table["fields"])}
         row["latency_seconds"] = time.monotonic() - began
         row["processing_seconds"] = time.monotonic() - execution_began
         row["queue_seconds"] = execution_began - began
@@ -292,7 +390,9 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         rows = list(pool.map(run, selected))
-    report = {"schema_version": 1, "mode": args.mode, "client_concurrency": args.concurrency,
+    report = {"schema_version": 2, "metric_policy": METRIC_POLICY,
+        "source_literals_sha256": literal_evidence.get("sha256"),
+        "mode": args.mode, "client_concurrency": args.concurrency,
         "gpu_effective_concurrency_limit": 1, "configuration": configuration,
         "definitions_sha256": digest(definitions), "oracle_sha256": inventory["oracle_sha256"],
         "summary": summarize(rows, time.monotonic() - began), "full_corpus": len(selected) == 100,

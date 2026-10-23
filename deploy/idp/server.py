@@ -36,6 +36,23 @@ CANCELLED = set()
 STATES = {}
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 VERIFIED_SIGNATURES = None
+RUNTIME = {"ready": False, "kernel_probe": "PENDING", "model_inference": False}
+OBSERVED_INFERENCE = {"paddle": False, "qwen": False}
+
+
+def probe_runtime():
+    global RUNTIME
+    try:
+        completed = subprocess.run([sys.executable, "-I", "-B", "/app/runtime_probe.py"],
+            capture_output=True, text=True, timeout=75, check=False)
+        if len(completed.stdout) > 1024 * 1024 or not completed.stdout.splitlines() or completed.returncode:
+            raise ValueError("RUNTIME_PROBE_FAILED")
+        result = json.loads(completed.stdout.splitlines()[-1])
+        if not isinstance(result, dict) or result.get("kernel_probe") not in {"PASS", "FAIL"}:
+            raise ValueError("RUNTIME_PROBE_INVALID")
+        RUNTIME = result
+    except (OSError, ValueError, subprocess.SubprocessError):
+        RUNTIME = {"ready": False, "kernel_probe": "FAIL", "model_inference": False, "error_type": "RUNTIME_PROBE_FAILED"}
 
 
 def verify_models():
@@ -75,8 +92,10 @@ def ollama(path, body=None, timeout=5):
 
 
 def qwen_verified():
-    return any(item.get("name") == LOCK["qwen"]["model"]
-        and item.get("digest") == LOCK["qwen"]["manifest_sha256"] for item in ollama("/tags").get("models", []))
+    tags = ollama("/tags")
+    return isinstance(tags, dict) and isinstance(tags.get("models"), list) and any(
+        isinstance(item, dict) and item.get("name") == LOCK["qwen"]["model"]
+        and item.get("digest") == LOCK["qwen"]["manifest_sha256"] for item in tags["models"])
 
 
 def stream_chat(identity, body, timeout):
@@ -121,12 +140,16 @@ def stream_chat(identity, body, timeout):
 
 def health():
     required = [Path("/models/paddle/model.safetensors"), Path("/models/layout/inference.pdiparams")]
-    ready = all(path.is_file() for path in required) and verify_models()
+    installed = all(path.is_file() for path in required) and verify_models()
+    qwen_installed = False
     try:
-        ready = ready and qwen_verified()
+        qwen_installed = qwen_verified()
     except (OSError, ValueError):
-        ready = False
-    return {"ready": ready, "reason": "Modelos locales instalados; prueba de inferencia real registrada separadamente." if ready else "Faltan modelos verificados o el servicio Qwen.",
+        pass
+    ready = installed and qwen_installed and RUNTIME.get("ready") is True
+    return {"ready": ready, "reason": "Modelos verificados y kernel CUDA comprobado; aceptación del corpus registrada por separado." if ready else "Modelos o runtime CUDA pendientes/no disponibles.",
+            "models_installed": {"paddle": installed, "qwen": qwen_installed}, "runtime": RUNTIME,
+            "observed_model_inference": dict(OBSERVED_INFERENCE),
             "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
 
 
@@ -202,8 +225,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(404, {"error": "NOT_FOUND"})
                 return
             queued = time.monotonic()
-            STATES[identity] = {"phase": "QUEUED", "progress": 15}
             queue_timeout = min(1800, max(30, int(body["configuration"].get("timeout_seconds", 300))))
+            STATES[identity] = {"phase": "QUEUED", "progress": 15}
             while not GATE.acquire(timeout=.2):
                 if identity in CANCELLED or time.monotonic() - queued >= queue_timeout:
                     CANCELLED.discard(identity)
@@ -229,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
                 CONTROL_SLOTS.release()
 
     def extract(self, body):
+        if RUNTIME.get("ready") is not True:
+            raise ValueError("GPU_RUNTIME_UNAVAILABLE")
         if not verify_models():
             raise ValueError("MODEL_INTEGRITY")
         config = body["configuration"]
@@ -263,6 +288,7 @@ class Handler(BaseHTTPRequestHandler):
                 if (folder / "result.json").stat().st_size > 16 * 1024**2:
                     raise ValueError("PADDLE_RESULT_LIMIT")
                 result = json.loads((folder / "result.json").read_text())
+                OBSERVED_INFERENCE["paddle"] = True
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -307,6 +333,7 @@ class Handler(BaseHTTPRequestHandler):
             if body["request_id"] in CANCELLED:
                 raise ValueError("CANCELLED")
             result["semantics"] = json.loads(reply["message"]["content"])
+            OBSERVED_INFERENCE["qwen"] = True
             result["engine"]["llm_model"] = LOCK["qwen"]["model"]
             result["engine"]["llm_manifest_sha256"] = LOCK["qwen"]["manifest_sha256"]
             result["engine"]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
@@ -317,4 +344,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=probe_runtime, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", 8088), Handler).serve_forever()

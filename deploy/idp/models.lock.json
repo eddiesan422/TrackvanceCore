@@ -39,6 +39,7 @@
   },
   "images": {
     "paddle": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487",
-    "ollama": "ollama/ollama@sha256:ca389885d4c03971d9bdc1c082452c128819b48425b5633c73d7b208b1e3d11a"
+    "ollama": "ollama/ollama@sha256:ca389885d4c03971d9bdc1c082452c128819b48425b5633c73d7b208b1e3d11a",
+    "ingress": "python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0"
   }
 }

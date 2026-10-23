@@ -60,7 +60,6 @@ services:
       - ${IDP_MODEL_ROOT:?Set private model cache}/layout:/models/layout:ro
       - ./deploy/idp:/app:ro
     tmpfs: ["/tmp:size=768m,mode=1777"]
-    ports: ["127.0.0.1:${IDP_LOCAL_PORT:-3288}:8088"]
     networks: [inference]
     depends_on: [idp-ollama]
     deploy:
@@ -70,6 +69,22 @@ services:
             - driver: nvidia
               device_ids: ["0"]
               capabilities: [gpu]
+  idp-ingress:
+    image: python@sha256:57d96f71de145a98e7ceca18ee4ade77bba4103a33a72dfaea026b23625c6bf0
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 48
+    entrypoint: [python, -I, -B, /app/ingress.py]
+    volumes:
+      - ./deploy/idp/ingress.py:/app/ingress.py:ro
+    networks: [inference, ingress]
+    ports: ["127.0.0.1:${IDP_LOCAL_PORT:-3288}:8088"]
+    depends_on: [idp-gateway]
 networks:
   inference:
     internal: true
+  ingress: {}

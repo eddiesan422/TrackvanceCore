@@ -29,7 +29,8 @@ PROMPT_VERSION = "trackvance-idp-098-v1"
 def _endpoint():
     raw = os.environ.get("TRACKVANCE_IDP_LOCAL_URL", "").rstrip("/")
     parsed = urlsplit(raw)
-    if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "idp-gateway"}
+    if (parsed.scheme != "http" or parsed.hostname not in {
+            "127.0.0.1", "localhost", "idp-gateway", "idp-ingress", "host.docker.internal"}
             or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path):
         raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNCONFIGURED", "Configura el servicio IA local aislado.")
     return raw
@@ -136,10 +137,10 @@ def apply_semantics(payload, candidate, definition, lines):
     except (KeyError, TypeError, ValueError):
         raise OperationError(422, "DOCUMENT_LLM_EVIDENCE_INVALID", "La respuesta semántica contiene campos sin evidencia verificable.") from None
     result = copy.deepcopy(payload)
-    conflicts = []
+    conflicts = list(payload.get("semantic_conflicts", []))
     for name, cell in fields.items():
         previous = result["fields"][name]
-        if previous["validity"] == "VALID" and previous["observed"] is not None:
+        if (previous["validity"] == "VALID" or previous.get("reextraction_conflict")) and previous["observed"] is not None:
             if cell["observed"] is not None and previous["value"] != cell["value"]:
                 conflicts.append("FIELD:" + name)
                 result["fields"][name] = {**previous, "validity": "AMBIGUOUS", "alternatives": [previous["observed"], cell["observed"]]}
@@ -160,6 +161,83 @@ def apply_semantics(payload, candidate, definition, lines):
     if period:
         result["business_period"] = {"field": period, **result["fields"][period]}
     return result
+
+
+def focused_regions(payload, definition, observations):
+    """At most four measured regions, selected by independent type/row checks."""
+    targets = []
+    for field in definition["fields"]:
+        cell = payload["fields"].get(field["name"], {})
+        if cell.get("validity") != "VALID" or field.get("required", True) and cell.get("observed") is None:
+            origin = cell.get("origin") or field.get("visual")
+            if origin:
+                targets.append(origin)
+    table_problem = any(not payload["tables"].get(table["name"])
+        or payload["table_unparsed"].get(table["name"])
+        or any(cell.get("validity") != "VALID" for row in payload["tables"].get(table["name"], []) for cell in row.values())
+        for table in definition["tables"])
+    if table_problem:
+        targets.extend(line for line in observations if line.get("block_label") == "table")
+    for check in [*payload.get("arithmetic", []), *payload.get("cross_totals", [])]:
+        if check.get("status") != "VALID":
+            targets.extend(cell["origin"] for cell in payload["fields"].values() if cell.get("origin"))
+    output, seen = [], set()
+    for target in targets:
+        page, box = target.get("page"), target.get("region")
+        if type(page) is not int or not isinstance(box, list) or len(box) != 4:
+            continue
+        key = (page, *box)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append({"page": page, "region": [max(0, box[0] - .02), max(0, box[1] - .02),
+                                                  min(1, box[2] + .02), min(1, box[3] + .02)]})
+        if len(output) == 4:
+            break
+    return output
+
+
+def refined_observations(original, refined, regions):
+    """Replace only covered regions while retaining the preceding evidence elsewhere."""
+    def covered(line):
+        a = line["region"]
+        area = (a[2] - a[0]) * (a[3] - a[1])
+        for target in regions:
+            b = target["region"]
+            intersection = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+            if line["page"] == target["page"] and area > 0 and intersection / area >= .6:
+                return True
+        return False
+
+    return [line for line in original if not covered(line)] + refined if refined else list(original)
+
+
+def retain_disagreements(before, after):
+    """A retry may propose alternatives but cannot erase a preceding valid value."""
+    conflicts = list(before.get("semantic_conflicts", []))
+    for name, previous in before["fields"].items():
+        current = after["fields"][name]
+        if (previous.get("validity") == "VALID" or previous.get("reextraction_conflict")) and previous.get("observed") is not None and (
+                current.get("value") != previous.get("value") or previous.get("reextraction_conflict")):
+            after["fields"][name] = {**previous, "validity": "AMBIGUOUS", "reextraction_conflict": True,
+                "alternatives": list(dict.fromkeys(value for value in [previous["observed"], current.get("observed")] if value is not None))}
+            conflicts.append("REEXTRACTION_FIELD:" + name)
+    for name, rows in before["tables"].items():
+        if rows and [[cell.get("value") for cell in row.values()] for row in rows] != [
+                [cell.get("value") for cell in row.values()] for row in after["tables"][name]]:
+            conflicts.append("REEXTRACTION_TABLE:" + name)
+            after.setdefault("reextraction_table_candidates", {})[name] = {
+                "before": copy.deepcopy(rows), "after": copy.deepcopy(after["tables"][name])}
+            for index, row in enumerate(after["tables"][name]):
+                previous_row = rows[index] if index < len(rows) else {}
+                for key, cell in row.items():
+                    previous = previous_row.get(key)
+                    if len(rows) != len(after["tables"][name]) or not previous or previous.get("value") != cell.get("value"):
+                        cell.update(validity="AMBIGUOUS", reextraction_conflict=True,
+                            alternatives=list(dict.fromkeys(value for value in [previous.get("observed") if previous else None,
+                                                                                cell.get("observed")] if value is not None)))
+    after["semantic_conflicts"] = list(dict.fromkeys(conflicts))
+    return after
 
 
 def _invoke(path, body, *, timeout, started, check, minimum_progress=15):
@@ -217,6 +295,30 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
         raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La inferencia no devolvió evidencia del documento solicitado.")
     result = legacy_runner(source, definition, check=lambda progress: check(35 + int(progress * .15)),
                            native_only=True, candidate_lines=response["lines"])
+    history, attempts = [], []
+    for attempt in range(min(2, max(0, int(configuration.get("max_retries", 1))))):
+        if _sufficient({**result["payload"], "native_incomplete_pages": []}, definition):
+            break
+        regions = focused_regions(result["payload"], definition, response["lines"])
+        if not regions:
+            break
+        refined = _invoke("/refine", {**body, "request_id": uuid.uuid4().hex, "regions": regions},
+            timeout=timeout, started=started, check=lambda _: check(50), minimum_progress=50)
+        if (not isinstance(refined, dict) or refined.get("source_sha256") != body["source_sha256"]
+                or not isinstance(refined.get("lines"), list)):
+            raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La reextracción no corresponde al documento original.")
+        history.append({"attempt": attempt, "observations": response["lines"],
+            "fields": copy.deepcopy(result["payload"]["fields"]), "tables": copy.deepcopy(result["payload"]["tables"])})
+        response["lines"] = refined_observations(response["lines"], refined["lines"], regions)
+        remapped = legacy_runner(source, definition, check=lambda _: check(50), native_only=True, candidate_lines=response["lines"])
+        remapped["payload"] = retain_disagreements(result["payload"], remapped["payload"])
+        result = remapped
+        attempts.append({"attempt": attempt + 1, "regions": regions, "engine": refined.get("engine", {}),
+                         "observations": len(refined["lines"])})
+        if not refined["lines"]:
+            break
+    if history:
+        result["payload"]["inference_observation_history"] = history
     semantic_used = False
     # Native gaps decide OCR need. Once real OCR observations exist, field/type/
     # table checks decide semantic need; missing spatial proof still blocks AUTO.
@@ -237,5 +339,6 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
     result["engine"].update(response["engine"], key="PADDLE_QWEN_LOCAL_098", route="PADDLE_QWEN" if semantic_used else "PADDLE",
         prompt_version=PROMPT_VERSION, transport="PRIVATE_LOCAL_HTTP", inference_skipped=False)
     result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)
+    result["engine"]["focused_reextraction"] = attempts
     check(100)
     return result

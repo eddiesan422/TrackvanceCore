@@ -15,15 +15,22 @@ La autorización del usuario permite modelos oficiales; nunca usar AWS real.
    digest. Se mantiene seccomp por defecto, usuario 65532, sistema raíz de sólo
    lectura, capabilities vacías y `no-new-privileges`. Únicamente `/tmp` y el
    índice efímero `manifests-v2` de Ollama permiten escrituras.
-3. Consultar `http://127.0.0.1:3288/health`. Esto comprueba artefactos instalados y
-   servicios, y no acredita una prueba GPU ni la exactitud sobre el corpus.
+3. Consultar `http://127.0.0.1:3288/health`. Distingue modelos instalados,
+   importación de Paddle y un kernel CUDA pequeño real, e inferencias de modelos
+   observadas por este gateway. La disponibilidad exige runtime y hashes válidos.
+   Estos diagnósticos no acreditan exactitud sobre el corpus ni aceptación final.
 4. El proceso coordinador documental utiliza `TRACKVANCE_IDP_LOCAL_URL`, con
-   origen permitido `http://127.0.0.1:3288` o `http://idp-gateway:8088` en una red
-   interna explícitamente conectada. No cambiar el sandbox del hijo OCR.
+   origen permitido `http://127.0.0.1:3288`, `http://host.docker.internal:3288`,
+   `http://idp-ingress:8088` o `http://idp-gateway:8088` en una red
+   interna explícitamente conectada. Docker Desktop puede acceder al relay por
+   `host.docker.internal` desde su red ordinaria, sin conectar la red GPU a la
+   base de datos. No cambiar el sandbox del hijo OCR.
 
 El compose limita ambos servicios a 6 GiB de RAM y tres CPU cada uno, y GPU 0.
-La red `inference` es interna: no tiene salida a Internet. Sólo el gateway publica
-un puerto en localhost. No expone Ollama. No requiere secretos.
+La red `inference` es interna: sus intérpretes no tienen salida a Internet. Un
+relay HTTP separado, sin GPU, modelos ni credenciales, publica localhost3288 y
+reenvía únicamente rutas conocidas al gateway. Esto permite acceso desde Windows
+sin dar una ruta externa a Paddle/Qwen. Ollama no se publica. No requiere secretos.
 
 ## Contrato y límites
 
@@ -38,16 +45,24 @@ El proceso Paddle termina antes de iniciar Qwen. Ollama usa un trabajo, contexto
 timeout efectivo admite 30–1800 segundos; no se garantiza throughput.
 `use_llm=false` mide Paddle solo y `use_llm=true` añade interpretación semántica.
 La ruta digital suficiente registra `inference_skipped=true`.
+La extracción por reglas se ejecuta antes del LLM; si ya es suficiente, Qwen se
+omite también después de Paddle. `max_retries` limita a cero, uno o dos intentos
+focalizados de hasta cuatro regiones. Esos recortes usan spotting y conservan
+los polígonos que realmente produce el modelo. Los resultados previos y los
+desacuerdos permanecen trazables y requieren resolución explícita.
 
 Límites: original 32 MiB, 50 páginas, 20 millones de píxeles por página,
 respuesta 16 MiB, 100.000 observaciones, 10.000 filas por tabla. El gateway acepta
 PDF, PNG y JPEG; no acepta rutas, URLs, archivos ejecutables ni modelos libres.
-La cancelación termina el proceso Paddle activo. El pedido LLM tiene timeout
-acotado; la cancelación durante Qwen aún depende de ese timeout y de su cierre.
+La cancelación termina el proceso Paddle activo y cierra la conexión HTTP de
+Qwen registrada antes de esperar cabeceras, también durante la carga inicial.
+El coordinador conserva sus controles de cancelación y autoridad de publicación.
+Su funcionamiento real sobre GPU debe verificarse con evidencia aparte.
 
-Paddle conserva coordenadas reales de bloques. Las filas de una tabla comparten
+La primera pasada Paddle conserva coordenadas reales de bloques. Las filas de una tabla comparten
 el rectángulo del bloque cuando el proveedor no proporciona coordenadas por
-celda; jamás se inventan ubicaciones, porcentajes de confianza ni revisión humana.
+celda; los reintentos focalizados conservan las coordenadas de spotting cuando
+existen. Jamás se inventan ubicaciones, porcentajes de confianza ni revisión humana.
 No se descartan filas repetidas por compartir rectángulo. El LLM sólo propone
 subcadenas presentes en observaciones referenciadas. Los tipos y cantidades se
 normalizan mediante el validador de Trackvance. Un conflicto con un valor válido

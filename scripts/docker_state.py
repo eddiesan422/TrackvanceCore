@@ -19,12 +19,16 @@ import sys
 import tarfile
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
+_SNAPSHOT_MEMORY_MIB: ContextVar[int | None] = ContextVar("snapshot_memory_mib", default=None)
 VERIFY_SCRIPT = ROOT / "scripts" / "verify_storage.py"
 PHYSICAL_SCHEMA_GUARD = ROOT / "scripts" / "physical_schema_guard.py"
 BACKUP_SCHEMA_VERSION = 2
@@ -554,18 +558,156 @@ def snapshot_stdin_source() -> str:
     )
 
 
+@contextmanager
+def snapshot_transport(memory_mib: int | None = None):
+    """Explicit trusted verifier transport; never change permanent API limits."""
+    if memory_mib is not None and (type(memory_mib) is not int or memory_mib not in {1024, 2048, 3072, 4096}):
+        raise OperationError("SNAPSHOT_SIDECAR_MEMORY_INVALID")
+    token = _SNAPSHOT_MEMORY_MIB.set(memory_mib)
+    try:
+        yield
+    finally:
+        _SNAPSHOT_MEMORY_MIB.reset(token)
+
+
+def _snapshot_sidecar_plan(api: Mapping[str, Any], memory_mib: int) -> dict[str, Any]:
+    """Validate exact source scope before sharing read-only application volumes."""
+    labels = api.get("Config", {}).get("Labels") or {}
+    project = labels.get(PROJECT_LABEL, "")
+    validate_project(project)
+    if (project in {"trackvance-certification", "trackvance", "trackvance-core", "bikerwash"}
+            or labels.get(SERVICE_LABEL) != "api" or not api.get("State", {}).get("Running")
+            or not re.fullmatch(r"[a-f0-9]{64}", api.get("Id", ""))
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", api.get("Image", ""))):
+        raise OperationError("SNAPSHOT_SIDECAR_SOURCE_FORBIDDEN")
+    if project == "trackvance-codex":
+        if labels.get("io.trackvance.owner") != project or labels.get("io.trackvance.permanent") != "true":
+            raise OperationError("SNAPSHOT_SIDECAR_CODEX_OWNER_INVALID")
+    elif "io.trackvance.permanent" in labels or labels.get("io.trackvance.owner") != project:
+        raise OperationError("SNAPSHOT_SIDECAR_DISPOSABLE_OWNER_INVALID")
+    networks = api.get("NetworkSettings", {}).get("Networks", {})
+    if set(networks) != {project + "_default"}:
+        raise OperationError("SNAPSHOT_SIDECAR_NETWORK_INVALID")
+    expected = {"/var/lib/trackvance": "trackvance_data",
+        "/var/lib/trackvance-credentials": "connection_credentials", "/var/lib/trackvance-keys": "connection_keys",
+        "/var/lib/trackvance-delivery-credentials": "delivery_credentials", "/var/lib/trackvance-delivery-keys": "delivery_keys"}
+    mounts = api.get("Mounts", [])
+    if (len(mounts) != len(expected) or {item.get("Destination") for item in mounts} != set(expected)
+            or any(item.get("Type") != "volume" or item.get("Name") != project + "_" + expected[item["Destination"]] for item in mounts)):
+        raise OperationError("SNAPSHOT_SIDECAR_MOUNTS_INVALID")
+    env = dict(item.split("=", 1) for item in api["Config"].get("Env", []))
+    parsed = urlsplit(env.get("DATABASE_URL", ""))
+    if (parsed.scheme != "postgresql+psycopg" or parsed.hostname != "postgres" or parsed.port != 5432
+            or not parsed.username or not parsed.password or parsed.query or parsed.fragment):
+        raise OperationError("SNAPSHOT_SIDECAR_DATABASE_SCOPE_INVALID")
+    allowed = {"DATABASE_URL", "TRACKVANCE_STORAGE_DIR", "TRACKVANCE_STORAGE_ROOT", "TRACKVANCE_SECRETS_DIR",
+        "TRACKVANCE_SECRET_KEY_FILE", "TRACKVANCE_DESTINATION_SECRETS_DIR", "TRACKVANCE_DESTINATION_SECRET_KEY_FILE"}
+    environment = {key: value for key, value in env.items() if key in allowed}
+    environment.update(PGOPTIONS="-c default_transaction_read_only=on", DEMO_ACCESS_ENABLED="false", DEMO_SEED_ENABLED="false")
+    if any("\n" in value or "\r" in value for value in environment.values()):
+        raise OperationError("SNAPSHOT_SIDECAR_ENVIRONMENT_INVALID")
+    return {"source_api_id": api["Id"], "project": project, "image_id": api["Image"],
+        "network": project + "_default", "mounts": sorted(mounts, key=lambda item: item["Destination"]),
+        "environment": environment, "memory_bytes": memory_mib * 1024**2, "user": api["Config"].get("User", "")}
+
+
+def _snapshot_via_sidecar(api_id: str, command: str, memory_mib: int, destination: Path) -> str:
+    sources = docker_json(["container", "inspect", api_id])
+    if len(sources) != 1 or sources[0].get("Id") != api_id:
+        raise OperationError("SNAPSHOT_SIDECAR_EXACT_SOURCE_REQUIRED")
+    plan = _snapshot_sidecar_plan(sources[0], memory_mib)
+    volumes = docker_json(["volume", "inspect", *[item["Name"] for item in plan["mounts"]]])
+    if len(volumes) != len(plan["mounts"]) or any((item.get("Labels") or {}).get(PROJECT_LABEL) != plan["project"] for item in volumes):
+        raise OperationError("SNAPSHOT_SIDECAR_VOLUME_OWNER_INVALID")
+    networks = docker_json(["network", "inspect", plan["network"]])
+    if len(networks) != 1 or (networks[0].get("Labels") or {}).get(PROJECT_LABEL) != plan["project"]:
+        raise OperationError("SNAPSHOT_SIDECAR_NETWORK_OWNER_INVALID")
+    token = uuid4().hex
+    helper_id = None
+    receipt = {key: value for key, value in plan.items() if key != "environment"}
+    receipt.update(status="INTENT", command=command, source_limits_unchanged=True,
+        read_only=True, database_read_only=True, cpu_limit=.75, pids_limit=128,
+        verifier_sha256=digest(VERIFY_SCRIPT), physical_guard_sha256=digest(PHYSICAL_SCHEMA_GUARD))
+    transport_root = ROOT / ".codex-local" / "snapshot-transports"
+    if transport_root.is_symlink() or transport_root.parent.is_symlink():
+        raise OperationError("SNAPSHOT_SIDECAR_RECEIPT_PATH_INVALID")
+    transport_root.mkdir(parents=True, exist_ok=True)
+    transport_path = transport_root / ("snapshot-" + token + ".json")
+    try:
+        with tempfile.TemporaryDirectory(prefix="trackvance-snapshot-config-") as directory:
+            env_file = Path(directory) / "snapshot.env"
+            env_file.write_text("\n".join(key + "=" + value for key, value in sorted(plan["environment"].items())) + "\n", encoding="utf-8")
+            env_file.chmod(0o600)
+            arguments = ["docker", "create", "--name", "trackvance-snapshot-" + token,
+                "--label", "io.trackvance.owner=trackvance-snapshot-" + token,
+                "--label", "io.trackvance.snapshot-token=" + token, "--read-only", "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges:true", "--network", plan["network"],
+                "--cpus", ".75", "--memory", str(plan["memory_bytes"]), "--pids-limit", "128",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=134217728,mode=1777", "--env-file", str(env_file)]
+            for item in plan["mounts"]:
+                arguments.extend(["--mount", "type=volume,src=" + item["Name"] + ",dst=" + item["Destination"] + ",readonly"])
+            if plan["user"]:
+                arguments.extend(["--user", plan["user"]])
+            arguments.extend([plan["image_id"], "python", "-c", "import time; time.sleep(900)"])
+            helper_id = str(execute(arguments)).strip()
+            if not re.fullmatch(r"[a-f0-9]{64}", helper_id):
+                raise OperationError("SNAPSHOT_SIDECAR_CREATE_ID_INVALID")
+            receipt["helper_id"] = helper_id
+            execute(["docker", "start", helper_id])
+            helpers = docker_json(["container", "inspect", helper_id])
+            helper = helpers[0] if len(helpers) == 1 else {}
+            host = helper.get("HostConfig", {})
+            actual_env = dict(value.split("=", 1) for value in helper.get("Config", {}).get("Env", []))
+            if (helper.get("Id") != helper_id or helper.get("Image") != plan["image_id"]
+                    or (helper.get("Config", {}).get("Labels") or {}).get("io.trackvance.snapshot-token") != token
+                    or host.get("Memory") != plan["memory_bytes"] or host.get("NanoCpus") != 750_000_000
+                    or host.get("PidsLimit") != 128 or not host.get("ReadonlyRootfs") or host.get("Privileged")
+                    or set(host.get("CapDrop") or []) != {"ALL"} or host.get("CapAdd")
+                    or "no-new-privileges:true" not in (host.get("SecurityOpt") or [])
+                    or set(helper.get("NetworkSettings", {}).get("Networks", {})) != {plan["network"]}
+                    or any(actual_env.get(key) != value for key, value in plan["environment"].items())
+                    or len(helper.get("Mounts", [])) != len(plan["mounts"])
+                    or {(item.get("Name"), item.get("Destination"), item.get("RW")) for item in helper.get("Mounts", [])}
+                        != {(item["Name"], item["Destination"], False) for item in plan["mounts"]}):
+                raise OperationError("SNAPSHOT_SIDECAR_RUNTIME_CONFINEMENT_INVALID")
+            receipt["helper_limits_and_read_only_mounts_verified"] = True
+            for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
+                execute(["docker", "cp", str(script), f"{helper_id}:/tmp/{script.name}"])
+            output = str(execute(["docker", "exec", helper_id, "python", "-c", snapshot_bootstrap(), command], timeout=600))
+            json.loads(output)  # The identical canonical verifier must produce JSON.
+            receipt["status"] = "PASS"
+            return output
+    finally:
+        if helper_id:
+            helpers = docker_json(["container", "inspect", helper_id])
+            if (len(helpers) != 1 or helpers[0].get("Id") != helper_id or helpers[0].get("Image") != plan["image_id"]
+                    or (helpers[0].get("Config", {}).get("Labels") or {}).get("io.trackvance.snapshot-token") != token):
+                receipt["status"] = "CLEANUP_IDENTITY_REJECTED"
+                transport_path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+                raise OperationError("SNAPSHOT_SIDECAR_CLEANUP_IDENTITY_INVALID")
+            execute(["docker", "rm", "--force", helper_id])
+            receipt["helper_removed"] = True
+        if receipt["status"] != "PASS":
+            receipt["status"] = "FAIL"
+        transport_path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _copy_snapshot(
     api_id: str, destination: Path, *, command: str = "snapshot"
 ) -> dict[str, Any]:
     if command not in {"snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10", "snapshot-legacy-v11", "snapshot-legacy-v12"}:
         raise OperationError("Comando de huella persistente no reconocido.")
-    bootstrap = snapshot_bootstrap()
-    for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
-        execute(["docker", "cp", str(script), f"{api_id}:/tmp/{script.name}"])
-    output = execute(
-        ["docker", "exec", api_id, "python", "-c", bootstrap, command],
-        timeout=600,
-    )
+    memory_mib = _SNAPSHOT_MEMORY_MIB.get()
+    if memory_mib is not None:
+        output = _snapshot_via_sidecar(api_id, command, memory_mib, destination)
+    else:
+        bootstrap = snapshot_bootstrap()
+        for script in (VERIFY_SCRIPT, PHYSICAL_SCHEMA_GUARD):
+            execute(["docker", "cp", str(script), f"{api_id}:/tmp/{script.name}"])
+        output = execute(
+            ["docker", "exec", api_id, "python", "-c", bootstrap, command],
+            timeout=600,
+        )
     try:
         value = json.loads(str(output))
     except json.JSONDecodeError as error:
@@ -1502,6 +1644,7 @@ def parse_arguments() -> argparse.Namespace:
     backup_parser.add_argument("--project", required=True)
     backup_parser.add_argument("--destination", required=True, type=Path)
     backup_parser.add_argument("--application-only-codex", action="store_true")
+    backup_parser.add_argument("--snapshot-memory-mib", type=int, choices=[1024, 2048, 3072, 4096])
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--source", required=True, type=Path)
     restore_parser = commands.add_parser("restore")
@@ -1510,6 +1653,7 @@ def parse_arguments() -> argparse.Namespace:
     restore_parser.add_argument("--start", action="store_true")
     restore_parser.add_argument("--smoke", action="store_true")
     restore_parser.add_argument("--web-port", type=int, default=3000)
+    restore_parser.add_argument("--snapshot-memory-mib", type=int, choices=[1024, 2048, 3072, 4096])
     plan_parser = commands.add_parser("plan-reset")
     plan_parser.add_argument("--project", required=True)
     plan_parser.add_argument("--output", required=True, type=Path)
@@ -1522,6 +1666,11 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     options = parse_arguments()
+    with snapshot_transport(getattr(options, "snapshot_memory_mib", None)):
+        return dispatch(options)
+
+
+def dispatch(options) -> int:
     try:
         if options.command == "inventory":
             result = inventory(options.project)

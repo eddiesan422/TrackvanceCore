@@ -159,12 +159,13 @@ def test_decimal_without_declared_arithmetic_cannot_autoapprove():
     assert issues(extracted(data), config) == ["REVIEW_REQUIRED:headers.0.total"]
 
 
-def test_semantic_disagreement_remains_an_exception_until_human_confirmation():
+@pytest.mark.parametrize("conflict_kind", ["FIELD", "REEXTRACTION_FIELD"])
+def test_semantic_disagreement_remains_an_exception_until_human_confirmation(conflict_kind):
     config, data = definition(), candidate()
-    data["payload"]["semantic_conflicts"] = ["FIELD:invoice"]
+    data["payload"]["semantic_conflicts"] = [conflict_kind + ":invoice"]
     data["engine"]["validation"] = certify_candidate(data, candidate(), config, "a" * 64)
     item = extracted(data)
-    assert "SEMANTIC_CONFLICT:FIELD:invoice" in issues(item, config)
+    assert "SEMANTIC_CONFLICT:" + conflict_kind + ":invoice" in issues(item, config)
     item.reviewed = True
     item.payload["fields"]["invoice"]["reviewed"] = True
     assert not issues(item, config)

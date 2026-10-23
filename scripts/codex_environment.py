@@ -39,6 +39,8 @@ APP_VOLUMES = ("postgres_data", "trackvance_data", "connection_credentials", "co
 VOLUMES = (*APP_VOLUMES, "test_destination_data")
 ENVIRONMENT_KEYS = {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD", "WEB_PORT", "CODEX_API_PORT",
     "TRACKVANCE_WEB_ORIGIN", "TRACKVANCE_PUBLIC_URL", "CODEX_ADMIN_PASSWORD", "CODEX_DESTINATION_PASSWORD", "CODEX_BACKEND_IMAGE", "CODEX_WEB_IMAGE", "CODEX_POSTGRES_IMAGE"}
+IDP_ORIGIN = "http://host.docker.internal:3288"
+IDP_SERVICES = frozenset({"api", "document-worker"})
 
 
 def require(value, code):
@@ -163,7 +165,9 @@ def load(directory):
     env_file = directory / "codex.env"
     require(env_file.is_file() and not env_file.is_symlink() and reference(env_file) == value["environment_file"], "CODEX_ENVIRONMENT_FILE_DRIFT")
     values = dict(line.split("=", 1) for line in env_file.read_text(encoding="utf-8").splitlines() if line)
-    require(set(values) == ENVIRONMENT_KEYS and values["POSTGRES_DB"] == values["POSTGRES_USER"] == "tv_codex"
+    require(set(values) in (ENVIRONMENT_KEYS, ENVIRONMENT_KEYS | {"CODEX_IDP_LOCAL_URL"})
+        and ("CODEX_IDP_LOCAL_URL" not in values or values["CODEX_IDP_LOCAL_URL"] == IDP_ORIGIN)
+        and values["POSTGRES_DB"] == values["POSTGRES_USER"] == "tv_codex"
         and values["TRACKVANCE_WEB_ORIGIN"] == values["TRACKVANCE_PUBLIC_URL"] == f"http://127.0.0.1:{values['WEB_PORT']}", "FRESH_CANONICAL_CODEX_CONFIG_REQUIRED")
     for role in ("backend", "web", "postgres"):
         require(values["CODEX_" + role.upper() + "_IMAGE"] == value["images"][role]["id"], "EXACT_IMMUTABLE_ROLE_PIN_REQUIRED")
@@ -171,8 +175,19 @@ def load(directory):
 
 
 def compose(directory, values):
-    return ["docker", "compose", "--project-name", PROJECT, "--env-file", str(directory / "codex.env"),
-        "-f", str(ROOT / "compose.yml"), "-f", str(ROOT / "compose.codex.yml")], process_environment(values)
+    arguments = ["docker", "compose", "--project-name", PROJECT, "--env-file", str(directory / "codex.env"),
+        "-f", str(ROOT / "compose.yml"), "-f", str(ROOT / "compose.codex.yml")]
+    if values.get("CODEX_IDP_LOCAL_URL"):
+        path = directory / "idp-local.compose.json"
+        require(not path.is_symlink() and path.is_file(), "EXACT_CODEX_IDP_OVERLAY_REQUIRED")
+        require(json.loads(path.read_text(encoding="utf-8")) == idp_overlay(values["CODEX_IDP_LOCAL_URL"]), "CODEX_IDP_OVERLAY_DRIFT")
+        arguments.extend(["-f", str(path)])
+    return arguments, process_environment(values)
+
+
+def idp_overlay(origin):
+    require(origin == IDP_ORIGIN, "CODEX_IDP_RESERVED_LOCAL_ORIGIN_REQUIRED")
+    return {"services": {name: {"environment": {"TRACKVANCE_IDP_LOCAL_URL": origin}} for name in sorted(IDP_SERVICES)}}
 
 
 def inventory(project, environment):
@@ -234,6 +249,8 @@ def validate_resolved(config, values, protected):
             require(env["DEMO_SEED_ENABLED"] == "false" and env["DEMO_ACCESS_ENABLED"] == "true"
                 and env["TRACKVANCE_WEB_ORIGIN"] == values["TRACKVANCE_WEB_ORIGIN"]
                 and env["DATABASE_URL"] == f"postgresql+psycopg://tv_codex:{values['POSTGRES_PASSWORD']}@postgres:5432/tv_codex", "OWN_SYNTHETIC_CODEX_APPLICATION_CONFIG_REQUIRED")
+            require(env.get("TRACKVANCE_IDP_LOCAL_URL") == (values.get("CODEX_IDP_LOCAL_URL") if name in IDP_SERVICES else None),
+                    "CODEX_IDP_ENDPOINT_OR_CONSUMER_SCOPE_INVALID")
         if name == "test-postgres":
             require(not service.get("ports") and service["environment"] == {"POSTGRES_USER": "tv_codex_destination", "POSTGRES_DB": "tv_codex_destination", "POSTGRES_PASSWORD": values["CODEX_DESTINATION_PASSWORD"]}, "SEPARATE_SYNTHETIC_DELIVERY_DESTINATION_REQUIRED")
     require(cpu <= 4 and memory <= 6 * 1024**3, "AGGREGATE_CODEX_BUDGET_EXCEEDED")
@@ -364,6 +381,10 @@ def prepare(directory, value, values):
 
 
 def update_pins(directory, value, values):
+    if values.get("CODEX_IDP_LOCAL_URL"):
+        path = directory / "idp-local.compose.json"
+        require(not path.is_symlink(), "LINKED_CODEX_IDP_OVERLAY_FORBIDDEN")
+        save(path, idp_overlay(values["CODEX_IDP_LOCAL_URL"]))
     env_file = directory / "codex.env"
     temporary = directory / ("codex.env." + uuid4().hex + ".tmp")
     with temporary.open("x", encoding="utf-8") as stream:
@@ -499,6 +520,11 @@ def verify_schema_upgrade(environment, proof, directory):
 
 def execute_stage(args, directory, value, values, sha):
     change = plan(value, sha)
+    requested_idp = getattr(args, "idp_local_url", None)
+    require(requested_idp is None or args.stage == "update", "CODEX_IDP_CONFIGURATION_REQUIRES_UPDATE")
+    require(requested_idp in {None, "DISABLED", IDP_ORIGIN}, "CODEX_IDP_RESERVED_LOCAL_ORIGIN_REQUIRED")
+    target_idp = (None if requested_idp == "DISABLED" else requested_idp) if requested_idp is not None else values.get("CODEX_IDP_LOCAL_URL")
+    idp_changed = target_idp != values.get("CODEX_IDP_LOCAL_URL")
     prefix, environment, config, existing, protected, budgets = prepare(directory, value, values)
     selected = tuple(args.services or ACTIVE)
     running_services = {row["Config"]["Labels"]["com.docker.compose.service"]
@@ -509,6 +535,8 @@ def execute_stage(args, directory, value, values, sha):
     require(set(selected) <= set(ACTIVE + OPTIONAL), "EXACT_CODEX_SERVICE_SELECTION_REQUIRED")
     intent = {"stage": args.stage, "source_sha": sha, "images": json.loads(json.dumps(value["images"])), "selected_services": selected,
         "budget": budgets, "protected_inventory_sha256": canonical_hash(protected), "configuration_sha256": canonical_hash(config)}
+    if idp_changed:
+        intent["idp_local_url_before"], intent["idp_local_url_after"] = values.get("CODEX_IDP_LOCAL_URL"), target_idp
     stop_timeout = getattr(args, "stop_timeout", 30)
     require(type(stop_timeout) is int and 1 <= stop_timeout <= 30, "BOUNDED_CODEX_STOP_TIMEOUT_REQUIRED")
     if args.stage == "stop":
@@ -526,7 +554,7 @@ def execute_stage(args, directory, value, values, sha):
                     for key in ("WEB_PORT", "CODEX_API_PORT"):
                         with socket.socket() as probe:probe.bind(("127.0.0.1", int(values[key])))
                 command([*prefix, "up", "--no-build", "--pull", "never", "--detach", "--wait", "--wait-timeout", "180", *selected], environment=environment, timeout=240)
-            elif change["changed_components"]:
+            elif change["changed_components"] or idp_changed:
                 schema_changed = bool(command(["git", "diff", "--name-only", value["images"]["backend"]["source_sha"], sha, "--", "backend/migrations"]))
                 if schema_changed:
                     proof = validate_schema_upgrade(args, value, sha, existing)
@@ -560,8 +588,14 @@ def execute_stage(args, directory, value, values, sha):
                     value["_image_defaults"][role] = inspection[0]["Config"]
                     values["CODEX_" + role.upper() + "_IMAGE"] = identifier
                 value["runtime_version"] = source_version(sha)
+                if target_idp:
+                    values["CODEX_IDP_LOCAL_URL"] = target_idp
+                else:
+                    values.pop("CODEX_IDP_LOCAL_URL", None)
                 update_pins(directory, value, values); prefix, environment = compose(directory, values)
                 roles = (set(BACKEND) if "backend" in change["changed_components"] else set()) | ({"web"} if "web" in change["changed_components"] else set())
+                if idp_changed:
+                    roles.update(IDP_SERVICES)
                 if schema_changed:
                     roles.add("web")  # Reactivate the existing web service quiesced for the snapshot.
                 was_running = {row["Config"]["Labels"]["com.docker.compose.service"] for row in existing["containers"] if row["State"]["Running"]}
@@ -588,6 +622,8 @@ def execute_stage(args, directory, value, values, sha):
         updated_config = json.loads(command([*prefix, "--profile", "codex-automatic", "config", "--format", "json"], environment=environment))
         validate_resolved(updated_config, values, inventory("trackvance-certification", environment))
         updated_roles = ((set(BACKEND) if "backend" in change["changed_components"] else set()) | ({"web"} if "web" in change["changed_components"] else set())) if args.stage == "update" else set()
+        if idp_changed:
+            updated_roles.update(IDP_SERVICES)
         validate_owned(final, updated_config, value, unchanged_roles=set(ACTIVE + OPTIONAL) - updated_roles)
         require(stable_inventory(inventory("trackvance-certification", environment)) == protected, "USER_INSTALLATION_IDENTITY_CONFIG_OR_STATE_CHANGED")
         stable = stable_inventory(final)
@@ -598,7 +634,7 @@ def execute_stage(args, directory, value, values, sha):
         health = check_health(values, value["runtime_version"]) if args.stage != "stop" else None
         save(receipt, {"status": "PASS", **intent, "images_after": value["images"], "resources": value["resources"], "health": health,
             "intent": reference(intent_path), "user_installation_unchanged": True, "volumes_removed": 0, "permanent": True})
-        return {"status": "PASS_NOOP" if args.stage == "update" and not change["changed_components"] else "PASS", "project": PROJECT, "stage": args.stage, "receipt": reference(receipt), "web_url": values["TRACKVANCE_WEB_ORIGIN"]}
+        return {"status": "PASS_NOOP" if args.stage == "update" and not change["changed_components"] and not idp_changed else "PASS", "project": PROJECT, "stage": args.stage, "receipt": reference(receipt), "web_url": values["TRACKVANCE_WEB_ORIGIN"]}
     except BaseException as error:
         save(receipt, {"status": "FAIL", **intent, "intent": reference(intent_path), "error_type": type(error).__name__, "error_code": str(error) if isinstance(error, ValueError) else "CODEX_OPERATION_FAILED"})
         raise
@@ -685,6 +721,10 @@ def main():
                         help="Bounded grace period for an explicitly selected Codex worker restart drill (default: 30s).")
     parser.add_argument("--schema-upgrade-backup", type=Path)
     parser.add_argument("--schema-upgrade-restore-receipt", type=Path)
+    parser.add_argument("--snapshot-memory-mib", type=int, choices=[1024, 2048, 3072, 4096],
+                        help="Run the unchanged trusted verifier in a bounded read-only temporary sidecar.")
+    parser.add_argument("--idp-local-url", choices=[IDP_ORIGIN, "DISABLED"],
+                        help="Explicit deployment-owned local GPU endpoint, only on API/document worker; no network attachment changes.")
     args = parser.parse_args(); directory = private_directory(args.directory)
     if args.stage == "init":result = initialize(args, directory)
     else:
@@ -692,7 +732,10 @@ def main():
         if args.stage == "plan":result = plan(value, sha)
         elif args.stage == "test":require(args.case == "c08503", "EXPLICIT_PERSISTENT_TEST_CASE_REQUIRED"); result = test_c08503(directory, value, values)
         elif args.stage == "fixture-destination":result = fixture_destination(directory, value, values)
-        else:result = execute_stage(args, directory, value, values, sha)
+        else:
+            import docker_state
+            with docker_state.snapshot_transport(args.snapshot_memory_mib):
+                result = execute_stage(args, directory, value, values, sha)
     print(json.dumps(result))
     return 0
 
