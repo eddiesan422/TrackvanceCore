@@ -204,7 +204,7 @@ def ephemeral_http_observation(value: dict[str, Any]) -> None:
                      "CSV_APPROVAL_REVOKED": "REPORT_SOURCE_REVOKED", "CSV_FROZEN_VERSION_DRIFT": "REPORT_SOURCE_CHANGED"}
     cases = value.get("cases", [])
     require(len(cases) == len(names) and {case.get("name") for case in cases} == names and value.get("main_unchanged") is True
-            and value.get("version") == "0.9.7" and value.get("requirement") == "R085-01", "EPHEMERAL_CASES_MISSING")
+            and value.get("version") == "0.9.8" and value.get("requirement") == "R085-01", "EPHEMERAL_CASES_MISSING")
     require(value.get("trace_scope") == "REAL_NGINX_API_AND_CONFINED_CHILDREN" and value.get("privileges_added") is False
             and value.get("raw_traces_published") is False, "EPHEMERAL_OBSERVATION_SCOPE")
     require(value.get("private_max_cell_bytes") == 65535 and value.get("input_cell_bytes") == 65536
@@ -308,8 +308,8 @@ def selective_cleanup_receipt(value: dict, source_sha: str) -> None:
     require(value.get("scope") == "OWNED_RESTORED_POSTGRES_COPY" and value.get("database") == "POSTGRESQL"
             and bool(re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", value.get("project", "")))
             and value.get("source_sha") == source_sha, "SELECTIVE_CLEANUP_NATIVE_SCOPE_OR_COMMIT")
-    require(value.get("schema_version") == 12 and value.get("migration") == "0027_document_builder_097"
-            and value.get("tables") == 80, "SELECTIVE_CLEANUP_NATIVE_SCHEMA")
+    require(value.get("schema_version") == 13 and value.get("migration") == "0028_document_idp_098"
+            and value.get("tables") == 81, "SELECTIVE_CLEANUP_NATIVE_SCHEMA")
     require(value.get("verified_restore") == "STOPPED_VERIFIED"
             and bool(re.fullmatch(r"trackvance-v080-test-cleanuprestore085-[a-f0-9]{12}", value.get("verified_restore_project", "")))
             and value.get("verified_restore_project") != value.get("project"), "SELECTIVE_CLEANUP_REAL_RESTORE_MISSING")
@@ -324,7 +324,7 @@ def selective_cleanup_receipt(value: dict, source_sha: str) -> None:
     protected = {"users", "roles", "role_permissions", "sessions", "external_identities", "oidc_login_attempts",
         "external_connections", "external_connection_versions", "delivery_destinations", "delivery_destination_versions",
         "delivery_target_guards", "delivery_target_policies", "delivery_target_decisions", "macro_domains", "data_domains",
-        "glossary_terms", "governance_people", "dataset_blocks", "dataset_security_dependencies"}
+        "glossary_terms", "governance_people", "dataset_blocks", "dataset_security_dependencies", "document_engine_settings"}
     removed = value.get("removed_counts", {})
     require(set(value.get("protected_tables", [])) == protected and all(removed.get(name) == 0 for name in protected | {"audit_events"})
             and removed.get("datasets") == 2 and all(removed.get(name, 0) > 0 for name in ("dataset_versions", "runs", "jobs",
@@ -366,12 +366,13 @@ def restore(value: dict[str, Any], version: str) -> None:
     require(value.get("source_destroyed_before_restore") is True, "RESTORE_SOURCE_NOT_DESTROYED")
     require(value.get("main_inventory") == "UNCHANGED", "RESTORE_MAIN_CHANGED")
     require(not value.get("cleanup_error_type") and not value.get("error_type"), "RESTORE_CLEANUP_OR_RUNTIME_ERROR")
-    if version in {"0.9.0", "0.9.5", "0.9.7"}:
-        current = version in {"0.9.5", "0.9.7"}
+    if version in {"0.9.0", "0.9.5", "0.9.7", "0.9.8"}:
+        current = version in {"0.9.5", "0.9.7", "0.9.8"}
         expected_tables, expected_schema, expected_revision = {
             "0.9.0": (65, 10, "0022_intake_automation_deletion"),
             "0.9.5": (77, 11, "0025_comparison_095"),
             "0.9.7": (80, 12, "0027_document_builder_097"),
+            "0.9.8": (81, 13, "0028_document_idp_098"),
         }[version]
         require(value.get("state_schema_version") == expected_schema and value.get("alembic_revision") == expected_revision, "RESTORE_SCHEMA_MISMATCH")
         require(value.get("persistence_exact_comparison") == "PASS"
@@ -402,7 +403,7 @@ def restore(value: dict[str, Any], version: str) -> None:
                 and core095.get("new_activity_rejected") is True
                 and core095.get("historical_physical_schema", {}).get("tables") == 65
                 and core095.get("physical_schema", {}).get("tables") == 77, "RESTORE_CORE095_ADDITIVE_PRESERVATION_MISSING")
-        if version == "0.9.7":
+        if version in {"0.9.7", "0.9.8"}:
             core097 = migration.get("0025_0027_preservation", {})
             passing(core097)
             require(core097.get("source_version") == "0.9.5" and core097.get("target_version") == "0.9.7"
@@ -411,17 +412,26 @@ def restore(value: dict[str, Any], version: str) -> None:
                 and core097.get("new_activity_rejected") is True
                 and core097.get("historical_physical_schema", {}).get("tables") == 77
                 and core097.get("physical_schema", {}).get("tables") == 80, "RESTORE_CORE097_ADDITIVE_PRESERVATION_MISSING")
+        if version == "0.9.8":
+            core098 = migration.get("0027_0028_preservation", {})
+            passing(core098)
+            require(core098.get("source_version") == "0.9.7" and core098.get("target_version") == "0.9.8"
+                and core098.get("tables_before") == 80 and core098.get("tables_after") == 81
+                and core098.get("exact_historical_projection") == "PASS" and core098.get("roundtrip") == "PASS"
+                and core098.get("new_activity_rejected") is True and core098.get("downgrade_with_snapshot_rejected") is True
+                and core098.get("historical_physical_schema", {}).get("tables") == 80
+                and core098.get("physical_schema", {}).get("tables") == 81, "RESTORE_CORE098_ADDITIVE_PRESERVATION_MISSING")
     else:
-        require(value.get("source_version") == version and value.get("target_version") == "0.9.7", "HISTORICAL_RESTORE_VERSION")
+        require(value.get("source_version") == version and value.get("target_version") == "0.9.8", "HISTORICAL_RESTORE_VERSION")
         require(value.get("restore") == "STOPPED_VERIFIED" and value.get("automatic_processes_started") is False,
                 "RESTORE_CONSUMERS_ACTIVATED")
         require(value.get("exact_historical_state") == "PASS", "HISTORICAL_STATE_NOT_EXACT")
         digest(value.get("source_state_sha256"))
         require(value.get("source_state_sha256") == value.get("restored_legacy_sha256"), "HISTORICAL_STATE_HASH_MISMATCH")
         if version == "0.6.1":
-            require(value.get("native_tables") == 80 and value.get("new_catalog_tables_empty") is True, "LEGACY061_NEW_TABLES")
+            require(value.get("native_tables") == 81 and value.get("new_catalog_tables_empty") is True, "LEGACY061_NEW_TABLES")
         else:
-            require(value.get("migration") == "0027_document_builder_097" and value.get("state_schema_version") == 12,
+            require(value.get("migration") == "0028_document_idp_098" and value.get("state_schema_version") == 13,
                     "HISTORICAL_SCHEMA_MISMATCH")
             require(value.get("cleanup") == "PASS" and value.get("log_secret_scan") == "PASS", "HISTORICAL_CLEANUP_OR_SECRETS")
 
@@ -431,8 +441,8 @@ def native_fixture_restore(value: dict[str, Any]) -> None:
     passing(value, "NATIVE_FIXTURE_RESTORE_NOT_PASS")
     require(value.get("main_inventory") == "UNCHANGED" and value.get("automatic_processes_started") is False
             and value.get("restore") == "STOPPED_VERIFIED", "NATIVE_FIXTURE_RESTORE_CONSUMERS_OR_MAIN")
-    require(value.get("revision") == "0027_document_builder_097" and value.get("state_schema_version") == 12
-            and value.get("tables") == 80, "NATIVE_FIXTURE_RESTORE_SCHEMA")
+    require(value.get("revision") == "0028_document_idp_098" and value.get("state_schema_version") == 13
+            and value.get("tables") == 81, "NATIVE_FIXTURE_RESTORE_SCHEMA")
     require(all(value.get(k) == "PASS" for k in ("multipart_integrity", "historical_bytes_and_hashes", "exact_state_comparison")),
             "NATIVE_FIXTURE_RESTORE_NOT_EXACT")
     digest(value.get("source_state_sha256"))
@@ -765,7 +775,7 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
             passing(recovery)
             recovered = recovery.get(spec["mode"], {})
             passing(recovered)
-            require(recovered.get("tables_after") == 80 and recovered.get("automatic_processes_started") is False
+            require(recovered.get("tables_after") == 81 and recovered.get("automatic_processes_started") is False
                     and recovered.get("exact_state_comparison") == "PASS", "CATALOG_RECOVERY_INCOMPLETE")
             digest(recovered.get("source_state_sha256"))
             require(recovered.get("source_state_sha256") == recovered.get("restored_projection_sha256"), "CATALOG_RECOVERY_HASH_MISMATCH")
@@ -773,7 +783,7 @@ def validate_content(spec: dict[str, Any], result: dict[str, Any], *, execution_
                 require(recovered.get("source_version") == "0.7.0" and recovered.get("tables_before") == 42
                         and recovered.get("new_tables_empty") is True, "AUTHENTIC070_RECOVERY_NOT_AUTHENTIC")
             elif spec["mode"] == "legacy080":
-                require(recovered.get("source_version") == "0.8.0" and recovered.get("target_version") == "0.9.7"
+                require(recovered.get("source_version") == "0.8.0" and recovered.get("target_version") == "0.9.8"
                         and recovered.get("tables_before") == 55 and recovered.get("source_destroyed_before_restore") is True
                         and recovered.get("baseline_commit") == "4eaaeb774878bca62d7d6f758157107f0557512e"
                         and recovered.get("functional_restored_bindings") == "DEFINITION_REVISIONS_EXECUTION_PROFILE_LINEAGE_CURRENT_BLOCK_PASS",

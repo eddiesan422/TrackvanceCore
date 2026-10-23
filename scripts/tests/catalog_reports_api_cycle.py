@@ -31,7 +31,7 @@ class CertificationProgress:
 
     def __init__(self, rows, directory):
         self.directory, self.began = directory, time.monotonic()
-        self.result = {"version": "0.9.7", "status": "RUNNING", "rows_per_source": rows,
+        self.result = {"version": "0.9.8", "status": "RUNNING", "rows_per_source": rows,
                        "sources": [], "joins": [], "active_phase": "SCOPE_VALIDATION"}
 
     def save(self):

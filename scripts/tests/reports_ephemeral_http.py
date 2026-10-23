@@ -361,7 +361,7 @@ def failed_stream(client: ProxyClient, frozen: str, format_name: str, *, after_h
 
 
 def certify(directory: Path, context: dict, progress: dict) -> dict:
-    progress.update(version="0.9.7", requirement="R085-01", project=context["project"], sources=3, join_sources=2, cell_sources=1, rows_per_source=120, cases=[],
+    progress.update(version="0.9.8", requirement="R085-01", project=context["project"], sources=3, join_sources=2, cell_sources=1, rows_per_source=120, cases=[],
                     private_max_cell_bytes=HTTP_MAX_CELL_BYTES, input_cell_bytes=CELL_FIXTURE_BYTES,
                     default_max_cell_bytes=65536, cell_limit_scope="PRIVATE_REDUCED_OUTPUT_BUDGET")
     client = ProxyClient(context["port"])

@@ -184,6 +184,10 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
             "duplicate_of_id": original.duplicate_of_id, "correction_of_id": original.correction_of_id,
             "is_example": original.is_example, "extraction_id": original.extraction_id,
             "started_at": iso(original.started_at), "finished_at": iso(original.finished_at),
+            "engine_snapshot": ({**original.engine_snapshot, "snapshot_sha256": original.engine_snapshot_hash}
+                if original.engine_snapshot else None),
+            "phase": (original.processing_phase if original.status == "RUNNING" and original.processing_phase else
+                {"PUBLISHED": "COMPLETE", "AUTO_VERIFIED": "PUBLICATION", "REVIEWED": "PUBLICATION"}.get(original.status, original.status)),
             "family_name": family.name, "mode": template.definition["publication"]["mode"],
             "extraction": {"id": extraction.id, "revision": extraction.revision,
                 "created_at": iso(extraction.created_at), "reviewed": extraction.reviewed} if extraction else None,

@@ -443,7 +443,7 @@ def validate_schema_upgrade(args, value, sha, existing):
     require(restored_at.tzinfo is not None and datetime.now(UTC) - timedelta(hours=24) <= restored_at <= datetime.now(UTC) + timedelta(minutes=1),
         "RECENT_SCHEMA_UPGRADE_RESTORE_RECEIPT_REQUIRED")
     require(manifest.get("source_project") == PROJECT and manifest.get("application_only_codex") is True
-        and manifest.get("migration") in {docker_state.PEOPLE_MIGRATION, docker_state.CORE090_MIGRATION, docker_state.CORE095_MIGRATION}
+        and manifest.get("migration") in {docker_state.PEOPLE_MIGRATION, docker_state.CORE090_MIGRATION, docker_state.CORE095_MIGRATION, docker_state.CORE097_MIGRATION}
         and manifest.get("images", {}).get("api") == value["images"]["backend"]["id"]
         and receipt.get("source_manifest_sha256") == reference(backup / "backup-manifest.json")["sha256"]
         and receipt.get("verified_state_sha256") == reference(backup / "state.json")["sha256"]
@@ -486,7 +486,7 @@ def verify_schema_upgrade(environment, proof, directory):
     require(len(apis) == 1 and apis[0]["State"]["Running"], "EXACT_MIGRATED_CODEX_API_REQUIRED")
     after_path = directory / ("schema-after-" + uuid4().hex + ".json")
     legacy_schema = proof["source_state"]["schema_version"]
-    require(legacy_schema in {9, 10, 11}, "EXACT_SUPPORTED_SOURCE_PROJECTION_REQUIRED")
+    require(legacy_schema in {9, 10, 11, 12}, "EXACT_SUPPORTED_SOURCE_PROJECTION_REQUIRED")
     projection_path = after_path.with_name(after_path.stem + f"-legacy-v{legacy_schema}.json")
     after = docker_state._copy_snapshot(apis[0]["Id"], after_path)
     projected = docker_state._copy_snapshot(apis[0]["Id"], projection_path, command=f"snapshot-legacy-v{legacy_schema}")

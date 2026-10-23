@@ -15,14 +15,14 @@ import docker_state
 PROTECTED = frozenset({"users", "roles", "role_permissions", "sessions", "external_identities", "oidc_login_attempts",
     "external_connections", "external_connection_versions", "delivery_destinations", "delivery_destination_versions",
     "delivery_target_guards", "delivery_target_policies", "delivery_target_decisions", "macro_domains", "data_domains",
-    "glossary_terms", "governance_people", "dataset_blocks", "dataset_security_dependencies"})
+    "glossary_terms", "governance_people", "dataset_blocks", "dataset_security_dependencies", "document_engine_settings"})
 CHECKS = ("dry_plan_read_only", "fault_rollback", "abrupt_fault_recovery", "metadata_transaction",
     "sql_relationships", "protected_hashes", "protected_secret_bytes", "unknown_barrier_preserved", "files_quarantined", "reset_audit")
 
 
 def require_copy(project):
     if not re.fullmatch(r"trackvance-v080-test-restore085-[a-f0-9]{12}", project):
-        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.9.7 copy.")
+        raise ValueError("Selective cleanup certification is restricted to the owned restored 0.9.8 copy.")
 
 
 def assert_plan(plan, before, fixture):

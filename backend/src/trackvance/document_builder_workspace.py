@@ -53,7 +53,8 @@ def processor_identity():
 def reference_dto(item, detail=False):
     result = {"id": item.id, "family_id": item.family_id, "filename": item.filename, "sha256": item.sha256,
               "kind": "REFERENCE", "is_example": True, "template_id": None, "role": item.role, "association": item.association,
-              "status": item.status, "error_code": item.error_code, "configuration_used": item.configuration_used, "created_at": iso(item.created_at)}
+              "status": item.status, "error_code": item.error_code, "configuration_used": item.configuration_used, "created_at": iso(item.created_at),
+              "engine_snapshot": ({**item.engine_snapshot, "snapshot_sha256": item.engine_snapshot_hash} if item.engine_snapshot else None)}
     if detail:
         verify_reference(item)
         result.update(payload=item.payload, payload_hash=item.payload_hash, engine=item.engine)

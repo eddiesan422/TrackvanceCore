@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import struct
@@ -220,9 +221,11 @@ def ocr(path, page):
     return merge_lines(ocr_pass(path, page, width, height, 6), ocr_pass(path, page, width, height, 11))
 
 
-def lines_from_file(source, folder, progress, page_geometry=None):
+def lines_from_file(source, folder, progress, page_geometry=None, *, native_only=False, native_gaps=None):
     if source.suffix != ".pdf":
-        lines = ocr(source, 1)
+        lines = [] if native_only else ocr(source, 1)
+        if native_only and native_gaps is not None:
+            native_gaps.append(1)
         if page_geometry is not None:
             width, height = image_size(source)
             page_geometry["1"] = {"width": width, "height": height, "unit": "PIXEL"}
@@ -260,6 +263,14 @@ def lines_from_file(source, folder, progress, page_geometry=None):
         # Mixed pages retain digital text and additionally recognize embedded scans.
         images = command(["/usr/bin/pdfimages", "-f", str(index + 1), "-l", str(index + 1), "-list", str(source)])
         if not page_lines or re.search(r"^\s*\d+\s+\d+\s+image\s", images, re.MULTILINE):
+            if native_only:
+                if native_gaps is not None:
+                    native_gaps.append(index + 1)
+                output.extend(page_lines)
+                if sum(len(line["text"]) for line in output) > MAX_TEXT:
+                    raise ValueError("DOCUMENT_TEXT_LIMIT")
+                progress.write_text(str(int((index + 1) / count * 100)))
+                continue
             prefix = folder / f"page-{index + 1}"
             command(["/usr/bin/pdftoppm", "-f", str(index + 1), "-l", str(index + 1), "-singlefile",
                      "-scale-to", "4000", "-png", str(source), str(prefix)])
@@ -273,6 +284,47 @@ def lines_from_file(source, folder, progress, page_geometry=None):
             raise ValueError("DOCUMENT_TEXT_LIMIT")
         progress.write_text(str(int((index + 1) / count * 100)))
     return output, count
+
+
+def validated_candidate_lines(lines, pages):
+    """Accept bounded observations, never execution instructions or confidence claims."""
+    if not isinstance(lines, list) or len(lines) > 100000:
+        raise ValueError("DOCUMENT_CANDIDATE_INVALID")
+    total = 0
+    output = []
+    for line in lines:
+        if not isinstance(line, dict) or not isinstance(line.get("text"), str):
+            raise ValueError("DOCUMENT_CANDIDATE_INVALID")  # noqa: TRY004 - stable child protocol
+        page, region = line.get("page"), line.get("region")
+        if (type(page) is not int or not 1 <= page <= pages or not isinstance(region, list) or len(region) != 4
+            or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in region)
+            or region[0] >= region[2] or region[1] >= region[3]):
+            raise ValueError("DOCUMENT_CANDIDATE_INVALID")
+        total += len(line["text"])
+        if total > MAX_TEXT:
+            raise ValueError("DOCUMENT_TEXT_LIMIT")
+        words = line.get("words")
+        if words is None:
+            words = [{"text": line["text"], "region": region}]
+        if not isinstance(words, list) or not words or len(words) > 10000:
+            raise ValueError("DOCUMENT_CANDIDATE_INVALID")
+        clean_words = []
+        for word in words:
+            box = word.get("region") if isinstance(word, dict) else None
+            if (not isinstance(word, dict) or not isinstance(word.get("text"), str) or word["text"] not in line["text"]
+                or not isinstance(box, list) or len(box) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in box)
+                or box[0] >= box[2] or box[1] >= box[3]
+                or box[0] < region[0] or box[1] < region[1] or box[2] > region[2] or box[3] > region[3]):
+                raise ValueError("DOCUMENT_CANDIDATE_INVALID")
+            clean_words.append({"text": word["text"], "region": box, "confidence": None})
+        total += sum(len(word["text"]) for word in clean_words)
+        if total > MAX_TEXT:
+            raise ValueError("DOCUMENT_TEXT_LIMIT")
+        # Only real provider-supplied word boxes or the honest whole block box.
+        output.append({"text": line["text"], "page": page, "region": region, "confidence": None,
+                       "method": "OCR", "words": clean_words})
+    return output
 
 
 def validate_value(raw, field):
@@ -369,6 +421,42 @@ def arithmetic_checks(payload, definition):
     return checks
 
 
+def cross_table_checks(payload, definition):
+    """Exact declared detail-to-header totals, never a model-authored verdict."""
+    checks = []
+    for rule in definition.get("cross_totals", []):
+        check = {"name": rule["name"], "table": rule["table"], "column": rule["column"],
+            "header": rule["header"], "scale": rule["scale"], "rounding": "ROUND_HALF_UP"}
+        try:
+            rows = payload["tables"].get(rule["table"], [])
+            header = payload["fields"][rule["header"]]
+            if not rows or header["validity"] != "VALID" or any(row.get(rule["column"], {}).get("validity") != "VALID" for row in rows):
+                raise ValueError()
+            values = [Decimal(str(row[rule["column"]]["value"])) for row in rows]
+            observed, tolerance = Decimal(str(header["value"])), Decimal(rule["tolerance"])
+            if not all(value.is_finite() for value in [*values, observed, tolerance]):
+                raise ValueError()
+            high = max(value.adjusted() for value in [*values, observed, tolerance])
+            low = min(-rule["scale"], *(value.as_tuple().exponent for value in [*values, observed, tolerance]))
+            if high - low + len(str(len(values))) + 3 > ARITHMETIC_PRECISION_LIMIT:
+                raise Inexact()
+            with localcontext() as context:
+                context.prec = ARITHMETIC_PRECISION_LIMIT
+                context.traps[Inexact] = True
+                expected = sum(values, Decimal(0))
+                context.traps[Inexact] = False
+                expected = expected.quantize(Decimal(1).scaleb(-rule["scale"]), rounding=ROUND_HALF_UP)
+                context.traps[Inexact] = True
+                check.update(status="VALID" if abs(expected - observed) <= tolerance else "DISCREPANCY",
+                    expected=str(expected), observed=str(observed), rows=len(rows))
+        except Inexact:
+            check.update(status="NOT_EVALUATED", reason="ARITHMETIC_PRECISION_LIMIT")
+        except (KeyError, ValueError, InvalidOperation):
+            check["status"] = "NOT_EVALUATED"
+        checks.append(check)
+    return checks
+
+
 def extract(lines, definition, page_geometry=None):
     if page_geometry is not None and not _visual_rules.valid_page_geometry(page_geometry, {line["page"] for line in lines}):
         raise ValueError("DOCUMENT_PAGE_GEOMETRY")
@@ -458,6 +546,8 @@ def extract(lines, definition, page_geometry=None):
         payload["page_geometry"] = {page: dict(size) for page, size in page_geometry.items()}
     if definition.get("arithmetic"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
+    if definition.get("cross_totals"):
+        payload["cross_totals"] = cross_table_checks(payload, definition)
     return payload
 
 
@@ -482,10 +572,24 @@ def main():
         (folder / "result.json").write_text(json.dumps({"preview": base64.b64encode(raw).decode(), "page": page}))
         return
     page_geometry: dict[str, Any] = {}
-    lines, pages = lines_from_file(source, folder, folder / "progress", page_geometry)
+    native_gaps: list[int] = []
+    native_only = request.get("native_only") is True
+    lines, pages = lines_from_file(source, folder, folder / "progress", page_geometry,
+                                  native_only=native_only, native_gaps=native_gaps)
+    if request.get("candidate_lines") is not None:
+        if not native_only:
+            raise ValueError("DOCUMENT_CANDIDATE_INVALID")
+        # A layout block can contain several real table rows sharing its rectangle.
+        # Spatial deduplication would discard those distinct observations. Retain
+        # every candidate, deduplicating only identical native observations.
+        native_observations = {(line["page"], line["text"], tuple(line["region"])) for line in lines}
+        lines.extend(line for line in validated_candidate_lines(request["candidate_lines"], pages)
+                     if (line["page"], line["text"], tuple(line["region"])) not in native_observations)
     if len(lines) > 100000:
         raise ValueError("DOCUMENT_TEXT_LIMIT")
     payload = extract(lines, request["definition"], page_geometry)
+    if native_only:
+        payload["native_incomplete_pages"] = native_gaps
     models = {}
     for language in ("eng", "spa"):
         for path in Path("/usr/share/tesseract-ocr").glob(f"*/tessdata/{language}.traineddata"):

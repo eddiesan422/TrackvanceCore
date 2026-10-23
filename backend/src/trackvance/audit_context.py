@@ -53,6 +53,10 @@ _AUDIT_KEYS = frozenset({
     "origin_run_id", "validation_run_id", "criterion",
     "role_id", "permissions", "provider", "notification_id",
     "policy_id", "target_fingerprint", "username", "audit_columns_enabled",
+    "scope", "family_id", "previous_config_hash", "previous_provider",
+    "paddle_model", "llm_model", "prompt_version", "timeout_seconds", "context_tokens",
+    "max_retries", "max_parallel_jobs", "use_llm",
+    "extraction_id", "validator_version", "validation_sha256", "independent_extraction",
 })
 
 

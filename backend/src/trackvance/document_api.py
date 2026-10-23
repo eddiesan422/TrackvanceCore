@@ -22,6 +22,7 @@ from .document_models import (
     DocumentOriginal,
     DocumentTemplate,
 )
+from .document_providers import EngineSettingsBody, save_settings, settings_dto
 from .document_queries import DocumentOrder, PublicationFilter, list_originals
 from .document_schemas import DocumentDefinition
 from .document_service import (
@@ -85,6 +86,19 @@ class PipelineBody(BaseModel):
     intake_bindings: dict[str, str] = Field(default_factory=dict)
     delivery_bindings: dict[str, str] = Field(default_factory=dict)
     automatic_delivery: bool = False
+
+
+@router.get("/engines")
+def engines(family_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    return settings_dto(db, user, family_id)
+
+
+@router.put("/engines")
+def configure_engine(body: EngineSettingsBody, family_id: str | None = None,
+                     db: Session = Depends(get_db), user: User = Depends(current_user)):
+    save_settings(db, user, body, family_id)
+    db.commit()
+    return settings_dto(db, user, family_id)
 
 
 @router.get("/limits")

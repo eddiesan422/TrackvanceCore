@@ -178,7 +178,7 @@ def test_post_restart_sources_require_ready_web_route_without_repeating_posts(mo
 
         def get(self, path):
             if path == "/api/v1/health":
-                return {"version": "0.9.7"}
+                return {"version": "0.9.8"}
             if path == "/api/v1/health/ready":
                 probes.append({"path": path, "timeout": self.timeout,
                                "backend_ready": state["backend_ready"], "web_fresh": state["web_fresh"]})

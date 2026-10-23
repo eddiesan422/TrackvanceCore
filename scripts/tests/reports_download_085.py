@@ -467,7 +467,7 @@ def certify(directory: Path, context: dict, sizes: list[int], limit: int, source
     client_dir.mkdir(exist_ok=False)
     evidence = directory / "reports-download-085.json"
     archive = directory / ("reports-download-085-" + attempt + ".json")
-    summary = {"requirements": ["R080-02", "R080-04", "R085-01", "R085-03"], "implementation": "0.9.7",
+    summary = {"requirements": ["R080-02", "R080-04", "R085-01", "R085-03"], "implementation": "0.9.8",
                "source_sha": source_sha, "attempt_id": attempt, "project": context["project"], "status": "RUNNING", "downloads": [],
                "sources": [], "client_result_storage": "PRIVATE_HOST_ONLY", "result_columns": HEADERS,
                "concurrency": 1, "requested_result_rows": sizes, "product_row_limit_under_test": limit,

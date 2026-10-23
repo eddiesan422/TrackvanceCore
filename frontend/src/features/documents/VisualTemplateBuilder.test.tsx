@@ -34,6 +34,20 @@ beforeEach(() => {
 })
 
 describe('DOC097 independent draft and references', () => {
+  it('records AUTO_VERIFIED in the same draft and invalidates previous activation evidence', async () => {
+    localStorage.setItem('document-draft:family', 'draft')
+    const user = userEvent.setup()
+    renderApp(<VisualTemplateBuilder identity="family" refresh={vi.fn()}/>)
+    await user.click(await screen.findByRole('button', { name: 'Probar todas las referencias' }))
+    expect(await screen.findByRole('button', { name: 'Aprobar y activar esta instantánea' })).toBeDisabled()
+    await user.selectOptions(screen.getByLabelText('Revisión antes de publicar'), 'AUTO_VERIFIED')
+    expect(screen.getByText(/Esta política no registra confirmaciones humanas/)).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Aprobar y activar esta instantánea' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Guardar borrador' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/documents/builder/drafts/draft', expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"review_policy":"AUTO_VERIFIED"') })))
+    expect(post).not.toHaveBeenCalledWith(expect.stringContaining('/activate'), expect.anything())
+  })
+
   it('requires a chosen draft or explicit revision copy and never uses the latest template automatically', async () => {
     const user = userEvent.setup()
     renderApp(<VisualTemplateBuilder identity="family" templates={[{ id: 'historical', revision: 9 }]} existing={definition} refresh={vi.fn()}/>)

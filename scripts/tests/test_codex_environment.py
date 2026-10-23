@@ -321,7 +321,8 @@ def schema_upgrade_evidence(tmp_path, value, existing, source_schema=9):
     manifest, state = write_delivery_backup(backup, current=True)
     migration, tables = {9: (docker_state.PEOPLE_MIGRATION, docker_state.PEOPLE_STATE_TABLES),
         10: (docker_state.CORE090_MIGRATION, docker_state.CORE090_STATE_TABLES_ALL),
-        11: (docker_state.CORE095_MIGRATION, docker_state.CORE095_STATE_TABLES_ALL)}[source_schema]
+        11: (docker_state.CORE095_MIGRATION, docker_state.CORE095_STATE_TABLES_ALL),
+        12: (docker_state.CORE097_MIGRATION, docker_state.CORE097_STATE_TABLES_ALL)}[source_schema]
     state.update(schema_version=source_schema, migration=migration)
     state["tables"].update({name: {} for name in tables - set(state["tables"])})
     candidate = "sha256:" + "5" * 64
@@ -340,7 +341,7 @@ def schema_upgrade_evidence(tmp_path, value, existing, source_schema=9):
     return SimpleNamespace(schema_upgrade_backup=backup, schema_upgrade_restore_receipt=receipt_path, backend_image=candidate), receipt, state
 
 
-@pytest.mark.parametrize("source_schema", [9, 10, 11])
+@pytest.mark.parametrize("source_schema", [9, 10, 11, 12])
 def test_schema_upgrade_accepts_only_verified_backup_bound_to_exact_candidate_and_old_runtime(fixture, tmp_path, source_schema):
     _directory, value, values, defaults = fixture
     existing = runtime(resolved(values), defaults)
@@ -359,7 +360,7 @@ def test_schema11_upgrade_projects_exact_source_before_any_consumer_is_reactivat
     existing = runtime(resolved(values), defaults)
     source = {"schema_version": 11, "migration": docker_state.CORE095_MIGRATION,
         "tables": {"internal_notifications": {"personal-history": "a" * 64}}}
-    current = {"schema_version": 12, "migration": docker_state.CURRENT_MIGRATION}
+    current = {"schema_version": docker_state.VERIFY_SCHEMA_VERSION, "migration": docker_state.CURRENT_MIGRATION}
     monkeypatch.setattr(codex, "inventory", lambda *_args: existing)
     commands = []
 

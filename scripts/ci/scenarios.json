@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.9.7",
+  "version": "0.9.8",
   "legacy_workflow_instances": 16,
   "groups": [
     {
@@ -351,7 +351,7 @@
           "id": "backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.7"
+          "version": "0.9.8"
         },
         {
           "id": "backup-authentic051",
@@ -742,7 +742,7 @@
           "id": "functional-backup-native080",
           "validator": "restore",
           "source": "native",
-          "version": "0.9.7"
+          "version": "0.9.8"
         }
       ],
       "timeout_minutes": 25,

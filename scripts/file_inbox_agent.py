@@ -620,7 +620,7 @@ def main(argv=None):
             client = APIClient(config)
             client.login()
             receiver = InboxAgent(config, client, stopping=stopping.is_set)
-            print(canonical({"status": "WATCHING", "implementation_version": "0.9.7", "publication_policy": "ON_CHANGE", "agent_sha256": digest_file(Path(__file__))}), flush=True)
+            print(canonical({"status": "WATCHING", "implementation_version": "0.9.8", "publication_policy": "ON_CHANGE", "agent_sha256": digest_file(Path(__file__))}), flush=True)
             while not stopping.is_set():
                 receiver.tick()
                 stopping.wait(config["poll_seconds"])

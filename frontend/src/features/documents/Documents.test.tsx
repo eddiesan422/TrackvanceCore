@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
@@ -86,5 +86,48 @@ describe('Documentos guided operations', () => {
     await user.type(screen.getByLabelText('Motivo de la revisión'), 'Checked exact known invoice')
     await user.click(screen.getByRole('button', { name: 'Guardar revisión y comprobar publicación' }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/originals/original/review', { expected_extraction_id: 'extraction-1', changes: {}, confirmed: ['headers.0.invoice'], reason: 'Checked exact known invoice', table_rows: {} }))
+  })
+
+  it('uses validator exceptions without requesting confirmation of safely validated candidates', async () => {
+    const user = userEvent.setup()
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? {
+      ...original, issues: [], phase: 'COMPLETE', quality: { status: 'AUTO_VERIFIED', validator_version: 'idp098-v1' },
+    } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    expect(await screen.findByLabelText('Valor headers.0.invoice')).toHaveValue('000001')
+    expect(screen.getByText('Aprobación automática verificada')).toBeVisible()
+    expect(screen.getByText(/revisión: No requerida por el validador/)).toBeVisible()
+    expect(screen.queryByRole('checkbox', { name: 'Confirmar valor' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Siguiente incidencia (0)' })).toBeDisabled()
+    await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
+    expect(screen.queryByLabelText('Valor headers.0.invoice')).not.toBeInTheDocument()
+    await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
+    await user.clear(screen.getByLabelText('Valor headers.0.invoice'))
+    await user.type(screen.getByLabelText('Valor headers.0.invoice'), '000002')
+    await user.click(screen.getByRole('checkbox', { name: 'Confirmar valor' }))
+    await user.type(screen.getByLabelText('Valor headers.0.invoice'), '3')
+    expect(screen.getByRole('checkbox', { name: 'Confirmar valor' })).not.toBeChecked()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('summarizes separate exceptions and synchronizes source page when navigating a field', async () => {
+    const user = userEvent.setup()
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    const good = original.extraction.payload.fields.invoice
+    const fields = { invoice: { ...good, reviewed: true }, total: { ...good, validity: 'AMBIGUOUS', origin: { ...good.origin, page: 2 } }, missing: { ...good, value: null, validity: 'MISSING', origin: null }, malformed: { ...good, validity: 'INVALID' }, pending: good }
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? {
+      ...original, issues: ['VALUE_INVALID:headers.0.total', 'VALUE_INVALID:headers.0.missing', 'VALUE_INVALID:headers.0.malformed', 'REVIEW_REQUIRED:headers.0.pending'],
+      extraction: { ...original.extraction, payload: { ...original.extraction.payload, fields, pages: [1, 2] } },
+    } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review', 'documents:download'] })
+    const summary = await screen.findByLabelText('Resumen de resultados')
+    for (const label of ['Validados', 'Ambiguos', 'Faltantes', 'Inválidos', 'Confirmación pendiente']) expect(within(summary).getByText(label).parentElement).toHaveTextContent('1')
+    await user.click(screen.getByRole('button', { name: 'Siguiente incidencia (4)' }))
+    expect(screen.getByLabelText('Página del original')).toHaveValue('2')
+    expect(screen.getByRole('img', { name: 'Página 2 del original PDF' })).toHaveAttribute('src', '/api/v1/documents/originals/original/pages/2')
+    await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
+    expect(screen.queryByLabelText('Valor headers.0.invoice')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Valor headers.0.total')).toBeVisible()
   })
 })

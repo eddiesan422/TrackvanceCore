@@ -63,7 +63,7 @@ def ci_restore_target(monkeypatch, tmp_path, request):
         fixture["inspected"].append(image)
         return json.dumps([{"Id": image, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": {
             "org.opencontainers.image.revision": fixture.get("image_sha", sha),
-            "org.opencontainers.image.version": "0.9.7"}}}])
+            "org.opencontainers.image.version": "0.9.8"}}}])
 
     def execute(arguments, **_kwargs):
         fixture["readonly"].append(arguments)
@@ -191,7 +191,7 @@ def test_ci_restore_uses_original_private_receipt_context_through_verified_stagi
     _manifest, expected = write_pre_corrections_backup(source)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     state = modern_inventory()
     state["project"] = target["project"]
     monkeypatch.setattr(docker_state, "inventory", lambda _: state)
@@ -580,7 +580,7 @@ def test_verify_backup_rejects_incomplete_native_fingerprint_before_restore(tmp_
         docker_state.verify_backup(root)
 
 
-@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10", "snapshot-legacy-v11"])
+@pytest.mark.parametrize("command", ["snapshot", "snapshot-legacy-v2", "snapshot-legacy-v3", "snapshot-legacy-v4", "snapshot-legacy-v5", "snapshot-legacy-v6", "snapshot-legacy-v7", "snapshot-legacy-v8", "snapshot-legacy-v9", "snapshot-legacy-v10", "snapshot-legacy-v11", "snapshot-legacy-v12"])
 def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path, command):
     calls = []
     expected = {"schema_version": 3, "migration": "0008_data_delivery", "tables": {}}
@@ -604,7 +604,7 @@ def test_copy_snapshot_allows_each_supported_real_command(monkeypatch, tmp_path,
     assert docker_state.digest(docker_state.PHYSICAL_SCHEMA_GUARD) in bootstrap
 
 
-@pytest.mark.parametrize("command", ["snapshot-legacy-v1", "snapshot-legacy-v12", "snapshot-legacy-v11 extra", "compare", "arbitrary"])
+@pytest.mark.parametrize("command", ["snapshot-legacy-v1", "snapshot-legacy-v13", "snapshot-legacy-v11 extra", "compare", "arbitrary"])
 def test_copy_snapshot_rejects_unsupported_commands_before_docker_or_file_writes(monkeypatch, tmp_path, command):
     def unexpected(*_args, **_kwargs):
         raise AssertionError("Unsupported commands must not invoke Docker or build the bootstrap.")
@@ -645,7 +645,7 @@ def test_restore_v6_routes_exact_projection_and_preserves_historical_async_activ
     _manifest, expected = write_pre_corrections_backup(root)
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     restored["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64  # Only NULL-column hashing changed.
     state = modern_inventory()
     state["project"] = "trackvance-restore-test"
@@ -679,7 +679,7 @@ def test_restore_v6_refuses_changed_or_missing_historical_projection(tmp_path, d
     manifest, expected = write_pre_corrections_backup(tmp_path / "backup")
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     projected = json.loads(json.dumps(expected))
     if damage == "normalized_hash":
         projected["tables"]["acquisition_runs"]["historical-failure"] = "b" * 64
@@ -978,7 +978,7 @@ def test_restore_050_uses_real_snapshot_command_routing_and_all_delivery_volumes
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION,
                     migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CATALOG_STATE_TABLES | {"governance_people"} | docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     restored["tables"]["delivery_reviews"] = {}
     restored["tables"].update({name: {} for name in docker_state.IDENTITY_STATE_TABLES | docker_state.ASYNC_STATE_TABLES})
     state = sample_inventory("trackvance-restore-test")
@@ -1220,7 +1220,7 @@ def test_schema9_backup_remains_valid_and_projection_is_required_for_current_res
     assert docker_state.verify_backup(root) == manifest
     restored = json.loads(json.dumps(expected))
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CORE090_STATE_TABLES | docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     # Native additions can be present; only the separately validated v9 report
     # proves exact preservation of every preexisting row and approval.
     restored["tables"]["sentinel_automatic_monitors"] = {"bootstrap": "a" * 64}

@@ -22,6 +22,35 @@ test.use({ trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 30_000,
 test.setTimeout(480_000)
 test.skip(process.env.TV_CORE095_DOCUMENT_E2E !== 'true', 'Requires the updated synthetic Codex stack and document oracle receiver')
 
+test('IDP engine administration preserves organization settings and blocks prepared cloud execution', async ({ page }, info) => {
+  const csrf = await login(page)
+  const nonce = randomBytes(6).toString('hex')
+  const organization = await call(page, csrf, '/documents/engines')
+  const family = await call(page, csrf, '/documents/families', { name: `D098 engine ${nonce}`, description: 'Synthetic isolated IDP provider configuration and audit fixture.' })
+  const before = await call(page, csrf, `/documents/engines?family_id=${family.id}`)
+  await page.goto(`/documents/families/${family.id}?view=references`)
+  await page.getByText('Motor específico de esta familia', { exact: true }).click()
+  const settings = page.getByRole('region', { name: 'Motor y disponibilidad', exact: true })
+  await expect(settings.getByLabel('Proveedor documental', { exact: true })).toHaveValue(before.configuration.provider)
+  await expect(settings.getByRole('option', { name: /Textract/ })).toBeDisabled()
+  await expect(settings.getByText(/Las llamadas reales a AWS permanecen bloqueadas/)).toBeVisible()
+  await expect(settings.getByLabel('Modelo visual', { exact: true })).toHaveAttribute('readonly', '')
+  await settings.getByLabel('Tiempo máximo (segundos)', { exact: true }).fill('180')
+  await settings.getByLabel('Motivo del cambio de motor', { exact: true }).fill('Isolated synthetic family configuration; preserve all existing jobs and organization defaults.')
+  const response = page.waitForResponse(value => value.request().method() === 'PUT' && new URL(value.url()).pathname === '/api/v1/documents/engines')
+  await settings.getByRole('button', { name: 'Guardar configuración auditada', exact: true }).click()
+  expect((await response).status()).toBe(200)
+  const saved = await call(page, csrf, `/documents/engines?family_id=${family.id}`)
+  expect(saved.scope).toBe('FAMILY')
+  expect(saved.configuration).toEqual({ ...before.configuration, timeout_seconds: 180 })
+  expect(saved.version).toBeGreaterThan(before.version)
+  const organizationAfter = await call(page, csrf, '/documents/engines')
+  expect(organizationAfter.configuration).toEqual(organization.configuration)
+  expect(organizationAfter.version).toBe(organization.version)
+  await info.attach('document-idp-engine-098.json', { body: JSON.stringify({ nonce, family_id: family.id, version_before: before.version, version_after: saved.version, provider: saved.configuration.provider, organization_unchanged: true, cloud_execution_blocked: true, model_readonly: true }), contentType: 'application/json' })
+  await info.attach('document-idp-engine-098.png', { body: await settings.screenshot(), contentType: 'image/png' })
+})
+
 function knownPdf(invoice: string) {
   const lines = [`Invoice: ${invoice}`, 'Total: 1234.50', 'Date: 2026-10-01', 'ITEM SKU1 10.25', 'ITEM SKU2 20.50']
   const content = `BT /F1 18 Tf 60 710 Td 30 TL ${lines.map(line => `(${line}) Tj T*`).join(' ')} ET`

@@ -40,7 +40,7 @@ def image_archive(path: Path, sha: str, role: str, *, kind: str = "configuration
     diff_id, layer_digest = digest(uncompressed), digest(layer_bytes)
     config = {"architecture": "amd64", "os": "linux", "created": "2026-10-09T00:00:00Z",
               "config": {"Labels": {"org.opencontainers.image.revision": sha,
-                                    "org.opencontainers.image.version": "0.9.7"},
+                                    "org.opencontainers.image.version": "0.9.8"},
                          "Env": ["FIXTURE_ROLE=" + role]},
               "rootfs": {"type": "layers", "diff_ids": [diff_id]},
               "history": [{"created_by": "deterministic fixture"}]}

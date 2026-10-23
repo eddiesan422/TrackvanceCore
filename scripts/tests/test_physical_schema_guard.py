@@ -108,9 +108,9 @@ def test_installed_runtime_contract_and_snapshot_reject_physical_extra_column(mo
 
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    assert guard.validate_physical_schema(engine, Base.metadata)["tables"] == 80
+    assert guard.validate_physical_schema(engine, Base.metadata)["tables"] == 81
     import verify_storage
-    assert len(set(Base.metadata.tables) - verify_storage.CORE095_TABLES - verify_storage.CORE097_TABLES) == 65
+    assert len(set(Base.metadata.tables) - verify_storage.CORE095_TABLES - verify_storage.CORE097_TABLES - verify_storage.CORE098_TABLES) == 65
     with engine.begin() as connection:
         connection.exec_driver_sql("CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY)")
         connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0015_sentinel_execution_identity')")

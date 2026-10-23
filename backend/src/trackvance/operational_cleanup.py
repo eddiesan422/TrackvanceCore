@@ -45,7 +45,7 @@ TYPE_TABLE = {"DATASET": "datasets", "DATASET_VERSION": "dataset_versions", "RUN
     "MONITOR_OCCURRENCE": "monitor_occurrences", "DELIVERY_OCCURRENCE": "delivery_occurrences",
     "INTAKE_OCCURRENCE": "intake_occurrences", "ACQUISITION_OCCURRENCE": "acquisition_occurrences",
     "DOCUMENT_REFERENCE": "document_references", "DOCUMENT_DRAFT": "document_drafts", "DOCUMENT_BUILDER_TEST": "document_builder_tests",
-    "DOCUMENT_FAMILY": "document_families", "DOCUMENT_TEMPLATE": "document_templates",
+    "DOCUMENT_ENGINE_SETTINGS": "document_engine_settings", "DOCUMENT_FAMILY": "document_families", "DOCUMENT_TEMPLATE": "document_templates",
     "DOCUMENT": "document_originals", "DOCUMENT_EXTRACTION": "document_extractions",
     "DOCUMENT_BATCH": "document_batches", "COMPARISON": "version_comparisons", "VERSION_COMPARISON": "version_comparisons",
     "CONNECTION_VERSION": "external_connection_versions", "DELIVERY_DESTINATION": "delivery_destinations",
@@ -260,6 +260,8 @@ def population(db: Session) -> tuple[dict, dict, set[tuple]]:
             if name == "document_families":
                 logical_references.extend(("datasets", value) for value in (row.get("output_datasets") or {}).values())
                 logical_references.append(("document_templates", row.get("active_template_id")))
+            elif name == "document_engine_settings":
+                logical_references.append(("document_families", row.get("scope_key")))
             elif name == "document_templates":
                 publications.append((row.get("definition") or {}).get("publication") or {})
                 logical_references.append(("document_extractions", row.get("tested_extraction_id")))
@@ -474,8 +476,8 @@ def compute(db: Session, project: str, organization_id: str, dataset_ids: list[s
         files_by_path[entry["path"]] = entry
     files = sorted(files_by_path.values(), key=lambda item: item["path"])
     revisions = list(db.scalars(text("SELECT version_num FROM alembic_version")))
-    if revisions != ["0027_document_builder_097"] or len(rows) != 80:
-        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.7 requiere exactamente la revisión 0027 y sus 80 tablas completas.")
+    if revisions != ["0028_document_idp_098"] or len(rows) != 81:
+        error("CLEANUP_SCHEMA_DRIFT", "La limpieza 0.9.8 requiere exactamente la revisión 0028 y sus 81 tablas completas.")
     revision = revisions[0]
     return {"project": project, "organization_id": organization_id, "dataset_ids": sorted(dataset_ids),
         "migration": revision, "schema_sha256": digest(schema), "population_sha256": digest(rows),
@@ -647,7 +649,7 @@ def _recover_locked(db: Session, quarantine: Path, storage: Path, *, project: st
             error("CLEANUP_RECOVERY_INVALID", "El marcador de commit no corresponde al journal sellado.")
         return {"status": "METADATA_COMMITTED_FILES_QUARANTINED", "files_restored": 0}
     rows, _, _ = population(db)
-    if journal.get("migration") != "0027_document_builder_097" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
+    if journal.get("migration") != "0028_document_idp_098" or list(db.scalars(text("SELECT version_num FROM alembic_version"))) != [journal["migration"]]:
         error("CLEANUP_SCHEMA_DRIFT", "La recuperación requiere la misma revisión certificada del journal.")
     live = {(Path(row[field]) if Path(row[field]).is_absolute() else storage / row[field]).resolve()
             for name, items in rows.items() for row in items.values() for field in PATH_FIELDS.get(name, ())

@@ -23,11 +23,11 @@ def core097_rows():
 def test_v12_projects_exact_populated_77_table_history_without_mutation():
     before, after = core097_rows()
     untouched = deepcopy(after)
-    report = verify_storage.legacy_v11_report(after, [], current_migration=verify_storage.CURRENT_MIGRATION,
+    report = verify_storage.legacy_v11_report(after, [], current_migration=verify_storage.CORE097_MIGRATION,
         verified_artifacts=0, verified_source_secrets=0, verified_delivery_secrets=0)
     assert report["schema_version"] == 11 and report["migration"] == "0025_comparison_095"
     assert report["tables"] == verify_storage._table_hashes(before) and after == untouched
-    assert len(report["tables"]) == 77 and len(verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]) == 80
+    assert len(report["tables"]) == 77 and len(verify_storage.FINGERPRINT_TABLES[verify_storage.CORE097_MIGRATION]) == 80
 
 
 @pytest.mark.parametrize("damage", ["draft", "reference", "test", "occurrence", "diagnostic", "job", "missing_default", "unknown"])
@@ -68,8 +68,8 @@ def test_backup11_remains_readable_and_requires_exact_independent_projection_to1
     rewrite_legacy_state(directory, manifest, expected)
     assert docker_state.verify_backup(directory) == manifest
     restored = deepcopy(expected)
-    restored.update(schema_version=12, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CORE097_STATE_TABLES})
+    restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
+    restored["tables"].update({name: {} for name in docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     docker_state.validate_restored_state(manifest, expected, restored, expected)
     with pytest.raises(docker_state.OperationError, match="v11 normalizada"):
         docker_state.validate_restored_state(manifest, expected, restored)
@@ -86,7 +86,7 @@ def test_cli_v11_projection_uses_verified_inputs(monkeypatch, capsys):
     import json
 
     _, after = core097_rows()
-    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (verify_storage.CURRENT_MIGRATION, after, [], 0, 0, 0))
+    monkeypatch.setattr(verify_storage, "_snapshot_inputs", lambda: (verify_storage.CORE097_MIGRATION, after, [], 0, 0, 0))
     monkeypatch.setattr(verify_storage.sys, "argv", ["verify_storage", "snapshot-legacy-v11"])
     assert verify_storage.main() == 0
     result = json.loads(capsys.readouterr().out)

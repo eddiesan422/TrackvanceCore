@@ -1,8 +1,8 @@
-# Matriz de permisos HTTP y catálogo 0.9.7
+# Matriz de permisos HTTP y catálogo 0.9.8
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 236 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 238 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -137,6 +137,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/documents/builder/references/{id}` | `documents:configure` |
 | GET | `/documents/builder/references/{id}/file` | `documents:download` |
 | GET | `/documents/builder/references/{id}/pages/{page}` | `documents:download` |
+| GET | `/documents/engines` | `documents:read` |
 | GET | `/documents/families` | `documents:read` |
 | GET | `/documents/families/{id}` | `documents:read` |
 | GET | `/documents/families/{id}/batches` | `documents:read` |
@@ -317,6 +318,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/version-comparisons/{id}/cancel` | `datasets:read` |
 | PUT | `/datasets/{id}/source-settings` | `datasets:write` |
 | PUT | `/documents/builder/drafts/{id}` | `documents:configure` |
+| PUT | `/documents/engines` | `documents:configure` |
 
 La inbox aplica usuario destinatario y permisos actuales del módulo a lista, contador y lectura. El responsable de programación se revalida al despachar y antes de STARTED; SYSTEM no es una cuenta ejecutora.
 

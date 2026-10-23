@@ -192,9 +192,7 @@ class FileArtifactStore:
         paths = []
         try:
             for part in descriptor["parts"]:
-                path = self.materialize_reference(str(self.root / part["path"]),
-                                                  expected_sha256=part["sha256"],
-                                                  expected_size=part["size_bytes"])
+                path = self._materialize_part(part)
                 schema = [{"name": key, "type": str(value)}
                           for key, value in pl.read_parquet_schema(path).items()]
                 with pq.ParquetFile(path, memory_map=False, pre_buffer=False) as parquet:
@@ -207,6 +205,14 @@ class FileArtifactStore:
         except (pl.exceptions.PolarsError, OSError, ValueError):
             raise ArtifactIntegrityError("DATASET_PART_INVALID: No fue posible verificar una parte Parquet.") from None
         return paths
+
+    def _part_reference(self, artifact: Artifact) -> str:
+        return self.checked_path(artifact.path).relative_to(self.root).as_posix()
+
+    def _materialize_part(self, part: dict) -> Path:
+        return self.materialize_reference(str(self.root / part["path"]),
+                                          expected_sha256=part["sha256"],
+                                          expected_size=part["size_bytes"])
 
     def put_dataset(self, db: Session, parts: list[Path], kind: str,
                     organization_id: str, *, name: str = "canonical.dataset.json",
@@ -247,7 +253,7 @@ class FileArtifactStore:
                                          f"part-{ordinal:06d}.parquet", part_identity,
                                          media_type="application/vnd.apache.parquet")
                 descriptions.append({"ordinal": ordinal, "artifact_id": artifact.id,
-                                     "path": self.checked_path(artifact.path).relative_to(self.root).as_posix(),
+                                     "path": self._part_reference(artifact),
                                      "sha256": artifact.sha256, "size_bytes": artifact.size_bytes,
                                      "row_count": count})
             descriptor = {"schema_version": 1, "kind": "PARQUET_DATASET", "schema": schema,

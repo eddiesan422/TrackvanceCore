@@ -1,0 +1,33 @@
+pipeline_name: PaddleOCR-VL-1.6
+batch_size: 1
+use_queues: false
+use_doc_preprocessor: false
+use_layout_detection: true
+use_chart_recognition: false
+use_seal_recognition: false
+format_block_content: false
+merge_layout_blocks: true
+markdown_ignore_labels: []
+SubModules:
+  LayoutDetection:
+    module_name: layout_detection
+    model_name: PP-DocLayoutV3
+    model_dir: /models/layout
+    batch_size: 1
+    threshold: 0.3
+    layout_nms: true
+    layout_unclip_ratio: [1.0, 1.0]
+    layout_merge_bboxes_mode: union
+  VLRecognition:
+    module_name: vl_recognition
+    model_name: PaddleOCR-VL-1.6-0.9B
+    model_dir: /models/paddle
+    batch_size: 1
+    genai_config:
+      backend: native
+SubPipelines:
+  DocPreprocessor:
+    pipeline_name: doc_preprocessor
+    batch_size: 1
+    use_doc_orientation_classify: false
+    use_doc_unwarping: false

@@ -1,5 +1,18 @@
 # Trackvance Core
 
+## Trackvance Core 0.9.8 - IDP en validación
+
+Incorpora proveedores documentales intercambiables, instantáneas por trabajo,
+validación independiente AUTO_VERIFIED, inferencia local aislada y adaptadores
+Textract/S3 comprobables con simulaciones. AWS real permanece bloqueado y LOCAL
+conserva los artefactos históricos. La versión no acredita por sí sola aceptación,
+actualización de instalaciones, exactitud del corpus ni capacidad de GPU.
+
+La [matriz 0.9.8](https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/development/core-0.9.8.md)
+registra evidencias, métricas, limitaciones y estado real. Los modelos se fijan en
+`deploy/idp/models.lock.json`; el entorno independiente usa `compose.idp-local.yml`.
+Las mediciones profundas y descargas de modelos se ejecutan fuera del CI rápido.
+
 ## Trackvance Core 0.9.7 — implementación y validación
 
 Incluye scheduler sin secretos, ocurrencias diagnosticables,

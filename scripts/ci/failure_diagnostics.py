@@ -784,11 +784,11 @@ def collect_catalog_recovery_failure(context, before, sources):
                 or not allowed(value.get('status'), {'PASS', 'FAIL'})):
             continue
         result = {**sanitize_recovery_summary(value), 'mode': value['mode']}
-        for profile, versions in (('native', {'0.8.5', '0.9.0', '0.9.5', '0.9.7'}), ('legacy', {'0.7.0'}), ('legacy080', {'0.8.0'})):
+        for profile, versions in (('native', {'0.8.5', '0.9.0', '0.9.5', '0.9.7', '0.9.8'}), ('legacy', {'0.7.0'}), ('legacy080', {'0.8.0'})):
             child = value.get(profile)
             if (isinstance(child, dict) and value['mode'] in {profile, 'both'}
                     and allowed(child.get('source_version'), versions)
-                    and allowed(child.get('target_version'), {'0.8.5', '0.9.0', '0.9.5', '0.9.7'})):
+                    and allowed(child.get('target_version'), {'0.8.5', '0.9.0', '0.9.5', '0.9.7', '0.9.8'})):
                 result[profile] = sanitize_recovery_summary(child)
         observations.append({'kind': 'CATALOG_RECOVERY_PARTIAL_SUMMARY', 'result': result})
         log = directory / 'diagnostic.private.log'
@@ -821,8 +821,8 @@ def sanitize_recovery_summary(value):
     for key, choices in (('failed_stage', RECOVERY_PHASES), ('functional_stage', RECOVERY_FUNCTIONAL_STAGES), ('error_type', ERROR_TYPES),
                          ('error_code', RECOVERY_CODES),
                          ('error_category', {'CONNECTION', 'SQL', 'UNHEALTHY', 'BUILD', 'UNKNOWN'}),
-                         ('source_version', {'0.5.1', '0.6.0', '0.6.1', '0.7.0', '0.8.0', '0.8.5', '0.9.0', '0.9.5', '0.9.7'}),
-                         ('target_version', {'0.8.5', '0.9.0', '0.9.5', '0.9.7'}), ('cleanup', {'PASS', 'FAIL'}),
+                         ('source_version', {'0.5.1', '0.6.0', '0.6.1', '0.7.0', '0.8.0', '0.8.5', '0.9.0', '0.9.5', '0.9.7', '0.9.8'}),
+                         ('target_version', {'0.8.5', '0.9.0', '0.9.5', '0.9.7', '0.9.8'}), ('cleanup', {'PASS', 'FAIL'}),
                          ('main_inventory', {'UNCHANGED', 'CHANGED_OR_UNVERIFIABLE', 'UNVERIFIABLE'}),
                          ('cleanup_error_type', ERROR_TYPES), ('inventory_error_type', ERROR_TYPES)):
         if allowed(value.get(key), choices):

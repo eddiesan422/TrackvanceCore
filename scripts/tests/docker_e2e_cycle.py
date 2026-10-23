@@ -159,7 +159,7 @@ def main() -> int:
     started = False
     began = time.monotonic()
     outcome = 1
-    result = {"version": "0.9.7", "status": "FAIL", "project": project, "port": port,
+    result = {"version": "0.9.8", "status": "FAIL", "project": project, "port": port,
               "demo_seed_enabled": not options.clean_demo}
     (evidence / "isolation.json").write_text(json.dumps({"project": project}), encoding="utf-8")
     stage = "docker"
@@ -193,7 +193,7 @@ def main() -> int:
         started = True
         execute(up, environment=environment)
         execute([*compose, 'exec', '-T', 'api', 'python', '-c',
-                 "import trackvance; assert trackvance.__version__ == '0.9.7'"], environment=environment)
+                 "import trackvance; assert trackvance.__version__ == '0.9.8'"], environment=environment)
         stage = "doctor"
         execute(
             [sys.executable, "scripts/doctor.py", "--base-url", base_url, "--docker", "--project", project],

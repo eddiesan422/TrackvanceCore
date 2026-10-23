@@ -83,7 +83,7 @@ def test_backup10_requires_independently_validated_projection_before_restore11(t
     assert docker_state.verify_backup(directory) == manifest
     restored = deepcopy(expected)
     restored.update(schema_version=docker_state.VERIFY_SCHEMA_VERSION, migration=docker_state.CURRENT_MIGRATION)
-    restored["tables"].update({name: {} for name in docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES})
+    restored["tables"].update({name: {} for name in docker_state.CORE095_STATE_TABLES | docker_state.CORE097_STATE_TABLES | docker_state.CORE098_STATE_TABLES})
     docker_state.validate_restored_state(manifest, expected, restored, expected)
     with pytest.raises(docker_state.OperationError, match="v10 normalizada"):
         docker_state.validate_restored_state(manifest, expected, restored)
@@ -115,8 +115,8 @@ def test_current_fingerprint_inventory_and_backup_validator_agree():
     current = restored_current_state()
     docker_state.validate_delivery_state(current)
     assert set(current["tables"]) == verify_storage.FINGERPRINT_TABLES[verify_storage.CURRENT_MIGRATION]
-    assert current["schema_version"] == verify_storage.SCHEMA_VERSION == 12
-    assert current["migration"] == verify_storage.CURRENT_MIGRATION == "0027_document_builder_097"
+    assert current["schema_version"] == verify_storage.SCHEMA_VERSION == 13
+    assert current["migration"] == verify_storage.CURRENT_MIGRATION == "0028_document_idp_098"
 
 
 def test_new_workers_are_quiesced_and_only_previously_running_workers_restart(monkeypatch):

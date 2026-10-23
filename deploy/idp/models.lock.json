@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "sources_checked_on": "2026-10-23",
+  "paddle": {
+    "repository": "PaddlePaddle/PaddleOCR-VL-1.6",
+    "revision": "c5630abae1d940eafe0697512a0325494b02ab42",
+    "files": {
+      "model.safetensors": "85a479d506a11e724e7285d395c551be69f41dbc16b6342d3cacfb189aed71db",
+      "tokenizer.json": "c8a215a59183d0d0781adc33bacd3ce6162716f7fd568fb30234a74d69803a7d",
+      "tokenizer.model": "34ef7db83df785924fb83d7b887b6e822a031c56e15cff40aaf9b982988180df",
+      "LICENSE": "b8c4d7deccd236af023af1c88c4d4e8f0fc2f41914e0fb23a3ec9678fb5a8456",
+      "added_tokens.json": "f59f889088e0fe21c523e7cf121bb6dca3b0bb148cb7159fbb4572c74dfc5644",
+      "chat_template.jinja": "2f27812dab7f333e471884e0c803d807f11953d5453140dfb1aaba234f872bc8",
+      "config.json": "ce7f4565f8b1db78532ad5d1b9ebe55c2139d49bd4cb04778b580a08a598f171",
+      "generation_config.json": "a6701d78ab3b4d972307cdec3b69d4c13f46e0d5140514f50ab7d84259324b94",
+      "inference.yml": "1587aece2d6442366efce34161d5f7d5f67f09ebfbf043168e5fade892c2780e",
+      "preprocessor_config.json": "111872ab1e8bb7fd040ac5087bfced7ab8f011f02139b088cba294964c3b1d0e",
+      "processor_config.json": "1568858960a9760c54431dae693a6152e601ff55cdf6d2eab97a4a99958faea0",
+      "special_tokens_map.json": "d3a125c03103deb2acaf7730791bdbbf196f620e5a2213b664511ff9b4b25bab",
+      "tokenizer_config.json": "1f979337347cc0cb72a6282d8a23ed183539aa81a87a906f022aee2bab83c7c5"
+    }
+  },
+  "layout": {
+    "repository": "PaddlePaddle/PP-DocLayoutV3",
+    "revision": "241f8bdfc77a7c7bee915a5057aaee58c235a8d3",
+    "files": {
+      "inference.pdiparams": "70bd316b0582769ec968829fd1feb1a6a58b7c941b938327e551b6b12b45c137",
+      "inference.json": "2b68367c5b312a03de5a6e1642c597c8f95165a7e40cd59c6700cf4a5042f4fd",
+      "inference.yml": "506fcfac13b3b546ae40d7886b44126420f392adb694e3f8bb6a6286a1f90fdc"
+    }
+  },
+  "qwen": {
+    "model": "qwen3.5:9b-q4_K_M",
+    "upstream_repository": "Qwen/Qwen3.5-9B",
+    "upstream_revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    "manifest_sha256": "56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90",
+    "model_sha256": "02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+    "projector_sha256": "f836f08f921193f4d6b6a6952dba0a6fb116759d26a757bcb395d570d73976ca"
+  },
+  "images": {
+    "paddle": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487",
+    "ollama": "ollama/ollama@sha256:ca389885d4c03971d9bdc1c082452c128819b48425b5633c73d7b208b1e3d11a"
+  }
+}

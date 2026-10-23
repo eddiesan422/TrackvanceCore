@@ -4,7 +4,14 @@ from datetime import UTC, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .document_template_builder_schemas import VisualFieldRule, VisualTableRule
 
@@ -83,7 +90,7 @@ class DocumentPublication(BaseModel):
     interval_seconds: int = Field(default=86400, ge=60, le=2678400)
     close_policy: Literal["STRICT", "READY_DEFER_PENDING"] = "STRICT"
     wait_seconds: int = Field(default=300, ge=0, le=86400)
-    review_policy: Literal["ALL", "CRITICAL_OR_UNCERTAIN"] = "ALL"
+    review_policy: Literal["ALL", "CRITICAL_OR_UNCERTAIN", "AUTO_VERIFIED"] = "ALL"
     minimum_confidence: float = Field(default=90, ge=0, le=100)
     stop_after: Literal["PUBLICATION", "VALIDATION", "DELIVERY"] = "PUBLICATION"
     intake_configuration_ids: dict[str, str] = Field(default_factory=dict)
@@ -116,6 +123,14 @@ class DocumentDefinition(BaseModel):
     publication: DocumentPublication = Field(default_factory=DocumentPublication)
     business_period_field: str | None = None
     arithmetic: list["DocumentArithmetic"] = Field(default_factory=list, max_length=50)
+    cross_totals: list["DocumentCrossTotal"] = Field(default_factory=list, max_length=30)
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_definition(self, handler):
+        result = handler(self)
+        if not self.cross_totals:
+            result.pop("cross_totals", None)
+        return result
 
     @model_validator(mode="after")
     def names(self):
@@ -135,6 +150,12 @@ class DocumentDefinition(BaseModel):
             scope = next((t.fields for t in self.tables if t.name == check.table), None) if check.table else self.fields
             if scope is None or not {check.result, *check.terms, *check.subtract}.issubset({f.name for f in scope}):
                 raise ValueError("La comprobación aritmética requiere campos declarados en su estructura.")
+        for check in self.cross_totals:
+            table = next((item for item in self.tables if item.name == check.table), None)
+            column = next((item for item in table.fields if item.name == check.column), None) if table else None
+            header = next((item for item in self.fields if item.name == check.header), None)
+            if not column or not header or column.logical_type not in {"DECIMAL", "INT64"} or header.logical_type not in {"DECIMAL", "INT64"}:
+                raise ValueError("El total cruzado requiere una columna de detalle y una cabecera numéricas declaradas.")
         return self
 
 
@@ -146,6 +167,16 @@ class DocumentArithmetic(BaseModel):
     terms: list[str] = Field(min_length=1, max_length=30)
     subtract: list[str] = Field(default_factory=list, max_length=30)
     result: str
+    scale: int = Field(default=2, ge=0, le=12)
+    tolerance: str = Field(default="0.01", pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
+
+
+class DocumentCrossTotal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    table: str
+    column: str
+    header: str
     scale: int = Field(default=2, ge=0, le=12)
     tolerance: str = Field(default="0.01", pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,12})?$")
 

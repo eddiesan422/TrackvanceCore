@@ -4,7 +4,7 @@ import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-import pyarrow.parquet as pq
+import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
 from .dataset_scans import version_paths
 

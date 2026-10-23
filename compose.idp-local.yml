@@ -1,0 +1,75 @@
+# Independent GPU identity; never merge into the permanent Codex compose stack.
+# Download models first: python scripts/idp_models.py --destination <private-cache>
+# Set IDP_MODEL_ROOT and run docker compose -f compose.idp-local.yml up -d.
+name: trackvance-idp098
+services:
+  idp-ollama:
+    image: ollama/ollama@sha256:ca389885d4c03971d9bdc1c082452c128819b48425b5633c73d7b208b1e3d11a
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 3
+    mem_limit: 6g
+    pids_limit: 128
+    environment:
+      HOME: /tmp
+      OLLAMA_MODELS: /models
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "2"
+      OLLAMA_CONTEXT_LENGTH: "8192"
+      OLLAMA_KEEP_ALIVE: "0"
+      OLLAMA_NO_CLOUD: "true"
+      OLLAMA_NOPRUNE: "true"
+      OLLAMA_GPU_OVERHEAD: "1610612736"
+    volumes:
+      - ${IDP_MODEL_ROOT:?Set private model cache}/ollama:/models:ro
+    tmpfs: ["/tmp:size=128m,mode=1777", "/models/manifests-v2:size=16m,mode=1777"]
+    networks: [inference]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+  idp-gateway:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl@sha256:659eb236d509966380c0ac938049cbb3494f1e84c5d5c53fcac3572c05463487
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 3
+    mem_limit: 6g
+    pids_limit: 192
+    shm_size: 256m
+    entrypoint: [python, -I, -B, /app/server.py]
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PADDLE_HOME: /tmp/paddle
+      PADDLE_PDX_CACHE_HOME: /tmp/paddlex
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      OMP_NUM_THREADS: "2"
+    volumes:
+      - ${IDP_MODEL_ROOT:?Set private model cache}/paddle:/models/paddle:ro
+      - ${IDP_MODEL_ROOT:?Set private model cache}/layout:/models/layout:ro
+      - ./deploy/idp:/app:ro
+    tmpfs: ["/tmp:size=768m,mode=1777"]
+    ports: ["127.0.0.1:${IDP_LOCAL_PORT:-3288}:8088"]
+    networks: [inference]
+    depends_on: [idp-ollama]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+networks:
+  inference:
+    internal: true

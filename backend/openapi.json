@@ -3,7 +3,7 @@
   "info": {
     "title": "Trackvance Core",
     "description": "Monolito modular local. SUCCESS es estado técnico; decision conserva el resultado de negocio. Configuraciones y evidence son snapshots versionados.",
-    "version": "0.9.7"
+    "version": "0.9.8"
   },
   "paths": {
     "/health": {
@@ -16223,6 +16223,152 @@
         "x-required-permission": "documents:configure"
       }
     },
+    "/api/v1/documents/engines": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Engines",
+        "operationId": "engines_api_v1_documents_engines_get",
+        "parameters": [
+          {
+            "name": "family_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Family Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:read"
+      },
+      "put": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Configure Engine",
+        "operationId": "configure_engine_api_v1_documents_engines_put",
+        "parameters": [
+          {
+            "name": "family_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Family Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineSettingsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
     "/api/v1/documents/limits": {
       "get": {
         "tags": [
@@ -21267,6 +21413,50 @@
         ],
         "title": "DocumentArithmetic"
       },
+      "DocumentCrossTotal": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "header": {
+            "type": "string",
+            "title": "Header"
+          },
+          "scale": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 0.0,
+            "title": "Scale",
+            "default": 2
+          },
+          "tolerance": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,12})?$",
+            "title": "Tolerance",
+            "default": "0.01"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "table",
+          "column",
+          "header"
+        ],
+        "title": "DocumentCrossTotal"
+      },
       "DocumentDefinition": {
         "properties": {
           "fields": {
@@ -21307,6 +21497,14 @@
             "type": "array",
             "maxItems": 50,
             "title": "Arithmetic"
+          },
+          "cross_totals": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentCrossTotal"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Cross Totals"
           }
         },
         "additionalProperties": false,
@@ -21355,6 +21553,14 @@
             "type": "array",
             "maxItems": 50,
             "title": "Arithmetic"
+          },
+          "cross_totals": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentCrossTotal"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Cross Totals"
           }
         },
         "additionalProperties": false,
@@ -21550,7 +21756,8 @@
             "type": "string",
             "enum": [
               "ALL",
-              "CRITICAL_OR_UNCERTAIN"
+              "CRITICAL_OR_UNCERTAIN",
+              "AUTO_VERIFIED"
             ],
             "title": "Review Policy",
             "default": "ALL"
@@ -21754,6 +21961,100 @@
           "context_id"
         ],
         "title": "DownloadBody"
+      },
+      "EngineConfiguration": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "PADDLE_QWEN_LOCAL",
+              "AWS_TEXTRACT",
+              "TESSERACT_LEGACY"
+            ],
+            "title": "Provider",
+            "default": "TESSERACT_LEGACY"
+          },
+          "paddle_model": {
+            "type": "string",
+            "const": "PaddleOCR-VL-1.6",
+            "title": "Paddle Model",
+            "default": "PaddleOCR-VL-1.6"
+          },
+          "llm_model": {
+            "type": "string",
+            "const": "qwen3.5:9b-q4_K_M",
+            "title": "Llm Model",
+            "default": "qwen3.5:9b-q4_K_M"
+          },
+          "prompt_version": {
+            "type": "string",
+            "const": "trackvance-idp-098-v1",
+            "title": "Prompt Version",
+            "default": "trackvance-idp-098-v1"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "maximum": 1800.0,
+            "minimum": 30.0,
+            "title": "Timeout Seconds",
+            "default": 300
+          },
+          "context_tokens": {
+            "type": "integer",
+            "maximum": 32768.0,
+            "minimum": 1024.0,
+            "title": "Context Tokens",
+            "default": 8192
+          },
+          "max_retries": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Max Retries",
+            "default": 1
+          },
+          "max_parallel_jobs": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Max Parallel Jobs",
+            "default": 1
+          },
+          "use_llm": {
+            "type": "boolean",
+            "title": "Use Llm",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EngineConfiguration"
+      },
+      "EngineSettingsBody": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/EngineConfiguration"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "configuration",
+          "reason"
+        ],
+        "title": "EngineSettingsBody"
       },
       "ExpectedVersion": {
         "properties": {

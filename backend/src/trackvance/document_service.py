@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from .artifactstore import link_artifact, storage_provider
 from .dataset_readers import DatasetReadResult
 from .db import iso, require_record, utcnow
-from .document_engine import arithmetic_checks, validate_value
+from .document_engine import arithmetic_checks, cross_table_checks, validate_value
 from .document_header_review import (
     append_confirmations,
     header_review_dto,
@@ -85,9 +85,16 @@ def issues(extraction, definition, *, source_binding=None):
     payload = extraction.payload
     policy = definition["publication"]
     result = []
-    for check in payload.get("arithmetic", []):
+    from .document_quality import cell_is_valid, semantic_issues
+    result.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
+    # The application validator recomputes checks; provider-authored arithmetic
+    # statuses cannot authorize publication.
+    for check in [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]:
         if check["status"] != "VALID":
-            result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check['row']}")
+            result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check.get('row', 'ALL')}")
+    if policy["review_policy"] == "AUTO_VERIFIED":
+        from .document_quality import quality_report
+        result.extend(quality_report(extraction, definition)["issues"])
     resolved = (resolved_observations(payload, definition, reviewed=getattr(extraction, "reviewed", False),
                 source_binding=source_binding) if payload.get("header_resolutions") else set())
     for name, fields in structures(definition).items():
@@ -102,12 +109,12 @@ def issues(extraction, definition, *, source_binding=None):
             for column, field in enumerate(fields):
                 cell = row.get(field["name"])
                 path = f"{name}.{row_index}.{field['name']}"
-                if not cell or cell.get("validity") != "VALID":
+                if not cell or not cell_is_valid(cell, field):
                     result.append("VALUE_INVALID:" + path)
                     continue
                 confidence = cell.get("confidence")
                 declared_start = ((table or {}).get("visual") or {}).get("row_start")
-                needs_review = (policy["review_policy"] == "ALL" or field["critical"]
+                needs_review = policy["review_policy"] != "AUTO_VERIFIED" and (policy["review_policy"] == "ALL" or field["critical"]
                                 or declared_start is not None and declared_start["column"] == column
                                 or confidence is not None and confidence < policy["minimum_confidence"])
                 if needs_review and not cell.get("reviewed"):
@@ -116,7 +123,7 @@ def issues(extraction, definition, *, source_binding=None):
     for name, regions in payload.get("table_unparsed", {}).items():
         if name not in declared_tables and regions:
             result.append(f"TABLE_ROWS_UNRECOGNIZED:{name}")
-    return result
+    return list(dict.fromkeys(result))
 
 
 def template_dto(item):
@@ -132,11 +139,18 @@ def original_dto(db, original, *, detail=False):
               "status": original.status, "progress": original.progress, "error_code": original.error_code,
               "duplicate_of_id": original.duplicate_of_id, "correction_of_id": original.correction_of_id,
               "is_example": original.is_example, "extraction_id": original.extraction_id,
-              "started_at": iso(original.started_at), "finished_at": iso(original.finished_at)}
+              "started_at": iso(original.started_at), "finished_at": iso(original.finished_at),
+              "engine_snapshot": ({**original.engine_snapshot, "snapshot_sha256": original.engine_snapshot_hash}
+                  if original.engine_snapshot else None),
+              "phase": (original.processing_phase if original.status == "RUNNING" and original.processing_phase else {"RUNNING": "EXTRACTION", "EXTRACTED": "VALIDATION", "REVIEWED": "PUBLICATION",
+                  "AUTO_VERIFIED": "PUBLICATION", "PUBLISHED": "COMPLETE"}.get(original.status, original.status))}
     if detail:
         result["template"] = template_dto(definition_for(db, original))
         result["extraction"] = extraction_dto(extraction) if extraction else None
         result["issues"] = issues(extraction, result["template"]["definition"])
+        if result["template"]["definition"]["publication"]["review_policy"] == "AUTO_VERIFIED":
+            from .document_quality import quality_report
+            result["quality"] = quality_report(extraction, result["template"]["definition"])
         if extraction:
             header_review = header_review_dto(extraction.payload, result["template"]["definition"], reviewed=extraction.reviewed)
             if header_review is not None:
@@ -361,6 +375,8 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
                 cell["alternatives"] = []
     if definition.get("arithmetic"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
+    if definition.get("cross_totals"):
+        payload["cross_totals"] = cross_table_checks(payload, definition)
     if definition.get("business_period_field"):
         field = definition["business_period_field"]
         payload["business_period"] = {"field": field, **payload["fields"][field]}

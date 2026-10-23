@@ -8,6 +8,18 @@ from .db import Base
 from .models import Record
 
 
+class DocumentEngineSettings(Record, Base):
+    """Administrative effective settings; every started job freezes its own copy."""
+    __tablename__ = "document_engine_settings"
+    __table_args__ = (UniqueConstraint("organization_id", "scope_key"),)
+    scope_key: Mapped[str] = mapped_column(String(64), default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    configuration: Mapped[dict] = mapped_column(JSON)
+    configuration_hash: Mapped[str] = mapped_column(String(64))
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    reason: Mapped[str] = mapped_column(String(2000))
+
+
 class DocumentFamily(Record, Base):
     __tablename__ = "document_families"
     __table_args__ = (UniqueConstraint("organization_id", "name"),)
@@ -50,6 +62,9 @@ class DocumentOriginal(Record, Base):
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    engine_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    engine_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processing_phase: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
 
 class DocumentExtraction(Record, Base):
@@ -106,6 +121,8 @@ class DocumentPublicationClaim(Record, Base):
 class DocumentReference(Record, Base):
     """Configuration corpus, deliberately outside operational originals/publication."""
     __tablename__ = "document_references"
+    engine_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    engine_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     family_id: Mapped[str] = mapped_column(ForeignKey("document_families.id"), index=True)
     artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"))
     filename: Mapped[str] = mapped_column(String(240))

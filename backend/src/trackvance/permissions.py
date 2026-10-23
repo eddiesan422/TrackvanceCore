@@ -212,6 +212,8 @@ _routes("datasets:read", "POST", "/datasets/{id}/comparisons", "/version-compari
 _routes("artifacts:download", "GET", "/version-comparisons/{id}/download")
 _routes("exceptions:read", "GET", "/operations")
 _routes("documents:read", "GET", "/documents/limits", "/documents/families", "/documents/families/{id}", "/documents/originals", "/documents/originals/{id}", "/documents/families/{id}/batches", "/documents/batches/{id}")
+_routes("documents:read", "GET", "/documents/engines")
+_routes("documents:configure", "PUT", "/documents/engines")
 _routes("documents:configure", "POST", "/documents/families", "/documents/families/{id}/templates", "/documents/families/{id}/templates/{template_id}/activate", "/documents/families/{id}/pipeline")
 _routes("documents:write", "POST", "/documents/families/{id}/originals", "/documents/originals/{id}/cancel", "/documents/originals/{id}/retry")
 _routes("documents:review", "POST", "/documents/originals/{id}/review")

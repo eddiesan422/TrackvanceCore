@@ -18,9 +18,11 @@ from typing import cast
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 
-from .artifactstore import link_artifact, storage_provider
+from .artifactstore import ArtifactIntegrityError, link_artifact, storage_provider
 from .db import SessionLocal, require_record, utcnow
 from .document_models import DocumentExtraction, DocumentOriginal, DocumentReference
+from .document_providers import execute_provider, freeze_configuration
+from .document_quality import certify_candidate, quality_report
 from .document_service import (
     definition_for,
     digest,
@@ -55,7 +57,8 @@ def _authority(db, document_id, owner):
     return original, job, user
 
 
-def run_engine(source, definition, *, check=lambda progress: None, preview_page=None):
+def run_engine(source, definition, *, check=lambda progress: None, preview_page=None,
+               native_only=False, candidate_lines=None):
     if sys.platform != "linux":
         raise OperationError(503, "DOCUMENT_SANDBOX_UNAVAILABLE", "El procesamiento documental requiere el worker Linux aislado.")
     temporary = storage_provider.temporary_path(".ocr")
@@ -64,7 +67,12 @@ def run_engine(source, definition, *, check=lambda progress: None, preview_page=
     try:
         name = "original" + source.suffix.lower()
         shutil.copyfile(source, folder / name)
-        (folder / "request.json").write_text(json.dumps({"filename": name, "definition": definition, "preview_page": preview_page}), encoding="utf-8")
+        request = {"filename": name, "definition": definition, "preview_page": preview_page}
+        if native_only:
+            request["native_only"] = True
+        if candidate_lines is not None:
+            request["candidate_lines"] = candidate_lines
+        (folder / "request.json").write_text(json.dumps(request, allow_nan=False), encoding="utf-8")
         environment = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/nonexistent", "TMPDIR": str(folder),
                        "OMP_THREAD_LIMIT": "1", "OMP_NUM_THREADS": "1", "TZ": "UTC"}
         runtime = Path(sys.base_prefix) / "lib"
@@ -84,7 +92,12 @@ def run_engine(source, definition, *, check=lambda progress: None, preview_page=
         result = folder / "result.json"
         if not result.exists() or result.stat().st_size > 16 * 1024**2:
             raise OperationError(422, "DOCUMENT_ENGINE_FAILURE", "El motor no produjo un resultado completo dentro del límite.")
-        data = json.loads(result.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(result.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeError):
+            raise OperationError(422, "DOCUMENT_ENGINE_FAILURE", "El motor no produjo un resultado JSON válido.") from None
+        if not isinstance(data, dict):
+            raise OperationError(422, "DOCUMENT_ENGINE_FAILURE", "El motor no produjo un resultado documental válido.")
         if data.get("error") or process.returncode:
             raise OperationError(422, data.get("error", "DOCUMENT_ENGINE_FAILURE"), "No fue posible extraer el documento; revisa el formato, límites o plantilla.")
         return data
@@ -121,9 +134,18 @@ def process_once(owner=None, active=None):
             db.commit()
             return True
         original.status, original.progress, original.started_at = "RUNNING", 0, utcnow()
-        definition = definition_for(db, original).definition
+        original.processing_phase = "EXTRACTION"
+        try:
+            configuration = freeze_configuration(db, original)
+            definition = definition_for(db, original).definition
+        except OperationError as error:
+            original.status, original.error_code, original.finished_at = "FAILED", error.code, utcnow()
+            job.status, job.last_error, job.lease_until = "FAILED", error.code, None
+            audit(db, "DOCUMENT_EXTRACTION_FAILED", "document", original.id, "La configuración congelada requiere intervención",
+                "Document worker", original.organization_id, {"code": error.code, "attempt": job.attempts})
+            db.commit()
+            return True
         artifact = require_record(db, Artifact, original.artifact_id)
-        source = storage_provider.materialize(artifact)
         db.commit()
     active["job_id"] = job_id
     last_progress, last_check = -1, 0.0
@@ -140,7 +162,25 @@ def process_once(owner=None, active=None):
         last_progress, last_check = progress, time.monotonic()
 
     try:
-        data = run_engine(source, definition, check=checkpoint)
+        source = storage_provider.materialize(artifact)
+        data = execute_provider(source, definition, configuration, legacy_runner=run_engine, check=checkpoint)
+        if definition["publication"]["review_policy"] == "AUTO_VERIFIED":
+            with SessionLocal() as db:
+                current, _, _ = _authority(db, document_id, owner)
+                current.processing_phase = "VALIDATION"
+                db.commit()
+            # This second, confined extraction is a control of the same original;
+            # it is never accepted from the provider or the language model.
+            try:
+                independent = run_engine(source, definition, check=checkpoint)
+                data["engine"]["validation"] = certify_candidate(data, independent, definition, artifact.sha256)
+            except OperationError as error:
+                if error.status != 422:
+                    raise
+                # A failed independent control prevents automatic approval, but
+                # the successfully extracted candidate remains durable/reviewable.
+                data["engine"]["validation_failure"] = {"error_code": error.code,
+                    "phase": "INDEPENDENT_VALIDATION", "automatic_approval_blocked": True}
         with SessionLocal() as db:
             original, job, user = _authority(db, document_id, owner)
             # Recovered workers never append another automatic extraction after completion.
@@ -155,11 +195,21 @@ def process_once(owner=None, active=None):
                 link_artifact(db, original.organization_id, "DOCUMENT_EXTRACTION", "DOCUMENT", original.id, "DOCUMENT_EXTRACTION", extraction.id)
             else:
                 extraction = require_record(db, DocumentExtraction, original.extraction_id)
-            original.status = "REVIEW_REQUIRED" if issues(extraction, definition) else "EXTRACTED"
+            blockers = issues(extraction, definition)
+            original.status = ("REVIEW_REQUIRED" if blockers else "AUTO_VERIFIED"
+                if definition["publication"]["review_policy"] == "AUTO_VERIFIED" else "EXTRACTED")
             original.progress, original.finished_at, original.error_code = 100, utcnow(), None
             job.status, job.lease_until = "SUCCESS", None
             audit(db, "DOCUMENT_EXTRACTED", "document", original.id, "Extracción documental conservada", user.name,
-                  user.organization_id, {"extraction_id": extraction.id, "engine": data["engine"], "sha256": extraction.payload_hash})
+                  user.organization_id, {"extraction_id": extraction.id, "provider": configuration["provider"],
+                      "config_hash": original.engine_snapshot_hash, "sha256": extraction.payload_hash})
+            if original.status == "AUTO_VERIFIED":
+                report = quality_report(extraction, definition)
+                audit(db, "DOCUMENT_AUTO_VERIFIED", "document_extraction", extraction.id,
+                    "Controles independientes satisfactorios; sin revisión humana declarada", user.name,
+                    user.organization_id, {"status": report["status"], "validator_version": report["validator_version"],
+                        "extraction_id": extraction.id, "validation_sha256": data["engine"]["validation"]["attestation_sha256"],
+                        "independent_extraction": True, "config_hash": original.engine_snapshot_hash})
             db.commit()
         # Publication is separately recoverable and does not discard successful OCR.
         with SessionLocal() as db:
@@ -167,16 +217,17 @@ def process_once(owner=None, active=None):
             user = db.get(User, original.uploaded_by_id)
             dispatch_individual(db, original, user)
             db.commit()
-    except OperationError as error:
+    except (OperationError, ArtifactIntegrityError) as error:
+        error_code = error.code if isinstance(error, OperationError) else "DOCUMENT_ARTIFACT_INTEGRITY"
         with SessionLocal() as db:
             job = require_record(db, Job, job_id)
             original = require_record(db, DocumentOriginal, document_id)
             if job.lease_owner == owner and job.status == "RUNNING":
                 original.status = "CANCELLED" if original.cancel_requested else "FAILED"
-                original.error_code, original.finished_at = error.code, utcnow()
-                job.status, job.last_error, job.lease_until = original.status, error.code, None
+                original.error_code, original.finished_at = error_code, utcnow()
+                job.status, job.last_error, job.lease_until = original.status, error_code, None
                 audit(db, "DOCUMENT_EXTRACTION_FAILED", "document", original.id, "La extracción requiere intervención", "Document worker",
-                      original.organization_id, {"code": error.code, "attempt": job.attempts})
+                      original.organization_id, {"code": error_code, "attempt": job.attempts})
                 db.commit()
     finally:
         active.pop("job_id", None)
@@ -187,8 +238,15 @@ def process_reference(db, job, owner, active):
     """The same fenced DOCUMENT lane reads corpus without operational documents."""
     reference = require_record(db, DocumentReference, job.document_reference_id)
     identity, job_id = reference.id, job.id
-    source = storage_provider.materialize(require_record(db, Artifact, reference.artifact_id))
+    artifact = require_record(db, Artifact, reference.artifact_id)
     reference.status = "RUNNING"
+    try:
+        configuration = freeze_configuration(db, reference)
+    except OperationError as error:
+        reference.status, reference.error_code = "FAILED", error.code
+        job.status, job.last_error, job.lease_until = "FAILED", error.code, None
+        db.commit()
+        return True
     db.commit()
     active["job_id"] = job_id
 
@@ -212,7 +270,9 @@ def process_reference(db, job, owner, active):
             session.commit()
 
     try:
-        data = run_engine(source, {"fields": [], "tables": []}, check=checkpoint)
+        source = storage_provider.materialize(artifact)
+        data = execute_provider(source, {"fields": [], "tables": []}, configuration,
+            legacy_runner=run_engine, check=checkpoint)
         with SessionLocal() as session:
             current, item, actor = authority(session)
             if item.payload is None:
@@ -222,13 +282,14 @@ def process_reference(db, job, owner, active):
             audit(session, "DOCUMENT_REFERENCE_READ", "document_reference", item.id, "Referencia disponible para configurar; sin publicación operativa", actor.name,
                   actor.organization_id, {"sha256": item.sha256, "payload_hash": item.payload_hash, "engine": item.engine})
             session.commit()
-    except OperationError as error:
+    except (OperationError, ArtifactIntegrityError) as error:
+        error_code = error.code if isinstance(error, OperationError) else "DOCUMENT_ARTIFACT_INTEGRITY"
         with SessionLocal() as session:
             current = require_record(session, Job, job_id)
             if current.lease_owner == owner and current.status == "RUNNING":
                 item = require_record(session, DocumentReference, identity)
-                item.status, item.error_code = "FAILED", error.code
-                current.status, current.last_error, current.lease_until = "FAILED", error.code, None
+                item.status, item.error_code = "FAILED", error_code
+                current.status, current.last_error, current.lease_until = "FAILED", error_code, None
                 session.commit()
     finally:
         active.pop("job_id", None)

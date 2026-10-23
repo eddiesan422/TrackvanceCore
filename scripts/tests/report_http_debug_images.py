@@ -190,7 +190,7 @@ def archive_to_layout(archive: Path, layout: Path, image: str, sha: str) -> dict
         labels = config.get("config", {}).get("Labels") or {}
         if (config.get("os") != "linux" or config.get("architecture") != "amd64"
                 or labels.get("org.opencontainers.image.revision") != sha
-                or labels.get("org.opencontainers.image.version") != "0.9.7"
+                or labels.get("org.opencontainers.image.version") != "0.9.8"
                 or config.get("rootfs", {}).get("type") != "layers"):
             raise ValueError("Exported base configuration does not match the certified runtime")
         diff_ids, names = config["rootfs"]["diff_ids"], manifests[0]["Layers"]
@@ -311,7 +311,7 @@ def verify_layout(layout: Path, descriptor: dict, image: str) -> None:
     labels = config.get("config", {}).get("Labels") or {}
     if (config.get("os") != "linux" or config.get("architecture") != "amd64"
             or labels.get("org.opencontainers.image.revision") != descriptor["source_sha"]
-            or labels.get("org.opencontainers.image.version") != "0.9.7"
+            or labels.get("org.opencontainers.image.version") != "0.9.8"
             or config.get("rootfs", {}).get("type") != "layers"
             or config["rootfs"]["diff_ids"] != [layer["digest"] for layer in manifest["layers"]]):
         raise ValueError("Diagnostic configuration labels, platform or ordered layer content changed")
@@ -429,7 +429,7 @@ def build(directory: Path, context: dict, *, environment: dict[str, str] | None 
             descriptor = proof["base_layouts"][role]
             layout = directory / descriptor["layout"]
             verify_layout(layout, descriptor, images[role])
-            labels = begin_image_build(registry, execution, context["project"], sha, "0.9.7", role, reference)
+            labels = begin_image_build(registry, execution, context["project"], sha, "0.9.8", role, reference)
             # Buildx 0.30.1 splits OCI paths at the first colon, including a
             # Windows drive. Resolve the checked layout from this private cwd.
             execute(["docker", "buildx", "build", "--builder", builder, "--load", "--platform", "linux/amd64",

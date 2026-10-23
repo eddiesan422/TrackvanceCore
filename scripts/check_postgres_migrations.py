@@ -275,7 +275,7 @@ def verify_people_preservation(connection, config) -> dict:
     connection.rollback()
     command.upgrade(config, "head")
     connection.commit()
-    return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.9.7",
+    return {"status": "PASS", "source_version": "0.8.0", "target_version": "0.9.8",
         "tables_before": 55, "tables_after": len(after), "tables_at_core090": 65, "exact_historical_projection": "PASS", "roundtrip": "PASS",
         "explicit_user_links_reused": True, "frozen_governance_history_preserved": True, "physical_schema": physical}
 
@@ -326,7 +326,7 @@ def verify_core090_preservation(connection, config) -> dict:
     after, after_fks = corrections_rows(connection)
     core090_rows, _core090_fks = verify_storage.project_core095_upgrade(after, after_fks)
     assert len(core090_rows) == 65 and set(core090_rows) - set(before) == verify_storage.CORE090_TABLES
-    assert len(after) == 80 and set(after) - set(core090_rows) == verify_storage.CORE095_TABLES | verify_storage.CORE097_TABLES
+    assert len(after) == 81 and set(after) - set(core090_rows) == verify_storage.CORE095_TABLES | verify_storage.CORE097_TABLES | verify_storage.CORE098_TABLES
     projection = verify_storage.legacy_v9_report(after, after_fks,
         current_migration=verify_storage.CURRENT_MIGRATION, verified_artifacts=len(before["artifacts"]),
         verified_source_secrets=len(before["external_connection_versions"]),
@@ -400,7 +400,7 @@ def verify_core095_preservation(connection, config) -> dict:
         verified_artifacts=len(before["artifacts"]), verified_source_secrets=len(before["external_connection_versions"]),
         verified_delivery_secrets=len(before["delivery_destination_versions"]))
     assert projection["tables"] == hashes and projection["validated_relationships"] == relationships
-    core095_metadata = metadata_before_additions(Base.metadata, verify_storage.CORE097_TABLES, verify_storage.CORE097_DEFAULTS)
+    core095_metadata = metadata_before_additions(metadata_before_additions(Base.metadata, verify_storage.CORE098_TABLES, verify_storage.CORE098_DEFAULTS), verify_storage.CORE097_TABLES, verify_storage.CORE097_DEFAULTS)
     physical = validate_physical_schema(connection, core095_metadata)
     assert physical["tables"] == 77
     changed = deepcopy(after)
@@ -477,19 +477,20 @@ def verify_core097_preservation(connection, config) -> dict:
     before, before_fks = corrections_rows(connection)
     hashes = verify_storage._table_hashes(before)
     relationships = verify_storage.validate_relationships(before, before_fks)
-    historical_metadata = metadata_before_additions(Base.metadata, verify_storage.CORE097_TABLES, verify_storage.CORE097_DEFAULTS)
+    historical_metadata = metadata_before_additions(metadata_before_additions(Base.metadata, verify_storage.CORE098_TABLES, verify_storage.CORE098_DEFAULTS), verify_storage.CORE097_TABLES, verify_storage.CORE097_DEFAULTS)
     historical_physical = validate_physical_schema(connection, historical_metadata)
     assert historical_physical["tables"] == 77
     connection.rollback()
-    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    command.upgrade(config, verify_storage.CORE097_MIGRATION)
     connection.commit()
     after, after_fks = corrections_rows(connection)
     assert len(after) == 80 and set(after) - set(before) == verify_storage.CORE097_TABLES
-    projection = verify_storage.legacy_v11_report(after, after_fks, current_migration=verify_storage.CURRENT_MIGRATION,
+    projection = verify_storage.legacy_v11_report(after, after_fks, current_migration=verify_storage.CORE097_MIGRATION,
         verified_artifacts=len(before["artifacts"]), verified_source_secrets=len(before["external_connection_versions"]),
         verified_delivery_secrets=len(before["delivery_destination_versions"]))
     assert projection["tables"] == hashes and projection["validated_relationships"] == relationships
-    physical = validate_physical_schema(connection, Base.metadata)
+    core097_metadata = metadata_before_additions(Base.metadata, verify_storage.CORE098_TABLES, verify_storage.CORE098_DEFAULTS)
+    physical = validate_physical_schema(connection, core097_metadata)
     assert physical["tables"] == 80
     for name, field, value in (("acquisition_occurrences", "reason_message", "New diagnostic evidence"),
                               ("jobs", "document_reference_id", "new-reference")):
@@ -509,7 +510,7 @@ def verify_core097_preservation(connection, config) -> dict:
     assert verify_storage.validate_relationships(restored, restored_fks) == relationships
     assert validate_physical_schema(connection, historical_metadata) == historical_physical
     connection.rollback()
-    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    command.upgrade(config, verify_storage.CORE097_MIGRATION)
     connection.commit()
     final, final_fks = corrections_rows(connection)
     previous, previous_fks = verify_storage.project_core097_upgrade(final, final_fks)
@@ -519,6 +520,89 @@ def verify_core097_preservation(connection, config) -> dict:
         "tables_after": 80, "exact_historical_projection": "PASS", "roundtrip": "PASS", "new_activity_rejected": True,
         "historical_physical_schema": historical_physical, "physical_schema": physical,
         "historical_document_extraction_preserved": True, "historical_occurrence_and_jobs_preserved": True}
+
+
+def verify_core098_preservation(connection, config) -> dict:
+    """Prove populated 0027→0028 preservation and reject loss of IDP evidence."""
+    from copy import deepcopy
+
+    import sqlalchemy as sa
+    import verify_storage
+    from alembic import command
+    from physical_schema_guard import metadata_before_additions, validate_physical_schema
+
+    from trackvance.db import Base
+
+    connection.rollback()
+    command.downgrade(config, verify_storage.CORE097_MIGRATION)
+    connection.commit()
+    before, before_fks = corrections_rows(connection)
+    assert len(before) == 80 and before["document_originals"] and before["document_extractions"]
+    hashes = verify_storage._table_hashes(before)
+    relationships = verify_storage.validate_relationships(before, before_fks)
+    historical_metadata = metadata_before_additions(Base.metadata, verify_storage.CORE098_TABLES, verify_storage.CORE098_DEFAULTS)
+    historical_physical = validate_physical_schema(connection, historical_metadata)
+    assert historical_physical["tables"] == 80
+    connection.rollback()
+    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    connection.commit()
+    after, after_fks = corrections_rows(connection)
+    assert len(after) == 81 and set(after) - set(before) == verify_storage.CORE098_TABLES
+    projection = verify_storage.legacy_v12_report(after, after_fks, current_migration=verify_storage.CURRENT_MIGRATION,
+        verified_artifacts=len(before["artifacts"]), verified_source_secrets=len(before["external_connection_versions"]),
+        verified_delivery_secrets=len(before["delivery_destination_versions"]))
+    assert projection["tables"] == hashes and projection["validated_relationships"] == relationships
+    physical = validate_physical_schema(connection, Base.metadata)
+    assert physical["tables"] == 81
+    snapshot = {"provider": "TESSERACT_LEGACY", "configuration_version": 0,
+        "scope": "ORGANIZATION", "family_id": None}
+    for field, value in (("engine_snapshot", snapshot), ("engine_snapshot_hash", "a" * 64),
+                         ("processing_phase", "EXTRACTION")):
+        changed = deepcopy(after)
+        changed["document_originals"][0][field] = value
+        try:
+            verify_storage.project_core098_upgrade(changed, after_fks)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("New 0.9.8 provider evidence was silently projected away")
+    metadata = sa.MetaData()
+    metadata.reflect(bind=connection)
+    originals = metadata.tables["document_originals"]
+    identity = after["document_originals"][0]["id"]
+    connection.execute(originals.update().where(originals.c.id == identity).values(
+        engine_snapshot=snapshot, engine_snapshot_hash=verify_storage._canonical_hash(snapshot), processing_phase="EXTRACTION"))
+    connection.commit()
+    try:
+        command.downgrade(config, verify_storage.CORE097_MIGRATION)
+    except RuntimeError as error:
+        assert "DOCUMENT_IDP_EVIDENCE_PRESERVATION" in str(error)
+        connection.rollback()
+    else:
+        raise AssertionError("The downgrade discarded a frozen inference provider")
+    assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == verify_storage.CURRENT_MIGRATION
+    persisted = connection.execute(sa.select(originals).where(originals.c.id == identity)).mappings().one()
+    assert persisted["engine_snapshot"] == snapshot and persisted["engine_snapshot_hash"] == verify_storage._canonical_hash(snapshot)
+    connection.execute(originals.update().where(originals.c.id == identity).values(
+        engine_snapshot=sa.null(), engine_snapshot_hash=None, processing_phase=None))
+    connection.commit()
+    command.downgrade(config, verify_storage.CORE097_MIGRATION)
+    connection.commit()
+    restored, restored_fks = corrections_rows(connection)
+    assert verify_storage._table_hashes(restored) == hashes
+    assert verify_storage.validate_relationships(restored, restored_fks) == relationships
+    assert validate_physical_schema(connection, historical_metadata) == historical_physical
+    connection.rollback()
+    command.upgrade(config, verify_storage.CURRENT_MIGRATION)
+    connection.commit()
+    final, final_fks = corrections_rows(connection)
+    previous, previous_fks = verify_storage.project_core098_upgrade(final, final_fks)
+    assert verify_storage._table_hashes(previous) == hashes
+    assert verify_storage.validate_relationships(previous, previous_fks) == relationships
+    return {"status": "PASS", "source_version": "0.9.7", "target_version": "0.9.8", "tables_before": 80,
+        "tables_after": 81, "exact_historical_projection": "PASS", "roundtrip": "PASS", "new_activity_rejected": True,
+        "downgrade_with_snapshot_rejected": True, "historical_physical_schema": historical_physical,
+        "physical_schema": physical, "historical_document_extraction_preserved": True}
 
 
 def seed_delivery_baseline(connection, legacy_ids: dict[str, str]) -> None:
@@ -768,7 +852,7 @@ def check() -> dict:
                 "acquisition_source_revisions", "acquisition_occurrences",
                 "document_families", "document_templates", "document_originals", "document_extractions",
                 "document_batches", "document_batch_members", "document_publication_claims",
-                "document_references", "document_drafts", "document_builder_tests",
+                "document_references", "document_drafts", "document_builder_tests", "document_engine_settings",
                 "version_comparisons",
             }
             for name, historical in identity_rows.items():
@@ -847,6 +931,7 @@ def check() -> dict:
             core090 = verify_core090_preservation(connection, config)
             core095 = verify_core095_preservation(connection, config)
             core097 = verify_core097_preservation(connection, config)
+            core098 = verify_core098_preservation(connection, config)
         return {"status": "PASS", "historical_tables_preserved": len(tables),
                 "actor_backfill": "PASS", "model_parity": "PASS", "roundtrip": "PASS",
                 "0008_0016_roundtrip": "PASS", "0012_0016_preservation": "PASS",
@@ -856,7 +941,7 @@ def check() -> dict:
                 "0008_delivery_lineage_edges_preserved": 8,
                 "0015_0017_preservation": corrections,
                 "0016_0017_preservation": catalog, "0017_0019_preservation": people, "0019_0022_preservation": core090, "0022_0025_preservation": core095,
-                "0025_0027_preservation": core097}
+                "0025_0027_preservation": core097, "0027_0028_preservation": core098}
     finally:
         if test_engine is not None:
             test_engine.dispose()

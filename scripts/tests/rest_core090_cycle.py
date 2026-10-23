@@ -827,7 +827,7 @@ def certify(api_url, receiver_url, rows, evidence, timeout, *, core095=False, co
         report["duration_seconds"] = time.monotonic() - started
         report["finished_at"] = datetime.now(UTC).isoformat()
         usage = resource.getrusage(resource.RUSAGE_SELF)
-        report["runner"] = {"identity": "rest_core090_cycle", "implementation": "0.9.7" if core097 else "0.9.5" if core095 else "0.9.0", "max_rss_kib": usage.ru_maxrss,
+        report["runner"] = {"identity": "rest_core090_cycle", "implementation": "0.9.8" if core097 else "0.9.5" if core095 else "0.9.0", "max_rss_kib": usage.ru_maxrss,
             "cpu_seconds": usage.ru_utime + usage.ru_stime - cpu_started.ru_utime - cpu_started.ru_stime}
         evidence_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps({"result": report["result"], "rows": rows, "duration_seconds": report["duration_seconds"], "evidence": str(evidence_path)}), flush=True)
