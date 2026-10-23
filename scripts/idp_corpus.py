@@ -17,6 +17,7 @@ import statistics
 import tempfile
 import threading
 import time
+import tomllib
 import unicodedata
 import zipfile
 from collections import Counter
@@ -54,6 +55,30 @@ def save(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def implementation_record(repository, source_sha=None):
+    """Hash actual readable code/lock bytes; a caller-declared SHA is not OCI proof."""
+    if source_sha is not None and not re.fullmatch(r"[a-f0-9]{40}", source_sha):
+        raise ValueError("IDP_IMPLEMENTATION_FULL_SOURCE_SHA_REQUIRED")
+    repository = repository.resolve()
+    paths = sorted({*repository.joinpath("backend/src").rglob("*.py"),
+        *(repository / name for name in ("backend/pyproject.toml", "backend/uv.lock",
+            "scripts/idp_corpus.py", "scripts/idp_benchmark.py"))}, key=lambda path: path.relative_to(repository).as_posix())
+    if not any(path.suffix == ".py" and path.is_relative_to(repository / "backend/src") for path in paths):
+        raise ValueError("IDP_IMPLEMENTATION_BACKEND_SOURCE_REQUIRED")
+    files = []
+    for path in paths:
+        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(repository):
+            raise ValueError("IDP_IMPLEMENTATION_REGULAR_SOURCE_FILES_REQUIRED")
+        raw = path.read_bytes()
+        files.append({"path": path.relative_to(repository).as_posix(), "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest()})
+    version = tomllib.loads((repository / "backend/pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    return {"schema_version": 1, "version": version, "source_sha": source_sha,
+        "source_sha_origin": "CALLER_DECLARED" if source_sha else "UNAVAILABLE",
+        "source_sha_verified_in_workload": False, "manifest_sha256": digest(files), "files": files,
+        "scope": "Actual backend/src Python, benchmark scripts, backend package manifest and dependency lock bytes; no OCI content certification."}
 
 
 def document_kind(doc):
@@ -241,6 +266,17 @@ def evaluate(payload, doc, definition, source_literals=None):
         "human_corrections": 0}
 
 
+def failed_evaluation(doc, definition, error):
+    """Preserve the original failure and all source denominators with raw defaults."""
+    return {"id": doc["id"], "family": doc["family_id"], "kind": document_kind(doc),
+        "status": "FAILED", "error_type": type(error).__name__, "error_code": getattr(error, "code", None),
+        "cells": len(doc["visible_header_fields"]) + len(doc["visible_line_fields"]) * doc["line_count"],
+        "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"],
+        "literal_expected_cells": doc["line_count"] * sum(field["name"] in PERCENTAGE_FIELDS
+            and field.get("logical_type", "STRING") == "STRING" and field["name"] in doc["visible_line_fields"]
+            for table in definition["tables"] if table["name"] == "detalle" for field in table["fields"])}
+
+
 def percentile(values, fraction):
     ordered = sorted(values)
     return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)] if ordered else None
@@ -290,6 +326,7 @@ def main():
     parser.add_argument("--definitions", type=Path)
     parser.add_argument("--source-literals", type=Path,
         help="Private independent original-source percentage literals, used only after inference by the evaluator.")
+    parser.add_argument("--source-sha", help="Optional caller-declared full 40-character lowercase Git SHA; not independently verified inside the workload.")
     parser.add_argument("--mode", choices=["inventory", "legacy", "paddle", "paddle-qwen"], default="inventory")
     parser.add_argument("--limit", type=int, choices=[5, 10, 25, 50, 100], default=100)
     parser.add_argument("--concurrency", type=int, choices=[1, 2, 3, 4], default=1)
@@ -297,22 +334,31 @@ def main():
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args()
     repository = Path(__file__).resolve().parents[1]
+    if args.source_sha is not None and not re.fullmatch(r"[a-f0-9]{40}", args.source_sha):
+        parser.error("--source-sha requires a full 40-character lowercase Git SHA.")
+    implementation = implementation_record(repository, args.source_sha)
     output = args.output.resolve()
     if output.is_relative_to(repository) and not output.is_relative_to(repository / ".codex-local"):
         parser.error("Corpus results must be private and outside tracked repository paths.")
     output.mkdir(parents=True, exist_ok=False)
     oracle, inventory = inspect_corpus(args.corpus)
+    inventory["implementation"] = implementation
     save(output / "inventory.json", inventory)
     if args.mode == "inventory":
-        print(json.dumps({k: v for k, v in inventory.items() if k != "sources"}))
+        print(json.dumps({**{k: v for k, v in inventory.items() if k not in {"sources", "implementation"}},
+            "implementation_version": implementation["version"], "implementation_manifest_sha256": implementation["manifest_sha256"]}))
         return
     if args.definitions is None:
         parser.error("--definitions is required; oracle values never configure inference.")
+    from trackvance import __version__ as runtime_version
     from trackvance.document_local_inference import run_local
     from trackvance.document_providers import EngineConfiguration
     from trackvance.document_quality import certify_candidate, quality_report
     from trackvance.document_worker import run_engine
     from trackvance.operations_common import OperationError
+    if runtime_version != implementation["version"]:
+        raise ValueError("IDP_IMPLEMENTATION_RUNTIME_VERSION_MISMATCH")
+    implementation["runtime_version"] = runtime_version
     definitions = json.loads(args.definitions.read_text(encoding="utf-8"))
     selected = [doc for doc in oracle["invoices"] if args.kind == "all" or document_kind(doc) == args.kind][:args.limit]
     configuration = EngineConfiguration(provider="PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
@@ -373,13 +419,7 @@ def main():
                 row.update(status="PROCESSED", auto_verified=quality["status"] == "AUTO_VERIFIED",
                     validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
-            row = {"id": doc["id"], "family": doc["family_id"], "kind": document_kind(doc),
-                "status": "FAILED", "error_type": type(error).__name__, "error_code": getattr(error, "code", None),
-                "cells": len(doc["visible_header_fields"]) + len(doc["visible_line_fields"]) * doc["line_count"],
-                "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"],
-                "literal_expected_cells": doc["line_count"] * sum(field["name"] in PERCENTAGE_FIELDS
-                    and field["logical_type"] == "STRING" and field["name"] in doc["visible_line_fields"]
-                    for table in definition["tables"] if table["name"] == "detalle" for field in table["fields"])}
+            row = failed_evaluation(doc, definition, error)
         row["latency_seconds"] = time.monotonic() - began
         row["processing_seconds"] = time.monotonic() - execution_began
         row["queue_seconds"] = execution_began - began
@@ -390,7 +430,9 @@ def main():
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         rows = list(pool.map(run, selected))
-    report = {"schema_version": 2, "metric_policy": METRIC_POLICY,
+    implementation["source_unchanged_during_run"] = (
+        implementation_record(repository, args.source_sha)["manifest_sha256"] == implementation["manifest_sha256"])
+    report = {"schema_version": 2, "metric_policy": METRIC_POLICY, "implementation": implementation,
         "source_literals_sha256": literal_evidence.get("sha256"),
         "mode": args.mode, "client_concurrency": args.concurrency,
         "gpu_effective_concurrency_limit": 1, "configuration": configuration,
@@ -403,7 +445,7 @@ def main():
         "statistical_limitation": "Fixed corpus, not a random population sample; percentages do not guarantee production accuracy."}
     save(output / "result.json", report)
     print(json.dumps(report["summary"]))
-    if report["summary"]["processed"] != len(selected):
+    if report["summary"]["processed"] != len(selected) or not implementation["source_unchanged_during_run"]:
         raise SystemExit(2)
 
 

@@ -1,6 +1,6 @@
 """Metric regression: no shifted rows, duplicate identities or numeric coercion."""
 import pytest
-from idp_corpus import evaluate, percentile, summarize
+from idp_corpus import evaluate, failed_evaluation, percentile, summarize
 
 
 def fixture():
@@ -53,6 +53,19 @@ def test_failed_documents_are_explicit_and_count_as_zero_accuracy():
     assert result["unprocessed_expected_rows"] == 3
     assert result["publication_measured"] is False
     assert result["pages"] == 4 and result["processed_pages"] == 0 and result["pages_per_minute"] == 0
+
+
+def test_raw_definition_default_does_not_mask_failure_or_drop_its_denominators():
+    _, document, definition, _ = fixture()
+    document["line_count"] = 2
+    del definition["tables"][0]["fields"][2]["logical_type"]
+    row = failed_evaluation(document, definition, TimeoutError("Real inference timeout"))
+    row["latency_seconds"] = 3
+    assert row["status"] == "FAILED" and row["error_type"] == "TimeoutError"
+    assert row["cells"] == 7 and row["expected_rows"] == row["literal_expected_cells"] == 2
+    summary = summarize([row], 3)
+    assert summary["cells"] == 7 and summary["literal_expected_cells"] == 2
+    assert summary["cell_accuracy"] == 0 and summary["unprocessed_expected_rows"] == 2
 
 
 def test_unknown_unique_row_is_extra_and_does_not_inflate_duplicate_count():

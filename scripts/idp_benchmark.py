@@ -20,6 +20,8 @@ import time
 import uuid
 from pathlib import Path
 
+from idp_corpus import digest, implementation_record
+
 PROTECTED = {"trackvance-codex", "trackvance-certification", "bikerwash"}
 SUPERVISE = r'''
 import json, os, pathlib, subprocess, sys
@@ -48,6 +50,33 @@ if control.exists():
 
 def command(args, timeout=10):
     return subprocess.run(args, capture_output=True, text=True, check=True, timeout=timeout).stdout
+
+
+def verified_host_source(repository):
+    """Verify host Git metadata separately from the workload's actual file hashes."""
+    repository = repository.resolve()
+    prefix = ["git", "-C", str(repository)]
+    root = Path(command([*prefix, "rev-parse", "--show-toplevel"]).strip()).resolve()
+    sha = command([*prefix, "rev-parse", "HEAD"]).strip()
+    dirty = command([*prefix, "status", "--porcelain", "--untracked-files=normal"]).strip()
+    if root != repository or not re.fullmatch(r"[a-f0-9]{40}", sha) or dirty:
+        raise ValueError("IDP_BENCHMARK_CLEAN_EXACT_HOST_GIT_SOURCE_REQUIRED")
+    return {"source_sha": sha, "clean_git_verified_on_host": True,
+        "implementation": implementation_record(repository, sha), "oci_content_certified": False}
+
+
+def workload_provenance(result_path, host_source):
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    actual = result["implementation"]
+    matched = (actual["source_sha"] == host_source["source_sha"]
+        and actual["source_sha_origin"] == "CALLER_DECLARED"
+        and actual["manifest_sha256"] == host_source["implementation"]["manifest_sha256"]
+        and digest(actual["files"]) == actual["manifest_sha256"]
+        and actual["files"] == host_source["implementation"]["files"]
+        and actual["runtime_version"] == actual["version"] == host_source["implementation"]["version"]
+        and actual.get("source_unchanged_during_run") is True)
+    return {"actual_implementation": actual, "actual_bytes_match_verified_host": matched,
+        "oci_content_certified": False}
 
 
 def inspect(identity):
@@ -229,6 +258,7 @@ def main():
             or args.minimum_vram_free_mib < 256 or not 60 <= args.maximum_gpu_temperature_c <= 90):
         parser.error("Matrix or safety limits exceed the bounded benchmark contract.")
     repository = Path(__file__).resolve().parents[1]
+    host_source = verified_host_source(repository)
     host_output = args.output.resolve()
     if host_output.is_relative_to(repository) and not host_output.is_relative_to(repository / ".codex-local"):
         parser.error("Potentially sensitive benchmark output must remain private.")
@@ -260,7 +290,8 @@ def main():
             workload = ["python", "/source/scripts/idp_corpus.py", "--corpus", args.corpus,
                 "--definitions", args.definitions, "--output", args.container_output.rstrip("/") + "/" + name,
                 "--mode", args.mode, "--kind", args.kind, "--limit", str(size),
-                "--concurrency", str(concurrency), "--timeout-seconds", str(args.timeout_seconds)]
+                "--concurrency", str(concurrency), "--timeout-seconds", str(args.timeout_seconds),
+                "--source-sha", host_source["source_sha"]]
             if args.source_literals:
                 workload.extend(["--source-literals", args.source_literals])
             samples, reason, control_errors = [], None, []
@@ -290,7 +321,8 @@ def main():
                     if process.poll() is None:
                         termination_confirmed, errors = terminate_workload(process, args.container_id, token)
                         control_errors.extend(errors)
-            report = {"schema_version": 1, "run": name, "requested_profile": args.profile,
+            report = {"schema_version": 2, "run": name, "requested_profile": args.profile,
+                "host_source": host_source,
                 "cold_warm_verified": False, "workload_container_id": args.container_id,
                 "workload_image_id": inventory[0]["Image"], "monitored_container_ids": identities,
                 "requested_sample_interval_seconds": 1, "interval_includes_sampler_overhead": True,
@@ -299,6 +331,19 @@ def main():
                 "abort_reason": reason, "status": "ABORTED" if reason else "PASS" if process.returncode == 0 else "FAIL",
                 "summary": summary(samples), "samples": samples}
             try:
+                proof = workload_provenance(host_output / name / "result.json", host_source)
+                unchanged_host = verified_host_source(repository) == host_source
+                report["implementation_provenance"] = {**proof, "host_source_unchanged": unchanged_host}
+                if not proof["actual_bytes_match_verified_host"] or not unchanged_host:
+                    report["implementation_error"] = "IDP_BENCHMARK_SOURCE_CHANGED_OR_MISMATCHED"
+                    if report["status"] == "PASS":
+                        report["status"] = "FAIL"
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                report.update(implementation_error="IDP_BENCHMARK_PROVENANCE_UNVERIFIED",
+                    implementation_error_type=type(error).__name__)
+                if report["status"] == "PASS":
+                    report["status"] = "FAIL"
+            try:
                 report["container_restart_deltas"] = {item["Id"]: inspect(item["Id"]).get("RestartCount", 0) - item.get("RestartCount", 0)
                     for item in inventory}
             except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -306,7 +351,8 @@ def main():
                 report["restart_verification_error"] = type(error).__name__
             (host_output / (name + ".telemetry.json")).write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
             runs.append({key: value for key, value in report.items() if key != "samples"})
-    (host_output / "benchmark-matrix.json").write_text(json.dumps({"runs": runs, "cancelled": cancelled,
+    (host_output / "benchmark-matrix.json").write_text(json.dumps({"schema_version": 2, "host_source": host_source,
+        "runs": runs, "cancelled": cancelled,
         "containers_preserved": True, "protected_containers_used_as_workload": False}, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     if cancelled or any(run["status"] != "PASS" for run in runs):
         raise SystemExit(2)
