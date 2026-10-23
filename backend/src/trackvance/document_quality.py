@@ -11,6 +11,7 @@ import json
 import math
 
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
+from .document_invoice_controls import invoice_arithmetic_fields
 from .document_schemas import structures
 from .operations_common import OperationError
 
@@ -153,6 +154,7 @@ def _arithmetic_fields(definition):
         covered.update((scope, name) for name in [rule["result"], *rule["terms"], *rule.get("subtract", [])])
     for rule in definition.get("cross_totals", []):
         covered.update(((rule["table"], rule["column"]), ("headers", rule["header"])))
+    covered.update(invoice_arithmetic_fields(definition))
     return covered
 
 

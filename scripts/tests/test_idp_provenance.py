@@ -81,3 +81,15 @@ def test_wrapper_rejects_same_declared_sha_with_different_actual_lock_bytes(sour
     result = source / "result.json"
     result.write_text(json.dumps({"implementation": actual}), encoding="utf-8")
     assert not idp_benchmark.workload_provenance(result, host)["actual_bytes_match_verified_host"]
+
+
+def test_retry_report_preserves_failed_attempt_and_existing_legacy_matrix(tmp_path):
+    legacy = tmp_path / "benchmark-matrix.json"
+    legacy.write_text('{"status":"FAIL","attempt":"legacy"}', encoding="utf-8")
+    first = idp_benchmark.save_matrix(tmp_path, {"status": "FAIL", "attempt": 1})
+    first_bytes = first.read_bytes()
+    second = idp_benchmark.save_matrix(tmp_path, {"status": "PASS", "attempt": 2})
+    assert first != second and first.read_bytes() == first_bytes
+    assert json.loads(first_bytes)["status"] == "FAIL"
+    assert json.loads(second.read_bytes())["status"] == "PASS"
+    assert json.loads(legacy.read_bytes()) == {"status": "FAIL", "attempt": "legacy"}

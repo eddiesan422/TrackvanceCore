@@ -79,10 +79,40 @@ El timeout efectivo admite 30–1800 segundos; no se garantiza throughput.
 `use_llm=false` mide Paddle solo y `use_llm=true` añade interpretación semántica.
 La ruta digital suficiente registra `inference_skipped=true`.
 La extracción por reglas se ejecuta antes del LLM; si ya es suficiente, Qwen se
-omite también después de Paddle. `max_retries` limita a cero, uno o dos intentos
-focalizados de hasta cuatro regiones. Esos recortes usan spotting y conservan
-los polígonos que realmente produce el modelo. Los resultados previos y los
-desacuerdos permanecen trazables y requieren resolución explícita.
+omite también después de Paddle. Cuando existen literales OCR pero falla su
+mapeo, Qwen los interpreta antes de iniciar recortes costosos. Los reintentos
+sólo atienden candidatos aún inválidos o en conflicto; la falta de prueba espacial
+de cobertura sigue bloqueando la aprobación aunque no justifique más inferencia.
+`max_retries` limita a cero, uno o dos intentos focalizados de hasta cuatro regiones.
+Se prefieren anclas observadas únicas dentro de los límites declarados; no se usa
+una página completa como sustituto de un campo sin localizar. La deduplicación
+compara los rectángulos expandidos y evita repetir recortes contenidos. Spotting
+conserva sus polígonos reales. Los resultados previos y los desacuerdos permanecen
+trazables y requieren resolución explícita.
+
+El contrato semántico `trackvance-semantic-098-v2` conserva nombres, etiquetas,
+alias, tipos, formatos numéricos/fechas y el grupo de captura literal declarado.
+Omite muestras de configuración, contextos del constructor, UUID y coordenadas
+de reglas; la evidencia mantiene texto, página, rectángulo real e índice. Nunca
+se recortan silenciosamente observaciones para ajustar el contexto. Ollama recibe
+`truncate=false` y `shift=false`; sólo se acepta `done=true`, `done_reason=stop`
+y conteos reales verificables. El contexto es de 1024–32768 tokens: la salida
+admite `min(8192, contexto/2)` y la entrada el resto. Los conteos finales se
+comprueban contra ambos límites; una respuesta incompleta o excesiva falla.
+Los bytes UTF-8 registrados no se presentan como tokens. Si el runtime no puede
+verificar el presupuesto, no se devuelve un candidato exitoso.
+
+Los errores HTTP usan códigos fijos para contexto, respuesta incompleta,
+integridad de modelos, runtime, cancelación, capacidad y timeout. No se transmiten
+stderr, rutas ni mensajes libres del modelo. Un fallo posterior a la lectura
+inicial conserva en `OperationError.details.local_inference` la etapa fallida y
+el candidato/historial para evidencia privada, con límite de ocho MiB; nunca se
+califica ese candidato parcial como ejecución correcta.
+
+`scripts/idp_benchmark.py` acepta `--context-tokens` (1024–32768, por defecto 8192)
+y `--max-retries` (0–2, por defecto 1). Ambos se propagan a la configuración
+congelada de cada ejecución. Cada invocación escribe un reporte exclusivo
+`benchmark-matrix-<uuid>.json` y conserva los intentos anteriores.
 
 Límites: original 32 MiB, 50 páginas, 20 millones de píxeles por página,
 respuesta 16 MiB, 100.000 observaciones, 10.000 filas por tabla. El gateway acepta

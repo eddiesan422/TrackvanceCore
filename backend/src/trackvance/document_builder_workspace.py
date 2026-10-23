@@ -47,7 +47,7 @@ def authority(db, user):
 
 def processor_identity():
     return {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in
-            ("document_engine.py", "document_template_builder_rules.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py")}
+            ("document_engine.py", "document_template_builder_rules.py", "document_invoice_controls.py", "document_invoice_schemas.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py")}
 
 
 def reference_dto(item, detail=False):
@@ -292,7 +292,7 @@ def review_test(db, item, reference_id, expected_version, changes, confirmed, re
         if cell["validity"] != "VALID":
             raise OperationError(422, "DOCUMENT_REVIEW_INVALID", "Resuelve los valores ausentes, inválidos o ambiguos antes de confirmarlos.")
         cell["reviewed"] = True
-    if definition.get("arithmetic"):
+    if definition.get("arithmetic") or definition.get("invoice_controls"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     if changes or confirmed:
         payload = invalidate_confirmations(payload, user.id, iso(utcnow()), reason)

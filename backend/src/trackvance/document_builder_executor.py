@@ -161,7 +161,12 @@ def _valid_result(result, request):
         if payload.get("business_period") != ({"field": period, **payload["fields"][period]} if period else None):
             return False
         arithmetic = definition.get("arithmetic", [])
-        if arithmetic:
+        if definition.get("invoice_controls"):
+            from .document_engine import arithmetic_checks
+
+            if payload.get("arithmetic") != arithmetic_checks(payload, definition):
+                return False
+        elif arithmetic:
             expected_checks = [(rule, index) for rule in arithmetic
                 for index in range(len(payload["tables"][rule["table"]]) if rule.get("table") else 1)]
             checks = payload.get("arithmetic")

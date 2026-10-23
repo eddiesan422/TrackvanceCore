@@ -1,6 +1,16 @@
 """Metric regression: no shifted rows, duplicate identities or numeric coercion."""
+import json
+from types import SimpleNamespace
+
 import pytest
-from idp_corpus import evaluate, failed_evaluation, percentile, select_documents, summarize
+from idp_corpus import (
+    evaluate,
+    failed_evaluation,
+    percentile,
+    preserve_failure_evidence,
+    select_documents,
+    summarize,
+)
 
 
 def fixture():
@@ -218,3 +228,31 @@ def test_independent_eligibility_never_claims_native_approval_under_either_polic
     assert not report["native_approval_measured"] and report["native_auto_approved"] is None
     assert report["auto_verified"] == 1 and report["deprecated_eligibility_aliases"]["auto_verified"] == "auto_approval_eligible"
     assert not report["publication_measured"]
+
+
+def test_failed_inference_retains_private_candidate_without_counting_its_values(tmp_path):
+    payload, document, definition, _ = fixture()
+    error = SimpleNamespace(details={"local_inference": {"failed_stage": "QWEN",
+        "initial_candidate": {"payload": payload}, "completed_stages": ["PADDLE"]}})
+    receipt = preserve_failure_evidence(tmp_path, document["id"], error)
+    assert receipt["retained"] and receipt["file"].endswith(".private.json")
+    assert json.loads((tmp_path / receipt["file"]).read_bytes())["initial_candidate"]["payload"] == payload
+    document["line_count"] = 2
+    row = failed_evaluation(document, definition, RuntimeError("synthetic failure"))
+    row["latency_seconds"] = 1
+    row["private_failure_evidence"] = receipt
+    report = summarize([row], 1)
+    assert report["processed"] == report["exact_cells"] == 0 and report["failed"] == 1
+    assert report["cells"] == 7 and report["expected_rows"] == 2
+
+
+def test_unrelated_errors_do_not_create_candidate_files(tmp_path):
+    assert preserve_failure_evidence(tmp_path, "original", ValueError("synthetic")) is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_invalid_private_diagnostics_cannot_hide_the_original_failure(tmp_path):
+    error = SimpleNamespace(details={"local_inference": {"bad": float("nan")}})
+    assert preserve_failure_evidence(tmp_path, "original", error) == {
+        "retained": False, "reason": "INVALID_PRIVATE_DIAGNOSTICS"}
+    assert list(tmp_path.iterdir()) == []

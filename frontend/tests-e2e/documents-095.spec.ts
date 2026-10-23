@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import type { RecordData as Json } from '../src/api/client'
@@ -35,19 +35,21 @@ test('IDP engine administration preserves organization settings and blocks prepa
   await expect(settings.getByRole('option', { name: /Textract/ })).toBeDisabled()
   await expect(settings.getByText(/Las llamadas reales a AWS permanecen bloqueadas/)).toBeVisible()
   await expect(settings.getByLabel('Modelo visual', { exact: true })).toHaveAttribute('readonly', '')
-  await settings.getByLabel('Tiempo máximo (segundos)', { exact: true }).fill('180')
+  await settings.getByLabel('Proveedor documental', { exact: true }).selectOption('TESSERACT_LEGACY')
+  for (const name of ['Tiempo máximo (segundos)', 'Contexto máximo (tokens)', 'Reintentos máximos', 'Trabajos simultáneos', 'Interpretación semántica cuando sea necesaria']) await expect(settings.getByLabel(name, { exact: true })).toBeDisabled()
+  await expect(settings.getByText(/Tesseract conserva su límite nativo de 120 segundos/)).toBeVisible()
   await settings.getByLabel('Motivo del cambio de motor', { exact: true }).fill('Isolated synthetic family configuration; preserve all existing jobs and organization defaults.')
   const response = page.waitForResponse(value => value.request().method() === 'PUT' && new URL(value.url()).pathname === '/api/v1/documents/engines')
   await settings.getByRole('button', { name: 'Guardar configuración auditada', exact: true }).click()
   expect((await response).status()).toBe(200)
   const saved = await call(page, csrf, `/documents/engines?family_id=${family.id}`)
   expect(saved.scope).toBe('FAMILY')
-  expect(saved.configuration).toEqual({ ...before.configuration, timeout_seconds: 180 })
+  expect(saved.configuration).toEqual({ ...before.configuration, provider: 'TESSERACT_LEGACY' })
   expect(saved.version).toBeGreaterThan(before.version)
   const organizationAfter = await call(page, csrf, '/documents/engines')
   expect(organizationAfter.configuration).toEqual(organization.configuration)
   expect(organizationAfter.version).toBe(organization.version)
-  await info.attach('document-idp-engine-098.json', { body: JSON.stringify({ nonce, family_id: family.id, version_before: before.version, version_after: saved.version, provider: saved.configuration.provider, organization_unchanged: true, cloud_execution_blocked: true, model_readonly: true }), contentType: 'application/json' })
+  await info.attach('document-idp-engine-098.json', { body: JSON.stringify({ nonce, family_id: family.id, version_before: before.version, version_after: saved.version, provider: saved.configuration.provider, organization_unchanged: true, cloud_execution_blocked: true, model_readonly: true, local_parameters_disabled_for_legacy: true, stored_local_parameters_preserved: true }), contentType: 'application/json' })
   await info.attach('document-idp-engine-098.png', { body: await settings.screenshot(), contentType: 'image/png' })
 })
 
@@ -277,6 +279,77 @@ async function prepareDelivery(page: Page, csrf: string, family: Json, initialBa
   const finalTemplate = await activateDraft(page, csrf, family, undefined, finalDraft)
   return { finalTemplate, bindings, automationIds, control: control! }
 }
+
+test('AUTO_VERIFIED browser publication preserves unreviewed evidence and one native dataset version', async ({ page }, info) => {
+  const started = Date.now()
+  const csrf = await login(page)
+  const nonce = randomBytes(6).toString('hex')
+  const family = await call(page, csrf, '/documents/families', { name: `D098 automatic ${nonce}`, description: 'Independent one-field digital automatic-publication fixture.' })
+  const before = await call(page, csrf, `/documents/engines?family_id=${family.id}`)
+  const configured = await page.request.put(`/api/v1/documents/engines?family_id=${family.id}`, {
+    headers: { 'X-CSRF-Token': csrf }, data: { expected_version: before.version,
+      configuration: { ...before.configuration, provider: 'TESSERACT_LEGACY', use_llm: false },
+      reason: 'Isolate the real legacy digital path for independent automatic native-publication verification.' },
+  })
+  expect(configured.status()).toBe(200)
+  const template = await activateDraft(page, csrf, family, {
+    fields: [{ name: 'invoice', label: 'Invoice', pattern: '([0-9]+)', logical_type: 'STRING', critical: true, business_key: true }],
+    tables: [], publication: { mode: 'INDIVIDUAL', review_policy: 'AUTO_VERIFIED', stop_after: 'PUBLICATION' },
+  })
+  expect(template.definition.publication.review_policy).toBe('AUTO_VERIFIED')
+  const original = await upload(page, `D098-auto-${nonce}.pdf`, '000001')
+  await expect.poll(async () => (await call(page, csrf, `/documents/originals/${original.id}`)).status,
+    { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe('PUBLISHED')
+  const automatic = await call(page, csrf, `/documents/originals/${original.id}`)
+  expect(automatic.phase).toBe('COMPLETE')
+  expect(automatic.quality.status).toBe('AUTO_VERIFIED')
+  expect(automatic.quality.checks.independent_extraction).toBe(true)
+  expect(automatic.extraction.reviewed).toBe(false)
+  expect(automatic.extraction.payload.fields.invoice).toEqual(expect.objectContaining({ value: '000001', validity: 'VALID', reviewed: false }))
+  expect(automatic.revisions).toHaveLength(1)
+  expect(automatic.publications).toHaveLength(1)
+  expect(automatic.engine_snapshot.provider).toBe('TESSERACT_LEGACY')
+  expect(automatic.engine_snapshot.snapshot_sha256).toMatch(/^[a-f0-9]{64}$/)
+  const source = await page.request.get(`/api/v1/documents/originals/${original.id}/file`)
+  expect(source.status()).toBe(200)
+  expect(createHash('sha256').update(await source.body()).digest('hex')).toBe(original.sha256)
+  await page.goto(`/documents/families/${family.id}?document=${original.id}`)
+  const dialog = page.getByRole('dialog', { name: original.filename, exact: true })
+  await expect(dialog.getByText('Aprobación automática verificada', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('checkbox', { name: 'Confirmar valor', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Siguiente incidencia (0)', exact: true })).toBeDisabled()
+  await expect(dialog.getByLabel('Valor headers.0.invoice', { exact: true })).toHaveValue('000001')
+  await dialog.getByRole('button', { name: 'invoice', exact: true }).click()
+  await expect(dialog.locator('.document-origin-region')).toBeVisible()
+  await expect.poll(() => dialog.locator('.document-source img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+  await expect(dialog.getByRole('link', { name: 'Abrir PDF original', exact: true })).toHaveAttribute('href', `/api/v1/documents/originals/${original.id}/file`)
+  await dialog.getByRole('button', { name: 'Cerrar ventana', exact: true }).click()
+  const populated = await call(page, csrf, `/documents/families/${family.id}`)
+  const versionId = automatic.publications[0].versions.headers
+  const dataset = await call(page, csrf, `/datasets/${populated.output_datasets.headers}`)
+  expect(dataset.versions).toHaveLength(1)
+  expect(dataset.versions[0].id).toBe(versionId)
+  const profile = await call(page, csrf, `/dataset-versions/${versionId}/profile`)
+  expect(profile.row_count).toBe(1)
+  expect(profile.sample.map((row: Json) => row.invoice)).toEqual(['000001'])
+  expect(profile.ingestion_metadata.document_publication).toEqual(expect.objectContaining({ family_id: family.id, scope: 'PUBLICATION_BATCH_ONLY', automatic_processing_allowed: false, automatic_delivery_allowed: false }))
+  await page.goto(`/datasets/${dataset.id}?version=${versionId}`)
+  await expect(page.getByRole('heading', { name: `${family.name} · headers`, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Muestra de datos', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '000001', exact: true })).toBeVisible()
+  const duplicateResponse = await page.request.post(`/api/v1/documents/families/${family.id}/originals`, {
+    headers: { 'X-CSRF-Token': csrf }, multipart: { files: { name: `D098-auto-repeat-${nonce}.pdf`, mimeType: 'application/pdf', buffer: knownPdf('000001') } },
+  })
+  expect(duplicateResponse.status()).toBe(200)
+  expect((await duplicateResponse.json()).items[0]).toEqual(expect.objectContaining({ status: 'DUPLICATE_FILE', duplicate_of_id: original.id }))
+  expect((await call(page, csrf, `/datasets/${dataset.id}`)).versions).toHaveLength(1)
+  expect((await call(page, csrf, `/documents/originals/${original.id}`)).publications).toEqual(automatic.publications)
+  await info.attach('document-auto-verified-098.json', { body: JSON.stringify({ nonce, family_id: family.id, document_id: original.id,
+    template_id: template.id, extraction_id: automatic.extraction.id, engine_provider: automatic.engine_snapshot.provider,
+    engine_snapshot_sha256: automatic.engine_snapshot.snapshot_sha256, quality: automatic.quality, human_reviewed: false,
+    native_dataset_id: dataset.id, native_version_id: versionId, exact_rows: 1, duplicate_publication: false,
+    original_source_sha256: original.sha256, automatic_delivery_allowed: false, elapsed_seconds: (Date.now() - started) / 1000 }), contentType: 'application/json' })
+})
 
 test('document browser individual flow → exact native approved output → verified Delivery receiver', async ({ page, browser }, info) => {
   const started = Date.now()

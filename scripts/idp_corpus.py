@@ -57,6 +57,25 @@ def save(path, value):
     temporary.replace(path)
 
 
+def preserve_failure_evidence(output, identity, error):
+    """Private diagnostics never become successful extraction or oracle input."""
+    details = getattr(error, "details", None)
+    if not isinstance(details, dict) or not isinstance(details.get("local_inference"), dict):
+        return None
+    try:
+        raw = json.dumps(details["local_inference"], ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError):
+        return {"retained": False, "reason": "INVALID_PRIVATE_DIAGNOSTICS"}
+    if len(raw) > 16 * 1024**2:
+        return {"retained": False, "reason": "PRIVATE_DIAGNOSTIC_LIMIT", "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest()}
+    path = output / (identity + ".failed-candidate.private.json")
+    with path.open("xb") as stream:
+        stream.write(raw)
+    return {"retained": True, "file": path.name, "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest()}
+
+
 def implementation_record(repository, source_sha=None):
     """Hash actual readable code/lock bytes; a caller-declared SHA is not OCI proof."""
     if source_sha is not None and not re.fullmatch(r"[a-f0-9]{40}", source_sha):
@@ -370,7 +389,11 @@ def main():
     parser.add_argument("--kind", choices=["all", "digital", "scanned"], default="all")
     parser.add_argument("--sampling", choices=["balanced", "sequential"], default="balanced")
     parser.add_argument("--timeout-seconds", type=int, default=300)
+    parser.add_argument("--context-tokens", type=int, default=8192)
+    parser.add_argument("--max-retries", type=int, choices=[0, 1, 2], default=1)
     args = parser.parse_args()
+    if not 30 <= args.timeout_seconds <= 1800 or not 1024 <= args.context_tokens <= 32768:
+        parser.error("Inference timeout/context exceed the bounded engine configuration.")
     repository = Path(__file__).resolve().parents[1]
     if args.source_sha is not None and not re.fullmatch(r"[a-f0-9]{40}", args.source_sha):
         parser.error("--source-sha requires a full 40-character lowercase Git SHA.")
@@ -400,7 +423,8 @@ def main():
     definitions = json.loads(args.definitions.read_text(encoding="utf-8"))
     selected = select_documents(oracle["invoices"], args.limit, args.kind, args.sampling)
     configuration = EngineConfiguration(provider="PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
-        timeout_seconds=args.timeout_seconds, max_parallel_jobs=args.concurrency).model_dump()
+        timeout_seconds=args.timeout_seconds, max_parallel_jobs=args.concurrency,
+        context_tokens=args.context_tokens, max_retries=args.max_retries).model_dump()
     began = time.monotonic()
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stopped.set())
@@ -458,6 +482,9 @@ def main():
                     validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
             row = failed_evaluation(doc, definition, error)
+            evidence = preserve_failure_evidence(output, doc["id"], error)
+            if evidence is not None:
+                row["private_failure_evidence"] = evidence
         row["latency_seconds"] = time.monotonic() - began
         row["processing_seconds"] = time.monotonic() - execution_began
         row["queue_seconds"] = execution_began - began

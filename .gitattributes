@@ -1,1 +1,2 @@
 *.pdf binary
+deploy/idp/requirements.lock text eol=lf

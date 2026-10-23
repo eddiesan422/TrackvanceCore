@@ -37,8 +37,13 @@ _rules_spec = importlib.util.spec_from_file_location("document_visual_rules", Pa
 assert _rules_spec and _rules_spec.loader
 _visual_rules = importlib.util.module_from_spec(_rules_spec)
 _rules_spec.loader.exec_module(_visual_rules)
+_invoice_spec = importlib.util.spec_from_file_location("document_invoice_controls", Path(__file__).with_name("document_invoice_controls.py"))
+assert _invoice_spec and _invoice_spec.loader
+_invoice_rules = importlib.util.module_from_spec(_invoice_spec)
+sys.modules[_invoice_spec.name] = _invoice_rules
+_invoice_spec.loader.exec_module(_invoice_rules)
 PROCESSOR_HASHES = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                   for name in ("document_engine.py", "document_template_builder_rules.py")}
+                   for name in ("document_engine.py", "document_template_builder_rules.py", "document_invoice_controls.py")}
 
 
 def confine(folder: Path):
@@ -418,6 +423,7 @@ def arithmetic_checks(payload, definition):
             except (KeyError, ValueError, InvalidOperation):
                 result["status"] = "NOT_EVALUATED"
             checks.append(result)
+    checks.extend(_invoice_rules.invoice_checks(payload, definition))
     return checks
 
 
@@ -544,7 +550,7 @@ def extract(lines, definition, page_geometry=None):
             "business_period": {"field": period_field, **fields[period_field]} if period_field else None}
     if page_geometry is not None:
         payload["page_geometry"] = {page: dict(size) for page, size in page_geometry.items()}
-    if definition.get("arithmetic"):
+    if definition.get("arithmetic") or definition.get("invoice_controls"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     if definition.get("cross_totals"):
         payload["cross_totals"] = cross_table_checks(payload, definition)

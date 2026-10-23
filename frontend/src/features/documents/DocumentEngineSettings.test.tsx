@@ -9,7 +9,7 @@ vi.mock('../../api/client', async importOriginal => ({ ...await importOriginal<t
 const configuration = { provider: 'TESSERACT_LEGACY', paddle_model: 'PaddleOCR-VL-1.6', llm_model: 'qwen3.5:9b-q4_K_M', prompt_version: 'idp098-v1', timeout_seconds: 120, context_tokens: 4096, max_retries: 1, max_parallel_jobs: 1, use_llm: true }
 const result = { configuration, version: 3, scope: 'ORGANIZATION', family_id: null, can_configure: true, providers: [
   { id: 'TESSERACT_LEGACY', name: 'Tesseract compatible', status: 'AVAILABLE', available: true, execution_enabled: true, model: 'Tesseract CPU' },
-  { id: 'PADDLE_QWEN_LOCAL', name: 'Paddle + Qwen local', status: 'UNAVAILABLE', available: false, execution_enabled: true, model: 'PaddleOCR-VL-1.6 + Qwen3.5', reason: 'Servicios locales sin conexión' },
+  { id: 'PADDLE_QWEN_LOCAL', name: 'Paddle + Qwen local', status: 'UNAVAILABLE', available: false, execution_enabled: false, model: 'PaddleOCR-VL-1.6 + Qwen3.5', reason: 'Servicios locales sin conexión' },
   { id: 'AWS_TEXTRACT', name: 'Amazon Textract', status: 'PREPARED', available: false, execution_enabled: false, model: 'AnalyzeExpense', reason: 'Habilitación real bloqueada' },
 ] }
 
@@ -26,16 +26,24 @@ describe('Document engine configuration', () => {
     expect(screen.getByRole('option', { name: /Amazon Textract/ })).toBeDisabled()
     expect(screen.getByText(/Las llamadas reales a AWS permanecen bloqueadas/)).toBeVisible()
     expect(screen.getByLabelText('Modelo semántico')).toHaveAttribute('readonly')
+    for (const name of ['Tiempo máximo (segundos)', 'Contexto máximo (tokens)', 'Reintentos máximos', 'Trabajos simultáneos', 'Interpretación semántica cuando sea necesaria']) expect(screen.getByLabelText(name)).toBeDisabled()
+    expect(screen.getByText(/Tesseract conserva su límite nativo de 120 segundos/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Guardar configuración auditada' })).toBeDisabled()
   })
 
   it('sends the exact optimistic version, configuration and audit reason for a family override', async () => {
     const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...result, providers: result.providers.map(provider => provider.id === 'PADDLE_QWEN_LOCAL' ? { ...provider, status: 'AVAILABLE', available: true, execution_enabled: true } : provider) })
     renderApp(<DocumentEngineSettings familyId="family-1"/>, { permissions: ['documents:read', 'documents:configure'] })
     await screen.findByLabelText('Proveedor documental')
     await user.selectOptions(screen.getByLabelText('Proveedor documental'), 'PADDLE_QWEN_LOCAL')
+    for (const name of ['Tiempo máximo (segundos)', 'Contexto máximo (tokens)', 'Reintentos máximos', 'Trabajos simultáneos', 'Interpretación semántica cuando sea necesaria']) expect(screen.getByLabelText(name)).toBeEnabled()
     await user.clear(screen.getByLabelText('Tiempo máximo (segundos)'))
     await user.type(screen.getByLabelText('Tiempo máximo (segundos)'), '180')
+    await user.selectOptions(screen.getByLabelText('Proveedor documental'), 'TESSERACT_LEGACY')
+    expect(screen.getByLabelText('Tiempo máximo (segundos)')).toBeDisabled()
+    expect(screen.getByLabelText('Tiempo máximo (segundos)')).toHaveValue(180)
+    await user.selectOptions(screen.getByLabelText('Proveedor documental'), 'PADDLE_QWEN_LOCAL')
     await user.type(screen.getByLabelText('Motivo del cambio de motor'), ' Validated local model selection ')
     await user.click(screen.getByRole('button', { name: 'Guardar configuración auditada' }))
     await waitFor(() => expect(api).toHaveBeenCalledWith('/documents/engines?family_id=family-1', {

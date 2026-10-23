@@ -227,6 +227,14 @@ def safety_reason(value, args):
     return None
 
 
+def save_matrix(host_output, report):
+    """Each invocation preserves an exclusive report; retries never replace history."""
+    path = host_output / ("benchmark-matrix-" + uuid.uuid4().hex + ".json")
+    with path.open("x", encoding="utf-8") as stream:
+        stream.write(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--container-id", required=True)
@@ -244,6 +252,8 @@ def main():
     parser.add_argument("--sampling", choices=["balanced", "sequential"], default="balanced")
     parser.add_argument("--profile", choices=["COLD_REQUESTED", "WARM_REQUESTED", "UNSPECIFIED"], default="UNSPECIFIED")
     parser.add_argument("--timeout-seconds", type=int, default=300)
+    parser.add_argument("--context-tokens", type=int, default=8192)
+    parser.add_argument("--max-retries", type=int, choices=[0, 1, 2], default=1)
     parser.add_argument("--max-total-documents", type=int, default=100)
     parser.add_argument("--minimum-host-free-mib", type=int, default=2048)
     parser.add_argument("--minimum-vram-free-mib", type=int, default=512)
@@ -255,7 +265,8 @@ def main():
             or len(set(sizes)) != len(sizes) or len(set(concurrencies)) != len(concurrencies)
             or not 1 <= args.max_total_documents <= 5000
             or sum(sizes) * len(concurrencies) > args.max_total_documents
-            or not 30 <= args.timeout_seconds <= 1800 or args.minimum_host_free_mib < 1024
+            or not 30 <= args.timeout_seconds <= 1800 or not 1024 <= args.context_tokens <= 32768
+            or args.minimum_host_free_mib < 1024
             or args.minimum_vram_free_mib < 256 or not 60 <= args.maximum_gpu_temperature_c <= 90):
         parser.error("Matrix or safety limits exceed the bounded benchmark contract.")
     repository = Path(__file__).resolve().parents[1]
@@ -270,8 +281,8 @@ def main():
     preflight = sample(identities)
     preflight_reason = safety_reason(preflight, args)
     if preflight_reason:
-        (host_output / "benchmark-preflight.json").write_text(json.dumps({"status": "BLOCKED",
-            "reason": preflight_reason, "sample": preflight}, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        path = save_matrix(host_output, {"status": "BLOCKED", "reason": preflight_reason, "sample": preflight})
+        print(json.dumps({"report": str(path), "status": "BLOCKED"}))
         raise SystemExit(2)
     cancelled = False
 
@@ -292,7 +303,8 @@ def main():
                 "--definitions", args.definitions, "--output", args.container_output.rstrip("/") + "/" + name,
                 "--mode", args.mode, "--kind", args.kind, "--limit", str(size),
                 "--concurrency", str(concurrency), "--timeout-seconds", str(args.timeout_seconds),
-                "--source-sha", host_source["source_sha"], "--sampling", args.sampling]
+                "--source-sha", host_source["source_sha"], "--sampling", args.sampling,
+                "--context-tokens", str(args.context_tokens), "--max-retries", str(args.max_retries)]
             if args.source_literals:
                 workload.extend(["--source-literals", args.source_literals])
             samples, reason, control_errors = [], None, []
@@ -352,9 +364,11 @@ def main():
                 report["restart_verification_error"] = type(error).__name__
             (host_output / (name + ".telemetry.json")).write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
             runs.append({key: value for key, value in report.items() if key != "samples"})
-    (host_output / "benchmark-matrix.json").write_text(json.dumps({"schema_version": 2, "host_source": host_source,
+    matrix_path = save_matrix(host_output, {"schema_version": 2, "host_source": host_source,
         "runs": runs, "cancelled": cancelled,
-        "containers_preserved": True, "protected_containers_used_as_workload": False}, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        "containers_preserved": True, "protected_containers_used_as_workload": False})
+    print(json.dumps({"report": str(matrix_path), "runs": len(runs),
+        "status": "PASS" if not cancelled and all(run["status"] == "PASS" for run in runs) else "FAIL"}))
     if cancelled or any(run["status"] != "PASS" for run in runs):
         raise SystemExit(2)
 

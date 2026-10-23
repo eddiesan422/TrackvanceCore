@@ -21505,6 +21505,16 @@
             "type": "array",
             "maxItems": 30,
             "title": "Cross Totals"
+          },
+          "invoice_controls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceControls"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -21561,6 +21571,16 @@
             "type": "array",
             "maxItems": 30,
             "title": "Cross Totals"
+          },
+          "invoice_controls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceControls"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -22642,6 +22662,210 @@
           "starts_at"
         ],
         "title": "IntakeScheduleSettings"
+      },
+      "InvoiceControls": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Table"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Unit Price"
+          },
+          "discount_percent": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Discount Percent"
+          },
+          "tax_percent": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Tax Percent"
+          },
+          "line_net": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Line Net"
+          },
+          "headers": {
+            "$ref": "#/components/schemas/InvoiceHeaders"
+          },
+          "rounding_scope": {
+            "type": "string",
+            "enum": [
+              "ROW",
+              "AGGREGATE"
+            ],
+            "title": "Rounding Scope",
+            "default": "ROW"
+          },
+          "rounding_mode": {
+            "type": "string",
+            "const": "ROUND_HALF_UP",
+            "title": "Rounding Mode",
+            "default": "ROUND_HALF_UP"
+          },
+          "scale": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 0.0,
+            "title": "Scale",
+            "default": 2
+          },
+          "tolerance": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,12})?$",
+            "title": "Tolerance",
+            "default": "0.01"
+          },
+          "percentage_decimal_separator": {
+            "type": "string",
+            "enum": [
+              ".",
+              ","
+            ],
+            "title": "Percentage Decimal Separator",
+            "default": "."
+          },
+          "string_percentage_suffix": {
+            "type": "string",
+            "enum": [
+              "REQUIRED",
+              "OPTIONAL"
+            ],
+            "title": "String Percentage Suffix",
+            "default": "REQUIRED"
+          },
+          "discount_header_sign": {
+            "type": "string",
+            "enum": [
+              "POSITIVE_DEDUCTION",
+              "NEGATIVE_DEDUCTION"
+            ],
+            "title": "Discount Header Sign",
+            "default": "POSITIVE_DEDUCTION"
+          },
+          "advance_header_sign": {
+            "type": "string",
+            "enum": [
+              "POSITIVE_DEDUCTION",
+              "NEGATIVE_DEDUCTION"
+            ],
+            "title": "Advance Header Sign",
+            "default": "POSITIVE_DEDUCTION"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "table",
+          "quantity",
+          "unit_price",
+          "discount_percent",
+          "tax_percent",
+          "line_net",
+          "headers"
+        ],
+        "title": "InvoiceControls"
+      },
+      "InvoiceHeaders": {
+        "properties": {
+          "gross_subtotal": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Gross Subtotal"
+          },
+          "discount_total": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Discount Total"
+          },
+          "net_base": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Net Base"
+          },
+          "exempt_base": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Exempt Base"
+          },
+          "tax_totals": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceTaxTotal"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Tax Totals"
+          },
+          "invoice_total": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Invoice Total"
+          },
+          "advance": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Advance"
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Balance"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "gross_subtotal",
+          "discount_total",
+          "net_base",
+          "exempt_base",
+          "invoice_total",
+          "advance",
+          "balance"
+        ],
+        "title": "InvoiceHeaders"
+      },
+      "InvoiceTaxTotal": {
+        "properties": {
+          "rate": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "title": "Rate"
+          },
+          "field": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Field"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rate",
+          "field"
+        ],
+        "title": "InvoiceTaxTotal"
       },
       "KeyNormalization": {
         "properties": {

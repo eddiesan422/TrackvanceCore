@@ -44,7 +44,7 @@ def post(endpoint, path, body=None, length=None):
 
 def test_unknown_paths_and_control_bodies_rejected_before_read(endpoint):
     assert post(endpoint, "/untrusted", length=100_000_000)[0] == 404
-    assert post(endpoint, "/cancel", length=1025)[0] == 422
+    assert post(endpoint, "/cancel", length=1025) == (413, {"error": "REQUEST_LIMIT"})
 
 
 def test_full_queue_does_not_buffer_request_body(gateway, endpoint):
@@ -116,7 +116,7 @@ def test_interpretation_exposes_actual_ollama_metrics_and_loaded_prompt(gateway,
 
     def chat(identity, body, timeout):
         calls.append(body)
-        return {**metrics, "message": {"content": '{"headers": []}'}}
+        return {**metrics, "done": True, "done_reason": "stop", "message": {"content": '{"headers": []}'}}
 
     monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
     monkeypatch.setattr(gateway, "stream_chat", chat)
@@ -124,12 +124,18 @@ def test_interpretation_exposes_actual_ollama_metrics_and_loaded_prompt(gateway,
     status, result = post(endpoint, "/interpret", interpretation_body(gateway))
     assert status == 200
     assert calls[0]["messages"][0]["content"] == gateway.PROMPT
+    assert calls[0]["truncate"] is False and calls[0]["shift"] is False
+    assert calls[0]["options"]["num_ctx"] == 8192
+    assert calls[0]["options"]["num_predict"] == 4096
     engine = result["engine"]
     assert engine["ollama_metrics"] == metrics
     assert engine["phases"]["llm_seconds"] == 9.1235
     assert engine["prompt_sha256"] == gateway.STARTUP_HASHES["prompt-v1.txt"]
     assert engine["model_lock_sha256"] == gateway.STARTUP_HASHES["models.lock.json"]
     assert engine["runtime_provenance"] == {"gateway": gateway.startup_provenance()}
+    assert engine["context_budget"]["verified"] is True
+    assert engine["context_budget"]["input_tokens_observed"] == 123
+    assert engine["context_budget"]["output_tokens_observed"] == 456
     assert result["semantics"] == {"headers": []}
 
 
@@ -142,12 +148,13 @@ def test_invalid_ollama_observations_remain_unavailable(gateway, value):
 @pytest.mark.parametrize("metrics,expected_seconds", [({}, None), ({"total_duration": 0}, 0.0)])
 def test_missing_duration_is_distinct_from_observed_zero(gateway, endpoint, monkeypatch, metrics, expected_seconds):
     monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
-    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: {**metrics, "message": {"content": "{}"}})
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: {**metrics, "done": True,
+        "done_reason": "stop", "prompt_eval_count": 12, "eval_count": 7, "message": {"content": "{}"}})
     status, result = post(endpoint, "/interpret", interpretation_body(gateway))
     assert status == 200
     assert result["engine"]["phases"]["llm_seconds"] == expected_seconds
     assert result["engine"]["ollama_metrics"]["load_duration"] is None
-    assert result["engine"]["ollama_metrics"]["prompt_eval_count"] is None
+    assert result["engine"]["ollama_metrics"]["prompt_eval_count"] == 12
 
 
 def test_no_qwen_invocation_does_not_create_metrics(gateway, endpoint, monkeypatch):
@@ -287,7 +294,7 @@ def test_cancel_closes_upstream_before_response_headers(gateway, endpoint, monke
     assert post(endpoint, "/cancel", {"request_id": identity}) == (200, {"cancelled": True})
     thread.join(timeout=2)
     assert not thread.is_alive()
-    assert result[0][0] == 422
+    assert result[0] == (422, {"error": "CANCELLED"})
     assert not gateway.GATE.locked()
     assert not gateway.UPSTREAM
 
@@ -343,3 +350,69 @@ def test_ingress_has_fixed_upstream_and_rejects_unknown_routes(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_compact_semantic_metadata_keeps_literal_rules_without_parser_samples(gateway):
+    definition = {"id": "private-uuid", "fields": [{"name": "discount", "label": "Discount", "logical_type": "DECIMAL",
+        "decimal_separator": ",", "thousands_separator": ".", "numeric_fragments": True, "decimal_format_explicit": True,
+        "visual": {"page": 1, "region": [0, 0, 1, 1], "label": "Less", "label_aliases": ["Discount amount"],
+                   "sample_value": "do not send", "context": "private context", "value_pattern": r"-\s*([0-9,.]+)"}}],
+        "tables": [{"name": "detail", "row_pattern": "do not send", "fields": [{"name": "sku", "logical_type": "STRING"}],
+                    "visual": {"header_labels": ["Code"], "header_label_aliases": [["Item"]], "region": [0, 0, 1, 1]}}]}
+    compact = gateway.compact_definition(definition)
+    text = json.dumps(compact)
+    assert compact["semantic_definition_version"] == "trackvance-semantic-098-v2"
+    field = compact["fields"][0]
+    assert field["numeric_fragments"] is True and field["decimal_format_explicit"] is True
+    assert field["literal_capture_pattern"] == r"-\s*([0-9,.]+)"
+    assert field["labels"] == ["Less", "Discount amount"]
+    assert compact["tables"][0]["fields"][0]["labels"] == ["Code", "Item"]
+    assert all(value not in text for value in ("private-uuid", "do not send", "private context", "region", "row_pattern"))
+    observations = [{"text": "Less -12,30", "page": 1, "region": [.1, .2, .3, .4], "words": ["large ignored geometry"]}]
+    content = json.loads(gateway.semantic_content(definition, observations))
+    assert content["evidence"] == [{"text": "Less -12,30", "page": 1, "region": [.1, .2, .3, .4], "evidence_id": 0}]
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ({"done": True, "done_reason": "length", "prompt_eval_count": 12, "eval_count": 4096}, "LLM_INCOMPLETE"),
+    ({"done_reason": "stop", "prompt_eval_count": 12, "eval_count": 7}, "LLM_INCOMPLETE"),
+    ({"done": True, "done_reason": "stop", "eval_count": 7}, "LLM_BUDGET_UNVERIFIED"),
+    ({"done": True, "done_reason": "stop", "prompt_eval_count": 4097, "eval_count": 7}, "LLM_CONTEXT_LIMIT"),
+    ({"done": True, "done_reason": "stop", "prompt_eval_count": 12, "eval_count": 4097}, "LLM_CONTEXT_LIMIT")])
+def test_incomplete_or_unverifiable_context_never_returns_success(gateway, endpoint, monkeypatch, reply, expected):
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: {**reply, "message": {"content": "{}"}})
+    assert post(endpoint, "/interpret", interpretation_body(gateway)) == (422, {"error": expected})
+    assert gateway.OBSERVED_INFERENCE["qwen"] is False
+
+
+@pytest.mark.parametrize("context", [0, 1023, 32769, True, "8192", None])
+def test_invalid_context_configuration_is_not_silently_clamped(gateway, endpoint, monkeypatch, context):
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: pytest.fail("invalid budget must not invoke a model"))
+    body = interpretation_body(gateway)
+    body["configuration"]["context_tokens"] = context
+    assert post(endpoint, "/interpret", body) == (422, {"error": "LLM_CONTEXT_LIMIT"})
+
+
+@pytest.mark.parametrize("error,status,code", [
+    (ValueError("MODEL_INTEGRITY"), 503, "MODEL_INTEGRITY"),
+    (ValueError("PADDLE_FAILURE"), 422, "PADDLE_FAILURE"),
+    (ValueError("LLM_CONTEXT_LIMIT"), 422, "LLM_CONTEXT_LIMIT"),
+    (ValueError("document values /credentials/error.log"), 422, "INFERENCE_FAILED"),
+    (OSError("document values /credentials/error.log"), 422, "INFERENCE_FAILED"),
+    (TimeoutError("private timeout text"), 504, "INFERENCE_TIMEOUT")])
+def test_error_allowlist_never_echoes_exception_content(gateway, endpoint, monkeypatch, error, status, code):
+    def fail(self, body):
+        raise error
+
+    monkeypatch.setattr(gateway.Handler, "extract", fail)
+    assert post(endpoint, "/extract", {"request_id": "b" * 32, "configuration": {}}) == (status, {"error": code})
+    assert not gateway.GATE.locked()
+
+
+def test_upstream_context_diagnostics_are_normalized_without_echo(gateway):
+    assert gateway._llm_error(b'{"error":"the input length exceeds the context length"}') == "LLM_CONTEXT_LIMIT"
+    assert gateway._llm_error(b'{"error":"private model output /credentials"}') == "LLM_FAILURE"
+    assert gateway._llm_error(b"private /credentials", 413) == "LLM_CONTEXT_LIMIT"
+    assert gateway._llm_error(b"x" * 4097) == "LLM_FAILURE"

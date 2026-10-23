@@ -13,6 +13,8 @@ from pydantic import (
     model_validator,
 )
 
+from .document_invoice_controls import validated_invoice_controls
+from .document_invoice_schemas import InvoiceControls
 from .document_template_builder_schemas import VisualFieldRule, VisualTableRule
 
 
@@ -124,12 +126,15 @@ class DocumentDefinition(BaseModel):
     business_period_field: str | None = None
     arithmetic: list["DocumentArithmetic"] = Field(default_factory=list, max_length=50)
     cross_totals: list["DocumentCrossTotal"] = Field(default_factory=list, max_length=30)
+    invoice_controls: InvoiceControls | None = None
 
     @model_serializer(mode="wrap")
     def preserve_historical_definition(self, handler):
         result = handler(self)
         if not self.cross_totals:
             result.pop("cross_totals", None)
+        if self.invoice_controls is None:
+            result.pop("invoice_controls", None)
         return result
 
     @model_validator(mode="after")
@@ -156,6 +161,10 @@ class DocumentDefinition(BaseModel):
             header = next((item for item in self.fields if item.name == total_check.header), None)
             if not column or not header or column.logical_type not in {"DECIMAL", "INT64"} or header.logical_type not in {"DECIMAL", "INT64"}:
                 raise ValueError("El total cruzado requiere una columna de detalle y una cabecera numéricas declaradas.")
+        if self.invoice_controls is not None:
+            validated_invoice_controls({"invoice_controls": self.invoice_controls.model_dump(mode="json"),
+                "fields": [field.model_dump(mode="json") for field in self.fields],
+                "tables": [table.model_dump(mode="json") for table in self.tables]})
         return self
 
 

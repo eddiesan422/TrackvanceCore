@@ -47,6 +47,63 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 VERIFIED_SIGNATURES = None
 RUNTIME = {"ready": False, "kernel_probe": "PENDING", "model_inference": False}
 OBSERVED_INFERENCE = {"paddle": False, "qwen": False}
+ERROR_STATUS = {
+    "GPU_RUNTIME_UNAVAILABLE": 503, "MODEL_INTEGRITY": 503, "LLM_MODEL_INTEGRITY": 503,
+    "MODEL_NOT_PINNED": 422, "DOCUMENT_FORMAT": 422, "SOURCE_INTEGRITY": 422,
+    "REGION_LIMIT": 422, "OBSERVATION_INTEGRITY": 422, "LLM_CONTEXT_LIMIT": 422,
+    "LLM_INCOMPLETE": 422, "LLM_BUDGET_UNVERIFIED": 422, "CANCELLED": 422,
+    "PADDLE_FAILURE": 422, "PADDLE_RESULT_LIMIT": 422, "LLM_FAILURE": 422,
+    "LLM_RESPONSE_LIMIT": 422, "INFERENCE_TIMEOUT": 504, "REQUEST_LIMIT": 413,
+    "REQUEST_ID": 422, "ADMISSION_CONFIGURATION": 422, "DUPLICATE_REQUEST": 422,
+}
+
+
+def safe_error(error, identity=None):
+    """Only exact fixed codes cross this boundary; never upstream text or paths."""
+    if identity in CANCELLED:
+        return 422, "CANCELLED"
+    if isinstance(error, (subprocess.TimeoutExpired, TimeoutError)):
+        return 504, "INFERENCE_TIMEOUT"
+    code = str(error) if isinstance(error, (ValueError, TypeError)) else "INFERENCE_FAILED"
+    return ERROR_STATUS.get(code, 422), code if code in ERROR_STATUS else "INFERENCE_FAILED"
+
+
+def compact_definition(definition):
+    """Versioned semantic metadata; parser samples and coordinates never reach Qwen."""
+    def field(item, extra_labels=()):
+        result = {key: item[key] for key in ("name", "label", "logical_type", "required", "section",
+            "date_format", "decimal_separator", "thousands_separator", "currency_symbols",
+            "numeric_fragments", "decimal_format_explicit") if key in item}
+        visual = item.get("visual") or {}
+        labels = [*extra_labels, visual.get("label", ""), *visual.get("label_aliases", [])]
+        for alternative in item.get("visual_alternatives", []):
+            labels.extend([alternative.get("label", ""), *alternative.get("label_aliases", [])])
+        aliases = list(dict.fromkeys(value for value in labels if value and value != item.get("label")))
+        if aliases:
+            result["labels"] = aliases
+        if visual.get("value_pattern"):
+            result["literal_capture_pattern"] = visual["value_pattern"]
+            result["literal_capture_group"] = 1
+        return result
+
+    tables = []
+    for table in definition.get("tables", []):
+        visual = table.get("visual") or {}
+        labels, aliases = visual.get("header_labels", []), visual.get("header_label_aliases") or []
+        columns = [field(item, ([labels[index]] if index < len(labels) else [])
+                         + (aliases[index] if index < len(aliases) else [])) for index, item in enumerate(table["fields"])]
+        tables.append({"name": table["name"], "fields": columns})
+    return {"semantic_definition_version": "trackvance-semantic-098-v2",
+            "fields": [field(item) for item in definition.get("fields", [])], "tables": tables}
+
+
+def semantic_content(definition, observations):
+    evidence = []
+    for index, line in enumerate(observations):
+        if not isinstance(line, dict) or not isinstance(line.get("text"), str):
+            raise TypeError("OBSERVATION_INTEGRITY")
+        evidence.append({**{key: line[key] for key in ("text", "page", "region")}, "evidence_id": index})
+    return json.dumps({"definition": compact_definition(definition), "evidence": evidence}, ensure_ascii=False)
 
 
 def startup_provenance():
@@ -130,7 +187,10 @@ def stream_chat(identity, body, timeout):
                            headers={"Content-Type": "application/json"})
         response = connection.getresponse()
         if response.status != 200:
-            raise ValueError("LLM_FAILURE")
+            # Inspect a bounded upstream diagnostic only to select a fixed code.
+            # The model's message, document text and paths are never returned.
+            raw_error = response.read(4097)
+            raise ValueError(_llm_error(raw_error, response.status))
         while True:
             if identity in CANCELLED:
                 raise ValueError("CANCELLED")
@@ -141,7 +201,7 @@ def stream_chat(identity, body, timeout):
                 raise ValueError("LLM_RESPONSE_LIMIT")
             item = json.loads(raw)
             if item.get("error"):
-                raise ValueError("LLM_FAILURE")
+                raise ValueError(_llm_error(raw, item.get("status")))
             content = item.get("message", {}).get("content", "")
             length += len(content.encode())
             if length > 16 * 1024**2:
@@ -156,6 +216,17 @@ def stream_chat(identity, body, timeout):
     finally:
         UPSTREAM.pop(identity, None)
         connection.close()
+
+
+def _llm_error(raw, status=None):
+    try:
+        value = json.loads(raw) if len(raw) <= 4096 else {}
+        message = value.get("error", "") if isinstance(value, dict) else ""
+    except (ValueError, UnicodeError):
+        message = ""
+    context_errors = {"the input length exceeds the context length", "input length exceeds maximum context length",
+                      "input exceeds maximum context length", "input after truncation exceeds maximum context length"}
+    return "LLM_CONTEXT_LIMIT" if status == 413 or message in context_errors else "LLM_FAILURE"
 
 
 def health():
@@ -226,6 +297,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 raise ValueError("REQUEST_LIMIT")
             body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise TypeError("REQUEST_ID")
             identity = body.get("request_id", "")
             if not re.fullmatch(r"[a-f0-9]{32}", identity):
                 raise ValueError("REQUEST_ID")
@@ -247,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path not in {"/extract", "/interpret", "/refine"}:
                 self.send(404, {"error": "NOT_FOUND"})
                 return
+            if not isinstance(body.get("configuration"), dict):
+                raise TypeError("ADMISSION_CONFIGURATION")
             maximum = body["configuration"].get("max_parallel_jobs", 1)
             if type(maximum) is not int or not 1 <= maximum <= 4:
                 raise ValueError("ADMISSION_CONFIGURATION")
@@ -264,9 +339,10 @@ class Handler(BaseHTTPRequestHandler):
             STATES[identity] = {"phase": "QUEUED", "progress": 15}
             while not GATE.acquire(timeout=.2):
                 if identity in CANCELLED or time.monotonic() - queued >= queue_timeout:
+                    code = "CANCELLED" if identity in CANCELLED else "GPU_QUEUE_TIMEOUT"
                     CANCELLED.discard(identity)
                     STATES.pop(identity, None)
-                    self.send(503, {"error": "GPU_QUEUE_CANCELLED_OR_TIMEOUT"})
+                    self.send(422, {"error": code})
                     return
             try:
                 if identity in CANCELLED:
@@ -274,12 +350,19 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
                 result["engine"]["queue_seconds"] = round(time.monotonic() - queued - result["engine"]["elapsed_seconds"], 4)
                 self.send(200, result)
+            except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
+                    urllib.error.URLError, http.client.HTTPException):
+                if identity in CANCELLED:
+                    raise ValueError("CANCELLED") from None
+                raise
             finally:
                 CANCELLED.discard(identity)
                 STATES.pop(identity, None)
                 GATE.release()
-        except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, urllib.error.URLError, http.client.HTTPException):
-            self.send(422, {"error": "INFERENCE_FAILED"})
+        except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
+                urllib.error.URLError, http.client.HTTPException) as error:
+            status, code = safe_error(error, identity)
+            self.send(status, {"error": code})
         finally:
             if slot:
                 REQUEST_SLOTS.release()
@@ -361,23 +444,39 @@ class Handler(BaseHTTPRequestHandler):
             remaining = max(1, timeout - (time.monotonic() - started))
             STATES[body["request_id"]] = {"phase": "QWEN", "progress": 65}
             prompt = PROMPT
-            content = json.dumps({"definition": body["definition"], "evidence": [dict(line, evidence_id=index) for index, line in enumerate(result["lines"])]}, ensure_ascii=False)
-            if len(content) > 120000:
+            content = semantic_content(body["definition"], result["lines"])
+            content_bytes = len(content.encode())
+            if content_bytes > 120000:
                 raise ValueError("LLM_CONTEXT_LIMIT")
+            context = config.get("context_tokens", 8192)
+            if type(context) is not int or not 1024 <= context <= 32768:
+                raise ValueError("LLM_CONTEXT_LIMIT")
+            output_budget = min(8192, context // 2)
+            input_budget = context - output_budget
             reply = stream_chat(body["request_id"], {"model": LOCK["qwen"]["model"], "think": False,
-                "keep_alive": 0, "format": body["semantic_schema"],
+                "keep_alive": 0, "format": body["semantic_schema"], "truncate": False, "shift": False,
                 "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": content}],
-                "options": {"num_ctx": min(32768, max(1024, int(config.get("context_tokens", 8192)))),
-                            "num_predict": 8192, "temperature": 0, "seed": 98}}, timeout=remaining)
+                "options": {"num_ctx": context, "num_predict": output_budget, "temperature": 0, "seed": 98}}, timeout=remaining)
             if body["request_id"] in CANCELLED:
                 raise ValueError("CANCELLED")
+            if reply.get("done") is not True or reply.get("done_reason") != "stop":
+                raise ValueError("LLM_INCOMPLETE")
+            metrics = ollama_metrics(reply)
+            if metrics["prompt_eval_count"] is None or metrics["eval_count"] is None:
+                raise ValueError("LLM_BUDGET_UNVERIFIED")
+            if metrics["prompt_eval_count"] > input_budget or metrics["eval_count"] > output_budget:
+                raise ValueError("LLM_CONTEXT_LIMIT")
             result["semantics"] = json.loads(reply["message"]["content"])
             OBSERVED_INFERENCE["qwen"] = True
             result["engine"]["llm_model"] = LOCK["qwen"]["model"]
             result["engine"]["llm_manifest_sha256"] = LOCK["qwen"]["manifest_sha256"]
             result["engine"]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
-            metrics = ollama_metrics(reply)
             result["engine"]["ollama_metrics"] = metrics
+            result["engine"]["semantic_definition_version"] = "trackvance-semantic-098-v2"
+            result["engine"]["context_budget"] = {"context_tokens": context, "input_tokens": input_budget,
+                "output_tokens": output_budget, "input_utf8_bytes": len(prompt.encode()) + content_bytes,
+                "input_tokens_observed": metrics["prompt_eval_count"], "output_tokens_observed": metrics["eval_count"],
+                "truncate": False, "shift": False, "done_reason": reply["done_reason"], "verified": True}
             result["engine"]["phases"]["llm_seconds"] = (
                 round(metrics["total_duration"] / 1e9, 4) if metrics["total_duration"] is not None else None)
         result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)

@@ -373,7 +373,7 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
             cell["reviewed"] = True
             if cell.get("alternatives"):
                 cell["alternatives"] = []
-    if definition.get("arithmetic"):
+    if definition.get("arithmetic") or definition.get("invoice_controls"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     if definition.get("cross_totals"):
         payload["cross_totals"] = cross_table_checks(payload, definition)

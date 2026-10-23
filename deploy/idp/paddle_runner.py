@@ -169,6 +169,8 @@ def main():
         geometries[str(page_number)] = {"width": source_width, "height": source_height, "unit": "PIXEL"}
         raw_pages.append(raw)
         spotting = raw.get("spotting_res")
+        if regions and not isinstance(spotting, dict):
+            raise ValueError("DOCUMENT_SPOTTING_UNAVAILABLE")
         if regions and isinstance(spotting, dict):
             words = []
             for text, polygon in zip(spotting.get("rec_texts", []), spotting.get("rec_polys", []), strict=True):
