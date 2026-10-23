@@ -576,7 +576,8 @@ def execute_stage(args, directory, value, values, sha):
                         dockerfile = "backend/Dockerfile" if role == "backend" else "deploy/docker/frontend.Dockerfile"
                         command(["docker", "buildx", "build", "--builder", "default", "--load", "--pull=false", "--progress", "plain",
                             "--label", "org.opencontainers.image.revision=" + sha, "--label", "org.opencontainers.image.version=" + source_version(sha),
-                            "--label", OWNER_LABEL + "=" + PROJECT, "--label", PERMANENT_LABEL + "=true", "--tag", tag, "--file", dockerfile, "."], environment=environment, timeout=1200)
+                            "--label", OWNER_LABEL + "=" + PROJECT, "--label", "io.trackvance.image-purpose=codex-component",
+                            "--tag", tag, "--file", dockerfile, "."], environment=environment, timeout=1200)
                         identifier = command(["docker", "image", "inspect", "--format", "{{.Id}}", tag], environment=environment)
                         image_sha = sha
                     require(re.fullmatch(r"sha256:[a-f0-9]{64}", identifier), "EXACT_NEW_COMPONENT_IMAGE_REQUIRED")

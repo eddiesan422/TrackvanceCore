@@ -1,6 +1,6 @@
 """Metric regression: no shifted rows, duplicate identities or numeric coercion."""
 import pytest
-from idp_corpus import evaluate, failed_evaluation, percentile, summarize
+from idp_corpus import evaluate, failed_evaluation, percentile, select_documents, summarize
 
 
 def fixture():
@@ -20,6 +20,26 @@ def fixture():
         "code_observed_in_source": code, "descuento_pct": value}
         for index, code, value in [(1, "A", "0%"), (2, "B", "5%")]]
     return payload, document, definition, literals
+
+
+def test_small_balanced_samples_keep_original_identities_and_cover_every_family():
+    documents = [{"id": f"{family}-{index:02}", "family_id": family,
+        "kind": "digital" if index < 10 else "escaneada", "expected": object()}
+        for family in ("F01", "F02", "F03", "F04", "F05") for index in range(20)]
+    small = select_documents(documents, 5)
+    assert {doc["family_id"] for doc in small} == {"F01", "F02", "F03", "F04", "F05"}
+    assert {doc["kind"] for doc in small} == {"digital", "escaneada"}
+    assert all(any(doc is original for original in documents) for doc in small)
+    whole = select_documents(documents, 100)
+    assert len(whole) == len({doc["id"] for doc in whole}) == 100
+    assert {doc["id"] for doc in whole} == {doc["id"] for doc in documents}
+    assert select_documents(list(reversed(documents)), 25) == select_documents(documents, 25)
+    scanned = select_documents(documents, 5, "scanned")
+    assert len({doc["family_id"] for doc in scanned}) == 5
+    assert all(doc["kind"] == "escaneada" for doc in scanned)
+    assert select_documents(documents, 5, sampling="sequential") == documents[:5]
+    with pytest.raises(ValueError, match="SAMPLE_EXCEEDS_AVAILABLE"):
+        select_documents(documents, 100, "scanned")
 
 
 def test_identity_accuracy_distinguishes_reordered_rows_from_wrong_values():

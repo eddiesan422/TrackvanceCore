@@ -264,6 +264,11 @@ def test_init_changed_web_bootstraps_reusing_backend_and_pg(fixture, monkeypatch
     assert value["images"]["web"]["id"] == NEW_WEB and value["images"]["postgres"]["id"] == IDS["postgres"]
     builds = [argv for argv in calls if argv[:3] == ["docker", "buildx", "build"]]
     assert len(builds) == 1 and "deploy/docker/frontend.Dockerfile" in builds[0] and "backend/Dockerfile" not in builds[0]
+    # Permanent ownership belongs to Compose containers, so this exact image can
+    # also be restored into a separately owned disposable verification project.
+    assert "io.trackvance.permanent=true" not in builds[0]
+    assert "io.trackvance.owner=trackvance-codex" in builds[0]
+    assert "io.trackvance.image-purpose=codex-component" in builds[0]
     assert list(directory.glob("operation-*.intent.json"))
 
 

@@ -241,6 +241,7 @@ def main():
     parser.add_argument("--concurrencies", default="1")
     parser.add_argument("--mode", choices=["legacy", "paddle", "paddle-qwen"], default="paddle-qwen")
     parser.add_argument("--kind", choices=["all", "digital", "scanned"], default="all")
+    parser.add_argument("--sampling", choices=["balanced", "sequential"], default="balanced")
     parser.add_argument("--profile", choices=["COLD_REQUESTED", "WARM_REQUESTED", "UNSPECIFIED"], default="UNSPECIFIED")
     parser.add_argument("--timeout-seconds", type=int, default=300)
     parser.add_argument("--max-total-documents", type=int, default=100)
@@ -291,7 +292,7 @@ def main():
                 "--definitions", args.definitions, "--output", args.container_output.rstrip("/") + "/" + name,
                 "--mode", args.mode, "--kind", args.kind, "--limit", str(size),
                 "--concurrency", str(concurrency), "--timeout-seconds", str(args.timeout_seconds),
-                "--source-sha", host_source["source_sha"]]
+                "--source-sha", host_source["source_sha"], "--sampling", args.sampling]
             if args.source_literals:
                 workload.extend(["--source-literals", args.source_literals])
             samples, reason, control_errors = [], None, []

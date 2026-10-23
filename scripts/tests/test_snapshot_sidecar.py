@@ -53,6 +53,14 @@ def test_snapshot_transport_bounds_and_restores_ambient_mode_after_failure():
         pass
 
 
+def test_disposable_scope_requires_its_own_owner_and_rejects_inherited_permanent_marker():
+    api = source_api("trackvance-v090-test-restored-" + "d" * 12)
+    assert state._snapshot_sidecar_plan(api, 2048)["project"] == api["Config"]["Labels"][state.PROJECT_LABEL]
+    api["Config"]["Labels"]["io.trackvance.permanent"] = "true"
+    with pytest.raises(state.OperationError, match="DISPOSABLE_OWNER_INVALID"):
+        state._snapshot_sidecar_plan(api, 2048)
+
+
 @pytest.fixture
 def transport(monkeypatch, tmp_path):
     api = source_api()

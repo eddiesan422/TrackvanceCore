@@ -20,7 +20,7 @@ import time
 import tomllib
 import unicodedata
 import zipfile
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -83,6 +83,34 @@ def implementation_record(repository, source_sha=None):
 
 def document_kind(doc):
     return "scanned" if doc["kind"] in {"scanned", "escaneada"} else doc["kind"]
+
+
+def select_documents(documents, limit, kind="all", sampling="balanced"):
+    """Choose original identities by family/kind only, never expected cell values."""
+    eligible = [doc for doc in documents if kind == "all" or document_kind(doc) == kind]
+    if not 1 <= limit <= len(eligible):
+        raise ValueError("CORPUS_SAMPLE_EXCEEDS_AVAILABLE_DOCUMENTS")
+    if sampling == "sequential":
+        return eligible[:limit]
+    if sampling != "balanced" or any(document_kind(doc) not in {"digital", "scanned"} for doc in eligible):
+        raise ValueError("CORPUS_SAMPLE_POLICY_INVALID")
+    families = sorted({doc["family_id"] for doc in eligible})
+    queues = {(family, category): deque(sorted((doc for doc in eligible
+        if doc["family_id"] == family and document_kind(doc) == category), key=lambda doc: doc["id"]))
+        for family in families for category in ("digital", "scanned")}
+    selected, cycle = [], 0
+    while len(selected) < limit:
+        for index, family in enumerate(families):
+            first = ("digital", "scanned")[(cycle + index) % 2]
+            order = (first, "scanned" if first == "digital" else "digital")
+            for category in order:
+                if queues[family, category]:
+                    selected.append(queues[family, category].popleft())
+                    break
+            if len(selected) == limit:
+                break
+        cycle += 1
+    return selected
 
 
 def inspect_corpus(path):
@@ -340,6 +368,7 @@ def main():
     parser.add_argument("--limit", type=int, choices=[5, 10, 25, 50, 100], default=100)
     parser.add_argument("--concurrency", type=int, choices=[1, 2, 3, 4], default=1)
     parser.add_argument("--kind", choices=["all", "digital", "scanned"], default="all")
+    parser.add_argument("--sampling", choices=["balanced", "sequential"], default="balanced")
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args()
     repository = Path(__file__).resolve().parents[1]
@@ -369,7 +398,7 @@ def main():
         raise ValueError("IDP_IMPLEMENTATION_RUNTIME_VERSION_MISMATCH")
     implementation["runtime_version"] = runtime_version
     definitions = json.loads(args.definitions.read_text(encoding="utf-8"))
-    selected = [doc for doc in oracle["invoices"] if args.kind == "all" or document_kind(doc) == args.kind][:args.limit]
+    selected = select_documents(oracle["invoices"], args.limit, args.kind, args.sampling)
     configuration = EngineConfiguration(provider="PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
         timeout_seconds=args.timeout_seconds, max_parallel_jobs=args.concurrency).model_dump()
     began = time.monotonic()
@@ -443,7 +472,8 @@ def main():
         implementation_record(repository, args.source_sha)["manifest_sha256"] == implementation["manifest_sha256"])
     report = {"schema_version": 2, "metric_policy": METRIC_POLICY, "implementation": implementation,
         "source_literals_sha256": literal_evidence.get("sha256"),
-        "mode": args.mode, "client_concurrency": args.concurrency,
+        "mode": args.mode, "sampling": args.sampling, "selection_uses_expected_values": False,
+        "client_concurrency": args.concurrency,
         "gpu_effective_concurrency_limit": 1, "configuration": configuration,
         "definitions_sha256": digest(definitions), "oracle_sha256": inventory["oracle_sha256"],
         "summary": summarize(rows, time.monotonic() - began), "full_corpus": len(selected) == 100,
