@@ -21,7 +21,9 @@ from ci.common import load_manifest, profile_groups
 from ci.evidence import wrap_group
 from ci.failure_diagnostics import publish_failure
 
-DEADLINES = {"backend": 1200, "frontend": 600, "compose-critical": 1500,
+# Leave the unchanged full backend regression room for types and migration checks.
+# The outer backend job remains bounded at 30 minutes, including setup/cleanup.
+DEADLINES = {"backend": 1500, "frontend": 600, "compose-critical": 1500,
     "compose-functional": 1500, "connections-functional": 1500, "backup-basic": 1200,
     "catalog-reports-functional": 1500, "corrections-functional": 1800,
     "identity-sso": 1200, "connections": 1500, "delivery": 1800,

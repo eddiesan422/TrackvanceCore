@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,7 +33,7 @@ APP_ROOT = Path(__file__).resolve().parent
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
     "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
-    "document_semantic_fragments.py", "models.lock.json")}
+    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
@@ -41,21 +42,39 @@ PROMPTS = {"trackvance-idp-098-v1": PROMPT,
            "trackvance-idp-098-v2": STARTUP_FILES["prompt-v2.txt"].decode("utf-8")}
 
 
-class FrozenFragmentLoader(importlib.abc.SourceLoader):
+class FrozenSourceLoader(importlib.abc.SourceLoader):
     """Import only captured trusted module bytes, without rereading a mount."""
 
+    def __init__(self, filename):
+        self.filename = filename
+
     def get_filename(self, fullname):
-        return str(APP_ROOT / "document_semantic_fragments.py")
+        return str(APP_ROOT / self.filename)
 
     def get_data(self, path):
-        if path != self.get_filename("trackvance_idp_semantic_fragments"):
+        if path != self.get_filename(""):
             raise OSError("FROZEN_MODULE_PATH")
-        return STARTUP_FILES["document_semantic_fragments.py"]
+        return STARTUP_FILES[self.filename]
 
 
-FRAGMENT_SPEC = importlib.util.spec_from_loader("trackvance_idp_semantic_fragments", FrozenFragmentLoader())
-FRAGMENTS = importlib.util.module_from_spec(FRAGMENT_SPEC)
-FRAGMENT_SPEC.loader.exec_module(FRAGMENTS)
+FROZEN_PACKAGE = types.ModuleType("trackvance_idp_frozen")
+FROZEN_PACKAGE.__path__ = []
+sys.modules[FROZEN_PACKAGE.__name__] = FROZEN_PACKAGE
+
+
+def frozen_module(filename):
+    fullname = FROZEN_PACKAGE.__name__ + "." + filename.removesuffix(".py")
+    spec = importlib.util.spec_from_loader(fullname, FrozenSourceLoader(filename))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[fullname] = module
+    spec.loader.exec_module(module)
+    setattr(FROZEN_PACKAGE, filename.removesuffix(".py"), module)
+    return module
+
+
+FRAGMENTS = frozen_module("document_semantic_fragments.py")
+RULES = frozen_module("document_template_builder_rules.py")
+TABLES = frozen_module("document_literal_tables.py")
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
@@ -142,13 +161,14 @@ def semantic_targets(definition, targets):
     return {key: list(targets[key]) for key in ("fields", "tables")}
 
 
-def validate_fragment_selection(candidate, definition, targets, fragment_count):
+def validate_fragment_selection(candidate, definition, targets, fragment_count, *, allowed_ids=None):
     """V2 permits IDs only; unknown, invented, and non-target selections fail."""
     def cell(value, enabled):
         if not isinstance(value, dict) or set(value) != {"fragment_id"}:
             raise ValueError("LLM_SELECTION_INVALID")
         identity = value["fragment_id"]
-        if identity is not None and (not enabled or type(identity) is not int or not 0 <= identity < fragment_count):
+        if identity is not None and (not enabled or type(identity) is not int or not 0 <= identity < fragment_count
+                or allowed_ids is not None and identity not in allowed_ids):
             raise ValueError("LLM_SELECTION_INVALID")
 
     if not isinstance(candidate, dict) or set(candidate) != {"fields", "tables"}:
@@ -172,12 +192,19 @@ def validate_fragment_selection(candidate, definition, targets, fragment_count):
 
 
 def fragment_content(definition, observations, targets):
-    catalog = FRAGMENTS.build_catalog(observations)
+    selection = TABLES.prompt_catalog_view(observations, definition, targets)
+    catalog, view = selection["full_catalog"], selection["prompt_view"]
+    visible_observations = {fragment["evidence_id"] for fragment in view["fragments"]}
     content = json.dumps({"definition": compact_definition(definition), "semantic_targets": targets,
-        "fragment_catalog_version": catalog["version"], "fragment_catalog": [
+        "fragment_catalog_version": catalog["version"], "fragment_catalog_columns": ["fragment_id", "evidence_id", "text"],
+        "fragment_catalog": [
             [fragment["fragment_id"], fragment["evidence_id"], fragment["text"]]
-            for fragment in catalog["fragments"]]}, ensure_ascii=False)
-    return content, catalog
+            for fragment in view["fragments"]],
+        "observation_context": [{"evidence_id": index, **{key: source.get(key) for key in ("page", "region", "block_label")}}
+            for index, source in enumerate(observations) if index in visible_observations],
+        "fragment_prompt_view_sha256": view["sha256"],
+        "omitted_resolved_detail_observation_ids": view["omitted_detail_observation_ids"]}, ensure_ascii=False)
+    return content, catalog, view
 
 
 def startup_provenance():
@@ -543,9 +570,12 @@ class Handler(BaseHTTPRequestHandler):
             prompt = PROMPTS[config["prompt_version"]]
             catalog = None
             targets = None
+            view = None
             if config["prompt_version"] == "trackvance-idp-098-v2":
                 targets = semantic_targets(body["definition"], body.get("semantic_targets"))
-                content, catalog = fragment_content(body["definition"], result["lines"], targets)
+                content, catalog, view = fragment_content(body["definition"], result["lines"], targets)
+                if body.get("fragment_prompt_view_sha256", view["sha256"]) != view["sha256"]:
+                    raise ValueError("LLM_FRAGMENT_INTEGRITY")
             else:
                 content = semantic_content(body["definition"], result["lines"])
             content_bytes = len(content.encode())
@@ -571,9 +601,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("LLM_CONTEXT_LIMIT")
             selection = json.loads(reply["message"]["content"])
             if catalog is not None:
-                validate_fragment_selection(selection, body["definition"], targets, len(catalog["fragments"]))
+                validate_fragment_selection(selection, body["definition"], targets, len(catalog["fragments"]),
+                    allowed_ids={fragment["fragment_id"] for fragment in view["fragments"]})
                 result["fragment_catalog_sha256"] = catalog["sha256"]
                 result["fragment_catalog_version"] = catalog["version"]
+                result["fragment_prompt_view_sha256"] = view["sha256"]
             result["semantics"] = selection
             OBSERVED_INFERENCE["qwen"] = True
             result["engine"]["llm_model"] = LOCK["qwen"]["model"]
@@ -584,6 +616,8 @@ class Handler(BaseHTTPRequestHandler):
                 result["engine"]["fragment_catalog_sha256"] = catalog["sha256"]
                 result["engine"]["fragment_catalog_version"] = catalog["version"]
                 result["engine"]["fragment_count"] = len(catalog["fragments"])
+                result["engine"]["fragment_prompt_view"] = {key: view[key] for key in (
+                    "sha256", "full_fragment_count", "prompt_fragment_count", "omitted_detail_observation_ids")}
             result["engine"]["ollama_metrics"] = metrics
             result["engine"]["semantic_definition_version"] = "trackvance-semantic-098-v2"
             result["engine"]["context_budget"] = {"context_tokens": context, "input_tokens": input_budget,

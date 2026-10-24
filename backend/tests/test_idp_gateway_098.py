@@ -20,7 +20,8 @@ def gateway(tmp_path):
     for path in (root / "deploy/idp").iterdir():
         if path.is_file():
             shutil.copyfile(path, tmp_path / path.name)
-    shutil.copyfile(root / "backend/src/trackvance/document_semantic_fragments.py", tmp_path / "document_semantic_fragments.py")
+    for name in ("document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py"):
+        shutil.copyfile(root / "backend/src/trackvance" / name, tmp_path / name)
     spec = importlib.util.spec_from_file_location("idp_gateway_test", tmp_path / "server.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -174,6 +175,62 @@ def fragment_interpretation_body(gateway):
 def fragment_reply(selection):
     return {"done": True, "done_reason": "stop", "prompt_eval_count": 20, "eval_count": 10,
             "message": {"content": json.dumps(selection)}}
+
+
+def resolved_detail_body(gateway):
+    body = fragment_interpretation_body(gateway)
+    body["definition"]["tables"][0]["visual"] = {"header_labels": ["Concept"], "row_start": {"column": 0,
+        "segments": [{"alphabet": "ASCII_ALPHA", "minimum": 2, "maximum": 2},
+            {"alphabet": "ASCII_DIGIT", "minimum": 1, "maximum": 1}]}}
+    body["observations"] = [
+        {"text": "Invoice: source", "page": 1, "region": [0, 0, 1, .1], "method": "OCR"},
+        {"text": "Concept", "page": 1, "region": [0, .2, 1, .8], "method": "OCR", "block_label": "table"},
+        {"text": "AA-1", "page": 1, "region": [0, .2, 1, .8], "method": "OCR", "block_label": "table"}]
+    body["observations_sha256"] = hashlib.sha256(json.dumps(body["observations"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    body["semantic_targets"]["tables"] = []
+    return body
+
+
+def test_filtered_prompt_preserves_full_catalog_and_source_context(gateway):
+    body = resolved_detail_body(gateway)
+    content, catalog, view = gateway.fragment_content(body["definition"], body["observations"], body["semantic_targets"])
+    shown = json.loads(content)
+    assert catalog == gateway.FRAGMENTS.build_catalog(body["observations"])
+    assert view["omitted_detail_observation_ids"] == [1, 2]
+    assert shown["fragment_catalog_columns"] == ["fragment_id", "evidence_id", "text"]
+    assert {item[1] for item in shown["fragment_catalog"]} == {0}
+    assert shown["observation_context"] == [{"evidence_id": 0, "page": 1, "region": [0, 0, 1, .1], "block_label": None}]
+    assert shown["fragment_prompt_view_sha256"] == view["sha256"]
+
+
+def test_http_rejects_omitted_global_id_even_when_cell_is_a_target(gateway, endpoint, monkeypatch):
+    body = resolved_detail_body(gateway)
+    view = gateway.TABLES.prompt_catalog_view(body["observations"], body["definition"], body["semantic_targets"])["prompt_view"]
+    selection = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": view["omitted_fragment_ids"][0]}},
+        "tables": {"rows": []}}
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: fragment_reply(selection))
+    assert post(endpoint, "/interpret", body) == (422, {"error": "LLM_SELECTION_INVALID"})
+
+
+def test_prompt_view_hash_mismatch_fails_before_model_call(gateway, endpoint, monkeypatch):
+    body = resolved_detail_body(gateway)
+    body["fragment_prompt_view_sha256"] = "0" * 64
+    calls = []
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: calls.append(args))
+    assert post(endpoint, "/interpret", body) == (422, {"error": "LLM_FRAGMENT_INTEGRITY"})
+    assert not calls
+
+
+def test_literal_helpers_keep_captured_bytes_after_files_change(gateway, tmp_path):
+    body = resolved_detail_body(gateway)
+    expected = gateway.TABLES.map_candidates(body["observations"], body["definition"])
+    hashes = gateway.startup_provenance()
+    for name in ("document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py"):
+        (tmp_path / name).write_bytes(b"untrusted changed file after startup")
+    assert gateway.TABLES.map_candidates(body["observations"], body["definition"]) == expected
+    assert gateway.startup_provenance() == hashes
 
 
 def test_v2_interpretation_uses_catalog_and_returns_only_verifiable_source_ids(gateway, endpoint, monkeypatch):

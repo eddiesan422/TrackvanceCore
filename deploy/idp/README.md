@@ -46,6 +46,24 @@ previo exige `--runtime-volume <nombre-propio>` y etiquetas de propietario
 coincidentes; su recibo debe acreditar exactamente las dos capas esperadas.
 El instalador no inicia automáticamente servicios ni declara inferencia válida.
 
+Para copiar los modelos verificados a almacenamiento ext4 privado, añadir
+`--snapshot-models` al mismo comando de preparación. Siempre crea un volumen
+nuevo con identidad y finalidad propias; no reutiliza ni sobrescribe volúmenes
+de modelos. El helper usa Python base, usuario 65532, sin red ni GPU, raíz de
+sólo lectura, 512 MiB y una CPU. Comprueba espacio, una reserva de RAM de 3,25 GiB
+en Windows, inventario exacto de archivos/directorios, SHA-256 de origen y
+destino y estabilidad del descriptor de origen. El límite es 10 GiB/900 segundos.
+El recibo completo se publica atómicamente y vincula volumen, imagen, lock y
+archivos; incluye el directorio vacío que requiere el tmpfs de Ollama.
+Tras retirar el helper y comprobar que no queda un escritor, genera
+`models.ext4.override.json` y `model-snapshot-receipt.json` en la caché privada.
+Para usarlo, añadir `-f <runtime-privado>/models.ext4.override.json` al comando
+compose del paso 3. Los subdirectorios Paddle/layout/Ollama quedan sólo lectura;
+se conservan los originales y todas las verificaciones del gateway y del hijo.
+Omitir ese segundo archivo permite volver a los binds originales. El instalador
+conserva un volumen incompleto si falla y no realiza limpieza global. Esta
+ubicación no acredita una mejora de velocidad: requiere medición separada.
+
 La imagen oficial SM120 se conserva en el manifiesto como referencia fallida:
 dos descargas independientes devolvieron capas con SHA-256 distintos de los
 esperados. Nunca se ejecutó, no se omitió la verificación y no es el runtime del

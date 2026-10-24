@@ -1,2 +1,8 @@
 *.pdf binary
 deploy/idp/requirements.lock text eol=lf
+deploy/idp/*.py text eol=lf
+deploy/idp/*.json text eol=lf
+deploy/idp/*.txt text eol=lf
+deploy/idp/*.yml text eol=lf
+backend/src/trackvance/document_*.py text eol=lf
+scripts/idp_*.py text eol=lf

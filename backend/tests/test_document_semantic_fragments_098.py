@@ -44,6 +44,78 @@ def selection(catalog):
         "tables": {"items": [{"concept": {"fragment_id": identity("AA" + ESCAPED_LINE_BREAK + "Última milla")}}]}}
 
 
+def literal_fixture():
+    definition, payload = fixture()
+    definition["tables"][0]["visual"].update(header_labels=["Concept"], row_start={"column": 0,
+        "segments": [{"alphabet": "ASCII_ALPHA", "minimum": 2, "maximum": 2},
+            {"alphabet": "ASCII_DIGIT", "minimum": 1, "maximum": 1}]})
+    observations = [line("Invoice: 0001"), {**line("Concept"), "block_label": "table"},
+        {**line("AA-1" + ESCAPED_LINE_BREAK + "Printed source"), "block_label": "table"}]
+    payload["lines"] = observations
+    return definition, local._literal_candidate(payload, observations, definition)
+
+
+def test_client_rejects_globally_valid_fragment_omitted_from_actual_prompt():
+    definition, payload = literal_fixture()
+    catalog = build_catalog(payload["lines"])
+    targets = local.semantic_targets(payload, definition)
+    assert targets == {"fields": ["invoice"], "tables": []}
+    view = local.prompt_catalog_view(payload["lines"], definition, targets)["prompt_view"]
+    omitted = view["omitted_fragment_ids"][0]
+    candidate = {"fields": {"invoice": {"fragment_id": omitted}}, "tables": {"items": []}}
+    with pytest.raises(OperationError) as caught:
+        local.apply_fragment_semantics(payload, candidate, definition, payload["lines"], catalog, targets)
+    assert caught.value.code == "DOCUMENT_LLM_EVIDENCE_INVALID"
+    schema = local.fragment_schema(definition, catalog, targets,
+        allowed_fragment_ids=[item["fragment_id"] for item in view["fragments"]])
+    assert omitted not in schema["properties"]["fields"]["properties"]["invoice"]["properties"]["fragment_id"]["enum"]
+
+
+@pytest.mark.parametrize("corrupt_view", [False, True])
+def test_coordinator_keeps_literal_rows_and_binds_filtered_semantic_request(tmp_path, monkeypatch, corrupt_view):
+    definition, mapped = literal_fixture()
+    observations = mapped["lines"]
+    initial = copy.deepcopy(mapped)
+    initial["tables"]["items"] = []
+    source = tmp_path / "document.pdf"
+    source.write_bytes(b"synthetic literal candidate transport")
+    calls = []
+
+    def invoke(path, body, **kwargs):
+        calls.append(path)
+        if path == "/extract":
+            return {"source_sha256": body["source_sha256"], "lines": observations,
+                "engine": {"independent_row_coverage": False}}
+        assert path == "/interpret"
+        assert body["semantic_targets"] == {"fields": ["invoice"], "tables": []}
+        view = local.prompt_catalog_view(observations, definition, body["semantic_targets"])["prompt_view"]
+        assert body["fragment_prompt_view_sha256"] == view["sha256"]
+        actual_ids = [item["fragment_id"] for item in view["fragments"]]
+        assert body["semantic_schema"] == local.fragment_schema(definition, build_catalog(observations),
+            body["semantic_targets"], allowed_fragment_ids=actual_ids)
+        identity = next(item["fragment_id"] for item in view["fragments"] if item["text"] == "0001")
+        return {"source_sha256": body["source_sha256"], "observations_sha256": body["observations_sha256"],
+            "fragment_catalog_sha256": build_catalog(observations)["sha256"],
+            "fragment_catalog_version": build_catalog(observations)["version"],
+            "fragment_prompt_view_sha256": "0" * 64 if corrupt_view else view["sha256"],
+            "semantics": {"fields": {"invoice": {"fragment_id": identity}}, "tables": {"items": []}}, "engine": {}}
+
+    monkeypatch.setattr(local, "_invoke", invoke)
+    arguments = {"legacy_runner": lambda *args, **kwargs: {"payload": copy.deepcopy(initial), "engine": {}},
+        "check": lambda _: None}
+    configuration = {"prompt_version": local.PROMPT_VERSION, "max_retries": 0}
+    if corrupt_view:
+        with pytest.raises(OperationError) as caught:
+            local.run_local(source, definition, configuration, **arguments)
+        assert caught.value.code == "DOCUMENT_LLM_EVIDENCE_INVALID"
+    else:
+        result = local.run_local(source, definition, configuration, **arguments)
+        assert result["payload"]["tables"]["items"] == mapped["tables"]["items"]
+        assert result["payload"]["fields"]["invoice"]["value"] == "0001"
+        assert result["engine"]["independent_row_coverage"] is False
+    assert calls == ["/extract", "/interpret"]
+
+
 def test_catalog_is_deterministic_exact_offsets_and_geometry_bound():
     observations = [line("  A | A\tÚltima 😀: 12,50  ")]
     before = copy.deepcopy(observations)

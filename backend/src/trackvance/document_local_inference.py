@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
+from .document_literal_tables import map_candidates, merge_candidates, prompt_catalog_view
 from .document_semantic_fragments import (
     ESCAPED_LINE_BREAK,
     build_catalog,
@@ -169,10 +170,12 @@ def semantic_targets(payload, definition):
             or any(prefix + table["name"] in conflicts for prefix in ("TABLE:", "REEXTRACTION_TABLE:"))]}
 
 
-def fragment_schema(definition, catalog, targets):
+def fragment_schema(definition, catalog, targets, *, allowed_fragment_ids=None):
     def cell(enabled):
-        identity = {"type": ["integer", "null"], "minimum": 0,
+        identity: dict = {"type": ["integer", "null"], "minimum": 0,
                     "maximum": len(catalog["fragments"]) - 1} if enabled and catalog["fragments"] else {"type": "null"}
+        if enabled and allowed_fragment_ids is not None:
+            identity = {"type": ["integer", "null"], "enum": [None, *allowed_fragment_ids]}
         return {"type": "object", "properties": {"fragment_id": identity},
             "required": ["fragment_id"], "additionalProperties": False}
 
@@ -198,7 +201,8 @@ def apply_fragment_semantics(payload, candidate, definition, lines, catalog, tar
         identity = selection["fragment_id"]
         if identity is None:
             return _semantic_cell({"observed": None, "evidence_id": None}, field, lines)
-        if not enabled or type(identity) is not int or not 0 <= identity < len(catalog["fragments"]):
+        if (not enabled or type(identity) is not int or not 0 <= identity < len(catalog["fragments"])
+                or identity not in visible_ids):
             raise ValueError("fragment selection")
         fragment = catalog["fragments"][identity]
         cell = _semantic_cell({"observed": fragment["text"], "evidence_id": fragment["evidence_id"]}, field, lines)
@@ -212,6 +216,8 @@ def apply_fragment_semantics(payload, candidate, definition, lines, catalog, tar
     try:
         if catalog != build_catalog(lines) or targets != semantic_targets(payload, definition):
             raise ValueError("fragment catalog or target integrity")
+        view = prompt_catalog_view(lines, definition, targets)["prompt_view"]
+        visible_ids = {item["fragment_id"] for item in view["fragments"]}
         if (not isinstance(candidate, dict) or set(candidate) != {"fields", "tables"}
                 or not isinstance(candidate["fields"], dict) or not isinstance(candidate["tables"], dict)
                 or set(candidate["fields"]) != {field["name"] for field in definition["fields"]}
@@ -281,6 +287,10 @@ def _merge_semantic_cells(payload, fields, tables, definition):
             conflicts.append("TABLE:" + name)
     result["semantic_conflicts"] = conflicts
     result["semantic_candidates"] = {"fields": fields, "tables": tables}
+    return _refresh_checks(result, definition)
+
+
+def _refresh_checks(result, definition):
     result["arithmetic"] = arithmetic_checks(result, definition)
     if definition.get("cross_totals"):
         result["cross_totals"] = cross_table_checks(result, definition)
@@ -288,6 +298,15 @@ def _merge_semantic_cells(payload, fields, tables, definition):
     if period:
         result["business_period"] = {"field": period, **result["fields"][period]}
     return result
+
+
+def _literal_candidate(payload, lines, definition):
+    try:
+        mapped = map_candidates(lines, definition)
+        result = merge_candidates(payload, mapped, definition, validate_value, observations=lines)
+    except (TypeError, ValueError, KeyError):
+        raise OperationError(422, "DOCUMENT_LITERAL_TABLE_INVALID", "No se pudo vincular la tabla literal con la evidencia OCR validada.") from None
+    return _refresh_checks(result, definition)
 
 
 def _region(target, margin=0):
@@ -564,7 +583,7 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             return
         stage = "INTERPRET"
         observation_hash = hashlib.sha256(json.dumps(response["lines"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        catalog, targets = None, None
+        catalog, targets, view = None, None, None
         schema = semantic_schema(definition)
         if prompt_version == PROMPT_VERSION:
             try:
@@ -572,10 +591,14 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             except ValueError:
                 raise OperationError(422, "DOCUMENT_LLM_FRAGMENT_LIMIT", "No se pudo construir el catálogo acotado de evidencia OCR.") from None
             targets = semantic_targets(result["payload"], definition)
-            schema = fragment_schema(definition, catalog, targets)
+            view = prompt_catalog_view(response["lines"], definition, targets)["prompt_view"]
+            schema = fragment_schema(definition, catalog, targets,
+                allowed_fragment_ids=[item["fragment_id"] for item in view["fragments"]]
+                if view["omitted_detail_observation_ids"] else None)
         interpretation = _invoke("/interpret", {"request_id": uuid.uuid4().hex, "source_sha256": body["source_sha256"],
             "configuration": configuration, "definition": definition, "semantic_schema": schema,
             **({"semantic_targets": targets} if targets is not None else {}),
+            **({"fragment_prompt_view_sha256": view["sha256"]} if view is not None else {}),
             "observations": response["lines"], "observations_sha256": observation_hash},
             timeout=timeout, started=started, check=check, minimum_progress=50)
         if (not isinstance(interpretation, dict) or interpretation.get("source_sha256") != body["source_sha256"]
@@ -583,8 +606,11 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
                 or not isinstance(interpretation.get("engine"), dict)):
             raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La interpretación no corresponde a la evidencia OCR solicitada.")
         if catalog is not None:
+            assert view is not None
             if (interpretation.get("fragment_catalog_sha256") != catalog["sha256"]
-                    or interpretation.get("fragment_catalog_version") != catalog["version"]):
+                    or interpretation.get("fragment_catalog_version") != catalog["version"]
+                    or view["omitted_detail_observation_ids"]
+                    and interpretation.get("fragment_prompt_view_sha256") != view["sha256"]):
                 raise OperationError(422, "DOCUMENT_LLM_EVIDENCE_INVALID", "El catálogo semántico no coincide con la evidencia OCR original.")
             result["payload"] = apply_fragment_semantics(result["payload"], interpretation["semantics"], definition,
                 response["lines"], catalog, targets)
@@ -603,6 +629,9 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
         stage = "PADDLE_INITIAL"
         _append_history(history, {"attempt": 0, "stage": "PADDLE_INITIAL", "observations": copy.deepcopy(response["lines"]),
             "fields": copy.deepcopy(result["payload"]["fields"]), "tables": copy.deepcopy(result["payload"]["tables"])})
+        if prompt_version == PROMPT_VERSION:
+            stage = "PADDLE_LITERAL_TABLES"
+            result["payload"] = _literal_candidate(result["payload"], response["lines"], definition)
         # Literal observations may already contain all needed values. Interpret
         # them before paying for spotting crops that cannot repair layout rules.
         interpret_if_needed()
@@ -623,6 +652,8 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             response["lines"] = refined_observations(response["lines"], refined["lines"], regions)
             stage = "REMAP"
             remapped = legacy_runner(source, definition, check=lambda _: check(50), native_only=True, candidate_lines=response["lines"])
+            if prompt_version == PROMPT_VERSION:
+                remapped["payload"] = _literal_candidate(remapped["payload"], response["lines"], definition)
             remapped["payload"] = retain_disagreements(result["payload"], remapped["payload"])
             result = remapped
             attempts.append({"attempt": attempt + 1, "regions": regions, "engine": refined.get("engine", {}),

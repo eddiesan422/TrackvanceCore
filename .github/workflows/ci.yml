@@ -152,6 +152,7 @@ jobs:
             .codex-local/ci/evidence/**/*.json
             .codex-local/ci/evidence/**/*.xml
             .codex-local/ci/diagnostics/**/*.json
+            .codex-local/ci/diagnostics/**/*.xml
             .codex-local/ci/image-load.json
             .codex-local/v070/trackvance-v070-test-corrections-*/xlsx-scenarios-*/**/*.json
             .codex-local/v070/trackvance-v070-test-corrections-*/corrections-evidence.json
