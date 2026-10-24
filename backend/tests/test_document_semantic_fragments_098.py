@@ -206,5 +206,6 @@ def test_coordinator_v2_binds_catalog_and_target_schema_before_merging(tmp_path,
         result = local.run_local(source, definition, configuration, legacy_runner=runner, check=lambda _: None)
         assert result["payload"]["tables"]["items"][0]["concept"]["value"] == "AA Última milla"
         assert result["engine"]["route"] == "PADDLE_QWEN"
+        assert result["engine"]["prompt_version"] == "trackvance-idp-098-v2"
         assert result["engine"]["independent_row_coverage"] is False
     assert endpoints == ["/extract", "/interpret"]

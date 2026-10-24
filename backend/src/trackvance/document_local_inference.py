@@ -637,7 +637,7 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
         raise
     result["payload"]["inference_observation_history"] = history
     result["engine"].update(response["engine"], key="PADDLE_QWEN_LOCAL_098", route="PADDLE_QWEN" if semantic_used else "PADDLE",
-        prompt_version=PROMPT_VERSION, transport="PRIVATE_LOCAL_HTTP", inference_skipped=False)
+        prompt_version=prompt_version, transport="PRIVATE_LOCAL_HTTP", inference_skipped=False)
     result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)
     result["engine"]["focused_reextraction"] = attempts
     result["engine"]["semantic_attempts"] = semantic_attempts

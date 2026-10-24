@@ -207,13 +207,15 @@ def test_scanned_route_refines_only_failed_region_and_skips_unneeded_llm(tmp_pat
     assert result["payload"]["inference_observation_history"][0]["observations"][0]["text"] == "unclear"
 
 
-def test_qwen_interpretation_preserves_paddle_child_and_gateway_provenance(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prompt_configuration", [{}, {"prompt_version": "trackvance-idp-098-v1"}])
+def test_qwen_interpretation_preserves_paddle_child_and_gateway_provenance(tmp_path, monkeypatch, prompt_configuration):
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"synthetic provenance fixture")
     provenance = {"gateway": {"files_sha256": {"server.py": "a" * 64}},
                   "paddle_runner": {"files_sha256": {"paddle_runner.py": "b" * 64}}}
 
     def invoke(path, body, **kwargs):
+        assert body["configuration"]["prompt_version"] == "trackvance-idp-098-v1"
         if path == "/extract":
             return {"source_sha256": body["source_sha256"], "lines": [line()],
                 "engine": {"runtime_provenance": copy.deepcopy(provenance), "phases": {"paddle_seconds": .25}}}
@@ -224,9 +226,10 @@ def test_qwen_interpretation_preserves_paddle_child_and_gateway_provenance(tmp_p
                        "ollama_metrics": {"load_duration": 123, "eval_count": 7}, "phases": {"llm_seconds": .5}}}
 
     monkeypatch.setattr(local, "_invoke", invoke)
-    result = local.run_local(source, definition(), {"max_retries": 0, "use_llm": True},
+    result = local.run_local(source, definition(), {**prompt_configuration, "max_retries": 0, "use_llm": True},
         legacy_runner=lambda *args, **kwargs: {"payload": payload(), "engine": {}}, check=lambda _: None)
     assert result["engine"]["runtime_provenance"] == provenance
+    assert result["engine"]["prompt_version"] == "trackvance-idp-098-v1"
     assert result["engine"]["ollama_metrics"] == {"load_duration": 123, "eval_count": 7}
     assert result["engine"]["phases"] == {"paddle_seconds": .25, "llm_seconds": .5}
 
