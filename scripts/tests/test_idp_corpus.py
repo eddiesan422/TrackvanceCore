@@ -1,4 +1,5 @@
 """Metric regression: no shifted rows, duplicate identities or numeric coercion."""
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -8,9 +9,38 @@ from idp_corpus import (
     failed_evaluation,
     percentile,
     preserve_failure_evidence,
+    preserve_failure_trace,
     select_documents,
     summarize,
 )
+
+
+def test_private_failure_trace_retains_actual_stack_without_locals(tmp_path):
+    def fails():
+        private_local = "synthetic-private-local-do-not-capture"
+        assert private_local
+        raise ValueError("synthetic progress failure")
+
+    try:
+        fails()
+    except ValueError as error:
+        receipt = preserve_failure_trace(tmp_path, "original", error)
+    raw = (tmp_path / receipt["file"]).read_bytes()
+    assert b"fails" in raw and b"ValueError: synthetic progress failure" in raw
+    assert b"synthetic-private-local-do-not-capture" not in raw
+    assert receipt["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert receipt["capture_locals"] is False and receipt["truncated"] is False
+    assert "traceback" not in receipt
+
+
+def test_private_failure_trace_is_bounded_and_does_not_replace_prior_evidence(tmp_path):
+    receipt = preserve_failure_trace(tmp_path, "original", ValueError("x" * 100000))
+    raw = (tmp_path / receipt["file"]).read_bytes()
+    assert len(raw) <= 65536 < receipt["original_trace_bytes"]
+    assert receipt["truncated"] is True
+    with pytest.raises(FileExistsError):
+        preserve_failure_trace(tmp_path, "original", ValueError("later"))
+    assert (tmp_path / receipt["file"]).read_bytes() == raw
 
 
 def fixture():

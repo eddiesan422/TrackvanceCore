@@ -102,6 +102,19 @@ comprueban contra ambos límites; una respuesta incompleta o excesiva falla.
 Los bytes UTF-8 registrados no se presentan como tokens. Si el runtime no puede
 verificar el presupuesto, no se devuelve un candidato exitoso.
 
+El prompt `trackvance-idp-098-v2` selecciona únicamente identificadores de
+fragmentos, sin devolver valores escritos por el modelo. El catálogo común
+conserva observación, offsets y subcadena exacta; el cliente lo reconstruye y
+comprueba su hash antes de resolver cada selección. Incluye líneas, celdas
+separadas por barras o tabuladores, sufijos tras dos puntos y tokens completos,
+con límites de 4096 fragmentos y 120.000 bytes UTF-8 de texto; excederlos produce
+un error explícito. El prompt incluye cada línea mediante su fragmento original,
+sin duplicar las observaciones completas ni eliminar evidencia para reducirlo.
+La máscara de trabajo sólo solicita cabeceras inválidas o ausentes y tablas
+incompletas o en conflicto. Las cabeceras restantes quedan nulas y las tablas
+restantes vacías en la respuesta IA. El prompt v1 permanece disponible para
+configuraciones históricas y mantiene su comprobación estricta de subcadenas.
+
 Los errores HTTP usan códigos fijos para contexto, respuesta incompleta,
 integridad de modelos, runtime, cancelación, capacidad y timeout. No se transmiten
 stderr, rutas ni mensajes libres del modelo. Un fallo posterior a la lectura
@@ -126,8 +139,9 @@ La primera pasada Paddle conserva coordenadas reales de bloques. Las filas de un
 el rectángulo del bloque cuando el proveedor no proporciona coordenadas por
 celda; los reintentos focalizados conservan las coordenadas de spotting cuando
 existen. Jamás se inventan ubicaciones, porcentajes de confianza ni revisión humana.
-No se descartan filas repetidas por compartir rectángulo. El LLM sólo propone
-subcadenas presentes en observaciones referenciadas. Los tipos y cantidades se
+No se descartan filas repetidas por compartir rectángulo. El LLM sólo selecciona
+fragmentos originales o, con el contrato v1, propone subcadenas presentes en
+observaciones referenciadas. Los tipos y cantidades se
 normalizan mediante el validador de Trackvance. Un conflicto con un valor válido
 queda ambiguo. La cobertura de filas requiere controles independientes y no se
 acredita por la sola respuesta de Paddle/Qwen.

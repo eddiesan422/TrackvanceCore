@@ -13,6 +13,7 @@ import math
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
 from .document_invoice_controls import invoice_arithmetic_fields
 from .document_schemas import structures
+from .document_semantic_fragments import canonical_observed, multiline_fields
 from .operations_common import OperationError
 
 VALIDATOR_VERSION = "TRACKVANCE_IDP_VALIDATOR_098_V1"
@@ -131,7 +132,7 @@ def _observed_in_source(cell, lines, field):
     return bool(normalized and normalized in " ".join(" ".join(words).split()))
 
 
-def cell_is_valid(cell, field):
+def cell_is_valid(cell, field, *, allow_multiline=False):
     raw = cell.get("observed")
     if cell.get("reviewed"):
         raw = cell.get("value")
@@ -139,6 +140,11 @@ def cell_is_valid(cell, field):
         # formatting was checked at review time; recheck the canonical form here.
         field = {**field, "date_format": "%Y-%m-%d", "decimal_separator": ".",
             "thousands_separator": None, "currency_symbols": []}
+    else:
+        try:
+            raw = canonical_observed(cell, allow_multiline=allow_multiline and field["logical_type"] == "STRING")
+        except (ValueError, TypeError, KeyError):
+            return False
     value, status = validate_value(raw, field)
     return status == "VALID" and cell.get("validity") == "VALID" and value == cell.get("value")
 
@@ -180,16 +186,18 @@ def certify_candidate(data, independent, definition, source_sha256):
     validate_candidate_contract(independent, definition)
     independent_cells = {path: cell for path, cell, _ in _cells(control, definition)}
     arithmetic_fields = _arithmetic_fields(definition)
+    multiline = multiline_fields(definition)
     verified, findings = {}, []
     for path, cell, field in _cells(payload, definition):
         other = independent_cells.get(path)
-        if not cell_is_valid(cell, field):
+        allow_multiline = (path.split(".")[0], field["name"]) in multiline
+        if not cell_is_valid(cell, field, allow_multiline=allow_multiline):
             findings.append("QUALITY_VALUE:" + path)
         elif field["logical_type"] == "DECIMAL" and (path.split(".")[0], field["name"]) not in arithmetic_fields:
             findings.append("QUALITY_ARITHMETIC_UNDECLARED:" + path)
         elif not _observed_in_source(cell, payload["lines"], field):
             findings.append("QUALITY_EVIDENCE:" + path)
-        elif not other or not cell_is_valid(other, field) or other["value"] != cell["value"]:
+        elif not other or not cell_is_valid(other, field, allow_multiline=allow_multiline) or other["value"] != cell["value"]:
             findings.append("QUALITY_INDEPENDENT_DISAGREEMENT:" + path)
         elif not _observed_in_source(other, control["lines"], field):
             findings.append("QUALITY_INDEPENDENT_EVIDENCE:" + path)
@@ -237,11 +245,12 @@ def quality_report(extraction, definition):
         and proof.get("independent_extraction") is True
         and (getattr(extraction, "reviewed", False) or proof.get("candidate_sha256") == _hash(payload)))
     findings = []
+    multiline = multiline_fields(definition)
     findings.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
     cell_count = verified_count = 0
     for path, cell, field in _cells(payload, definition):
         cell_count += 1
-        if not cell or not cell_is_valid(cell, field):
+        if not cell or not cell_is_valid(cell, field, allow_multiline=(path.split(".")[0], field["name"]) in multiline):
             findings.append("QUALITY_VALUE:" + path)
             continue
         if cell.get("reviewed") and getattr(extraction, "reviewed", False) or trusted and proof.get("verified_cells", {}).get(path) == cell_hash(cell):

@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import tomllib
+import traceback
 import unicodedata
 import zipfile
 from collections import Counter, deque
@@ -74,6 +75,18 @@ def preserve_failure_evidence(output, identity, error):
         stream.write(raw)
     return {"retained": True, "file": path.name, "bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def preserve_failure_trace(output, identity, error):
+    """Private bounded traceback, without local variables or inline metric text."""
+    raw = "".join(traceback.format_exception(type(error), error, error.__traceback__, limit=20)).encode("utf-8")
+    retained = raw[:65536].decode("utf-8", errors="ignore").encode("utf-8")
+    path = output / (identity + ".failure-trace.private.txt")
+    with path.open("xb") as stream:
+        stream.write(retained)
+    return {"file": path.name, "bytes": len(retained), "sha256": hashlib.sha256(retained).hexdigest(),
+        "truncated": len(retained) < len(raw), "original_trace_bytes": len(raw), "capture_locals": False,
+        "scope": "PRIVATE_DIAGNOSTIC_NOT_SUCCESS_OR_ORACLE_INPUT"}
 
 
 def implementation_record(repository, source_sha=None):
@@ -482,6 +495,7 @@ def main():
                     validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
             row = failed_evaluation(doc, definition, error)
+            row["private_failure_trace"] = preserve_failure_trace(output, doc["id"], error)
             evidence = preserve_failure_evidence(output, doc["id"], error)
             if evidence is not None:
                 row["private_failure_evidence"] = evidence

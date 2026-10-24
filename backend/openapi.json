@@ -22008,9 +22008,12 @@
           },
           "prompt_version": {
             "type": "string",
-            "const": "trackvance-idp-098-v1",
+            "enum": [
+              "trackvance-idp-098-v1",
+              "trackvance-idp-098-v2"
+            ],
             "title": "Prompt Version",
-            "default": "trackvance-idp-098-v1"
+            "default": "trackvance-idp-098-v2"
           },
           "timeout_seconds": {
             "type": "integer",

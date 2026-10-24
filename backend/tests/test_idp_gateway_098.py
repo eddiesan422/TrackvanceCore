@@ -4,7 +4,9 @@ import hashlib
 import http.client
 import importlib.util
 import json
+import shutil
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -13,9 +15,13 @@ HTTPConnection = http.client.HTTPConnection
 
 
 @pytest.fixture
-def gateway():
+def gateway(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    spec = importlib.util.spec_from_file_location("idp_gateway_test", root / "deploy/idp/server.py")
+    for path in (root / "deploy/idp").iterdir():
+        if path.is_file():
+            shutil.copyfile(path, tmp_path / path.name)
+    shutil.copyfile(root / "backend/src/trackvance/document_semantic_fragments.py", tmp_path / "document_semantic_fragments.py")
+    spec = importlib.util.spec_from_file_location("idp_gateway_test", tmp_path / "server.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -82,7 +88,7 @@ def test_health_requires_exact_model_tag_and_digest(gateway, monkeypatch):
 
 
 def test_gateway_health_keeps_process_startup_hashes_after_files_change(gateway, tmp_path, monkeypatch):
-    names = ("server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "models.lock.json")
+    names = tuple(gateway.STARTUP_FILES)
     for name in names:
         (tmp_path / name).write_bytes((gateway.APP_ROOT / name).read_bytes())
     spec = importlib.util.spec_from_file_location("idp_gateway_frozen_test", tmp_path / "server.py")
@@ -95,7 +101,10 @@ def test_gateway_health_keeps_process_startup_hashes_after_files_change(gateway,
     proof = frozen.health()["runtime_provenance"]["gateway"]
     assert proof == {"capture": "PROCESS_STARTUP", "files_sha256": expected}
     assert frozen.PROMPT == gateway.PROMPT
+    assert frozen.PROMPTS == gateway.PROMPTS
     assert frozen.LOCK_BYTES == gateway.LOCK_BYTES
+    observations = [{"text": "A | B", "page": 1, "region": [0, 0, 1, 1]}]
+    assert frozen.FRAGMENTS.build_catalog(observations) == gateway.FRAGMENTS.build_catalog(observations)
     proof["files_sha256"].clear()
     assert frozen.startup_provenance()["files_sha256"] == expected
 
@@ -106,6 +115,120 @@ def interpretation_body(gateway, observations=None):
         "observations_sha256": hashlib.sha256(json.dumps(observations, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         "configuration": {"llm_model": gateway.LOCK["qwen"]["model"], "prompt_version": "trackvance-idp-098-v1"},
         "definition": {}, "semantic_schema": {}}
+
+
+def selection_definition():
+    return {"fields": [{"name": "known"}, {"name": "missing"}],
+            "tables": [{"name": "rows", "fields": [{"name": "concept"}]}]}
+
+
+@pytest.mark.parametrize("targets", [None, [], {}, {"fields": ["unknown"], "tables": []},
+    {"fields": ["missing", "missing"], "tables": []}, {"fields": [True], "tables": []},
+    {"fields": [], "tables": ["unknown"]}, {"fields": [], "tables": [], "extra": []}])
+def test_semantic_targets_only_allow_unique_declared_names(gateway, targets):
+    with pytest.raises(ValueError, match="LLM_SELECTION_INVALID"):
+        gateway.semantic_targets(selection_definition(), targets)
+
+
+def test_fragment_selection_preserves_null_non_targets_and_exact_ids(gateway):
+    definition = selection_definition()
+    targets = gateway.semantic_targets(definition, {"fields": ["missing"], "tables": ["rows"]})
+    candidate = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": 0}},
+                 "tables": {"rows": [{"concept": {"fragment_id": 2}}]}}
+    assert gateway.validate_fragment_selection(candidate, definition, targets, 3) is None
+
+
+@pytest.mark.parametrize("identity", [-1, 3, True, 1.5, "1", {"observed": "invented"}])
+def test_fragment_selection_rejects_unknown_or_non_integer_ids(gateway, identity):
+    definition = selection_definition()
+    candidate = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": identity}},
+                 "tables": {"rows": []}}
+    with pytest.raises(ValueError, match="LLM_SELECTION_INVALID"):
+        gateway.validate_fragment_selection(candidate, definition, {"fields": ["missing"], "tables": []}, 3)
+
+
+@pytest.mark.parametrize("kind", ["field", "table", "generated_value"])
+def test_fragment_selection_cannot_change_non_targets_or_return_generated_values(gateway, kind):
+    definition = selection_definition()
+    candidate = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": None}},
+                 "tables": {"rows": []}}
+    if kind == "field":
+        candidate["fields"]["known"]["fragment_id"] = 0
+    elif kind == "table":
+        candidate["tables"]["rows"] = [{"concept": {"fragment_id": 0}}]
+    else:
+        candidate["fields"]["missing"] = {"fragment_id": 0, "observed": "invented"}
+    with pytest.raises(ValueError, match="LLM_SELECTION_INVALID"):
+        gateway.validate_fragment_selection(candidate, definition, {"fields": ["missing"], "tables": []}, 3)
+
+
+def fragment_interpretation_body(gateway):
+    body = interpretation_body(gateway, [{"text": r"Concept | A\nB | 12,00", "page": 1, "region": [0, 0, 1, 1]}])
+    body["configuration"]["prompt_version"] = "trackvance-idp-098-v2"
+    body["definition"] = selection_definition()
+    body["semantic_targets"] = {"fields": ["missing"], "tables": ["rows"]}
+    body["semantic_schema"] = {"type": "object", "description": "synthetic fragment schema"}
+    return body
+
+
+def fragment_reply(selection):
+    return {"done": True, "done_reason": "stop", "prompt_eval_count": 20, "eval_count": 10,
+            "message": {"content": json.dumps(selection)}}
+
+
+def test_v2_interpretation_uses_catalog_and_returns_only_verifiable_source_ids(gateway, endpoint, monkeypatch):
+    body = fragment_interpretation_body(gateway)
+    catalog = gateway.FRAGMENTS.build_catalog(body["observations"])
+    identity = next(item["fragment_id"] for item in catalog["fragments"] if item["text"] == r"A\nB")
+    selection = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": None}},
+                 "tables": {"rows": [{"concept": {"fragment_id": identity}}]}}
+    calls = []
+
+    def chat(request_id, request_body, timeout):
+        calls.append(request_body)
+        return fragment_reply(selection)
+
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", chat)
+    status, result = post(endpoint, "/interpret", body)
+    assert status == 200
+    content = json.loads(calls[0]["messages"][1]["content"])
+    assert "evidence" not in content and "observations" not in content
+    assert content["semantic_targets"] == body["semantic_targets"]
+    assert content["fragment_catalog"] == [[item["fragment_id"], item["evidence_id"], item["text"]] for item in catalog["fragments"]]
+    assert calls[0]["messages"][0]["content"] == gateway.PROMPTS["trackvance-idp-098-v2"]
+    assert calls[0]["format"] == body["semantic_schema"]
+    assert result["semantics"] == selection
+    assert result["fragment_catalog_sha256"] == catalog["sha256"]
+    assert result["fragment_catalog_version"] == catalog["version"]
+    assert result["engine"]["fragment_count"] == len(catalog["fragments"])
+    assert result["engine"]["prompt_sha256"] == gateway.STARTUP_HASHES["prompt-v2.txt"]
+    assert result["lines"] == body["observations"]
+
+
+@pytest.mark.parametrize("kind", ["non_target", "out_of_range", "generated_text"])
+def test_v2_http_boundary_rejects_non_target_ids_and_generated_strings(gateway, endpoint, monkeypatch, kind):
+    body = fragment_interpretation_body(gateway)
+    selection = {"fields": {"known": {"fragment_id": None}, "missing": {"fragment_id": None}}, "tables": {"rows": []}}
+    if kind == "non_target":
+        selection["fields"]["known"]["fragment_id"] = 0
+    elif kind == "out_of_range":
+        selection["fields"]["missing"]["fragment_id"] = 4096
+    else:
+        selection["fields"]["missing"] = {"observed": "generated", "evidence_id": 0}
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: fragment_reply(selection))
+    assert post(endpoint, "/interpret", body) == (422, {"error": "LLM_SELECTION_INVALID"})
+
+
+@pytest.mark.parametrize("text,code", [("a" * 65537, "LLM_FRAGMENT_LIMIT"), (None, "LLM_FRAGMENT_INTEGRITY")])
+def test_v2_catalog_fails_closed_before_llm_on_invalid_or_oversized_evidence(gateway, endpoint, monkeypatch, text, code):
+    body = fragment_interpretation_body(gateway)
+    body["observations"][0]["text"] = text
+    body["observations_sha256"] = hashlib.sha256(json.dumps(body["observations"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    monkeypatch.setattr(gateway, "qwen_verified", lambda: True)
+    monkeypatch.setattr(gateway, "stream_chat", lambda *args, **kwargs: pytest.fail("invalid catalog must not reach Qwen"))
+    assert post(endpoint, "/interpret", body) == (422, {"error": code})
 
 
 def test_interpretation_exposes_actual_ollama_metrics_and_loaded_prompt(gateway, endpoint, monkeypatch):
@@ -416,3 +539,128 @@ def test_upstream_context_diagnostics_are_normalized_without_echo(gateway):
     assert gateway._llm_error(b'{"error":"private model output /credentials"}') == "LLM_FAILURE"
     assert gateway._llm_error(b"private /credentials", 413) == "LLM_CONTEXT_LIMIT"
     assert gateway._llm_error(b"x" * 4097) == "LLM_FAILURE"
+
+
+def test_unknown_cancel_nonces_do_not_allocate_state(gateway, endpoint):
+    gateway.STATES["f" * 32] = {"phase": "UNKNOWN_STALE_STATE"}
+    for index in range(32):
+        assert post(endpoint, "/cancel", {"request_id": format(index, "032x")}) == (200, {"cancelled": False})
+    assert post(endpoint, "/cancel", {"request_id": "f" * 32}) == (200, {"cancelled": False})
+    assert not gateway.CANCELLED
+
+
+def test_cancel_remains_accepted_when_child_exits_after_poll(gateway, endpoint, monkeypatch):
+    identity = "8" * 32
+
+    class CompletedChild:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    def already_exited(pid, requested_signal):
+        assert pid == CompletedChild.pid and requested_signal == gateway.signal.SIGKILL
+        raise ProcessLookupError("synthetic process already exited")
+
+    gateway.ADMISSIONS[identity] = 1
+    gateway.ACTIVE[identity] = CompletedChild()
+    monkeypatch.setattr(gateway.os, "killpg", already_exited)
+    assert post(endpoint, "/cancel", {"request_id": identity}) == (200, {"cancelled": True})
+
+
+def test_cancel_racing_completed_response_cannot_leave_permanent_nonce(gateway, endpoint, monkeypatch):
+    entered, adding, release_extract, release_add = (threading.Event() for _ in range(4))
+    identity = "9" * 32
+
+    class DelayedCancellation(set):
+        def add(self, value):
+            adding.set()
+            release_extract.set()
+            assert release_add.wait(timeout=2)
+            super().add(value)
+
+    def extract(self, body):
+        entered.set()
+        assert release_extract.wait(timeout=2)
+        return {"engine": {"elapsed_seconds": 0}}
+
+    monkeypatch.setattr(gateway, "CANCELLED", DelayedCancellation())
+    monkeypatch.setattr(gateway.Handler, "extract", extract)
+    results = []
+    inference = threading.Thread(target=lambda: results.append(post(endpoint, "/extract",
+        {"request_id": identity, "configuration": {}})))
+    cancellation = threading.Thread(target=lambda: results.append(post(endpoint, "/cancel", {"request_id": identity})))
+    inference.start()
+    assert entered.wait(timeout=2)
+    cancellation.start()
+    assert adding.wait(timeout=2)
+    inference.join(timeout=2)  # Response is delivered before admission cleanup.
+    assert not inference.is_alive()
+    time.sleep(.05)
+    release_add.set()
+    cancellation.join(timeout=2)
+    assert not cancellation.is_alive()
+    deadline = time.monotonic() + 2
+    while gateway.ADMISSIONS and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert len(results) == 2 and all(status == 200 for status, _ in results)
+    assert not gateway.ADMISSIONS and not gateway.CANCELLED
+
+
+def paddle_request(gateway):
+    raw = b"synthetic cancellation boundary"
+    return {"request_id": "7" * 32, "filename": "document.pdf", "source": base64.b64encode(raw).decode(),
+        "source_sha256": hashlib.sha256(raw).hexdigest(), "configuration": {"paddle_model": "PaddleOCR-VL-1.6",
+            "llm_model": gateway.LOCK["qwen"]["model"], "prompt_version": "trackvance-idp-098-v1"}}
+
+
+def test_cancel_before_child_creation_never_starts_a_process(gateway, monkeypatch):
+    gateway.RUNTIME["ready"] = True
+    monkeypatch.setattr(gateway, "verify_models", lambda: True)
+    monkeypatch.setattr(gateway.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("cancelled request must not spawn"))
+    body = paddle_request(gateway)
+    gateway.CANCELLED.add(body["request_id"])
+    with pytest.raises(ValueError, match="^CANCELLED$"):
+        gateway.Handler.extract(None, body)
+
+
+def test_cancel_during_creation_kills_child_before_waiting_for_its_timeout(gateway, endpoint, monkeypatch):
+    constructing, release_creation, killed, waited_before_cancel = (threading.Event() for _ in range(4))
+
+    class Child:
+        pid = 12345
+        returncode = None
+
+        def __init__(self, *args, **kwargs):
+            constructing.set()
+            assert release_creation.wait(timeout=2)
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            if not killed.is_set():
+                waited_before_cancel.set()
+                raise gateway.subprocess.TimeoutExpired("synthetic", timeout)
+            self.returncode = -9
+            return self.returncode
+
+    def kill(pid, _signal):
+        assert pid == Child.pid
+        killed.set()
+
+    gateway.RUNTIME["ready"] = True
+    monkeypatch.setattr(gateway, "verify_models", lambda: True)
+    monkeypatch.setattr(gateway.subprocess, "Popen", Child)
+    monkeypatch.setattr(gateway.os, "killpg", kill)
+    body, result = paddle_request(gateway), []
+    active = threading.Thread(target=lambda: result.append(post(endpoint, "/extract", body)))
+    active.start()
+    assert constructing.wait(timeout=2)
+    assert post(endpoint, "/cancel", {"request_id": body["request_id"]}) == (200, {"cancelled": True})
+    release_creation.set()
+    active.join(timeout=2)
+    assert not active.is_alive()
+    assert result == [(422, {"error": "CANCELLED"})]
+    assert killed.is_set() and not waited_before_cancel.is_set()
+    assert not gateway.GATE.locked() and not gateway.ACTIVE

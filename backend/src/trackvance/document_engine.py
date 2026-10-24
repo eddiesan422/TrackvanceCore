@@ -226,6 +226,14 @@ def ocr(path, page):
     return merge_lines(ocr_pass(path, page, width, height, 6), ocr_pass(path, page, width, height, 11))
 
 
+def write_progress(path, value):
+    # The parent polls this concurrently. Replacing a complete sibling avoids
+    # exposing the empty interval of truncate/write to another process.
+    temporary = path.with_name(path.name + ".next")
+    temporary.write_text(str(value), encoding="utf-8")
+    temporary.replace(path)
+
+
 def lines_from_file(source, folder, progress, page_geometry=None, *, native_only=False, native_gaps=None):
     if source.suffix != ".pdf":
         lines = [] if native_only else ocr(source, 1)
@@ -234,7 +242,7 @@ def lines_from_file(source, folder, progress, page_geometry=None, *, native_only
         if page_geometry is not None:
             width, height = image_size(source)
             page_geometry["1"] = {"width": width, "height": height, "unit": "PIXEL"}
-        progress.write_text("100")
+        write_progress(progress, 100)
         return lines, 1
     info = command(["/usr/bin/pdfinfo", str(source)])
     match = re.search(r"^Pages:\s+(\d+)", info, re.MULTILINE)
@@ -274,7 +282,7 @@ def lines_from_file(source, folder, progress, page_geometry=None, *, native_only
                 output.extend(page_lines)
                 if sum(len(line["text"]) for line in output) > MAX_TEXT:
                     raise ValueError("DOCUMENT_TEXT_LIMIT")
-                progress.write_text(str(int((index + 1) / count * 100)))
+                write_progress(progress, int((index + 1) / count * 100))
                 continue
             prefix = folder / f"page-{index + 1}"
             command(["/usr/bin/pdftoppm", "-f", str(index + 1), "-l", str(index + 1), "-singlefile",
@@ -287,7 +295,7 @@ def lines_from_file(source, folder, progress, page_geometry=None, *, native_only
         output.extend(page_lines)
         if sum(len(line["text"]) for line in output) > MAX_TEXT:
             raise ValueError("DOCUMENT_TEXT_LIMIT")
-        progress.write_text(str(int((index + 1) / count * 100)))
+        write_progress(progress, int((index + 1) / count * 100))
     return output, count
 
 

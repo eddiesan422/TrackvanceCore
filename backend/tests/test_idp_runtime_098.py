@@ -14,6 +14,12 @@ runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
 
 
+def test_packaging_includes_shared_source_catalog_and_both_immutable_prompts():
+    assert {"prompt-v1.txt", "prompt-v2.txt", "document_semantic_fragments.py"} <= set(runtime.SOURCES)
+    assert runtime.source_path("document_semantic_fragments.py") == runtime.ROOT / "backend/src/trackvance/document_semantic_fragments.py"
+    assert runtime.source_path("prompt-v1.txt") == runtime.DEPLOY / "prompt-v1.txt"
+
+
 def tar_bytes(files):
     target = io.BytesIO()
     with tarfile.open(fileobj=target, mode="w") as archive:

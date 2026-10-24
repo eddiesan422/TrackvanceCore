@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.client
+import importlib.abc
+import importlib.util
 import json
 import os
 import re
@@ -29,11 +31,31 @@ APP_ROOT = Path(__file__).resolve().parent
 # Capture this process's inputs once. A later bind-mount edit must not rewrite
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
-    "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "models.lock.json")}
+    "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
+    "document_semantic_fragments.py", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
 PROMPT = STARTUP_FILES["prompt-v1.txt"].decode("utf-8")
+PROMPTS = {"trackvance-idp-098-v1": PROMPT,
+           "trackvance-idp-098-v2": STARTUP_FILES["prompt-v2.txt"].decode("utf-8")}
+
+
+class FrozenFragmentLoader(importlib.abc.SourceLoader):
+    """Import only captured trusted module bytes, without rereading a mount."""
+
+    def get_filename(self, fullname):
+        return str(APP_ROOT / "document_semantic_fragments.py")
+
+    def get_data(self, path):
+        if path != self.get_filename("trackvance_idp_semantic_fragments"):
+            raise OSError("FROZEN_MODULE_PATH")
+        return STARTUP_FILES["document_semantic_fragments.py"]
+
+
+FRAGMENT_SPEC = importlib.util.spec_from_loader("trackvance_idp_semantic_fragments", FrozenFragmentLoader())
+FRAGMENTS = importlib.util.module_from_spec(FRAGMENT_SPEC)
+FRAGMENT_SPEC.loader.exec_module(FRAGMENTS)
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
@@ -54,6 +76,7 @@ ERROR_STATUS = {
     "LLM_INCOMPLETE": 422, "LLM_BUDGET_UNVERIFIED": 422, "CANCELLED": 422,
     "PADDLE_FAILURE": 422, "PADDLE_RESULT_LIMIT": 422, "LLM_FAILURE": 422,
     "LLM_RESPONSE_LIMIT": 422, "INFERENCE_TIMEOUT": 504, "REQUEST_LIMIT": 413,
+    "LLM_FRAGMENT_LIMIT": 422, "LLM_FRAGMENT_INTEGRITY": 422, "LLM_SELECTION_INVALID": 422,
     "REQUEST_ID": 422, "ADMISSION_CONFIGURATION": 422, "DUPLICATE_REQUEST": 422,
 }
 
@@ -104,6 +127,57 @@ def semantic_content(definition, observations):
             raise TypeError("OBSERVATION_INTEGRITY")
         evidence.append({**{key: line[key] for key in ("text", "page", "region")}, "evidence_id": index})
     return json.dumps({"definition": compact_definition(definition), "evidence": evidence}, ensure_ascii=False)
+
+
+def semantic_targets(definition, targets):
+    """The parent can request bounded missing work, never add schema names."""
+    if not isinstance(targets, dict) or set(targets) != {"fields", "tables"}:
+        raise ValueError("LLM_SELECTION_INVALID")
+    for kind in ("fields", "tables"):
+        allowed = {item["name"] for item in definition.get(kind, [])}
+        names = targets[kind]
+        if (not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+                or len(names) != len(set(names)) or not set(names) <= allowed):
+            raise ValueError("LLM_SELECTION_INVALID")
+    return {key: list(targets[key]) for key in ("fields", "tables")}
+
+
+def validate_fragment_selection(candidate, definition, targets, fragment_count):
+    """V2 permits IDs only; unknown, invented, and non-target selections fail."""
+    def cell(value, enabled):
+        if not isinstance(value, dict) or set(value) != {"fragment_id"}:
+            raise ValueError("LLM_SELECTION_INVALID")
+        identity = value["fragment_id"]
+        if identity is not None and (not enabled or type(identity) is not int or not 0 <= identity < fragment_count):
+            raise ValueError("LLM_SELECTION_INVALID")
+
+    if not isinstance(candidate, dict) or set(candidate) != {"fields", "tables"}:
+        raise ValueError("LLM_SELECTION_INVALID")
+    for kind in ("fields", "tables"):
+        selected = candidate[kind]
+        if not isinstance(selected, dict) or set(selected) != {item["name"] for item in definition.get(kind, [])}:
+            raise ValueError("LLM_SELECTION_INVALID")
+    for field in definition.get("fields", []):
+        cell(candidate["fields"][field["name"]], field["name"] in targets["fields"])
+    for table in definition.get("tables", []):
+        rows = candidate["tables"][table["name"]]
+        if (not isinstance(rows, list) or len(rows) > 10000
+                or table["name"] not in targets["tables"] and rows):
+            raise ValueError("LLM_SELECTION_INVALID")
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {field["name"] for field in table["fields"]}:
+                raise ValueError("LLM_SELECTION_INVALID")
+            for value in row.values():
+                cell(value, True)
+
+
+def fragment_content(definition, observations, targets):
+    catalog = FRAGMENTS.build_catalog(observations)
+    content = json.dumps({"definition": compact_definition(definition), "semantic_targets": targets,
+        "fragment_catalog_version": catalog["version"], "fragment_catalog": [
+            [fragment["fragment_id"], fragment["evidence_id"], fragment["text"]]
+            for fragment in catalog["fragments"]]}, ensure_ascii=False)
+    return content, catalog
 
 
 def startup_provenance():
@@ -303,11 +377,16 @@ class Handler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[a-f0-9]{32}", identity):
                 raise ValueError("REQUEST_ID")
             if self.path == "/cancel":
-                if identity in STATES:
-                    CANCELLED.add(identity)
+                with ADMISSION_LOCK:
+                    accepted = identity in ADMISSIONS
+                    if accepted:
+                        CANCELLED.add(identity)
                 process = ACTIVE.get(identity)
                 if process and process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 upstream = UPSTREAM.get(identity)
                 if upstream and upstream.sock:
                     try:
@@ -315,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError:
                         pass
                     upstream.close()
-                self.send(200, {"cancelled": identity in CANCELLED})
+                self.send(200, {"cancelled": accepted})
                 return
             if self.path not in {"/extract", "/interpret", "/refine"}:
                 self.send(404, {"error": "NOT_FOUND"})
@@ -371,6 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             if admitted:
                 with ADMISSION_LOCK:
                     ADMISSIONS.pop(identity, None)
+                    CANCELLED.discard(identity)
 
     def extract(self, body):
         if RUNTIME.get("ready") is not True:
@@ -379,7 +459,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("MODEL_INTEGRITY")
         config = body["configuration"]
         if (config["paddle_model"] != "PaddleOCR-VL-1.6" or config["llm_model"] != LOCK["qwen"]["model"]
-                or config["prompt_version"] != "trackvance-idp-098-v1"):
+                or config["prompt_version"] not in PROMPTS):
             raise ValueError("MODEL_NOT_PINNED")
         timeout = min(1800, max(30, int(config.get("timeout_seconds", 300))))
         filename = body["filename"]
@@ -397,13 +477,27 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(regions, list) or len(regions) > 4:
                 raise ValueError("REGION_LIMIT")
             (folder / "request.json").write_text(json.dumps({"filename": filename, "source_sha256": body["source_sha256"], "regions": regions}))
+            if body["request_id"] in CANCELLED:
+                raise ValueError("CANCELLED")
             with (folder / "error.log").open("wb") as error_stream:
                 process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", temporary],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_stream,
                     start_new_session=True, close_fds=True)
             ACTIVE[body["request_id"]] = process
             try:
-                process.wait(timeout=timeout)
+                deadline = time.monotonic() + timeout
+                while process.poll() is None:
+                    if body["request_id"] in CANCELLED:
+                        raise ValueError("CANCELLED")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired("paddle_runner", timeout)
+                    try:
+                        process.wait(timeout=min(.2, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
+                if body["request_id"] in CANCELLED:
+                    raise ValueError("CANCELLED")
                 if process.returncode or not (folder / "result.json").is_file():
                     raise ValueError("PADDLE_FAILURE")
                 if (folder / "result.json").stat().st_size > 16 * 1024**2:
@@ -412,7 +506,10 @@ class Handler(BaseHTTPRequestHandler):
                 OBSERVED_INFERENCE["paddle"] = True
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                     process.wait(timeout=5)
                 ACTIVE.pop(body["request_id"], None)
         # The coordinator runs confined template validation before deciding
@@ -426,7 +523,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def interpret(self, body):
         config = body["configuration"]
-        if config["llm_model"] != LOCK["qwen"]["model"] or config["prompt_version"] != "trackvance-idp-098-v1":
+        if config["llm_model"] != LOCK["qwen"]["model"] or config["prompt_version"] not in PROMPTS:
             raise ValueError("MODEL_NOT_PINNED")
         if not qwen_verified():
             raise ValueError("LLM_MODEL_INTEGRITY")
@@ -443,8 +540,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("CANCELLED")
             remaining = max(1, timeout - (time.monotonic() - started))
             STATES[body["request_id"]] = {"phase": "QWEN", "progress": 65}
-            prompt = PROMPT
-            content = semantic_content(body["definition"], result["lines"])
+            prompt = PROMPTS[config["prompt_version"]]
+            catalog = None
+            targets = None
+            if config["prompt_version"] == "trackvance-idp-098-v2":
+                targets = semantic_targets(body["definition"], body.get("semantic_targets"))
+                content, catalog = fragment_content(body["definition"], result["lines"], targets)
+            else:
+                content = semantic_content(body["definition"], result["lines"])
             content_bytes = len(content.encode())
             if content_bytes > 120000:
                 raise ValueError("LLM_CONTEXT_LIMIT")
@@ -466,11 +569,21 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("LLM_BUDGET_UNVERIFIED")
             if metrics["prompt_eval_count"] > input_budget or metrics["eval_count"] > output_budget:
                 raise ValueError("LLM_CONTEXT_LIMIT")
-            result["semantics"] = json.loads(reply["message"]["content"])
+            selection = json.loads(reply["message"]["content"])
+            if catalog is not None:
+                validate_fragment_selection(selection, body["definition"], targets, len(catalog["fragments"]))
+                result["fragment_catalog_sha256"] = catalog["sha256"]
+                result["fragment_catalog_version"] = catalog["version"]
+            result["semantics"] = selection
             OBSERVED_INFERENCE["qwen"] = True
             result["engine"]["llm_model"] = LOCK["qwen"]["model"]
             result["engine"]["llm_manifest_sha256"] = LOCK["qwen"]["manifest_sha256"]
             result["engine"]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
+            result["engine"]["prompt_version"] = config["prompt_version"]
+            if catalog is not None:
+                result["engine"]["fragment_catalog_sha256"] = catalog["sha256"]
+                result["engine"]["fragment_catalog_version"] = catalog["version"]
+                result["engine"]["fragment_count"] = len(catalog["fragments"])
             result["engine"]["ollama_metrics"] = metrics
             result["engine"]["semantic_definition_version"] = "trackvance-semantic-098-v2"
             result["engine"]["context_budget"] = {"context_tokens": context, "input_tokens": input_budget,

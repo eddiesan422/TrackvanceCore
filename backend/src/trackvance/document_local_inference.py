@@ -21,11 +21,20 @@ from urllib.parse import urlsplit
 import httpx
 
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
+from .document_semantic_fragments import (
+    ESCAPED_LINE_BREAK,
+    build_catalog,
+    canonical_observed,
+    escaped_break_normalization,
+    multiline_fields,
+)
 from .operations_common import OperationError
 
 MAX_SOURCE = 32 * 1024**2
 MAX_RESPONSE = 16 * 1024**2
-PROMPT_VERSION = "trackvance-idp-098-v1"
+PROMPT_VERSION = "trackvance-idp-098-v2"
+LEGACY_PROMPT_VERSION = "trackvance-idp-098-v1"
+SUPPORTED_PROMPTS = {LEGACY_PROMPT_VERSION, PROMPT_VERSION}
 SERVICE_ERRORS = {
     "LLM_CONTEXT_LIMIT": (422, "DOCUMENT_LLM_CONTEXT_LIMIT", "La evidencia excede el contexto IA configurado; amplía el contexto o reduce el documento."),
     "LLM_INCOMPLETE": (422, "DOCUMENT_LLM_INCOMPLETE", "El modelo no completó la respuesta estructurada dentro de su presupuesto."),
@@ -40,6 +49,9 @@ SERVICE_ERRORS = {
     "LLM_RESPONSE_LIMIT": (422, "DOCUMENT_LOCAL_INFERENCE_LIMIT", "La interpretación IA excedió el límite de respuesta."),
     "INFERENCE_TIMEOUT": (422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado."),
     "CANCELLED": (422, "DOCUMENT_CANCELLED", "La inferencia IA fue cancelada."),
+    "LLM_FRAGMENT_LIMIT": (422, "DOCUMENT_LLM_FRAGMENT_LIMIT", "La evidencia excede el catálogo acotado de fragmentos IA."),
+    "LLM_FRAGMENT_INTEGRITY": (422, "DOCUMENT_LLM_EVIDENCE_INVALID", "No se pudo verificar el catálogo de evidencia OCR."),
+    "LLM_SELECTION_INVALID": (422, "DOCUMENT_LLM_EVIDENCE_INVALID", "La interpretación seleccionó evidencia fuera del contrato."),
     "GPU_QUEUE_FULL": (503, "DOCUMENT_LOCAL_INFERENCE_BUSY", "La capacidad de inferencia local está ocupada."),
     "CONFIGURED_INFERENCE_CAPACITY": (503, "DOCUMENT_LOCAL_INFERENCE_BUSY", "Se alcanzó el máximo de trabajos IA configurado."),
     "GPU_QUEUE_TIMEOUT": (422, "DOCUMENT_TIMEOUT", "El trabajo agotó su tiempo esperando la GPU local."),
@@ -145,6 +157,86 @@ def _semantic_cell(candidate, field, lines):
             "origin": {key: source[key] for key in ("page", "region", "method")}}
 
 
+def semantic_targets(payload, definition):
+    conflicts = {value for value in payload.get("semantic_conflicts", []) if isinstance(value, str)}
+    return {"fields": [field["name"] for field in definition["fields"]
+            if payload["fields"][field["name"]]["validity"] != "VALID"
+            or payload["fields"][field["name"]].get("observed") is None
+            or any(prefix + field["name"] in conflicts for prefix in ("FIELD:", "REEXTRACTION_FIELD:"))],
+        "tables": [table["name"] for table in definition["tables"]
+            if not payload["tables"][table["name"]] or payload["table_unparsed"][table["name"]]
+            or any(cell["validity"] != "VALID" for row in payload["tables"][table["name"]] for cell in row.values())
+            or any(prefix + table["name"] in conflicts for prefix in ("TABLE:", "REEXTRACTION_TABLE:"))]}
+
+
+def fragment_schema(definition, catalog, targets):
+    def cell(enabled):
+        identity = {"type": ["integer", "null"], "minimum": 0,
+                    "maximum": len(catalog["fragments"]) - 1} if enabled and catalog["fragments"] else {"type": "null"}
+        return {"type": "object", "properties": {"fragment_id": identity},
+            "required": ["fragment_id"], "additionalProperties": False}
+
+    fields = {field["name"]: cell(field["name"] in targets["fields"]) for field in definition["fields"]}
+    tables = {}
+    for table in definition["tables"]:
+        enabled = table["name"] in targets["tables"]
+        tables[table["name"]] = {"type": "array", "maxItems": 10000 if enabled else 0,
+            "items": {"type": "object", "properties": {field["name"]: cell(enabled) for field in table["fields"]},
+                "required": [field["name"] for field in table["fields"]], "additionalProperties": False}}
+    return {"type": "object", "properties": {
+        "fields": {"type": "object", "properties": fields, "required": list(fields), "additionalProperties": False},
+        "tables": {"type": "object", "properties": tables, "required": list(tables), "additionalProperties": False}},
+        "required": ["fields", "tables"], "additionalProperties": False}
+
+
+def apply_fragment_semantics(payload, candidate, definition, lines, catalog, targets):
+    allowed = multiline_fields(definition)
+
+    def resolve(selection, field, scope, enabled):
+        if not isinstance(selection, dict) or set(selection) != {"fragment_id"}:
+            raise ValueError("fragment cell schema")
+        identity = selection["fragment_id"]
+        if identity is None:
+            return _semantic_cell({"observed": None, "evidence_id": None}, field, lines)
+        if not enabled or type(identity) is not int or not 0 <= identity < len(catalog["fragments"]):
+            raise ValueError("fragment selection")
+        fragment = catalog["fragments"][identity]
+        cell = _semantic_cell({"observed": fragment["text"], "evidence_id": fragment["evidence_id"]}, field, lines)
+        cell["source_fragment"] = {"catalog_sha256": catalog["sha256"],
+            **{key: fragment[key] for key in ("fragment_id", "evidence_id", "start", "end")}}
+        if (scope, field["name"]) in allowed and ESCAPED_LINE_BREAK in fragment["text"]:
+            cell["source_text_normalization"] = escaped_break_normalization(cell["observed"])
+            cell["value"], cell["validity"] = validate_value(canonical_observed(cell, allow_multiline=True), field)
+        return cell
+
+    try:
+        if catalog != build_catalog(lines) or targets != semantic_targets(payload, definition):
+            raise ValueError("fragment catalog or target integrity")
+        if (not isinstance(candidate, dict) or set(candidate) != {"fields", "tables"}
+                or not isinstance(candidate["fields"], dict) or not isinstance(candidate["tables"], dict)
+                or set(candidate["fields"]) != {field["name"] for field in definition["fields"]}
+                or set(candidate["tables"]) != {table["name"] for table in definition["tables"]}):
+            raise ValueError("fragment schema")
+        fields = {field["name"]: resolve(candidate["fields"][field["name"]], field, "headers",
+            field["name"] in targets["fields"]) for field in definition["fields"]}
+        tables: dict[str, list[dict[str, dict]]] = {}
+        for table in definition["tables"]:
+            name = table["name"]
+            rows = candidate["tables"][name]
+            if not isinstance(rows, list) or len(rows) > 10000 or (name not in targets["tables"] and rows):
+                raise ValueError("fragment table")
+            if name not in targets["tables"]:
+                continue
+            tables[name] = []
+            for row in rows:
+                if not isinstance(row, dict) or set(row) != {field["name"] for field in table["fields"]}:
+                    raise ValueError("fragment row")
+                tables[name].append({field["name"]: resolve(row[field["name"]], field, name, True) for field in table["fields"]})
+    except (KeyError, TypeError, ValueError, IndexError):
+        raise OperationError(422, "DOCUMENT_LLM_EVIDENCE_INVALID", "La interpretación seleccionó fragmentos fuera de la evidencia verificable.") from None
+    return _merge_semantic_cells(payload, fields, tables, definition)
+
+
 def apply_semantics(payload, candidate, definition, lines):
     """No generated values, confidence, human status, or silent overwriting."""
     try:
@@ -167,6 +259,10 @@ def apply_semantics(payload, candidate, definition, lines):
                 tables[table["name"]].append({field["name"]: _semantic_cell(row[field["name"]], field, lines) for field in table["fields"]})
     except (KeyError, TypeError, ValueError):
         raise OperationError(422, "DOCUMENT_LLM_EVIDENCE_INVALID", "La respuesta semántica contiene campos sin evidencia verificable.") from None
+    return _merge_semantic_cells(payload, fields, tables, definition)
+
+
+def _merge_semantic_cells(payload, fields, tables, definition):
     result = copy.deepcopy(payload)
     conflicts = list(payload.get("semantic_conflicts", []))
     for name, cell in fields.items():
@@ -426,8 +522,10 @@ def _append_history(history, entry):
 
 
 def run_local(source, definition, configuration, *, legacy_runner, check):
-    if configuration.get("prompt_version", PROMPT_VERSION) != PROMPT_VERSION:
+    prompt_version = configuration.get("prompt_version", LEGACY_PROMPT_VERSION)
+    if prompt_version not in SUPPORTED_PROMPTS:
         raise OperationError(422, "DOCUMENT_PROMPT_UNKNOWN", "La versión del prompt no está instalada.")
+    configuration = {**configuration, "prompt_version": prompt_version}
     original_check, highest = check, 0
 
     def report(progress):
@@ -466,15 +564,32 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             return
         stage = "INTERPRET"
         observation_hash = hashlib.sha256(json.dumps(response["lines"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        catalog, targets = None, None
+        schema = semantic_schema(definition)
+        if prompt_version == PROMPT_VERSION:
+            try:
+                catalog = build_catalog(response["lines"])
+            except ValueError:
+                raise OperationError(422, "DOCUMENT_LLM_FRAGMENT_LIMIT", "No se pudo construir el catálogo acotado de evidencia OCR.") from None
+            targets = semantic_targets(result["payload"], definition)
+            schema = fragment_schema(definition, catalog, targets)
         interpretation = _invoke("/interpret", {"request_id": uuid.uuid4().hex, "source_sha256": body["source_sha256"],
-            "configuration": configuration, "definition": definition, "semantic_schema": semantic_schema(definition),
+            "configuration": configuration, "definition": definition, "semantic_schema": schema,
+            **({"semantic_targets": targets} if targets is not None else {}),
             "observations": response["lines"], "observations_sha256": observation_hash},
             timeout=timeout, started=started, check=check, minimum_progress=50)
         if (not isinstance(interpretation, dict) or interpretation.get("source_sha256") != body["source_sha256"]
                 or interpretation.get("observations_sha256") != observation_hash or "semantics" not in interpretation
                 or not isinstance(interpretation.get("engine"), dict)):
             raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La interpretación no corresponde a la evidencia OCR solicitada.")
-        result["payload"] = apply_semantics(result["payload"], interpretation["semantics"], definition, response["lines"])
+        if catalog is not None:
+            if (interpretation.get("fragment_catalog_sha256") != catalog["sha256"]
+                    or interpretation.get("fragment_catalog_version") != catalog["version"]):
+                raise OperationError(422, "DOCUMENT_LLM_EVIDENCE_INVALID", "El catálogo semántico no coincide con la evidencia OCR original.")
+            result["payload"] = apply_fragment_semantics(result["payload"], interpretation["semantics"], definition,
+                response["lines"], catalog, targets)
+        else:
+            result["payload"] = apply_semantics(result["payload"], interpretation["semantics"], definition, response["lines"])
         _merge_engine(response["engine"], interpretation["engine"])
         semantic_attempts.append(copy.deepcopy(interpretation["engine"]))
         stages.append({"stage": "INTERPRET", "engine": copy.deepcopy(interpretation["engine"])})

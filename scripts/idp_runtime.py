@@ -25,7 +25,13 @@ WHEEL_URL = "https://paddle-whl.cdn.bcebos.com/stable/cu129/paddlepaddle-gpu/" +
 WHEEL_SHA = "01924dc83214a041bcc78de01c6be67ffe42e88909c7f4b6d13c31b363851b0a"
 BUILDKIT = "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
 SOURCES = ("server.py", "paddle_runner.py", "runtime_probe.py", "runtime_init.py",
-           "pipeline.yml", "prompt-v1.txt", "models.lock.json")
+           "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt", "document_semantic_fragments.py", "models.lock.json")
+
+
+def source_path(name):
+    if name == "document_semantic_fragments.py":
+        return ROOT / "backend/src/trackvance" / name
+    return DEPLOY / name
 
 
 def sha(path):
@@ -180,7 +186,7 @@ def prepare(args):
         app.mkdir(parents=True, exist_ok=True)
         hashes = {}
         for name in SOURCES:
-            shutil.copyfile(DEPLOY / name, app / name)
+            shutil.copyfile(source_path(name), app / name)
             hashes[name] = sha(app / name)
         (app / "runtime-layers.lock.json").write_text(json.dumps(manifest, indent=2))
         shutil.copyfile(DEPLOY / "Dockerfile.gateway", gateway / "Dockerfile")

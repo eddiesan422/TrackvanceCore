@@ -32,7 +32,7 @@ class EngineConfiguration(BaseModel):
     provider: Provider = "TESSERACT_LEGACY"
     paddle_model: Literal["PaddleOCR-VL-1.6"] = "PaddleOCR-VL-1.6"
     llm_model: Literal["qwen3.5:9b-q4_K_M"] = "qwen3.5:9b-q4_K_M"
-    prompt_version: Literal["trackvance-idp-098-v1"] = "trackvance-idp-098-v1"
+    prompt_version: Literal["trackvance-idp-098-v1", "trackvance-idp-098-v2"] = "trackvance-idp-098-v2"
     timeout_seconds: int = Field(default=300, ge=30, le=1800)
     context_tokens: int = Field(default=8192, ge=1024, le=32768)
     max_retries: int = Field(default=1, ge=0, le=2)

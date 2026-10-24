@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,28 @@ def _authority(db, document_id, owner):
     return original, job, user
 
 
+def _read_engine_progress(path, previous):
+    """Read only a bounded regular child file; an empty write keeps last progress."""
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("not a regular progress file")
+        raw = os.read(descriptor, 4)
+        if not raw:
+            return previous
+        if len(raw) > 3 or not raw.isdigit() or int(raw) > 100:
+            raise ValueError("invalid progress")
+        return max(previous, int(raw))
+    except FileNotFoundError:
+        return previous
+    except (OSError, ValueError):
+        raise OperationError(422, "DOCUMENT_ENGINE_FAILURE", "El motor produjo un indicador de progreso inválido.") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def run_engine(source, definition, *, check=lambda progress: None, preview_page=None,
                native_only=False, candidate_lines=None):
     if sys.platform != "linux":
@@ -81,12 +104,12 @@ def run_engine(source, definition, *, check=lambda progress: None, preview_page=
         process = subprocess.Popen([sys.executable, "-I", "-B", str(Path(__file__).with_name("document_engine.py")), str(folder)],
                                    env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
-        start = time.monotonic()
+        start, last_progress = time.monotonic(), 0
         while process.poll() is None:
             if time.monotonic() - start >= TIMEOUT_SECONDS:
                 raise OperationError(422, "DOCUMENT_TIMEOUT", "La extracción excedió el tiempo total de 120 segundos.")
-            progress = folder / "progress"
-            check(int(progress.read_text()) if progress.exists() else 0)
+            last_progress = _read_engine_progress(folder / "progress", last_progress)
+            check(last_progress)
             time.sleep(0.2)
         check(100)
         result = folder / "result.json"
