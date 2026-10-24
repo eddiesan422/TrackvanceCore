@@ -369,8 +369,6 @@ def map_candidates(observations, definition):
                 reason = "AT_OR_AFTER_DECLARED_PAGE_STOP"
             elif len(parts) != len(table["fields"]):
                 reason = "PHYSICAL_PIPE_CELL_COUNT_MISMATCH"
-            elif any(not item[2] for item in parts):
-                reason = "EMPTY_SOURCE_CELL"
             elif key is None:
                 reason = "UNKNOWN_DECLARED_ROW_START"
             elif len(row_start_tokens(parts, table)) != 1:
@@ -386,7 +384,26 @@ def map_candidates(observations, definition):
                 rejected_count += 1
                 continue
             row, issues = {}, []
+            if any(not item[2] for item in parts):
+                issues.append("EMPTY_SOURCE_CELL")
+                output["rejected"][name].append(rejected_source(index, source, issues[0]))
+                rejected_count += 1
             for field, (start, end, observed) in zip(table["fields"], parts, strict=True):
+                if not observed:
+                    # Retain the known row and every observed neighbour, without
+                    # inventing text, a fragment or cell geometry for this gap.
+                    row[field["name"]] = {
+                        "observed": None,
+                        "value": None,
+                        "candidate_text": None,
+                        "validity": "UNVALIDATED",
+                        "confidence": None,
+                        "reviewed": False,
+                        "origin": None,
+                        "source_fragment": None,
+                        "source_spatial_precision": "MISSING_SOURCE_CELL",
+                    }
+                    continue
                 fragment = lookup.get((index, start, end))
                 if fragment is None or fragment["text"] != observed:
                     raise ValueError("EXACT_SOURCE_CELL_FRAGMENT_NOT_IN_SHARED_CATALOG")
@@ -422,7 +439,9 @@ def map_candidates(observations, definition):
                 row[field["name"]] = cell
             if key in seen_keys[name]:
                 issues.append("DUPLICATE_DECLARED_ROW_KEY")
-                output["rejected"][name].append(rejected_source(index, source, issues[0]))
+                output["rejected"][name].append(
+                    rejected_source(index, source, "DUPLICATE_DECLARED_ROW_KEY")
+                )
                 rejected_count += 1
             seen_keys[name].add(key)
             # Duplicate rows stay visible in candidates and in rejection facts.
@@ -438,7 +457,14 @@ def map_candidates(observations, definition):
             ],
             continuation_inferred=inferred,
             candidate_rows=mapped_count,
-            rejected_rows=rejected_count,
+            rejected_rows=len(
+                {
+                    fact["evidence_id"]
+                    for fact in output["rejected"][name]
+                    if fact["evidence_id"] in identities
+                }
+            ),
+            rejected_facts=rejected_count,
         )
         output["blocks"].append(block)
     # Plausible detail blocks that failed identification/geometry must enter the

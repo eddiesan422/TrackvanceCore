@@ -20,8 +20,12 @@ from pathlib import Path
 APP_ROOT = Path(__file__).resolve().parent
 RUNNER_BYTES = Path(__file__).read_bytes()
 PIPELINE_BYTES = (APP_ROOT / "pipeline.yml").read_bytes()
+DIAGNOSTIC_BYTES = (APP_ROOT / "idp_observability.py").read_bytes()
+DIAGNOSTICS = {"__name__": "trackvance_idp_child_diagnostics"}
+exec(compile(DIAGNOSTIC_BYTES, str(APP_ROOT / "idp_observability.py"), "exec"), DIAGNOSTICS)
 STARTUP_HASHES = {"paddle_runner.py": hashlib.sha256(RUNNER_BYTES).hexdigest(),
-                  "pipeline.yml": hashlib.sha256(PIPELINE_BYTES).hexdigest()}
+                  "pipeline.yml": hashlib.sha256(PIPELINE_BYTES).hexdigest(),
+                  "idp_observability.py": hashlib.sha256(DIAGNOSTIC_BYTES).hexdigest()}
 
 
 def startup_provenance():
@@ -139,83 +143,101 @@ def main():
 
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024**2,) * 2)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    import paddle
-    from paddleocr import PaddleOCRVL
+    diagnostic = DIAGNOSTICS["make_child_diagnostics"](Path(sys.argv[1]), STARTUP_HASHES,
+        enable_stacks=os.environ.get("TRACKVANCE_IDP_STACK_DIAGNOSTICS") == "1")
+    try:
+        diagnostic.arm()
+        diagnostic.mark("IMPORT_PADDLE")
+        import paddle
+        diagnostic.mark("IMPORT_PADDLEOCR")
+        from paddleocr import PaddleOCRVL
 
-    started = time.monotonic()
-    folder = Path(sys.argv[1])
-    request = json.loads((folder / "request.json").read_text())
-    if not paddle.is_compiled_with_cuda() or paddle.device.cuda.device_count() != 1:
-        raise RuntimeError("GPU_REQUIRED")
-    pipeline = PaddleOCRVL(pipeline_version="v1.6", device="gpu:0", paddlex_config=captured_pipeline(folder),
-        vl_rec_model_dir="/models/paddle", layout_detection_model_dir="/models/layout",
-        use_doc_orientation_classify=False, use_doc_unwarping=False,
-        vl_rec_max_concurrency=1, use_queues=False)
-    lines, geometries, raw_pages = [], {}, []
-    regions = request.get("regions", [])
-    for page_number, result, crop_box, full_size in predictions(pipeline, folder / request["filename"], regions):
-        if page_number > 50:
-            raise ValueError("DOCUMENT_PAGE_LIMIT")
-        raw = result.json
-        raw = raw.get("res", raw)
-        width, height = raw["width"], raw["height"]
-        if isinstance(width, list):
-            width = width[0]
-        if isinstance(height, list):
-            height = height[0]
-        if width <= 0 or height <= 0 or width * height > 20_000_000:
-            raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
-        source_width, source_height = full_size or (width, height)
-        geometries[str(page_number)] = {"width": source_width, "height": source_height, "unit": "PIXEL"}
-        raw_pages.append(raw)
-        spotting = raw.get("spotting_res")
-        if regions and not isinstance(spotting, dict):
-            raise ValueError("DOCUMENT_SPOTTING_UNAVAILABLE")
-        if regions and isinstance(spotting, dict):
-            words = []
-            for text, polygon in zip(spotting.get("rec_texts", []), spotting.get("rec_polys", []), strict=True):
-                if isinstance(text, (list, tuple)):
-                    text = text[0]
-                if not isinstance(text, str) or not text.strip() or not polygon:
-                    continue
-                xs, ys = [point[0] for point in polygon], [point[1] for point in polygon]
-                normalized = [max(0, min(1, min(xs) / width)), max(0, min(1, min(ys) / height)),
-                              max(0, min(1, max(xs) / width)), max(0, min(1, max(ys) / height))]
-                global_box = [crop_box[0] + normalized[0] * (crop_box[2] - crop_box[0]),
-                    crop_box[1] + normalized[1] * (crop_box[3] - crop_box[1]),
-                    crop_box[0] + normalized[2] * (crop_box[2] - crop_box[0]),
-                    crop_box[1] + normalized[3] * (crop_box[3] - crop_box[1])]
-                if global_box[0] < global_box[2] and global_box[1] < global_box[3]:
-                    words.append({"text": text.strip(), "region": global_box, "confidence": None})
-            lines.extend(group_spotted(words, page_number))
-            continue
-        for block in raw.get("parsing_res_list", []):
-            text, box = block.get("block_content", ""), block.get("block_bbox")
-            if not isinstance(text, str) or not box or not text.strip():
+        started = time.monotonic()
+        folder = Path(sys.argv[1])
+        request = json.loads((folder / "request.json").read_text())
+        diagnostic.bind_source(request["source_sha256"])
+        if not paddle.is_compiled_with_cuda() or paddle.device.cuda.device_count() != 1:
+            raise RuntimeError("GPU_REQUIRED")
+        diagnostic.mark("CREATE_PIPELINE")
+        pipeline = PaddleOCRVL(pipeline_version="v1.6", device="gpu:0", paddlex_config=captured_pipeline(folder),
+            vl_rec_model_dir="/models/paddle", layout_detection_model_dir="/models/layout",
+            use_doc_orientation_classify=False, use_doc_unwarping=False,
+            vl_rec_max_concurrency=1, use_queues=False)
+        lines, geometries, raw_pages = [], {}, []
+        regions = request.get("regions", [])
+        diagnostic.mark("PREDICT_NEXT")
+        for page_number, result, crop_box, full_size in predictions(pipeline, folder / request["filename"], regions):
+            if page_number > 50:
+                raise ValueError("DOCUMENT_PAGE_LIMIT")
+            diagnostic.mark("POSTPROCESS_PAGE", page_number)
+            raw = result.json
+            raw = raw.get("res", raw)
+            width, height = raw["width"], raw["height"]
+            if isinstance(width, list):
+                width = width[0]
+            if isinstance(height, list):
+                height = height[0]
+            if width <= 0 or height <= 0 or width * height > 20_000_000:
+                raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
+            source_width, source_height = full_size or (width, height)
+            geometries[str(page_number)] = {"width": source_width, "height": source_height, "unit": "PIXEL"}
+            raw_pages.append(raw)
+            spotting = raw.get("spotting_res")
+            if regions and not isinstance(spotting, dict):
+                raise ValueError("DOCUMENT_SPOTTING_UNAVAILABLE")
+            if regions and isinstance(spotting, dict):
+                words = []
+                for text, polygon in zip(spotting.get("rec_texts", []), spotting.get("rec_polys", []), strict=True):
+                    if isinstance(text, (list, tuple)):
+                        text = text[0]
+                    if not isinstance(text, str) or not text.strip() or not polygon:
+                        continue
+                    xs, ys = [point[0] for point in polygon], [point[1] for point in polygon]
+                    normalized = [max(0, min(1, min(xs) / width)), max(0, min(1, min(ys) / height)),
+                                  max(0, min(1, max(xs) / width)), max(0, min(1, max(ys) / height))]
+                    global_box = [crop_box[0] + normalized[0] * (crop_box[2] - crop_box[0]),
+                        crop_box[1] + normalized[1] * (crop_box[3] - crop_box[1]),
+                        crop_box[0] + normalized[2] * (crop_box[2] - crop_box[0]),
+                        crop_box[1] + normalized[3] * (crop_box[3] - crop_box[1])]
+                    if global_box[0] < global_box[2] and global_box[1] < global_box[3]:
+                        words.append({"text": text.strip(), "region": global_box, "confidence": None})
+                lines.extend(group_spotted(words, page_number))
+                diagnostic.mark("PREDICT_NEXT")
                 continue
-            region = [max(0, min(1, box[0] / width)), max(0, min(1, box[1] / height)),
-                      max(0, min(1, box[2] / width)), max(0, min(1, box[3] / height))]
-            rows = text.splitlines()
-            if block.get("block_label") == "table" and "<table" in text:
-                parser = TableText()
-                parser.feed(text)
-                rows = parser.rows
-            for row in rows:
-                if row.strip() and region[0] < region[2] and region[1] < region[3]:
-                    lines.append({"text": row.strip(), "page": page_number, "region": region,
-                                  "method": "OCR", "confidence": None, "block_label": block.get("block_label")})
-    raw_hash = hashlib.sha256(json.dumps(raw_pages, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    with open("/models/paddle/model.safetensors", "rb") as model_stream:
-        model_hash = hashlib.file_digest(model_stream, "sha256").hexdigest()
-    output = {"source_sha256": request["source_sha256"], "lines": lines, "page_geometry": geometries,
-        "engine": {"paddle_model": "PaddleOCR-VL-1.6", "paddle_version": paddle.__version__,
-            "paddleocr_version": importlib.metadata.version("paddleocr"),
-            "model_sha256": model_hash,
-            "device": paddle.device.cuda.get_device_name(0), "raw_observations_sha256": raw_hash,
-            "runtime_provenance": {"paddle_runner": startup_provenance()},
-            "evidence_resolution": "MODEL_SPOTTING" if regions else "LAYOUT_BLOCK", "independent_row_coverage": False,
-            "phases": {"paddle_seconds": round(time.monotonic() - started, 4)}}}
-    (folder / "result.json").write_text(json.dumps(output, ensure_ascii=False, allow_nan=False))
+            for block in raw.get("parsing_res_list", []):
+                text, box = block.get("block_content", ""), block.get("block_bbox")
+                if not isinstance(text, str) or not box or not text.strip():
+                    continue
+                region = [max(0, min(1, box[0] / width)), max(0, min(1, box[1] / height)),
+                          max(0, min(1, box[2] / width)), max(0, min(1, box[3] / height))]
+                rows = text.splitlines()
+                if block.get("block_label") == "table" and "<table" in text:
+                    parser = TableText()
+                    parser.feed(text)
+                    rows = parser.rows
+                for row in rows:
+                    if row.strip() and region[0] < region[2] and region[1] < region[3]:
+                        lines.append({"text": row.strip(), "page": page_number, "region": region,
+                                      "method": "OCR", "confidence": None, "block_label": block.get("block_label")})
+            diagnostic.mark("PREDICT_NEXT")
+        diagnostic.mark("SERIALIZE_OBSERVATIONS")
+        raw_hash = hashlib.sha256(json.dumps(raw_pages, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        diagnostic.mark("HASH_MODEL")
+        with open("/models/paddle/model.safetensors", "rb") as model_stream:
+            model_hash = hashlib.file_digest(model_stream, "sha256").hexdigest()
+        output = {"source_sha256": request["source_sha256"], "lines": lines, "page_geometry": geometries,
+            "engine": {"paddle_model": "PaddleOCR-VL-1.6", "paddle_version": paddle.__version__,
+                "paddleocr_version": importlib.metadata.version("paddleocr"),
+                "model_sha256": model_hash,
+                "device": paddle.device.cuda.get_device_name(0), "raw_observations_sha256": raw_hash,
+                "runtime_provenance": {"paddle_runner": startup_provenance()},
+                "evidence_resolution": "MODEL_SPOTTING" if regions else "LAYOUT_BLOCK", "independent_row_coverage": False,
+                "phases": {"paddle_seconds": round(time.monotonic() - started, 4)}}}
+        diagnostic.mark("WRITE_RESULT")
+        (folder / "result.json").write_text(json.dumps(output, ensure_ascii=False, allow_nan=False))
+        diagnostic.mark("DONE")
+    finally:
+        diagnostic.close()
 
 
 if __name__ == "__main__":

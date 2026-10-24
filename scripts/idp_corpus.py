@@ -37,13 +37,14 @@ LINE_ALIASES = {"unidad": "unit", "cantidad": "quantity", "valor_unitario": "uni
 NUMERIC_LINES = {"cantidad", "valor_unitario", "descuento_pct", "impuesto_pct", "line_base", "line_total", "tax_amount"}
 PERCENTAGE_FIELDS = {"descuento_pct", "impuesto_pct"}
 METRIC_POLICY = {
-    "version": 2,
+    "version": 3,
     "primary": "Declared field types; STRING percentages use independently recorded original-source literals. Missing literals count as unverified, never synthesized.",
     "row_identity": "Unique original code plus exact description when visible; every row cell requires that full identity. Reordered unique rows are aligned by code.",
     "positional": "Declared-type cell comparison at the original row position, without identity gating; diagnostic only.",
     "semantic_oracle": "Same full-row identity; percentage fields compare numeric percentage points with an optional percent suffix. No scaling, sign or magnitude repair; diagnostic only.",
     "text": "Unicode NFKC and whitespace normalization; internal spacing remains significant, including before percent signs.",
     "failures": "All selected documents, pages, expected rows and cells remain in accuracy denominators; failed documents contribute zero correct cells.",
+    "partial": "Worker-marked incomplete candidates are PARTIAL, never complete or auto-approval eligible. Their observed cells can score after inference; complete throughput excludes them.",
 }
 
 
@@ -332,6 +333,7 @@ def failed_evaluation(doc, definition, error):
     """Preserve the original failure and all source denominators with raw defaults."""
     return {"id": doc["id"], "family": doc["family_id"], "kind": document_kind(doc),
         "status": "FAILED", "error_type": type(error).__name__, "error_code": getattr(error, "code", None),
+        "source_sha256": doc.get("sha256"),
         "cells": len(doc["visible_header_fields"]) + len(doc["visible_line_fields"]) * doc["line_count"],
         "header_fields": len(doc["visible_header_fields"]), "expected_rows": doc["line_count"], "pages": doc["page_count"],
         "literal_expected_cells": doc["line_count"] * sum(field["name"] in PERCENTAGE_FIELDS
@@ -346,11 +348,97 @@ def percentile(values, fraction):
     return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)] if ordered else None
 
 
+class CorpusCheckpointFailure(Exception):
+    """A cancellation/authority callback must never become an ordinary422 control failure."""
+    def __init__(self, original):
+        self.original = original
+
+
+def deadline_failure(error, budget, deadline_error):
+    if not isinstance(error, deadline_error):
+        return {}
+    return {"error_code": "DOCUMENT_TIMEOUT", "timeout_origin": "TOTAL_DEADLINE"
+        if budget is not None and budget.clock() >= budget.deadline else "MANDATORY_STAGE_DEADLINE"}
+
+
+def run_automatic(source, definition, configuration, source_sha256, *, provider, control, certify,
+                  report_quality, operation_error, checkpoint, budget, phases, capture_candidate=None, clock=time.monotonic):
+    """Use the worker provider boundary and one total budget; no oracle or writes.
+
+    The CLI has no database commit. Its reserved commit margin stays unused, and
+    the report explicitly cannot measure durable native approval/publication.
+    Dependencies are explicit so synthetic tests need no backend/model imports.
+    """
+    def check(progress):
+        if budget is not None:
+            budget.require()
+        try:
+            checkpoint(progress)
+        except operation_error as error:
+            raise CorpusCheckpointFailure(error) from error
+
+    def verify_source():
+        with source.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != source_sha256:
+                raise ValueError("CORPUS_SOURCE_INTEGRITY_FAILURE")
+
+    check(0)
+    verify_source()
+    extraction_began = clock()
+    try:
+        result = provider(source, definition, configuration, legacy_runner=control, check=check, budget=budget)
+    finally:
+        phases["extraction_seconds"] = clock() - extraction_began
+    if capture_candidate is not None:
+        capture_candidate(result)  # Private raw checkpoint remains diagnostic if later control fails.
+    validation = None
+    control_began = clock()
+    try:
+        try:
+            independent = control(source, definition, check=check,
+                deadline=budget.control_deadline() if budget is not None else None,
+                control_deadline=budget is not None)
+            validation = certify(result, independent, definition, source_sha256)
+            result["engine"]["validation"] = validation
+        except operation_error as error:
+            if error.status != 422 or error.code in {"DOCUMENT_CANCELLED", "DOCUMENT_LEASE_LOST",
+                    "DOCUMENT_ARTIFACT_INTEGRITY", "DOCUMENT_EXTRACTION_INTEGRITY", "DOCUMENT_PROVIDER_CONTRACT",
+                    "DOCUMENT_LOCAL_INFERENCE_CONTRACT"}:
+                raise
+            result["engine"]["validation_failure"] = {"error_code": error.code,
+                "phase": "INDEPENDENT_VALIDATION", "automatic_approval_blocked": True}
+    finally:
+        phases["independent_validation_seconds"] = clock() - control_began
+    check(95)
+    verify_source()
+    quality_began = clock()
+    try:
+        quality = report_quality(SimpleNamespace(payload=result["payload"], engine=result["engine"], reviewed=False), definition)
+    finally:
+        phases["quality_seconds"] = clock() - quality_began
+    check(100)
+    if budget is not None:
+        result["engine"]["deadline_budget"] = budget.report()
+    marker = result["engine"].get("inference_completion")
+    partial = isinstance(marker, dict) and marker.get("status") == "PARTIAL"
+    return result, {"status": "PARTIAL" if partial else "PROCESSED",
+        "auto_approval_eligible": not partial and quality["status"] == "AUTO_VERIFIED",
+        "validation": validation, "quality": quality,
+        "incomplete_inference": marker if partial else None,
+        "error_code": marker.get("error_code") if partial else None,
+        "failed_phase": marker.get("failed_stage") if partial else None,
+        "timeout_origin": "OPTIONAL_STAGE" if partial else None,
+        "native_approval_measured": False, "native_auto_approved": None, "publication_measured": False,
+        "human_corrections": 0, "human_edits": 0}
+
+
 def summarize(rows, elapsed):
     complete = [row for row in rows if row.get("status") == "PROCESSED"]
+    partial = [row for row in rows if row.get("status") == "PARTIAL"]
+    observed = complete + partial
     eligible = sum(row.get("auto_approval_eligible", row.get("auto_verified", False)) for row in complete)
     correct_eligible = sum(row.get("auto_approval_eligible", row.get("auto_verified", False)) and row["document_exact"] for row in complete)
-    counts = {key: sum(row.get(key, 0) for row in complete) for key in (
+    counts = {key: sum(row.get(key, 0) for row in observed) for key in (
         "cells", "exact_cells", "header_fields", "exact_header_fields", "expected_rows", "actual_rows",
         "exact_rows", "missing_rows", "extra_rows", "duplicate_rows", "critical_errors", "pages",
         "positional_exact_cells", "positional_detail_exact_cells", "code_aligned_exact_cells", "semantic_exact_cells",
@@ -360,16 +448,30 @@ def summarize(rows, elapsed):
     for key in ("cells", "header_fields", "expected_rows", "pages", "literal_expected_cells"):
         counts[key] = sum(row.get(key, 0) for row in rows)
     processed_pages = sum(row.get("pages", 0) for row in complete)
-    return {"documents": len(rows), "processed": len(complete), "failed": len(rows) - len(complete), **counts,
+    phase_names = sorted({name for row in rows for name in row.get("phases", {})})
+    phase_summary = {}
+    for name in phase_names:
+        values = [row["phases"][name] for row in rows if name in row.get("phases", {})]
+        phase_summary[name] = {"observed_documents": len(values), "p50_seconds": percentile(values, .5),
+            "p95_seconds": percentile(values, .95), "max_seconds": max(values), "mean_seconds": statistics.mean(values)}
+    return {"documents": len(rows), "processed": len(complete), "partial": len(partial),
+        "reviewable_results": len(observed), "failed": len(rows) - len(observed), **counts,
         "cell_accuracy": counts["exact_cells"] / counts["cells"] if counts["cells"] else None,
         "semantic_oracle_cell_accuracy": counts["semantic_exact_cells"] / counts["cells"] if counts["cells"] else None,
         "positional_cell_accuracy": counts["positional_exact_cells"] / counts["cells"] if counts["cells"] else None,
         "row_accuracy": counts["exact_rows"] / counts["expected_rows"] if counts["expected_rows"] else None,
         "header_accuracy": counts["exact_header_fields"] / counts["header_fields"] if counts["header_fields"] else None,
-        "primary_reference_complete": len(complete) == len(rows)
-            and all(row.get("primary_reference_complete", False) for row in complete),
+        "primary_reference_complete": len(observed) == len(rows)
+            and all(row.get("primary_reference_complete", False) for row in observed),
         "accuracy_failed_documents_count_as_zero": True,
-        "unprocessed_expected_rows": sum(row.get("expected_rows", 0) for row in rows if row.get("status") != "PROCESSED"),
+        "unprocessed_expected_rows": sum(row.get("expected_rows", 0) for row in rows if row.get("status") not in {"PROCESSED", "PARTIAL"}),
+        "partial_expected_rows": sum(row.get("expected_rows", 0) for row in partial),
+        "partial_content_exact_documents": sum(row.get("document_exact", False) for row in partial),
+        "partial_failed_stage_counts": dict(Counter(row.get("incomplete_inference", {}).get("failed_stage", "UNREPORTED") for row in partial)),
+        "error_code_counts": dict(Counter(row["error_code"] for row in rows if row.get("error_code"))),
+        "global_deadline_exhausted_documents": sum(row.get("timeout_origin") == "TOTAL_DEADLINE" for row in rows),
+        "mandatory_stage_deadline_exhausted_documents": sum(row.get("timeout_origin") == "MANDATORY_STAGE_DEADLINE" for row in rows),
+        "phase_durations": phase_summary,
         "document_exact": sum(row["document_exact"] for row in complete),
         "semantic_document_exact": sum(row.get("semantic_document_exact", False) for row in complete),
         "table_exact": sum(row["table_exact"] for row in complete),
@@ -385,7 +487,8 @@ def summarize(rows, elapsed):
         "latency_p95_seconds": percentile([row["latency_seconds"] for row in rows], .95),
         "latency_max_seconds": max((row["latency_seconds"] for row in rows), default=None),
         "latency_mean_seconds": statistics.mean(row["latency_seconds"] for row in rows) if rows else None,
-        "human_corrections": 0, "publication_measured": False}
+        "reviewable_results_per_minute": len(observed) * 60 / elapsed if elapsed else None,
+        "human_corrections": 0, "human_edits": 0, "publication_measured": False}
 
 
 def main():
@@ -425,8 +528,8 @@ def main():
     if args.definitions is None:
         parser.error("--definitions is required; oracle values never configure inference.")
     from trackvance import __version__ as runtime_version
-    from trackvance.document_local_inference import run_local
-    from trackvance.document_providers import EngineConfiguration
+    from trackvance.document_inference_completion import AttemptBudget, DocumentDeadlineExpired
+    from trackvance.document_providers import EngineConfiguration, execute_provider
     from trackvance.document_quality import certify_candidate, quality_report
     from trackvance.document_worker import run_engine
     from trackvance.operations_common import OperationError
@@ -435,7 +538,7 @@ def main():
     implementation["runtime_version"] = runtime_version
     definitions = json.loads(args.definitions.read_text(encoding="utf-8"))
     selected = select_documents(oracle["invoices"], args.limit, args.kind, args.sampling)
-    configuration = EngineConfiguration(provider="PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
+    configuration = EngineConfiguration(provider="TESSERACT_LEGACY" if args.mode == "legacy" else "PADDLE_QWEN_LOCAL", use_llm=args.mode == "paddle-qwen",
         timeout_seconds=args.timeout_seconds, max_parallel_jobs=args.concurrency,
         context_tokens=args.context_tokens, max_retries=args.max_retries).model_dump()
     began = time.monotonic()
@@ -465,36 +568,28 @@ def main():
         execution_began = time.monotonic()
         definition = definitions[doc["family_id"]]
         phases = {}
+        budget = AttemptBudget(configuration["timeout_seconds"], started=execution_began) if args.mode != "legacy" else None
         try:
             checkpoint(0)
             with tempfile.TemporaryDirectory(prefix="idp-corpus-") as directory:
                 source = Path(directory) / "document.pdf"
                 with zipfile.ZipFile(args.corpus) as archive:
                     source.write_bytes(archive.read(doc["relative_path"]))
-                if args.mode == "legacy":
-                    result = run_engine(source, definition, check=checkpoint)
-                else:
-                    result = run_local(source, definition, configuration, legacy_runner=run_engine, check=checkpoint)
-                phases["extraction_seconds"] = time.monotonic() - execution_began
+                result, outcome = run_automatic(source, definition, configuration, doc["sha256"],
+                    provider=execute_provider, control=run_engine, certify=certify_candidate,
+                    report_quality=quality_report, operation_error=OperationError, checkpoint=checkpoint,
+                    budget=budget, phases=phases,
+                    capture_candidate=lambda value: save(output / (doc["id"] + ".private.json"), value))
                 save(output / (doc["id"] + ".private.json"), result)
-                # Attestation must be computed by the independent worker validator.
-                control_began = time.monotonic()
-                validation = None
-                try:
-                    independent = run_engine(source, definition, check=checkpoint)
-                    validation = certify_candidate(result, independent, definition, doc["sha256"])
-                    result["engine"]["validation"] = validation
-                except OperationError as error:
-                    if error.status != 422:
-                        raise
-                    result["engine"]["validation_failure"] = {"error_code": error.code, "automatic_approval_blocked": True}
-                phases["independent_validation_seconds"] = time.monotonic() - control_began
-                quality = quality_report(SimpleNamespace(payload=result["payload"], engine=result["engine"], reviewed=False), definition)
                 row = evaluate(result["payload"], doc, definition, document_literals(doc))
-                row.update(status="PROCESSED", auto_approval_eligible=quality["status"] == "AUTO_VERIFIED",
-                    validation=validation, quality=quality, engine=result["engine"], source_sha256=doc["sha256"])
+                row.update(**outcome, engine=result["engine"], source_sha256=doc["sha256"])
         except Exception as error:  # noqa: BLE001 -- preserve each genuine failure and continue the remaining original corpus.
+            if isinstance(error, CorpusCheckpointFailure):
+                error = error.original
             row = failed_evaluation(doc, definition, error)
+            row["failed_phase"] = {"extraction_seconds": "EXTRACTION", "independent_validation_seconds": "INDEPENDENT_VALIDATION",
+                "quality_seconds": "QUALITY"}.get(next(reversed(phases), None), "BEFORE_EXTRACTION")
+            row.update(deadline_failure(error, budget, DocumentDeadlineExpired))
             row["private_failure_trace"] = preserve_failure_trace(output, doc["id"], error)
             evidence = preserve_failure_evidence(output, doc["id"], error)
             if evidence is not None:
@@ -503,6 +598,9 @@ def main():
         row["processing_seconds"] = time.monotonic() - execution_began
         row["queue_seconds"] = execution_began - began
         row["phases"] = phases
+        row["deadline_budget"] = budget.report() if budget is not None else None
+        row["deadline_scope"] = "AUTOMATIC_INFERENCE_AND_INDEPENDENT_CONTROL_ONLY; no database commit or oracle evaluation"
+        row["human_corrections"] = row["human_edits"] = 0
         save(output / (doc["id"] + ".metrics.json"), row)
         print(json.dumps({"id": row["id"], "status": row["status"], "latency_seconds": row["latency_seconds"]}), flush=True)
         return row
@@ -511,7 +609,7 @@ def main():
         rows = list(pool.map(run, selected))
     implementation["source_unchanged_during_run"] = (
         implementation_record(repository, args.source_sha)["manifest_sha256"] == implementation["manifest_sha256"])
-    report = {"schema_version": 2, "metric_policy": METRIC_POLICY, "implementation": implementation,
+    report = {"schema_version": 3, "metric_policy": METRIC_POLICY, "implementation": implementation,
         "source_literals_sha256": literal_evidence.get("sha256"),
         "mode": args.mode, "sampling": args.sampling, "selection_uses_expected_values": False,
         "client_concurrency": args.concurrency,

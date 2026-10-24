@@ -79,6 +79,32 @@ def workload_provenance(result_path, host_source):
         "oci_content_certified": False}
 
 
+def workload_outcomes(result, expected_documents):
+    """CLI completion/reviewability is separate from process and native outcomes."""
+    rows, reported = result["results"], result["summary"]
+    if (type(expected_documents) is not int or not 1 <= expected_documents <= 100
+            or not isinstance(rows, list) or len(rows) != expected_documents
+            or any(not isinstance(row.get("id"), str) or not row["id"] for row in rows)
+            or len({row["id"] for row in rows}) != expected_documents
+            or any(row["status"] not in {"PROCESSED", "PARTIAL", "FAILED"} for row in rows)):
+        raise ValueError("IDP_BENCHMARK_TERMINAL_DENOMINATOR_INVALID")
+    counts = {name: sum(row["status"] == status for row in rows)
+        for name, status in (("processed", "PROCESSED"), ("partial", "PARTIAL"), ("failed", "FAILED"))}
+    if (type(reported.get("documents")) is not int or reported["documents"] != expected_documents
+            or any(type(reported.get(name, 0)) is not int or reported.get(name, 0) != count for name, count in counts.items())):
+        raise ValueError("IDP_BENCHMARK_TERMINAL_COUNTS_MISMATCH")
+    if any(record.get("human_edits", 0) != 0 or record.get("human_corrections", 0) != 0
+           or record.get("native_approval_measured", False) is not False
+           or record.get("native_auto_approved") is not None
+           or record.get("publication_measured", False) is not False for record in [reported, *rows]):
+        raise ValueError("IDP_BENCHMARK_CLI_SCOPE_OR_HUMAN_EDIT_MISMATCH")
+    return {"documents": expected_documents, **counts,
+        "completion_status": "FAILED" if counts["failed"] else "PARTIAL" if counts["partial"] else "COMPLETE",
+        "all_selected_documents_preserved": True, "human_edits": 0,
+        "native_approval_measured": False, "native_auto_approved": None, "publication_measured": False,
+        "scope": "CLI automatic candidate completion only; no durable native approval/publication"}
+
+
 def inspect(identity):
     if not re.fullmatch(r"[a-f0-9]{64}", identity):
         raise ValueError("IDP_BENCHMARK_REQUIRES_IMMUTABLE_CONTAINER_ID")
@@ -344,7 +370,9 @@ def main():
                 "abort_reason": reason, "status": "ABORTED" if reason else "PASS" if process.returncode == 0 else "FAIL",
                 "summary": summary(samples), "samples": samples}
             try:
-                proof = workload_provenance(host_output / name / "result.json", host_source)
+                result_path = host_output / name / "result.json"
+                proof = workload_provenance(result_path, host_source)
+                report["workload_outcomes"] = workload_outcomes(json.loads(result_path.read_text(encoding="utf-8")), size)
                 unchanged_host = verified_host_source(repository) == host_source
                 report["implementation_provenance"] = {**proof, "host_source_unchanged": unchanged_host}
                 if not proof["actual_bytes_match_verified_host"] or not unchanged_host:

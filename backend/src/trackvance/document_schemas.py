@@ -195,5 +195,27 @@ class DocumentDraftDefinition(DocumentDefinition):
     fields: list[DocumentField] = Field(default_factory=list, max_length=100)
 
 
+class IncompleteSourceConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_extraction_id: str = Field(min_length=1, max_length=100)
+    expected_payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_marker_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    pages: list[int] = Field(min_length=1, max_length=50)
+    all_pages_confirmed: bool = Field(strict=True)
+    all_rows_confirmed: bool = Field(strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def exact_pages_and_confirmation(cls, value):
+        if isinstance(value, dict):
+            pages = value.get("pages")
+            if (not isinstance(pages, list) or any(type(page) is not int or not 1 <= page <= 50 for page in pages)
+                    or pages != sorted(set(pages)) or value.get("all_pages_confirmed") is not True
+                    or value.get("all_rows_confirmed") is not True):
+                raise ValueError("Confirma todas las páginas y filas con sus índices exactos.")
+        return value
+
+
 def structures(definition: dict) -> dict[str, list[dict]]:
     return {"headers": definition["fields"], **{t["name"]: t["fields"] for t in definition["tables"]}}

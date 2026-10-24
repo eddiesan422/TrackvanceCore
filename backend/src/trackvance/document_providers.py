@@ -159,7 +159,8 @@ def freeze_configuration(db, subject):
     return copy.deepcopy(snapshot)
 
 
-def execute_provider(source, definition, configuration, *, legacy_runner, check):
+def execute_provider(source, definition, configuration, *, legacy_runner, check, budget=None):
+    from .document_inference_completion import LocalCandidateResult, canonical_hash
     from .document_quality import validate_candidate_contract
     provider = configuration["provider"]
     if provider == "AWS_TEXTRACT":
@@ -168,13 +169,24 @@ def execute_provider(source, definition, configuration, *, legacy_runner, check)
         data = legacy_runner(source, definition, check=check)
     elif provider == "PADDLE_QWEN_LOCAL":
         from .document_local_inference import run_local
-        data = run_local(source, definition, configuration, legacy_runner=legacy_runner, check=check)
+        data = run_local(source, definition, configuration, legacy_runner=legacy_runner, check=check, budget=budget)
     else:
         raise OperationError(422, "DOCUMENT_PROVIDER_UNKNOWN", "El proveedor no pertenece al contrato autorizado.")
     validate_candidate_contract(data, definition)
     # A candidate cannot create a validator attestation or assert human review.
-    data = copy.deepcopy(data)
+    marker = data.completion_marker if isinstance(data, LocalCandidateResult) else None
+    data = copy.deepcopy(dict(data))
     data["engine"].pop("validation", None)
+    data["engine"].pop("inference_completion", None)
+    data["engine"].pop("inference_completion_sha256", None)
+    if marker is not None:
+        if (marker.get("definition_sha256") != canonical_hash(definition)
+                or marker.get("configuration_sha256") != canonical_hash(configuration)
+                or marker.get("checkpoint_payload_sha256") != canonical_hash(data["payload"])):
+            raise OperationError(422, "DOCUMENT_PROVIDER_CONTRACT", "No se pudo verificar el resultado parcial del worker.")
+        data["engine"]["inference_completion"] = copy.deepcopy(marker)
+        data["engine"]["inference_completion_sha256"] = canonical_hash(marker)
     data["engine"].update(provider=provider, configuration=copy.deepcopy(configuration),
         configuration_sha256=hash_value(configuration))
+    validate_candidate_contract(data, definition, allow_worker_completion=True)
     return data

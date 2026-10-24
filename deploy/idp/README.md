@@ -181,3 +181,26 @@ acredita por la sola respuesta de Paddle/Qwen.
 
 Las métricas, fallos y aceptación pertenecen a los reportes de ejecución; este
 procedimiento no afirma porcentajes de exactitud, estabilidad ni capacidad.
+
+
+Diagnóstico local opcional: `IDP_STACK_DIAGNOSTICS=1` en el archivo privado de
+entorno habilita una única captura de pila a los60s; el valor predeterminado es0.
+La solicitud/documento no puede habilitarla. El watchdog se cancela al terminar;
+puede alterar tiempos o carreras y no constituye una corrección del bloqueo.
+Los marcadores de fase contienen únicamente nombres fijos, tiempos observados,
+ordinales de página y hashes de código/fuente, nunca texto documental.
+
+Tras detener y recoger un hijo fallido, el gateway conserva como máximo cuatro
+diagnósticos privados en su propio `/tmp/idp-failures-*`: hasta256KiB de stderr y
+64KiB de metadatos por registro (1.25MiB total), permisos0700/0600 y TTL de1hora
+comprobado al menos cada60s mientras vive el proceso. El stderr puede contener
+texto no confiable: nunca se devuelve por HTTP, estado, detalles de error o logs
+generales. Exportar esa evidencia privada antes de recrear el contenedor; el
+almacenamiento es efímero. Un fallo de diagnóstico conserva el error original.
+
+El runtime ahora empaqueta13 fuentes verificadas, incluido
+`idp_observability.py`, capturado por el gateway y el hijo. La salud separa
+archivos instalados, kernel CUDA y las inferencias realmente observadas.
+Kernel PASS no prueba lectura de documentos ni aceptación del corpus. Una
+prueba con proceso/tmpfs nuevos no demuestra que estén frías las cachés del
+controlador o del sistema; esos estados permanecen sin verificar.

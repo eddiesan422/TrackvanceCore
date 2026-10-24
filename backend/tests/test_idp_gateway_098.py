@@ -25,7 +25,12 @@ def gateway(tmp_path):
     spec = importlib.util.spec_from_file_location("idp_gateway_test", tmp_path / "server.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    try:
+        yield module
+    finally:
+        module.FAILURE_DIAGNOSTICS.close(clear=True)
+        if module.FAILURE_DIAGNOSTICS.thread is not None:
+            assert not module.FAILURE_DIAGNOSTICS.thread.is_alive()
 
 
 @pytest.fixture
@@ -88,13 +93,14 @@ def test_health_requires_exact_model_tag_and_digest(gateway, monkeypatch):
     assert not gateway.qwen_verified()
 
 
-def test_gateway_health_keeps_process_startup_hashes_after_files_change(gateway, tmp_path, monkeypatch):
+def test_gateway_health_keeps_process_startup_hashes_after_files_change(gateway, tmp_path, monkeypatch, request):
     names = tuple(gateway.STARTUP_FILES)
     for name in names:
         (tmp_path / name).write_bytes((gateway.APP_ROOT / name).read_bytes())
     spec = importlib.util.spec_from_file_location("idp_gateway_frozen_test", tmp_path / "server.py")
     frozen = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(frozen)
+    request.addfinalizer(lambda: frozen.FAILURE_DIAGNOSTICS.close(clear=True))
     expected = {name: hashlib.sha256((tmp_path / name).read_bytes()).hexdigest() for name in names}
     for name in names:
         (tmp_path / name).write_bytes(b"changed after process startup")
@@ -353,7 +359,7 @@ def test_paddle_child_uses_its_captured_pipeline_bytes(tmp_path, monkeypatch):
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
     expected = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
-                for name in ("paddle_runner.py", "pipeline.yml")}
+                for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
     monkeypatch.setattr(Path, "read_bytes", lambda *args, **kwargs: pytest.fail("child must use captured configuration"))
     snapshot = Path(runner.captured_pipeline(tmp_path))
     with snapshot.open("rb") as stream:

@@ -24,7 +24,7 @@ from .document_models import (
 )
 from .document_providers import EngineSettingsBody, save_settings, settings_dto
 from .document_queries import DocumentOrder, PublicationFilter, list_originals
-from .document_schemas import DocumentDefinition
+from .document_schemas import DocumentDefinition, IncompleteSourceConfirmation
 from .document_service import (
     MAX_BYTES,
     activate_template,
@@ -72,6 +72,7 @@ class ReviewBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
     table_rows: dict[str, list[dict[str, str | None]]] = Field(default_factory=dict, max_length=10)
     header_confirmations: list[HeaderConfirmation] = Field(default_factory=list, max_length=50)
+    incomplete_source_confirmation: IncompleteSourceConfirmation | None = None
 
 
 class BatchBody(BaseModel):
@@ -310,7 +311,8 @@ async def page_preview(identity: str, page: int, db: Session = Depends(get_db), 
 def review_original(identity: str, body: ReviewBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     item = owned(db, DocumentOriginal, identity, user)
     review(db, item, body.expected_extraction_id, body.changes, body.confirmed, body.reason, user, body.table_rows,
-           [value.model_dump() for value in body.header_confirmations])
+           [value.model_dump() for value in body.header_confirmations],
+           body.incomplete_source_confirmation.model_dump() if body.incomplete_source_confirmation is not None else None)
     # A successful human review remains durable even if a separate publication is blocked.
     db.commit()
     try:

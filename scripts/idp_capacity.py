@@ -28,7 +28,7 @@ def capacity(results, *, documents_per_user_per_day, window_hours, target_utiliz
     for result in results:
         summary = result.get("summary", {})
         count, seconds = summary.get("processed", 0), summary.get("elapsed_seconds", 0)
-        if (summary.get("failed") != 0 or count <= 0 or count != summary.get("documents")
+        if (summary.get("failed") != 0 or summary.get("partial", 0) != 0 or count <= 0 or count != summary.get("documents")
                 or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0):
             continue
         eligible.append((count / seconds, result))

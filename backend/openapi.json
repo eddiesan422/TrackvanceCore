@@ -22473,6 +22473,60 @@
         ],
         "title": "InboxResponse"
       },
+      "IncompleteSourceConfirmation": {
+        "properties": {
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Sha256"
+          },
+          "expected_extraction_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Expected Extraction Id"
+          },
+          "expected_payload_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Payload Hash"
+          },
+          "expected_marker_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Marker Hash"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Pages"
+          },
+          "all_pages_confirmed": {
+            "type": "boolean",
+            "title": "All Pages Confirmed"
+          },
+          "all_rows_confirmed": {
+            "type": "boolean",
+            "title": "All Rows Confirmed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_sha256",
+          "expected_extraction_id",
+          "expected_payload_hash",
+          "expected_marker_hash",
+          "pages",
+          "all_pages_confirmed",
+          "all_rows_confirmed"
+        ],
+        "title": "IncompleteSourceConfirmation"
+      },
       "IntakeBody": {
         "properties": {
           "name": {
@@ -24250,6 +24304,16 @@
             "type": "array",
             "maxItems": 50,
             "title": "Header Confirmations"
+          },
+          "incomplete_source_confirmation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncompleteSourceConfirmation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

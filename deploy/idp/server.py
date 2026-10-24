@@ -33,7 +33,7 @@ APP_ROOT = Path(__file__).resolve().parent
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
     "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
-    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "models.lock.json")}
+    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
@@ -75,6 +75,9 @@ def frozen_module(filename):
 FRAGMENTS = frozen_module("document_semantic_fragments.py")
 RULES = frozen_module("document_template_builder_rules.py")
 TABLES = frozen_module("document_literal_tables.py")
+DIAGNOSTICS = frozen_module("idp_observability.py")
+CHILD_SOURCE_HASHES = {name: STARTUP_HASHES[name] for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
+FAILURE_DIAGNOSTICS = DIAGNOSTICS.FailureRing(CHILD_SOURCE_HASHES)
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
@@ -499,6 +502,7 @@ class Handler(BaseHTTPRequestHandler):
         STATES[body["request_id"]] = {"phase": "PADDLE", "progress": 25}
         with tempfile.TemporaryDirectory(prefix="idp-") as temporary:
             folder = Path(temporary)
+            owned_job_identity = DIAGNOSTICS.identity(folder.lstat())
             (folder / filename).write_bytes(raw)
             regions = body.get("regions", [])
             if not isinstance(regions, list) or len(regions) > 4:
@@ -511,6 +515,7 @@ class Handler(BaseHTTPRequestHandler):
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_stream,
                     start_new_session=True, close_fds=True)
             ACTIVE[body["request_id"]] = process
+            failure_code = None
             try:
                 deadline = time.monotonic() + timeout
                 while process.poll() is None:
@@ -531,6 +536,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("PADDLE_RESULT_LIMIT")
                 result = json.loads((folder / "result.json").read_text())
                 OBSERVED_INFERENCE["paddle"] = True
+                child_phase = DIAGNOSTICS.phase_from_job(folder, owned_job_identity, CHILD_SOURCE_HASHES, body["source_sha256"])
+                if child_phase is not None:
+                    result["engine"]["child_diagnostics"] = child_phase
+            except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+                failure_code = safe_error(error, body["request_id"])[1]
+                raise
             finally:
                 if process.poll() is None:
                     try:
@@ -539,6 +550,12 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     process.wait(timeout=5)
                 ACTIVE.pop(body["request_id"], None)
+                if failure_code in {"INFERENCE_TIMEOUT", "PADDLE_FAILURE", "CANCELLED"}:
+                    try:
+                        FAILURE_DIAGNOSTICS.retain(folder, owned_job_identity, body["request_id"],
+                            body["source_sha256"], failure_code, process)
+                    except Exception:
+                        pass  # Diagnostics must never replace the original normalized failure.
         # The coordinator runs confined template validation before deciding
         # whether a separate /interpret request is necessary.
         result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)

@@ -13,6 +13,7 @@ import math
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import quote, unquote, urlsplit
 
 AUTHORING_IMPORT_ERROR: ModuleNotFoundError | None = None
 try:
@@ -112,12 +113,41 @@ def require_authoring_runtime() -> None:
         ) from AUTHORING_IMPORT_ERROR
 
 
+def document_link(target: str) -> str | None:
+    """Resolve existing documentation links to their published repository paths."""
+    parsed = urlsplit(target)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return target
+    if parsed.scheme or parsed.netloc or parsed.query or not parsed.path or "\\" in parsed.path:
+        return None
+    root, source = globals().get("DOCS_ROOT"), globals().get("SOURCE")
+    if root is None or source is None:
+        return None
+    try:
+        path = (source.parent / unquote(parsed.path)).resolve(strict=True)
+        relative = path.relative_to(root.resolve(strict=True))
+        if not path.is_file():
+            return None
+    except (OSError, ValueError):
+        return None
+    url = "https://github.com/eddiesan422/TrackvanceCore-docs/blob/main/docs/" + quote(relative.as_posix(), safe="/")
+    return url + ("#" + quote(unquote(parsed.fragment), safe="-_.~") if parsed.fragment else "")
+
+
 def escaped(text: str) -> str:
     # Portable PDF typography: avoid non-breaking / Unicode dash glyph fallbacks.
     text = re.sub("[\u2010-\u2015]", "-", text)
     text = html.escape(text)
-    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<link href="\2" color="#008B83">\1</link>', text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    def link(match):
+        label, target = match.groups()
+        try:
+            destination = document_link(html.unescape(target))
+        except ValueError:
+            destination = None
+        return (f'<link href="{html.escape(destination, quote=True)}" color="#008B83">{label}</link>'
+                if destination else f"{label} ({target})")
+
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", text)
     return re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', text)
 
@@ -614,7 +644,7 @@ def build(candidate: Path, results: dict, draft: bool):
     toc = TableOfContents()
     toc.levelStyles = [
         ParagraphStyle("toc", fontName="ArialBold", fontSize=9, leading=12, textColor=INK, spaceBefore=4),
-        ParagraphStyle("toc-detail", fontName="Arial", fontSize=8, leading=10.2, leftIndent=13, textColor=MUTED, spaceBefore=0),
+        ParagraphStyle("toc-detail", fontName="Arial", fontSize=8, leading=10, leftIndent=13, textColor=MUTED, spaceBefore=0),
     ]
     story.extend([toc, PageBreak()])
     lines = SOURCE.read_text(encoding="utf-8").splitlines()

@@ -95,6 +95,8 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
     if family_id:
         owned(db, DocumentFamily, family_id, user)
     # All joins are tenant scoped BEFORE search, total, sorting and pagination.
+    # Extracted values remain raiseload-protected and never enter the bounded
+    # page query, count or list DTO.
     query = select(DocumentOriginal, DocumentFamily, DocumentTemplate, DocumentExtraction).options(
         load_only(DocumentExtraction.id, DocumentExtraction.revision, DocumentExtraction.created_at,
                   DocumentExtraction.reviewed, raiseload=True)).join(
@@ -146,6 +148,19 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
     # A stable unique tie breaker prevents duplicate/missing rows across pages.
     page = db.execute(query.order_by(order, DocumentOriginal.id.asc()).offset(offset).limit(limit)).all()
     ids = [row[0].id for row in page]
+    # One bounded projection for this authorized page reads only fixed worker
+    # completion scalars, never complete engine/payload JSON or document values.
+    extraction_ids = [row[3].id for row in page if row[3] is not None]
+    completions = {}
+    if extraction_ids:
+        completion_query = select(DocumentExtraction.id,
+            DocumentExtraction.engine["inference_completion"]["status"].as_string(),
+            DocumentExtraction.engine["inference_completion"]["failed_stage"].as_string(),
+            DocumentExtraction.engine["inference_completion"]["error_code"].as_string(),
+            DocumentExtraction.engine["inference_completion_sha256"].as_string(),
+            DocumentExtraction.payload["inference_completion_resolution"]["marker_sha256"].as_string()).where(
+                DocumentExtraction.id.in_(extraction_ids), DocumentExtraction.organization_id == user.organization_id)
+        completions = {row[0]: tuple(row[1:]) for row in db.execute(completion_query)}
     batch_info: dict[str, DocumentBatch] = {}
     publication_info: dict[str, DocumentBatch] = {}
     # Window functions select one latest link per page document in SQL, keeping
@@ -173,6 +188,8 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
     items = []
     output_cache: dict[str, list[dict]] = {}
     for original, family, template, extraction in page:
+        completion_status, completion_stage, completion_error, completion_sha256, resolution_sha256 = completions.get(
+            extraction.id if extraction else None, (None, None, None, None, None))
         href = f"/documents/families/{family.id}?" + urlencode({"document": original.id})
         batch = batch_info.get(original.id)
         published_batch = publication_info.get(original.id)
@@ -188,6 +205,12 @@ def list_originals(db: Session, user: User, *, family_id: str | None = None, sea
                 if original.engine_snapshot else None),
             "phase": (original.processing_phase if original.status == "RUNNING" and original.processing_phase else
                 {"PUBLISHED": "COMPLETE", "AUTO_VERIFIED": "PUBLICATION", "REVIEWED": "PUBLICATION"}.get(original.status, original.status)),
+            **({"incomplete_inference": {"status": "HUMAN_RESOLVED" if extraction.reviewed and completion_sha256
+                    and resolution_sha256 == completion_sha256 else "PARTIAL",
+                "failed_stage": completion_stage, "error_code": completion_error,
+                "automatic_approval_blocked": True, "requires_full_source_review": not (extraction.reviewed
+                    and completion_sha256 and resolution_sha256 == completion_sha256), "can_confirm": False}}
+                if completion_status == "PARTIAL" and extraction else {}),
             "family_name": family.name, "mode": template.definition["publication"]["mode"],
             "extraction": {"id": extraction.id, "revision": extraction.revision,
                 "created_at": iso(extraction.created_at), "reviewed": extraction.reviewed} if extraction else None,

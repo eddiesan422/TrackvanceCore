@@ -6,21 +6,32 @@ publication remains the responsibility of Trackvance's independent validator.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import hashlib
 import json
 import math
 import os
+import threading
 import time
 import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from urllib.parse import urlsplit
 
 import httpx
 
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
+from .document_inference_completion import (
+    AttemptBudget,
+    DocumentDeadlineExpired,
+    make_marker,
+    source_pages,
+    trusted_partial_result,
+    usable_candidate,
+)
 from .document_literal_tables import map_candidates, merge_candidates, prompt_catalog_view
 from .document_semantic_fragments import (
     ESCAPED_LINE_BREAK,
@@ -36,6 +47,37 @@ MAX_RESPONSE = 16 * 1024**2
 PROMPT_VERSION = "trackvance-idp-098-v2"
 LEGACY_PROMPT_VERSION = "trackvance-idp-098-v1"
 SUPPORTED_PROMPTS = {LEGACY_PROMPT_VERSION, PROMPT_VERSION}
+
+
+class RemoteInferenceTimeout(OperationError):
+    def __init__(self):
+        super().__init__(422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado.")
+
+
+class OptionalInferenceTimeout(RemoteInferenceTimeout):
+    def __init__(self, request_id):
+        super().__init__()
+        self.request_id = request_id
+
+
+class _RequestControl:
+    def __init__(self):
+        self.lock, self.loop, self.task, self.cancelled = threading.Lock(), None, None, False
+
+    def register(self, loop, task):
+        with self.lock:
+            self.loop, self.task = loop, task
+            if self.cancelled:
+                task.cancel()
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled = True
+            if self.loop is not None and self.task is not None and not self.loop.is_closed():
+                try:
+                    self.loop.call_soon_threadsafe(self.task.cancel)
+                except RuntimeError:
+                    pass  # A completed request can close its loop concurrently.
 SERVICE_ERRORS = {
     "LLM_CONTEXT_LIMIT": (422, "DOCUMENT_LLM_CONTEXT_LIMIT", "La evidencia excede el contexto IA configurado; amplía el contexto o reduce el documento."),
     "LLM_INCOMPLETE": (422, "DOCUMENT_LLM_INCOMPLETE", "El modelo no completó la respuesta estructurada dentro de su presupuesto."),
@@ -73,7 +115,40 @@ def _endpoint():
     return raw
 
 
-def _request(path, body=None, *, timeout=2):
+def _decoded_response(raw, status):
+    value = json.loads(raw)
+    if status != 200:
+        diagnostic = value.get("error") if isinstance(value, dict) else None
+        known = SERVICE_ERRORS.get(diagnostic) if isinstance(diagnostic, str) else None
+        if known:
+            if diagnostic in {"INFERENCE_TIMEOUT", "GPU_QUEUE_TIMEOUT"}:
+                raise RemoteInferenceTimeout()
+            raise OperationError(*known)
+        raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE", "El servicio IA local no está disponible o está ocupado.")
+    return value
+
+
+async def _async_request(path, body, timeout, control):
+    control.register(asyncio.get_running_loop(), asyncio.current_task())
+    try:
+        async with asyncio.timeout(timeout):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client, \
+                    client.stream("POST", _endpoint() + path, json=body) as response:
+                raw = bytearray()
+                async for chunk in response.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE:
+                        raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_LIMIT", "La inferencia excedió el límite de respuesta.")
+                return _decoded_response(raw, response.status_code)
+    except (TimeoutError, httpx.TimeoutException):
+        raise RemoteInferenceTimeout() from None
+    except (httpx.HTTPError, ValueError, OSError):
+        raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE", "No fue posible completar la inferencia IA local.") from None
+
+
+def _request(path, body=None, *, timeout=2, control=None):
+    if control is not None:
+        return asyncio.run(_async_request(path, body, timeout, control))
     try:
         with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client, \
                 client.stream("POST" if body is not None else "GET", _endpoint() + path, json=body) as response:
@@ -82,16 +157,9 @@ def _request(path, body=None, *, timeout=2):
                     raw.extend(chunk)
                     if len(raw) > MAX_RESPONSE:
                         raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_LIMIT", "La inferencia excedió el límite de respuesta.")
-                value = json.loads(raw)
-                if response.status_code != 200:
-                    diagnostic = value.get("error") if isinstance(value, dict) else None
-                    known = SERVICE_ERRORS.get(diagnostic) if isinstance(diagnostic, str) else None
-                    if known:
-                        raise OperationError(*known)
-                    raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE", "El servicio IA local no está disponible o está ocupado.")
-                return value
+                return _decoded_response(raw, response.status_code)
     except httpx.TimeoutException:
-        raise OperationError(422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado.") from None
+        raise RemoteInferenceTimeout() from None
     except (httpx.HTTPError, ValueError, OSError):
         raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE", "No fue posible completar la inferencia IA local.") from None
 
@@ -283,7 +351,8 @@ def _merge_semantic_cells(payload, fields, tables, definition):
         previous = result["tables"][name]
         if not previous:
             result["tables"][name] = rows
-        elif [[cell["value"] for cell in row.values()] for row in previous] != [[cell["value"] for cell in row.values()] for row in rows]:
+        elif [{key: cell["value"] for key, cell in row.items()} for row in previous] != [
+                {key: cell["value"] for key, cell in row.items()} for row in rows]:
             conflicts.append("TABLE:" + name)
     result["semantic_conflicts"] = conflicts
     result["semantic_candidates"] = {"fields": fields, "tables": tables}
@@ -440,7 +509,7 @@ def refined_observations(original, refined, regions):
     return output
 
 
-def retain_disagreements(before, after):
+def retain_disagreements(before, after, definition=None):
     """A retry may propose alternatives but cannot erase a preceding valid value."""
     conflicts = list(before.get("semantic_conflicts", []))
     for name, previous in before["fields"].items():
@@ -451,35 +520,68 @@ def retain_disagreements(before, after):
                 "alternatives": list(dict.fromkeys(value for value in [previous["observed"], current.get("observed")] if value is not None))}
             conflicts.append("REEXTRACTION_FIELD:" + name)
     for name, rows in before["tables"].items():
-        if rows and [[cell.get("value") for cell in row.values()] for row in rows] != [
-                [cell.get("value") for cell in row.values()] for row in after["tables"][name]]:
+        proposed = after["tables"][name]
+        previous_values = [{key: cell.get("value") for key, cell in row.items()} for row in rows]
+        proposed_values = [{key: cell.get("value") for key, cell in row.items()} for row in proposed]
+        if rows and (previous_values != proposed_values
+                or any(cell.get("reextraction_conflict") for row in rows for cell in row.values())):
             conflicts.append("REEXTRACTION_TABLE:" + name)
+            table: dict = next((item for item in (definition or {}).get("tables", []) if item["name"] == name), {})
+            keys = [field["name"] for field in table.get("fields", []) if field.get("business_key")]
+            start = (table.get("visual") or {}).get("row_start")
+            if not keys and start:
+                keys = [table["fields"][start["column"]]["name"]]
+            if not keys:
+                keys = sorted(rows[0])
+            structural = len(rows) != len(proposed) or [
+                tuple(row.get(key, {}).get("value") for key in keys) for row in rows] != [
+                tuple(row.get(key, {}).get("value") for key in keys) for row in proposed]
             after.setdefault("reextraction_table_candidates", {})[name] = {
-                "before": copy.deepcopy(rows), "after": copy.deepcopy(after["tables"][name])}
+                "before": copy.deepcopy(rows), "after": copy.deepcopy(proposed),
+                "reason": "ROW_COUNT_OR_IDENTITY_ORDER" if structural else "CELL_VALUES"}
+            history = copy.deepcopy(before.get("reextraction_table_history", {}).get(name, []))
+            history.append(copy.deepcopy(after["reextraction_table_candidates"][name]))
+            after.setdefault("reextraction_table_history", {})[name] = history
+            # Keep the complete preceding table as the active candidate. An
+            # optional read cannot choose, insert, reorder, or erase its rows.
+            after["tables"][name] = copy.deepcopy(rows)
             for index, row in enumerate(after["tables"][name]):
-                previous_row = rows[index] if index < len(rows) else {}
+                current = proposed[index] if not structural else {}
                 for key, cell in row.items():
-                    previous = previous_row.get(key)
-                    if len(rows) != len(after["tables"][name]) or not previous or previous.get("value") != cell.get("value"):
-                        cell.update(validity="AMBIGUOUS", reextraction_conflict=True,
-                            alternatives=list(dict.fromkeys(value for value in [previous.get("observed") if previous else None,
-                                                                                cell.get("observed")] if value is not None)))
+                    alternative = current.get(key, {})
+                    if structural or cell.get("reextraction_conflict") or cell.get("value") != alternative.get("value"):
+                        cell.update(validity="AMBIGUOUS" if cell.get("observed") is not None else cell["validity"],
+                            reextraction_conflict=True, alternatives=list(dict.fromkeys(value for value in [
+                                *cell.get("alternatives", []), cell.get("observed"), alternative.get("observed")]
+                                if value is not None)))
     after["semantic_conflicts"] = list(dict.fromkeys(conflicts))
     return after
 
 
-def _invoke(path, body, *, timeout, started, check, minimum_progress=15):
+def _invoke(path, body, *, timeout, started, check, minimum_progress=15,
+            budget=None, phase_deadline=None, optional=False):
     identity = body["request_id"]
     remaining = timeout - (time.monotonic() - started)
+    if budget is not None:
+        budget.require()
+    if phase_deadline is not None:
+        remaining = min(remaining, phase_deadline - time.monotonic())
     if remaining <= 0:
-        raise OperationError(422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado.")
+        if optional:
+            raise OptionalInferenceTimeout(identity)
+        raise DocumentDeadlineExpired()
+    check(minimum_progress)  # Fast responses still require current worker authority.
+    control = _RequestControl()
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_request, path, body, timeout=remaining)
+    future = executor.submit(_request, path, body, timeout=remaining, control=control)
     completed = False
+    error = None
     last_phase_poll = 0.0
     phase_progress = minimum_progress
     try:
         while not future.done():
+            if budget is not None:
+                budget.require()
             if time.monotonic() - last_phase_poll >= 2:
                 try:
                     phase = _request("/status/" + identity, timeout=1)
@@ -491,23 +593,48 @@ def _invoke(path, body, *, timeout, started, check, minimum_progress=15):
                     pass  # Registration/finish can race the read-only status poll.
                 last_phase_poll = time.monotonic()
             check(phase_progress)  # Real service phases; elapsed time never becomes invented progress.
+            if phase_deadline is not None and time.monotonic() >= phase_deadline:
+                if optional:
+                    raise OptionalInferenceTimeout(identity)
+                raise DocumentDeadlineExpired()
             if time.monotonic() - started > timeout:
-                raise OperationError(422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado.")
+                raise DocumentDeadlineExpired()
             time.sleep(.2)
-        response = future.result()
+        if budget is not None:
+            budget.require()
+        check(phase_progress)
+        try:
+            response = future.result()
+        except RemoteInferenceTimeout:
+            if optional:
+                raise OptionalInferenceTimeout(identity) from None
+            raise
         completed = True
+    except (OperationError, DocumentDeadlineExpired, asyncio.CancelledError) as caught:
+        error = caught
     finally:
         if not completed:
             try:
                 _request("/cancel", {"request_id": identity}, timeout=2)
             except OperationError:
                 pass
+            control.cancel()
+            try:
+                future.result(timeout=2)
+            except FutureTimeout:
+                if isinstance(error, OptionalInferenceTimeout):
+                    error = OperationError(503, "DOCUMENT_LOCAL_TRANSPORT_CLEANUP_FAILED", "No se pudo cerrar el transporte IA local de forma verificable.")
+            except (OperationError, asyncio.CancelledError):
+                completed = future.done()  # Consume the canceled task; preserve the original failure.
         executor.shutdown(wait=False, cancel_futures=True)
+    if error is not None:
+        raise error
     return response
 
 
 def _merge_engine(engine, later):
-    engine.update({key: value for key, value in later.items() if key not in {"phases", "runtime_provenance"}})
+    engine.update({key: value for key, value in later.items() if key not in {
+        "phases", "runtime_provenance", "validation", "inference_completion"}})
     if "runtime_provenance" in later:
         engine["runtime_provenance"] = {**engine.get("runtime_provenance", {}), **later["runtime_provenance"]}
     engine.setdefault("phases", {}).update(later.get("phases", {}))
@@ -540,7 +667,7 @@ def _append_history(history, entry):
         raise OperationError(422, "DOCUMENT_LOCAL_AUDIT_LIMIT", "El historial de evidencia IA excedió el límite de auditoría local.")
 
 
-def run_local(source, definition, configuration, *, legacy_runner, check):
+def run_local(source, definition, configuration, *, legacy_runner, check, budget=None):
     prompt_version = configuration.get("prompt_version", LEGACY_PROMPT_VERSION)
     if prompt_version not in SUPPORTED_PROMPTS:
         raise OperationError(422, "DOCUMENT_PROMPT_UNKNOWN", "La versión del prompt no está instalada.")
@@ -554,7 +681,10 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
 
     check = report
     started = time.monotonic()
-    native = legacy_runner(source, definition, check=lambda progress: check(int(progress * .15)), native_only=True)
+    timeout = min(1800, max(30, configuration.get("timeout_seconds", 300)))
+    budget = budget or AttemptBudget(timeout, started=started)
+    native = legacy_runner(source, definition, check=lambda progress: check(int(progress * .15)),
+        native_only=True, deadline=budget.extraction_deadline)
     if _sufficient(native["payload"], definition):
         native["engine"].update(key="PADDLE_QWEN_LOCAL_098", route="DIGITAL_NATIVE", inference_skipped=True)
         return native
@@ -565,17 +695,36 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
         "source": base64.b64encode(raw).decode(), "source_sha256": hashlib.sha256(raw).hexdigest(),
         "configuration": {**configuration, "use_llm": False}, "definition": definition,
         "semantic_schema": semantic_schema(definition)}
-    timeout = min(1800, max(30, configuration.get("timeout_seconds", 300)))
-    response = _invoke("/extract", body, timeout=timeout, started=started, check=check)
+    response = _invoke("/extract", body, timeout=timeout, started=started, check=check,
+        budget=budget, phase_deadline=budget.extraction_deadline)
     if (not isinstance(response, dict) or response.get("source_sha256") != body["source_sha256"]
             or not isinstance(response.get("lines"), list) or not isinstance(response.get("engine"), dict)):
         raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La inferencia no devolvió evidencia del documento solicitado.")
     result = legacy_runner(source, definition, check=lambda progress: check(35 + int(progress * .15)),
-                           native_only=True, candidate_lines=response["lines"])
+        native_only=True, candidate_lines=response["lines"], deadline=budget.extraction_deadline)
     initial = {"payload": copy.deepcopy(result["payload"]), "engine": copy.deepcopy(response["engine"])}
     history: list[dict] = []
-    attempts, stages, semantic_attempts = [], [{"stage": "PADDLE_INITIAL", "engine": copy.deepcopy(response["engine"])}], []
+    attempts: list[dict] = []
+    stages: list[dict] = [{"stage": "PADDLE_INITIAL", "engine": copy.deepcopy(response["engine"])}]
+    semantic_attempts: list[dict] = []
     semantic_used, stage = False, "INTERPRET"
+    checkpoint = None
+    partial_error = None
+
+    def capture():
+        from .document_quality import validate_candidate_contract
+        # The source page count comes from the confined native reader, never OCR metadata.
+        try:
+            pages = source_pages(native["engine"])
+        except ValueError:
+            return None  # An unverified count cannot support recovery; normal inference still proceeds.
+        validate_candidate_contract(result, definition)
+        if not usable_candidate(result["payload"]):
+            return None
+        return {"result": copy.deepcopy(result), "response": copy.deepcopy(response),
+            "history": copy.deepcopy(history), "stages": copy.deepcopy(stages),
+            "attempts": copy.deepcopy(attempts), "semantic_attempts": copy.deepcopy(semantic_attempts),
+            "semantic_used": semantic_used, "pages": pages}
 
     def interpret_if_needed():
         nonlocal semantic_used, stage
@@ -600,7 +749,8 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             **({"semantic_targets": targets} if targets is not None else {}),
             **({"fragment_prompt_view_sha256": view["sha256"]} if view is not None else {}),
             "observations": response["lines"], "observations_sha256": observation_hash},
-            timeout=timeout, started=started, check=check, minimum_progress=50)
+            timeout=timeout, started=started, check=check, minimum_progress=50,
+            budget=budget, phase_deadline=budget.extraction_deadline, optional=True)
         if (not isinstance(interpretation, dict) or interpretation.get("source_sha256") != body["source_sha256"]
                 or interpretation.get("observations_sha256") != observation_hash or "semantics" not in interpretation
                 or not isinstance(interpretation.get("engine"), dict)):
@@ -632,9 +782,11 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
         if prompt_version == PROMPT_VERSION:
             stage = "PADDLE_LITERAL_TABLES"
             result["payload"] = _literal_candidate(result["payload"], response["lines"], definition)
+        checkpoint = capture()
         # Literal observations may already contain all needed values. Interpret
         # them before paying for spotting crops that cannot repair layout rules.
         interpret_if_needed()
+        checkpoint = capture()
         for attempt in range(min(2, max(0, int(configuration.get("max_retries", 1))))):
             if _candidate_complete(result["payload"], definition):
                 break
@@ -645,23 +797,49 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
             _append_history(history, {"attempt": attempt + 1, "stage": "BEFORE_REFINE", "observations": copy.deepcopy(response["lines"]),
                 "fields": copy.deepcopy(result["payload"]["fields"]), "tables": copy.deepcopy(result["payload"]["tables"])})
             refined = _invoke("/refine", {**body, "request_id": uuid.uuid4().hex, "regions": regions},
-                timeout=timeout, started=started, check=check, minimum_progress=50)
+                timeout=timeout, started=started, check=check, minimum_progress=50,
+                budget=budget, phase_deadline=budget.extraction_deadline, optional=True)
             if (not isinstance(refined, dict) or refined.get("source_sha256") != body["source_sha256"]
                     or not isinstance(refined.get("lines"), list)):
                 raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La reextracción no corresponde al documento original.")
             response["lines"] = refined_observations(response["lines"], refined["lines"], regions)
             stage = "REMAP"
-            remapped = legacy_runner(source, definition, check=lambda _: check(50), native_only=True, candidate_lines=response["lines"])
+            remapped = legacy_runner(source, definition, check=lambda _: check(50), native_only=True,
+                candidate_lines=response["lines"], deadline=budget.extraction_deadline)
             if prompt_version == PROMPT_VERSION:
                 remapped["payload"] = _literal_candidate(remapped["payload"], response["lines"], definition)
-            remapped["payload"] = retain_disagreements(result["payload"], remapped["payload"])
+            remapped["payload"] = retain_disagreements(result["payload"], remapped["payload"], definition)
             result = remapped
             attempts.append({"attempt": attempt + 1, "regions": regions, "engine": refined.get("engine", {}),
                              "observations": len(refined["lines"])})
             stages.append({"stage": "REFINE", "engine": copy.deepcopy(refined.get("engine", {}))})
             if not refined["lines"]:
                 break
+            checkpoint = capture()
             interpret_if_needed()
+            checkpoint = capture()
+    except OptionalInferenceTimeout as error:
+        budget.require()  # Global deadline exhaustion and cancellation/authority always win.
+        check(highest)
+        if checkpoint is None:
+            _failure_details(error, stage=stage, source_sha256=body["source_sha256"], initial=initial,
+                latest={"payload": result["payload"], "engine": response["engine"]}, history=history, stages=stages)
+            raise
+        with source.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            actual_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+            after = os.fstat(stream.fileno())
+        if (actual_sha256 != body["source_sha256"]
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+            raise OperationError(422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El original cambió durante la inferencia.")
+        result, response = checkpoint["result"], checkpoint["response"]
+        history, stages = checkpoint["history"], checkpoint["stages"]
+        attempts, semantic_attempts = checkpoint["attempts"], checkpoint["semantic_attempts"]
+        semantic_used = checkpoint["semantic_used"]
+        partial_error = {"stage": stage, "request_id": error.request_id, "pages": checkpoint["pages"]}
+        _append_history(history, {"stage": stage, "status": "INCOMPLETE", "error_code": error.code,
+            "request_id": error.request_id, "candidate_restored_from_validated_checkpoint": True})
     except OperationError as error:
         _failure_details(error, stage=stage, source_sha256=body["source_sha256"], initial=initial,
             latest={"payload": result["payload"], "engine": response["engine"]}, history=history, stages=stages)
@@ -677,4 +855,10 @@ def run_local(source, definition, configuration, *, legacy_runner, check):
     if semantic_used:
         result["engine"]["phases"]["llm_seconds"] = _phase_total(stages, {"INTERPRET"}, "llm_seconds")
     check(100)
+    budget.require()
+    if partial_error is not None:
+        marker = make_marker(payload=result["payload"], stage=partial_error["stage"],
+            source_sha256=body["source_sha256"], definition=definition, configuration=configuration,
+            pages=partial_error["pages"], completed_stages=stages, request_id=partial_error["request_id"])
+        return trusted_partial_result(result, marker)
     return result

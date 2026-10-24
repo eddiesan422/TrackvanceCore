@@ -27,7 +27,7 @@ WHEEL_SHA = "01924dc83214a041bcc78de01c6be67ffe42e88909c7f4b6d13c31b363851b0a"
 BUILDKIT = "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
 SOURCES = ("server.py", "paddle_runner.py", "runtime_probe.py", "runtime_init.py",
            "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt", "document_semantic_fragments.py",
-           "document_literal_tables.py", "document_template_builder_rules.py", "model_snapshot.py", "models.lock.json")
+           "document_literal_tables.py", "document_template_builder_rules.py", "model_snapshot.py", "idp_observability.py", "models.lock.json")
 BACKEND_SOURCES = {"document_semantic_fragments.py", "document_literal_tables.py", "document_template_builder_rules.py"}
 
 

@@ -24,4 +24,11 @@ describe('Observed document execution', () => {
     expect(screen.getByText('Revisión humana verificada')).toBeVisible()
     expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
   })
+
+  it('preserves the failed stage and blocks automatic presentation for an incomplete candidate', () => {
+    renderApp(<DocumentExecution document={{ quality: { status: 'AUTO_VERIFIED' }, incomplete_inference: { status: 'PARTIAL', failed_stage: 'INTERPRET', error_code: 'DOCUMENT_TIMEOUT', automatic_approval_blocked: true, requires_full_source_review: true, can_confirm: false } }}/>)
+    expect(screen.getByText(/tiempo máximo en interpretación semántica/)).toBeVisible()
+    expect(screen.getByText(/La publicación está bloqueada/)).toBeVisible()
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+  })
 })

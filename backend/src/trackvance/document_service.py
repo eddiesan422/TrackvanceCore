@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import polars as pl
 from sqlalchemy import func, select, update
@@ -20,6 +21,14 @@ from .document_header_review import (
     invalidate_confirmations,
     reject_initial_resolutions,
     resolved_observations,
+)
+from .document_inference_completion import (
+    all_cells_reviewed,
+    canonical_hash,
+    completion_issues,
+    confirmation_binding,
+    marker_hash,
+    unresolved_completion,
 )
 from .document_models import (
     DocumentBatch,
@@ -79,12 +88,14 @@ def extraction_for(db, original):
     return item
 
 
-def issues(extraction, definition, *, source_binding=None):
+def issues(extraction, definition, *, source_binding=None, ignore_incomplete=False):
     if extraction is None:
         return ["EXTRACTION_PENDING"]
     payload = extraction.payload
     policy = definition["publication"]
     result = []
+    if not ignore_incomplete:
+        result.extend(completion_issues(extraction, definition))
     from .document_quality import cell_is_valid, semantic_issues
     result.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
     # The application validator recomputes checks; provider-authored arithmetic
@@ -94,7 +105,7 @@ def issues(extraction, definition, *, source_binding=None):
             result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check.get('row', 'ALL')}")
     if policy["review_policy"] == "AUTO_VERIFIED":
         from .document_quality import quality_report
-        result.extend(quality_report(extraction, definition)["issues"])
+        result.extend(quality_report(extraction, definition, ignore_incomplete=ignore_incomplete)["issues"])
     resolved = (resolved_observations(payload, definition, reviewed=getattr(extraction, "reviewed", False),
                 source_binding=source_binding) if payload.get("header_resolutions") else set())
     for name, fields in structures(definition).items():
@@ -144,13 +155,33 @@ def original_dto(db, original, *, detail=False):
                   if original.engine_snapshot else None),
               "phase": (original.processing_phase if original.status == "RUNNING" and original.processing_phase else {"RUNNING": "EXTRACTION", "EXTRACTED": "VALIDATION", "REVIEWED": "PUBLICATION",
                   "AUTO_VERIFIED": "PUBLICATION", "PUBLISHED": "COMPLETE"}.get(original.status, original.status))}
+    if extraction and extraction.engine.get("inference_completion"):
+        marker = extraction.engine["inference_completion"]
+        pending = unresolved_completion(extraction)
+        result["incomplete_inference"] = {"status": "PARTIAL" if pending else "HUMAN_RESOLVED",
+            "failed_stage": marker["failed_stage"], "error_code": marker["error_code"],
+            "automatic_approval_blocked": True, "requires_full_source_review": pending, "can_confirm": False}
     if detail:
         result["template"] = template_dto(definition_for(db, original))
         result["extraction"] = extraction_dto(extraction) if extraction else None
         result["issues"] = issues(extraction, result["template"]["definition"])
-        if result["template"]["definition"]["publication"]["review_policy"] == "AUTO_VERIFIED":
+        if result["template"]["definition"]["publication"]["review_policy"] == "AUTO_VERIFIED" or extraction and extraction.engine.get("inference_completion"):
             from .document_quality import quality_report
             result["quality"] = quality_report(extraction, result["template"]["definition"])
+        if extraction and extraction.engine.get("inference_completion"):
+            marker = extraction.engine["inference_completion"]
+            pending = unresolved_completion(extraction)
+            result["incomplete_inference"] = {"status": "PARTIAL" if pending else "HUMAN_RESOLVED",
+                "failed_stage": marker["failed_stage"], "error_code": marker["error_code"],
+                "automatic_approval_blocked": True, "requires_full_source_review": pending,
+                "can_confirm": bool(pending and extraction.reviewed and all_cells_reviewed(extraction.payload)
+                    and not issues(extraction, result["template"]["definition"], ignore_incomplete=True))}
+            if pending:
+                result["incomplete_inference"]["confirmation_binding"] = confirmation_binding(original, extraction)
+            else:
+                resolution = extraction.payload["inference_completion_resolution"]
+                result["incomplete_inference"]["resolution"] = {
+                    key: resolution[key] for key in ("actor_id", "reason", "created_at")}
         if extraction:
             header_review = header_review_dto(extraction.payload, result["template"]["definition"], reviewed=extraction.reviewed)
             if header_review is not None:
@@ -309,7 +340,8 @@ def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bin
     return create_template(db, family, definition, user)
 
 
-def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None, header_confirmations=None):
+def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None, header_confirmations=None,
+           incomplete_source_confirmation=None):
     permission(db, user, "review")
     if header_confirmations:
         permission(db, user, "download")
@@ -323,6 +355,32 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
         raise OperationError(422, "DOCUMENT_REVIEW_REASON", "Registra el motivo de la revisión.")
     definition = definition_for(db, original).definition
     payload = copy.deepcopy(previous.payload)
+    if incomplete_source_confirmation is not None:
+        if (changes or confirmed or table_rows or header_confirmations or not previous.reviewed
+                or not unresolved_completion(previous)):
+            raise OperationError(422, "DOCUMENT_INCOMPLETE_REVIEW_REQUIRED", "Guarda primero la revisión completa de todas las celdas y regiones del original.")
+        permission(db, user, "download")
+        if not user.active or user.deleted:
+            raise OperationError(403, "DOCUMENT_ACTOR_DISABLED", "El responsable ya no está habilitado.")
+        marker = previous.engine["inference_completion"]
+        binding = confirmation_binding(original, previous)
+        acknowledgement = {key: value for key, value in incomplete_source_confirmation.items()
+            if key not in {"all_pages_confirmed", "all_rows_confirmed"}}
+        if (acknowledgement != binding or incomplete_source_confirmation.get("all_pages_confirmed") is not True
+                or incomplete_source_confirmation.get("all_rows_confirmed") is not True
+                or marker.get("source_sha256") != original.sha256
+                or marker.get("definition_sha256") != canonical_hash(definition)):
+            raise OperationError(409, "DOCUMENT_INCOMPLETE_REVIEW_CONFLICT", "La extracción, el original o la fase pendiente cambiaron; actualiza antes de confirmar.")
+        if not all_cells_reviewed(payload) or issues(previous, definition, ignore_incomplete=True):
+            raise OperationError(422, "DOCUMENT_INCOMPLETE_REVIEW_REQUIRED", "Resuelve todos los valores, filas, regiones y controles antes de confirmar el original completo.")
+        payload["inference_completion_resolution"] = {"version": 1, "marker_sha256": marker_hash(marker),
+            "source_sha256": original.sha256, "definition_sha256": canonical_hash(definition),
+            "pages": marker["source_pages"], "all_pages_confirmed": True, "all_rows_confirmed": True,
+            "actor_id": user.id, "reason": reason.strip(), "created_at": iso(utcnow()),
+            "acknowledged_extraction_id": previous.id, "acknowledged_payload_hash": previous.payload_hash,
+            "acknowledged_revision": previous.revision}
+    elif changes or confirmed or table_rows or header_confirmations:
+        payload.pop("inference_completion_resolution", None)
     if header_confirmations and (changes or confirmed or table_rows):
         raise OperationError(422, "DOCUMENT_HEADER_CELLS_REQUIRED", "Guarda primero la revisión de valores; confirma después el encabezado exacto.")
     if header_confirmations and not previous.reviewed:
@@ -400,6 +458,10 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
              "template_id": original.template_id, "definition_hash": digest(definition),
              "automatic_extraction_id": automatic.id, "automatic_payload_hash": automatic.payload_hash},
             user.id, iso(utcnow()), reason)
+    if incomplete_source_confirmation is not None:
+        pending = issues(SimpleNamespace(payload=payload, engine=previous.engine, reviewed=True), definition)
+        if pending:
+            raise OperationError(422, "DOCUMENT_INCOMPLETE_REVIEW_REQUIRED", "La confirmación conserva controles pendientes; revisa el original.")
     item = DocumentExtraction(organization_id=user.organization_id, document_id=original.id, template_id=original.template_id,
                               revision=previous.revision + 1, previous_id=previous.id, payload=payload, payload_hash=digest(payload),
                               engine=previous.engine, actor_id=user.id, reason=reason.strip(), reviewed=True)
@@ -412,6 +474,11 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
           user.organization_id, {"document_id": original.id, "previous_id": previous.id,
                                  "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reason": reason,
                                  **({"header_confirmations": payload["header_resolutions"][-len(header_confirmations):]} if header_confirmations else {})})
+    if incomplete_source_confirmation is not None:
+        audit(db, "DOCUMENT_INCOMPLETE_SOURCE_CONFIRMED", "document_extraction", item.id,
+            "Original completo confirmado por una persona; fase IA incompleta conservada", user.name,
+            user.organization_id, {"document_id": original.id, "previous_id": previous.id,
+                "confirmation": payload["inference_completion_resolution"], "status": "HUMAN_VERIFIED"})
     return item
 
 

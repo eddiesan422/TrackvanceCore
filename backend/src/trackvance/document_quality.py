@@ -11,6 +11,7 @@ import json
 import math
 
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
+from .document_inference_completion import completion_issues, unresolved_completion
 from .document_invoice_controls import invoice_arithmetic_fields
 from .document_schemas import structures
 from .document_semantic_fragments import canonical_observed, multiline_fields
@@ -43,17 +44,19 @@ def cell_hash(cell):
     return _hash({key: value for key, value in cell.items() if key != "reviewed"})
 
 
-def validate_candidate_contract(data, definition):
+def validate_candidate_contract(data, definition, *, allow_worker_completion=False):
     """Reject malformed or self-reviewed provider output before durable storage."""
     try:
         if (not isinstance(data, dict) or set(data) != {"payload", "engine"}
-                or not isinstance(data["engine"], dict)):
+                or not isinstance(data["engine"], dict)
+                or not allow_worker_completion and {"inference_completion", "inference_completion_sha256"} & data["engine"].keys()):
             raise ValueError()
         if len(json.dumps(data, allow_nan=False).encode()) > 16 * 1024**2:
             raise ValueError()
         payload = data["payload"]
         if (not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict)
-                or not isinstance(payload.get("tables"), dict) or "header_resolutions" in payload):
+                or not isinstance(payload.get("tables"), dict) or "header_resolutions" in payload
+                or "inference_completion_resolution" in payload):
             raise ValueError()
         if ("semantic_conflicts" in payload and (not isinstance(payload["semantic_conflicts"], list)
                 or any(not isinstance(value, str) or len(value) > 160 for value in payload["semantic_conflicts"]))):
@@ -233,7 +236,7 @@ def certify_candidate(data, independent, definition, source_sha256):
     return proof
 
 
-def quality_report(extraction, definition):
+def quality_report(extraction, definition, *, ignore_incomplete=False):
     if extraction is None:
         return {"validator_version": VALIDATOR_VERSION, "status": "REVIEW_REQUIRED", "issues": ["EXTRACTION_PENDING"], "checks": {}}
     payload = extraction.payload
@@ -245,6 +248,8 @@ def quality_report(extraction, definition):
         and proof.get("independent_extraction") is True
         and (getattr(extraction, "reviewed", False) or proof.get("candidate_sha256") == _hash(payload)))
     findings = []
+    if not ignore_incomplete:
+        findings.extend(completion_issues(extraction, definition))
     multiline = multiline_fields(definition)
     findings.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
     cell_count = verified_count = 0
@@ -284,7 +289,7 @@ def quality_report(extraction, definition):
     for check in checks:
         if check["status"] != "VALID":
             findings.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check.get('row', 'ALL')}")
-    status = "REVIEW_REQUIRED" if findings else "HUMAN_VERIFIED" if getattr(extraction, "reviewed", False) else "AUTO_VERIFIED"
+    status = "REVIEW_REQUIRED" if findings or not ignore_incomplete and unresolved_completion(extraction) else "HUMAN_VERIFIED" if getattr(extraction, "reviewed", False) else "AUTO_VERIFIED"
     return {"validator_version": VALIDATOR_VERSION, "status": status, "issues": list(dict.fromkeys(findings)),
         "checks": {"independent_extraction": bool(trusted), "scalar_and_evidence": verified_count == cell_count,
             "arithmetic": arithmetic, "row_coverage": coverage, "duplicate_keys": duplicates},

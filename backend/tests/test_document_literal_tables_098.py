@@ -60,6 +60,8 @@ def source():
 
 def validator(text, field):
     # Test injection only; actual integration must use existing product validator.
+    if text is None:
+        return None, "MISSING"
     return (
         (str(Decimal(text.replace(",", "."))), "VALID")
         if field["logical_type"] == "DECIMAL"
@@ -128,6 +130,58 @@ class MapperTests(unittest.TestCase):
         observations[1]["text"] = "AB-12345-01 service | | 30,00"
         out = mapper.map_candidates(observations, definition())
         self.assertEqual(out["rejected"]["items"][0]["reason"], "EMPTY_SOURCE_CELL")
+        self.assertEqual(len(out["tables"]["items"]), 1)
+        cell = out["tables"]["items"][0]["cells"]["quantity"]
+        for key in ("value", "observed", "origin", "source_fragment", "candidate_text"):
+            self.assertIsNone(cell[key])
+        self.assertEqual(out["tables"]["items"][0]["cells"]["amount"]["observed"], "30,00")
+        self.assertEqual(out["blocks"][0]["status"], "PARTIAL")
+        self.assertFalse(out["successful_literal_mapping_claims"])
+
+    def test_partial_row_stays_shown_in_prompt_and_enters_normal_missing_review(self):
+        observations = source()
+        observations[1]["text"] = "AB-12345-01 service | | 30,00"
+        declared = definition()
+        mapped = mapper.map_candidates(observations, declared)
+        merged = mapper.merge_candidates({"lines": observations}, mapped, declared, validator)
+        self.assertEqual(merged["tables"]["items"][0]["quantity"]["validity"], "MISSING")
+        self.assertTrue(merged["table_unparsed"]["items"])
+        self.assertEqual(merged["lines"], observations)
+        view = mapper.prompt_catalog_view(observations, declared, {"fields": [], "tables": []})
+        self.assertEqual(view["prompt_view"]["omitted_detail_observation_ids"], [])
+        self.assertFalse(mapped["independent_row_coverage"])
+
+    def test_missing_row_key_never_synthesizes_a_partial_identity(self):
+        observations = source()
+        observations[1]["text"] = " | 2 | 30,00"
+        out = mapper.map_candidates(observations, definition())
+        self.assertFalse(out["tables"]["items"])
+        self.assertEqual(out["rejected"]["items"][0]["reason"], "UNKNOWN_DECLARED_ROW_START")
+
+    def test_duplicate_partial_row_preserves_both_rejection_reasons(self):
+        observations = source()
+        observations[1]["text"] = "AB-12345-01 service | | 30,00"
+        observations.append(copy.deepcopy(observations[1]))
+        out = mapper.map_candidates(observations, definition())
+        self.assertEqual(len(out["tables"]["items"]), 2)
+        self.assertEqual(
+            [x["reason"] for x in out["rejected"]["items"]],
+            ["EMPTY_SOURCE_CELL", "EMPTY_SOURCE_CELL", "DUPLICATE_DECLARED_ROW_KEY"],
+        )
+        self.assertEqual(out["blocks"][0]["rejected_rows"], 2)
+        self.assertEqual(out["blocks"][0]["rejected_facts"], 3)
+
+    def test_partial_does_not_rescue_malformed_cell_count_or_ambiguous_identity(self):
+        for text, reason in [
+            ("AB-12345-01 service | | 30,00 |", "PHYSICAL_PIPE_CELL_COUNT_MISMATCH"),
+            ("AB-12345-01 CD-12345-02 | | 30,00", "AMBIGUOUS_MULTIPLE_DECLARED_ROW_STARTS"),
+        ]:
+            with self.subTest(text=text):
+                observations = source()
+                observations[1]["text"] = text
+                out = mapper.map_candidates(observations, definition())
+                self.assertFalse(out["tables"]["items"])
+                self.assertEqual(out["rejected"]["items"][0]["reason"], reason)
 
     def test_unknown_row_start_is_not_hidden(self):
         observations = source() + [line("BADKEY unrecognized | 3 | 40,00")]

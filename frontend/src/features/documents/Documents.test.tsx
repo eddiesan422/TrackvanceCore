@@ -1,9 +1,10 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
 import { renderApp } from '../../test/render'
 import Documents from './Documents'
+import type { RecordData } from '../../api/client'
 
 vi.mock('../../api/client', () => ({ api: vi.fn(), post: vi.fn() }))
 const definition = { fields: [{ name: 'invoice', logical_type: 'STRING', required: true, critical: true, business_key: true, label: 'Invoice', pattern: '(.*)' }], tables: [], publication: { mode: 'SCHEDULED', timezone: 'America/Bogota' } }
@@ -129,5 +130,65 @@ describe('Documentos guided operations', () => {
     await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
     expect(screen.queryByLabelText('Valor headers.0.invoice')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Valor headers.0.total')).toBeVisible()
+  })
+
+  it('preserves partial candidates/source and requires confirming even optional absence before a value-only save', async () => {
+    const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
+    const binding = { source_sha256: 'source-sha', expected_extraction_id: 'partial-1', expected_payload_hash: 'payload-sha', expected_marker_hash: 'marker-sha', pages: [1, 2] }
+    const partial = { ...original, sha256: 'source-sha', quality: { status: 'AUTO_VERIFIED' }, error_code: 'DOCUMENT_TIMEOUT',
+      incomplete_inference: { status: 'PARTIAL', failed_stage: 'REFINE', error_code: 'DOCUMENT_TIMEOUT', automatic_approval_blocked: true, requires_full_source_review: true, can_confirm: false, confirmation_binding: binding },
+      issues: ['QUALITY_INCOMPLETE_SOURCE:REFINE'], template: { definition: { ...definition, fields: [...definition.fields, { name: 'optional', required: false }] } },
+      extraction: { ...original.extraction, id: 'partial-1', sha256: 'payload-sha', payload: { ...original.extraction.payload, pages: [1, 2], fields: {
+        ...original.extraction.payload.fields, optional: { value: null, observed: null, validity: 'VALID', recognition_status: 'NOT_APPLICABLE', reviewed: false, origin: null },
+      } } } }
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? partial : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review', 'documents:download'] })
+    const dialog = await screen.findByRole('dialog', { name: 'known.pdf' })
+    expect(await within(dialog).findByLabelText('Valor headers.0.invoice')).toHaveValue('000001')
+    expect(within(dialog).getByRole('img', { name: 'Página 1 del original PDF' })).toBeVisible()
+    expect(within(dialog).getByText(/tiempo máximo en refinamiento de regiones/)).toBeVisible()
+    expect(within(dialog).queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/Campo opcional sin valor: confirma su ausencia/)).toBeVisible()
+    await user.type(within(dialog).getByLabelText('Motivo de la revisión'), 'Verifiqué los valores y la ausencia opcional contra el original.')
+    const save = within(dialog).getByRole('button', { name: 'Guardar valores de la revisión parcial' })
+    expect(save).toBeDisabled()
+    for (const checkbox of within(dialog).getAllByRole('checkbox', { name: 'Confirmar valor' })) await user.click(checkbox)
+    await user.click(save)
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/originals/original/review', { expected_extraction_id: 'partial-1', changes: {}, confirmed: ['headers.0.invoice', 'headers.0.optional'], reason: 'Verifiqué los valores y la ausencia opcional contra el original.', table_rows: {} }))
+    expect(within(dialog).getByLabelText('Extracción parcial conservada')).toBeVisible()
+    expect(within(dialog).getByRole('button', { name: 'Confirmar fuente completa mediante revisión manual' })).toBeDisabled()
+  })
+
+  it('sends only a separately acknowledged opaque full-source binding and resolves as manual, preserving the partial marker', async () => {
+    const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
+    const binding = { source_sha256: 'source-sha', expected_extraction_id: 'partial-2', expected_payload_hash: 'reviewed-payload', expected_marker_hash: 'immutable-partial-marker', pages: [1, 2] }
+    let current: RecordData = { ...original, sha256: binding.source_sha256, quality: { status: 'REVIEW_REQUIRED' },
+      incomplete_inference: { status: 'PARTIAL', failed_stage: 'INTERPRET', error_code: 'DOCUMENT_TIMEOUT', automatic_approval_blocked: true, requires_full_source_review: true, can_confirm: true, confirmation_binding: binding },
+      publications: [{ batch_id: 'old-batch', extraction_id: 'prior' }], issues: ['QUALITY_INCOMPLETE_SOURCE:INTERPRET'],
+      extraction: { ...original.extraction, id: binding.expected_extraction_id, sha256: binding.expected_payload_hash, engine: { inference_completion: { marker: 'original-retained' } }, payload: { ...original.extraction.payload, pages: [1, 2], fields: { invoice: { ...original.extraction.payload.fields.invoice, reviewed: true } } } } }
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? current : baseApi(path))
+    vi.mocked(post).mockImplementation(async (_path, body) => {
+      expect((body as RecordData).changes).toEqual({})
+      current = { ...current, quality: { status: 'HUMAN_VERIFIED' }, incomplete_inference: { ...current.incomplete_inference, status: 'HUMAN_RESOLVED', can_confirm: false, requires_full_source_review: false, confirmation_binding: undefined },
+        extraction: { ...current.extraction, id: 'manual-resolution-3', revision: 3, sha256: 'new-manual-payload' } }
+      return current
+    })
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review', 'documents:download', 'documents:publish'] })
+    const dialog = await screen.findByRole('dialog', { name: 'known.pdf' })
+    await within(dialog).findByLabelText('Valor headers.0.invoice')
+    expect(within(dialog).getByRole('button', { name: 'Publicar revisión como corrección' })).toBeDisabled()
+    for (const page of [1, 2]) {
+      await user.click(within(dialog).getByRole('button', { name: `Ver página ${page} del original completo` }))
+      fireEvent.load(within(dialog).getByRole('img', { name: `Original completo, página ${page}` }))
+    }
+    await user.click(within(dialog).getByRole('checkbox', { name: 'He revisado completas todas las páginas del original.' }))
+    await user.click(within(dialog).getByRole('checkbox', { name: /He comprobado la totalidad de filas/ }))
+    await user.type(within(dialog).getByLabelText('Motivo de la confirmación de fuente completa'), 'Comparé ambas páginas y todas las filas con el original completo.')
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar fuente completa mediante revisión manual' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/originals/original/review', { expected_extraction_id: 'partial-2', changes: {}, confirmed: [], table_rows: {}, header_confirmations: [], reason: 'Comparé ambas páginas y todas las filas con el original completo.', incomplete_source_confirmation: { ...binding, all_pages_confirmed: true, all_rows_confirmed: true } }))
+    expect(await within(dialog).findByText('Revisión humana verificada')).toBeVisible()
+    expect(within(dialog).queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+    expect(current.extraction.engine.inference_completion).toEqual({ marker: 'original-retained' })
+    expect(post).toHaveBeenCalledTimes(1)
   })
 })
