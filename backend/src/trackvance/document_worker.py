@@ -256,7 +256,7 @@ def process_once(owner=None, active=None):
                 independent = run_engine(source, definition, check=checkpoint,
                     deadline=budget.control_deadline() if budget is not None else None,
                     control_deadline=budget is not None)
-                data["engine"]["validation"] = certify_candidate(data, independent, definition, artifact.sha256)
+                data["engine"]["validation"] = certify_candidate(data, independent, definition, artifact.sha256, lambda: checkpoint(95))
             except OperationError as error:
                 if error.status != 422 or error.code in {"DOCUMENT_CANCELLED", "DOCUMENT_LEASE_LOST",
                         "DOCUMENT_ARTIFACT_INTEGRITY", "DOCUMENT_EXTRACTION_INTEGRITY", "DOCUMENT_PROVIDER_CONTRACT",

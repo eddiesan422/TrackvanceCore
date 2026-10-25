@@ -398,7 +398,7 @@ def run_automatic(source, definition, configuration, source_sha256, *, provider,
             independent = control(source, definition, check=check,
                 deadline=budget.control_deadline() if budget is not None else None,
                 control_deadline=budget is not None)
-            validation = certify(result, independent, definition, source_sha256)
+            validation = certify(result, independent, definition, source_sha256, lambda: check(95))
             result["engine"]["validation"] = validation
         except operation_error as error:
             if error.status != 422 or error.code in {"DOCUMENT_CANCELLED", "DOCUMENT_LEASE_LOST",

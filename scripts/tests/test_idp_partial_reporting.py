@@ -78,6 +78,20 @@ class ReportingTests(unittest.TestCase):
         self.assertFalse(outcome["publication_measured"])
         self.assertEqual(outcome["human_edits"], 0)
 
+    def test_certifier_receives_live_total_deadline_callback_after_actual_control(self):
+        captured = []
+
+        def certify(data, independent, definition, source_sha256, check):
+            self.clock[0] = 31
+            check()
+            self.fail("expired certification checkpoint returned")
+
+        with self.assertRaises(completion.DocumentDeadlineExpired):
+            self.run_candidate(certify=certify, capture_candidate=lambda data: captured.append(copy.deepcopy(data)),
+                report_quality=lambda *args: self.fail("expired certification reached quality/publication"))
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(self.phases["independent_validation_seconds"], 21)
+
     def test_partial_stage_is_retained_and_never_eligible_even_if_quality_claims_auto(self):
         marker = {"status": "PARTIAL", "failed_stage": "REFINE", "error_code": "DOCUMENT_TIMEOUT"}
         self.data["engine"]["inference_completion"] = marker

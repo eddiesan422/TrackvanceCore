@@ -82,6 +82,33 @@ def anchor(line, label):
     return matches[0] if matches else None
 
 
+def declared_table_stop(line, label, rule):
+    """Recognize a declared stop in an actual unsplit pipe-prefix block.
+
+    Keep the measured whole block rectangle. Never split its width into guessed
+    words, use fuzzy captions, or infer a stop from scalar validity.
+    """
+    if anchor(line, label):
+        return True
+    tokens = words(line)
+    if not label or not tokens:
+        return False
+    left = min(word["region"][0] for word in tokens)
+    grammar = rule.get("row_start")
+    if not isinstance(grammar, dict):
+        return False  # Historical rules without a finite row grammar are unchanged.
+    for word in tokens:
+        prefix, separator, _ = word["text"].partition("|")
+        if (not separator or word["region"][0] != left
+                or anchor_key(prefix) != anchor_key(label)):
+            continue
+        if any(declared_row_start(token, grammar)
+               for item in tokens for token in re.split(r"[\\\s|]+", item["text"])):
+            continue  # A source business key is never silently cut by this fallback.
+        return True
+    return False
+
+
 def table_anchor_matches(line, label):
     """A full caption can continue vertically within the same horizontal band."""
     matches = anchor_matches(line, label)
@@ -231,6 +258,19 @@ def visual_lines(lines, baseline_tolerance=.004):
     return result
 
 
+def coarse_below_anchor(line, label):
+    """A literal label delimiter in one OCR block; never fabricate word boxes."""
+    tokens = words(line)
+    if (line.get("method") != "OCR" or len(tokens) != 1
+            or tokens[0]["text"] != line["text"] or tokens[0]["region"] != line["region"]):
+        return None
+    for separator in (":", "="):
+        prefix, found, value = line["text"].partition(separator)
+        if found and value.strip() and anchor_key(prefix) == anchor_key(label):
+            return 0, 1, list(line["region"])
+    return None
+
+
 def field_candidates(lines, rule):
     lines = visual_lines(lines, rule.get("baseline_tolerance", .004))
     if rule.get("section_bounds"):
@@ -246,6 +286,11 @@ def field_candidates(lines, rule):
         if line["page"] != rule["page"]:
             continue
         found = next((matched for label in [rule["label"], *rule.get("label_aliases", [])] if (matched := anchor(line, label))), None)
+        coarse_anchor = False
+        if not found and rule.get("kind") == "LABEL_VALUE" and rule.get("direction") == "BELOW":
+            found = next((matched for label in [rule["label"], *rule.get("label_aliases", [])]
+                if (matched := coarse_below_anchor(line, label))), None)
+            coarse_anchor = found is not None
         if not found:
             continue
         if rule.get("section_label"):
@@ -298,7 +343,10 @@ def field_candidates(lines, rule):
                 continue
             raw = matched[1].strip()
         if raw:
-            candidates.append((raw, origin(source, selected)))
+            evidence = origin(source, selected)
+            if coarse_anchor:
+                evidence["resolution"] = "LAYOUT_BLOCK"
+            candidates.append((raw, evidence))
     return candidates
 
 
@@ -781,7 +829,7 @@ def _legacy_table_candidates(lines, rule, fields=None, header_values=(), validat
             start = rule["region"][1] if page == rule["page"] else 0
             stop_labels = [label for label in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if label]
             stops = [line["region"][1] for line in lines if line["page"] == page and line["region"][1] > start
-                     and any(anchor(line, label) for label in stop_labels)]
+                     and any(declared_table_stop(line, label, rule) for label in stop_labels)]
             end = min([line["region"][1] for line, _, _ in page_headers] + stops, default=1)
             groups = row_groups(lines, page, start, end, rule.get("row_tolerance", .018))
             dx = page_headers[0][2] if page_headers else 0
@@ -807,7 +855,7 @@ def _legacy_table_candidates(lines, rule, fields=None, header_values=(), validat
                 end = min(end, min(following_headers))
             stop_labels = [label for label in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if label]
             stops = [line["region"][1] for line in lines if line["page"] == page and line["region"][1] > header_bottom
-                     and any(anchor(line, label) for label in stop_labels)]
+                     and any(declared_table_stop(line, label, rule) for label in stop_labels)]
             if stops:
                 end = min(end, min(stops))
             continuing = not bool(stops)
@@ -1422,7 +1470,7 @@ def table_candidates(lines, rule, fields=None, header_values=(), validator=None,
             bottom = header["region"][3] if supported is not None else max(item[2][3] for item in anchors)
             end = page_headers[number + 1][0]["region"][1] if number + 1 < len(page_headers) else 1
             stops = [line["region"][1] for line in source if line["page"] == page and line["region"][1] > bottom
-                and any(anchor(line, stop) for stop in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if stop)]
+                and any(declared_table_stop(line, stop, rule) for stop in [rule.get("stop_label", ""), *rule.get("stop_label_aliases", [])] if stop)]
             end = min([end, *stops])
             population = [(word, line) for line in source if line["page"] == page for word in words(line)
                           if bottom < (word["region"][1] + word["region"][3]) / 2 < end]

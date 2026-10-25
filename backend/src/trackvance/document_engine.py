@@ -504,7 +504,7 @@ def extract(lines, definition, page_geometry=None):
             "validity": "AMBIGUOUS" if ambiguous else validity,
             "recognition_status": "AMBIGUOUS" if ambiguous else "RECOGNIZED" if raw is not None else "EXPECTED_NOT_LOCATED" if field.get("required", True) else "NOT_APPLICABLE",
             "confidence": origin["confidence"] if origin else None,
-            "origin": {k: origin[k] for k in ("page", "region", "method")} if origin else None,
+            "origin": {k: origin[k] for k in ("page", "region", "method", "resolution") if k in origin} if origin else None,
             "reviewed": False, "alternatives": sorted(distinct)[:20] if ambiguous else []}
     tables = {}
     table_unparsed = {}

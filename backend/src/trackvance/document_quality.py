@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 
+from .document_candidate_arbitration import reconcile_worker_candidate
 from .document_engine import arithmetic_checks, cross_table_checks, validate_value
 from .document_inference_completion import completion_issues, unresolved_completion
 from .document_invoice_controls import invoice_arithmetic_fields
@@ -44,7 +45,7 @@ def cell_hash(cell):
     return _hash({key: value for key, value in cell.items() if key != "reviewed"})
 
 
-def validate_candidate_contract(data, definition, *, allow_worker_completion=False):
+def validate_candidate_contract(data, definition, *, allow_worker_completion=False, allow_worker_arbitration=False):
     """Reject malformed or self-reviewed provider output before durable storage."""
     try:
         if (not isinstance(data, dict) or set(data) != {"payload", "engine"}
@@ -52,6 +53,9 @@ def validate_candidate_contract(data, definition, *, allow_worker_completion=Fal
                 or not allow_worker_completion and {"inference_completion", "inference_completion_sha256"} & data["engine"].keys()):
             raise ValueError()
         if len(json.dumps(data, allow_nan=False).encode()) > 16 * 1024**2:
+            raise ValueError()
+        if (not allow_worker_arbitration and ("independent_cell_arbitration" in data["engine"]
+                or "independent_cell_arbitration_history" in data["payload"])):
             raise ValueError()
         payload = data["payload"]
         if (not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict)
@@ -95,6 +99,8 @@ def validate_candidate_contract(data, definition, *, allow_worker_completion=Fal
                     or cell["reviewed"] is not False or cell.get("corrected")
                     or cell["validity"] not in {"VALID", "INVALID", "MISSING", "AMBIGUOUS"}
                     or any(cell[key] is not None and (not isinstance(cell[key], str) or len(cell[key]) > 65536) for key in ("value", "observed"))):
+                raise ValueError()
+            if (not allow_worker_arbitration and {"independent_selection_version", "prior_alternatives"} & cell.keys()):
                 raise ValueError()
             origin = cell["origin"]
             if origin is not None and (not isinstance(origin, dict) or origin.get("page") not in pages
@@ -183,15 +189,24 @@ def semantic_issues(payload, *, reviewed=False):
     return result
 
 
-def certify_candidate(data, independent, definition, source_sha256):
+def certify_candidate(data, independent, definition, source_sha256, check=lambda: None):
     """Worker-only attestation. Never accept this object from an OCR/LLM response."""
-    payload, control = data["payload"], independent["payload"]
+    check()
     validate_candidate_contract(independent, definition)
+    validate_candidate_contract(data, definition, allow_worker_completion=True)
+    target = data
+    selected, arbitration = reconcile_worker_candidate(data, independent, definition, source_sha256, check)
+    changed = bool(arbitration and arbitration.get("selected"))
+    if changed:
+        validate_candidate_contract(selected, definition, allow_worker_completion=True, allow_worker_arbitration=True)
+        data = selected  # Publish mutations only after the complete attestation succeeds.
+    payload, control = data["payload"], independent["payload"]
     independent_cells = {path: cell for path, cell, _ in _cells(control, definition)}
     arithmetic_fields = _arithmetic_fields(definition)
     multiline = multiline_fields(definition)
     verified, findings = {}, []
     for path, cell, field in _cells(payload, definition):
+        check()
         other = independent_cells.get(path)
         allow_multiline = (path.split(".")[0], field["name"]) in multiline
         if not cell_is_valid(cell, field, allow_multiline=allow_multiline):
@@ -219,7 +234,8 @@ def certify_candidate(data, independent, definition, source_sha256):
                 and any(field["logical_type"] == "DECIMAL" for field in definition["fields"])
                 and not any(rule["table"] == name for rule in definition.get("cross_totals", []))):
             coverage[name] = False
-        if data["engine"].get("independent_row_coverage") is False and data["engine"].get("route") != "DIGITAL_NATIVE":
+        if (data["engine"].get("independent_cell_arbitration")
+                or data["engine"].get("independent_row_coverage") is False and data["engine"].get("route") != "DIGITAL_NATIVE"):
             coverage[name] = False
         if not coverage[name]:
             findings.append("QUALITY_ROW_COVERAGE:" + name)
@@ -233,6 +249,9 @@ def certify_candidate(data, independent, definition, source_sha256):
         "verified_cells": verified, "table_coverage": coverage, "arithmetic": arithmetic,
         "issues": findings, "independent_extraction": True}
     proof["attestation_sha256"] = _hash(proof)
+    check()
+    if changed:
+        target["payload"], target["engine"] = data["payload"], data["engine"]
     return proof
 
 

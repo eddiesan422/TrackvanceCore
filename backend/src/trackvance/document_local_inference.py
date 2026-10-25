@@ -260,6 +260,78 @@ def fragment_schema(definition, catalog, targets, *, allowed_fragment_ids=None):
         "required": ["fields", "tables"], "additionalProperties": False}
 
 
+def _fragment_source_origin(source, fragment):
+    """Bind exact offsets to measured whole words; otherwise keep the block."""
+    origin = {key: source[key] for key in ("page", "region", "method")}
+    origin["region"] = list(origin["region"])
+    if source.get("method") == "OCR":
+        origin["resolution"] = "LAYOUT_BLOCK"
+    text, start, end = source["text"], fragment["start"], fragment["end"]
+    if (type(start) is not int or type(end) is not int or not 0 <= start < end <= len(text)
+            or text[start:end] != fragment["text"]):
+        raise ValueError("fragment source span")
+    words = source.get("words")
+    measured = _region(source)
+    if not measured or not isinstance(words, list) or not words:
+        return origin
+    spans, cursor = [], 0
+    for index, word in enumerate(words):
+        if not isinstance(word, dict) or not isinstance(word.get("text"), str) or not word["text"]:
+            return origin
+        box = _region({"page": source["page"], "region": word.get("region")})
+        if box is None or not _contains(measured, box):
+            return origin
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if not text.startswith(word["text"], cursor):
+            return origin
+        finish = cursor + len(word["text"])
+        spans.append((cursor, finish, index, box["region"]))
+        cursor = finish
+    if text[cursor:].strip():
+        return origin
+    selected = [item for item in spans if item[0] < end and item[1] > start]
+    if not selected or selected[0][0] != start or selected[-1][1] != end:
+        return origin  # A source subword cannot acquire a guessed partial box.
+    if (len(words) == 1 and words[0]["text"] == text
+            and words[0]["region"] == source["region"]):
+        return origin
+    origin.update(region=[min(item[3][0] for item in selected), min(item[3][1] for item in selected),
+                          max(item[3][2] for item in selected), max(item[3][3] for item in selected)],
+                  resolution="MEASURED_WORDS", source_word_indexes=[item[2] for item in selected])
+    return origin
+
+
+def _field_source_scope(field, source):
+    """Apply declared header geometry to literal selection; no text inference."""
+    visual = field.get("visual")
+    alternatives = field.get("visual_alternatives", [])
+    if not isinstance(alternatives, list):
+        return False
+    if visual is None and not alternatives:
+        return True
+    measured = _region(source)
+    if measured is None:
+        return False
+    for rule in ([visual] if visual is not None else []) + alternatives:
+        if not isinstance(rule, dict):
+            return False
+        search = _region(rule)
+        if search is None:
+            continue
+        bounds = rule.get("section_bounds")
+        if bounds is not None:
+            if (not isinstance(bounds, list) or len(bounds) != 2
+                    or any(type(value) not in (int, float) or not math.isfinite(value)
+                        or not 0 <= value <= 1 for value in bounds) or bounds[0] >= bounds[1]):
+                continue
+            search["region"][0] = max(search["region"][0], bounds[0])
+            search["region"][2] = min(search["region"][2], bounds[1])
+        if search["region"][0] < search["region"][2] and _contains(search, measured):
+            return True
+    return False
+
+
 def apply_fragment_semantics(payload, candidate, definition, lines, catalog, targets):
     allowed = multiline_fields(definition)
 
@@ -279,6 +351,11 @@ def apply_fragment_semantics(payload, candidate, definition, lines, catalog, tar
         if (scope, field["name"]) in allowed and ESCAPED_LINE_BREAK in fragment["text"]:
             cell["source_text_normalization"] = escaped_break_normalization(cell["observed"])
             cell["value"], cell["validity"] = validate_value(canonical_observed(cell, allow_multiline=True), field)
+        if scope == "headers":
+            cell["origin"] = _fragment_source_origin(lines[fragment["evidence_id"]], fragment)
+            # Geometry is the final authority after every text transformation.
+            if not _field_source_scope(field, cell["origin"]):
+                cell.update(value=None, validity="INVALID", source_scope_issue="OUTSIDE_DECLARED_FIELD_SCOPE")
         return cell
 
     try:
