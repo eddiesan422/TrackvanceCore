@@ -360,6 +360,7 @@ class HTTPFailureFixture(unittest.TestCase):
 
             def wait(self, timeout):
                 if state["returncode"] is None:
+                    clock["now"] = 28.0
                     raise subprocess.TimeoutExpired("synthetic", timeout)
                 state["reaped"] = True
                 return state["returncode"]
@@ -376,7 +377,18 @@ class HTTPFailureFixture(unittest.TestCase):
                 raise OSError("synthetic diagnostic failure with SECRET_DOCUMENT_VALUE")
             return original(*args)
 
-        clock = iter(range(0, 10000, 100))
+        # Admission and Budget share one controlled clock. Time stays zero
+        # until the already-created synthetic child waits; then only work time
+        # expires, leaving the same caller allowance available for reap/retention.
+        clock = {"now": 0.0}
+        monotonic = lambda: clock["now"]
+        real_budget = gateway.MEMORY.Budget
+        def budget(configured, requested=None, *, started=None):
+            return real_budget(configured, requested, clock=monotonic, started=started)
+        def barrier(*_args, **_kwargs):
+            self.assertFalse(gateway.ACTIVE)
+            self.assertFalse(gateway.UPSTREAM)
+            return {"status": "EMPTY_RESIDENCY_OBSERVED"}
         raw = b"synthetic only"
         body = {"request_id": "e" * 32, "filename": "document.pdf", "source": base64.b64encode(raw).decode(),
             "source_sha256": hashlib.sha256(raw).hexdigest(), "configuration": {"timeout_seconds": 30,
@@ -386,7 +398,7 @@ class HTTPFailureFixture(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(gateway, "verify_models", return_value=True), patch.object(gateway.subprocess, "Popen", Child), patch.object(gateway.os, "killpg", side_effect=kill), patch.object(gateway, "time", SimpleNamespace(monotonic=lambda: next(clock))), patch.object(ring, "retain", side_effect=retain):
+            with patch.object(gateway, "verify_models", return_value=True), patch.object(gateway.subprocess, "Popen", Child), patch.object(gateway.os, "killpg", side_effect=kill), patch.object(gateway, "time", SimpleNamespace(monotonic=monotonic)), patch.object(gateway.MEMORY, "Budget", side_effect=budget), patch.object(gateway, "memory_barrier", side_effect=barrier), patch.object(gateway, "CACHE_HYGIENE", False), patch.object(ring, "retain", side_effect=retain):
                 connection = http.client.HTTPConnection(*server.server_address, timeout=3)
                 connection.request("POST", "/extract", body=json.dumps(body), headers={"Content-Type": "application/json"})
                 response = connection.getresponse()

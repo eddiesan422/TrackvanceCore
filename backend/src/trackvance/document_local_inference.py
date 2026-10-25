@@ -509,6 +509,65 @@ def refined_observations(original, refined, regions):
     return output
 
 
+def _missing_table_fills(rows, proposed, table, conflicts):
+    """Identify only empty cells in a uniquely matched, otherwise unchanged table.
+
+    Both inputs have already passed the source remap/contract boundary. This
+    comparison grants no source coverage, human review, or approval authority.
+    """
+    name = table.get("name")
+    fields = table.get("fields", [])
+    names = {field["name"] for field in fields}
+    keys = [field["name"] for field in fields if field.get("business_key")]
+    start = (table.get("visual") or {}).get("row_start")
+    if not keys and start and type(start.get("column")) is int and 0 <= start["column"] < len(fields):
+        keys = [fields[start["column"]]["name"]]
+    if (not keys or not rows or len(rows) != len(proposed)
+            or any(prefix + str(name) in conflicts for prefix in ("TABLE:", "REEXTRACTION_TABLE:"))
+            or any(set(row) != names for row in [*rows, *proposed])):
+        return []
+    identities = []
+    for group in (rows, proposed):
+        identity = []
+        for row in group:
+            cells = [row[key] for key in keys]
+            if any(cell.get("validity") != "VALID" or cell.get("reextraction_conflict") or cell.get("alternatives")
+                    or not isinstance(cell.get("value"), str) or not cell["value"].strip()
+                    or not isinstance(cell.get("observed"), str) or not cell["observed"].strip() for cell in cells):
+                return []
+            identity.append(tuple(cell["value"] for cell in cells))
+        if len(set(identity)) != len(identity):
+            return []
+        identities.append(identity)
+    if identities[0] != identities[1]:
+        return []
+    fills: list[tuple[int, str]] = []
+    for index, (previous_row, current_row) in enumerate(zip(rows, proposed, strict=True)):
+        for key, previous in previous_row.items():
+            current = current_row[key]
+            if (previous.get("reextraction_conflict") or current.get("reextraction_conflict")
+                    or previous.get("alternatives") or current.get("alternatives")
+                    or previous.get("validity") == "AMBIGUOUS" or current.get("validity") == "AMBIGUOUS"):
+                return []
+            if (previous.get("observed"), previous.get("value"), previous.get("validity")) == (
+                    current.get("observed"), current.get("value"), current.get("validity")):
+                continue
+            if (previous.get("validity") != "MISSING" or previous.get("reviewed") is not False
+                    or previous.get("alternatives") or previous.get("corrected")
+                    or any(previous.get(item) is not None for item in (
+                        "observed", "value", "origin", "source_fragment", "candidate_text"))
+                    or current.get("validity") != "VALID" or current.get("reviewed") is not False
+                    or current.get("alternatives") or current.get("corrected")
+                    or not isinstance(current.get("observed"), str) or not current["observed"].strip()
+                    or not isinstance(current.get("value"), str) or not current["value"].strip()
+                    or not isinstance(current.get("origin"), dict) or _region(current["origin"]) is None
+                    or not isinstance(current["origin"].get("method"), str)):
+                return []
+            fills.append((index, key))
+    return fills
+
+
+
 def retain_disagreements(before, after, definition=None):
     """A retry may propose alternatives but cannot erase a preceding valid value."""
     conflicts = list(before.get("semantic_conflicts", []))
@@ -521,12 +580,23 @@ def retain_disagreements(before, after, definition=None):
             conflicts.append("REEXTRACTION_FIELD:" + name)
     for name, rows in before["tables"].items():
         proposed = after["tables"][name]
-        previous_values = [{key: cell.get("value") for key, cell in row.items()} for row in rows]
-        proposed_values = [{key: cell.get("value") for key, cell in row.items()} for row in proposed]
+        previous_values = [{key: (cell.get("value"), cell.get("observed")) for key, cell in row.items()} for row in rows]
+        proposed_values = [{key: (cell.get("value"), cell.get("observed")) for key, cell in row.items()} for row in proposed]
         if rows and (previous_values != proposed_values
                 or any(cell.get("reextraction_conflict") for row in rows for cell in row.values())):
-            conflicts.append("REEXTRACTION_TABLE:" + name)
             table: dict = next((item for item in (definition or {}).get("tables", []) if item["name"] == name), {})
+            fills = _missing_table_fills(rows, proposed, table, [*conflicts, *after.get("semantic_conflicts", [])])
+            if fills:
+                record = {"before": copy.deepcopy(rows), "after": copy.deepcopy(proposed),
+                    "reason": "EMPTY_MISSING_FILLED", "filled_cells": [{"row": index, "field": key} for index, key in fills]}
+                after.setdefault("reextraction_table_candidates", {})[name] = record
+                history = copy.deepcopy(before.get("reextraction_table_history", {}).get(name, []))
+                after.setdefault("reextraction_table_history", {})[name] = [*history, copy.deepcopy(record)]
+                after["tables"][name] = copy.deepcopy(rows)
+                for index, key in fills:
+                    after["tables"][name][index][key] = copy.deepcopy(proposed[index][key])
+                continue
+            conflicts.append("REEXTRACTION_TABLE:" + name)
             keys = [field["name"] for field in table.get("fields", []) if field.get("business_key")]
             start = (table.get("visual") or {}).get("row_start")
             if not keys and start:
@@ -549,7 +619,8 @@ def retain_disagreements(before, after, definition=None):
                 current = proposed[index] if not structural else {}
                 for key, cell in row.items():
                     alternative = current.get(key, {})
-                    if structural or cell.get("reextraction_conflict") or cell.get("value") != alternative.get("value"):
+                    if (structural or cell.get("reextraction_conflict") or cell.get("value") != alternative.get("value")
+                            or cell.get("observed") != alternative.get("observed")):
                         cell.update(validity="AMBIGUOUS" if cell.get("observed") is not None else cell["validity"],
                             reextraction_conflict=True, alternatives=list(dict.fromkeys(value for value in [
                                 *cell.get("alternatives", []), cell.get("observed"), alternative.get("observed")]
@@ -571,9 +642,21 @@ def _invoke(path, body, *, timeout, started, check, minimum_progress=15,
             raise OptionalInferenceTimeout(identity)
         raise DocumentDeadlineExpired()
     check(minimum_progress)  # Fast responses still require current worker authority.
+    # Authority callbacks consume time too: publish only the allowance still left.
+    remaining = min(remaining, timeout - (time.monotonic() - started))
+    if budget is not None:
+        remaining = min(remaining, budget.require())
+    if phase_deadline is not None:
+        remaining = min(remaining, phase_deadline - time.monotonic())
+    if remaining <= 0:
+        if optional:
+            raise OptionalInferenceTimeout(identity)
+        raise DocumentDeadlineExpired()
     control = _RequestControl()
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_request, path, body, timeout=remaining, control=control)
+    # Ephemeral per-RPC allowance; never alter the frozen configuration/snapshot.
+    transport_body = {**body, "request_budget_seconds": remaining}
+    future = executor.submit(_request, path, transport_body, timeout=remaining, control=control)
     completed = False
     error = None
     last_phase_poll = 0.0

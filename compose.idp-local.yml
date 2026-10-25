@@ -60,6 +60,7 @@ services:
       FLAGS_allocator_strategy: auto_growth
       FLAGS_gpu_memory_limit_mb: "10000"
       TRACKVANCE_IDP_STACK_DIAGNOSTICS: "${IDP_STACK_DIAGNOSTICS:-0}"
+      TRACKVANCE_IDP_CACHE_HYGIENE: "${IDP_CACHE_HYGIENE:-0}"
     volumes:
       - ${IDP_MODEL_ROOT:?Set private model cache}/paddle:/models/paddle:ro
       - ${IDP_MODEL_ROOT:?Set private model cache}/layout:/models/layout:ro

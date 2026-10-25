@@ -6,7 +6,6 @@ import importlib.util
 import json
 import shutil
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +14,7 @@ HTTPConnection = http.client.HTTPConnection
 
 
 @pytest.fixture
-def gateway(tmp_path):
+def gateway(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[2]
     for path in (root / "deploy/idp").iterdir():
         if path.is_file():
@@ -25,6 +24,22 @@ def gateway(tmp_path):
     spec = importlib.util.spec_from_file_location("idp_gateway_test", tmp_path / "server.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # These existing boundary/format tests use synthetic recognizers. Supply the
+    # additional control protocol explicitly; lifecycle tests exercise real barriers.
+    def memory_request(_identity, _budget, path, body=None, *, cleanup=False):
+        pinned = module.LOCK["qwen"]
+        if path == "/ps":
+            return {"models": []}
+        if path == "/tags":
+            return {"models": [{"name": pinned["model"], "digest": pinned["manifest_sha256"]}]}
+        if path == "/generate" and body == {"model": pinned["model"], "prompt": "", "keep_alive": 0, "stream": False}:
+            return {"model": pinned["model"], "done": True, "done_reason": "unload"}
+        pytest.fail("unexpected synthetic residency control request")
+    monkeypatch.setattr(module, "memory_request", memory_request)
+    monkeypatch.setattr(module, "CACHE_HYGIENE", False)
+    if not hasattr(module.signal, "SIGKILL"):
+        # These tests replace every process operation with synthetic children.
+        monkeypatch.setattr(module.signal, "SIGKILL", 9, raising=False)
     try:
         yield module
     finally:
@@ -284,7 +299,8 @@ def test_v2_http_boundary_rejects_non_target_ids_and_generated_strings(gateway, 
     assert post(endpoint, "/interpret", body) == (422, {"error": "LLM_SELECTION_INVALID"})
 
 
-@pytest.mark.parametrize("text,code", [("a" * 65537, "LLM_FRAGMENT_LIMIT"), (None, "LLM_FRAGMENT_INTEGRITY")])
+@pytest.mark.parametrize("text,code", [("a" * 65537, "LLM_FRAGMENT_LIMIT"), (None, "LLM_FRAGMENT_INTEGRITY")],
+    ids=["oversized", "missing"])
 def test_v2_catalog_fails_closed_before_llm_on_invalid_or_oversized_evidence(gateway, endpoint, monkeypatch, text, code):
     body = fragment_interpretation_body(gateway)
     body["observations"][0]["text"] = text
@@ -392,6 +408,7 @@ def test_extract_preserves_child_phases_and_provenance(gateway, monkeypatch):
             "source": base64.b64encode(raw).decode(), "source_sha256": hashlib.sha256(raw).hexdigest(),
             "configuration": {"paddle_model": "PaddleOCR-VL-1.6", "llm_model": gateway.LOCK["qwen"]["model"],
                               "prompt_version": "trackvance-idp-098-v1"}}
+    gateway.BUDGETS[body["request_id"]] = gateway.MEMORY.Budget(300)
     engine = gateway.Handler.extract(None, body)["engine"]
     assert engine["phases"] == {"paddle_seconds": 1.25}
     assert engine["runtime_provenance"] == {"paddle_runner": child_proof, "gateway": gateway.startup_provenance()}
@@ -404,6 +421,10 @@ def test_stream_keeps_final_metrics_separate_from_intermediate_chunks(gateway, m
 
     class Upstream:
         status = 200
+        sock = None
+
+        def connect(self):
+            pass
 
         def __init__(self, *args, **kwargs):
             pass
@@ -448,9 +469,15 @@ def test_cancel_closes_upstream_before_response_headers(gateway, endpoint, monke
         def shutdown(self, _how):
             cancelled.set()
 
+        def close(self):
+            pass
+
     class Upstream:
         def __init__(self, *args, **kwargs):
             self.sock = Socket()
+
+        def connect(self):
+            pass
 
         def request(self, *args, **kwargs):
             pass
@@ -627,11 +654,12 @@ def test_cancel_remains_accepted_when_child_exits_after_poll(gateway, endpoint, 
 
     gateway.ADMISSIONS[identity] = 1
     gateway.ACTIVE[identity] = CompletedChild()
-    monkeypatch.setattr(gateway.os, "killpg", already_exited)
+    monkeypatch.setattr(gateway.os, "killpg", already_exited, raising=False)
     assert post(endpoint, "/cancel", {"request_id": identity}) == (200, {"cancelled": True})
 
 
-def test_cancel_racing_completed_response_cannot_leave_permanent_nonce(gateway, endpoint, monkeypatch):
+@pytest.mark.parametrize("cancel_first", [True, False], ids=["accepted-cancel", "already-terminal"])
+def test_cancel_racing_completed_response_cannot_leave_permanent_nonce(gateway, endpoint, monkeypatch, cancel_first):
     entered, adding, release_extract, release_add = (threading.Event() for _ in range(4))
     identity = "9" * 32
 
@@ -653,21 +681,39 @@ def test_cancel_racing_completed_response_cannot_leave_permanent_nonce(gateway, 
     inference = threading.Thread(target=lambda: results.append(post(endpoint, "/extract",
         {"request_id": identity, "configuration": {}})))
     cancellation = threading.Thread(target=lambda: results.append(post(endpoint, "/cancel", {"request_id": identity})))
-    inference.start()
-    assert entered.wait(timeout=2)
-    cancellation.start()
-    assert adding.wait(timeout=2)
-    inference.join(timeout=2)  # Response is delivered before admission cleanup.
-    assert not inference.is_alive()
-    time.sleep(.05)
-    release_add.set()
-    cancellation.join(timeout=2)
-    assert not cancellation.is_alive()
-    deadline = time.monotonic() + 2
-    while gateway.ADMISSIONS and time.monotonic() < deadline:
-        time.sleep(.01)
-    assert len(results) == 2 and all(status == 200 for status, _ in results)
-    assert not gateway.ADMISSIONS and not gateway.CANCELLED
+    try:
+        inference.start()
+        assert entered.wait(timeout=2)
+        if cancel_first:
+            cancellation.start()
+            assert adding.wait(timeout=2)
+            # Complete the accepted cancellation under the admission lock before
+            # terminal response; a successful candidate must not become200.
+            release_add.set()
+        else:
+            release_extract.set()
+            inference.join(timeout=2)
+            assert not inference.is_alive()
+            assert results == [(200, results[0][1])]
+            cancellation.start()
+        inference.join(timeout=2)
+        cancellation.join(timeout=2)
+        assert not inference.is_alive() and not cancellation.is_alive()
+        assert len(results) == 2
+        if cancel_first:
+            assert (200, {"cancelled": True}) in results
+            assert (422, {"error": "CANCELLED"}) in results
+        else:
+            assert all(status == 200 for status, _ in results)
+            assert (200, {"cancelled": False}) in results
+        assert not gateway.ADMISSIONS and not gateway.CANCELLED
+        assert not gateway.GATE.locked() and not gateway.UPSTREAM
+    finally:
+        release_extract.set(); release_add.set()
+        if inference.ident is not None:
+            inference.join(timeout=2)
+        if cancellation.ident is not None:
+            cancellation.join(timeout=2)
 
 
 def paddle_request(gateway):
@@ -683,6 +729,7 @@ def test_cancel_before_child_creation_never_starts_a_process(gateway, monkeypatc
     monkeypatch.setattr(gateway.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("cancelled request must not spawn"))
     body = paddle_request(gateway)
     gateway.CANCELLED.add(body["request_id"])
+    gateway.BUDGETS[body["request_id"]] = gateway.MEMORY.Budget(300)
     with pytest.raises(ValueError, match="^CANCELLED$"):
         gateway.Handler.extract(None, body)
 
@@ -715,7 +762,7 @@ def test_cancel_during_creation_kills_child_before_waiting_for_its_timeout(gatew
     gateway.RUNTIME["ready"] = True
     monkeypatch.setattr(gateway, "verify_models", lambda: True)
     monkeypatch.setattr(gateway.subprocess, "Popen", Child)
-    monkeypatch.setattr(gateway.os, "killpg", kill)
+    monkeypatch.setattr(gateway.os, "killpg", kill, raising=False)
     body, result = paddle_request(gateway), []
     active = threading.Thread(target=lambda: result.append(post(endpoint, "/extract", body)))
     active.start()

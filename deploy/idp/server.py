@@ -15,7 +15,6 @@ import json
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -33,7 +32,7 @@ APP_ROOT = Path(__file__).resolve().parent
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
     "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
-    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "models.lock.json")}
+    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "idp_memory_lifecycle.py", "idp_cache_advice.py", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
@@ -76,6 +75,7 @@ FRAGMENTS = frozen_module("document_semantic_fragments.py")
 RULES = frozen_module("document_template_builder_rules.py")
 TABLES = frozen_module("document_literal_tables.py")
 DIAGNOSTICS = frozen_module("idp_observability.py")
+MEMORY = frozen_module("idp_memory_lifecycle.py")
 CHILD_SOURCE_HASHES = {name: STARTUP_HASHES[name] for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
 FAILURE_DIAGNOSTICS = DIAGNOSTICS.FailureRing(CHILD_SOURCE_HASHES)
 GATE = threading.Lock()
@@ -85,6 +85,10 @@ ADMISSION_LOCK = threading.Lock()
 ADMISSIONS = {}
 ACTIVE = {}
 UPSTREAM = {}
+BUDGETS = {}
+MEMORY_STATE = {"status": "AVAILABLE"}
+MEMORY_FAILURE = None
+CACHE_HYGIENE = os.environ.get("TRACKVANCE_IDP_CACHE_HYGIENE", "0") == "1"
 CANCELLED = set()
 STATES = {}
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -99,6 +103,10 @@ ERROR_STATUS = {
     "PADDLE_FAILURE": 422, "PADDLE_RESULT_LIMIT": 422, "LLM_FAILURE": 422,
     "LLM_RESPONSE_LIMIT": 422, "INFERENCE_TIMEOUT": 504, "REQUEST_LIMIT": 413,
     "LLM_FRAGMENT_LIMIT": 422, "LLM_FRAGMENT_INTEGRITY": 422, "LLM_SELECTION_INVALID": 422,
+    "REQUEST_BUDGET_INVALID": 422, "GPU_MEMORY_UNAVAILABLE": 503,
+    "GPU_READER_QUIESCENCE_UNVERIFIED": 503, "GPU_OWNER_QUIESCENCE_UNVERIFIED": 503,
+    "GPU_RESIDENCY_UNVERIFIED": 503, "GPU_FOREIGN_RESIDENCY": 503,
+    "GPU_PIN_UNVERIFIED": 503, "GPU_UNLOAD_UNVERIFIED": 503, "CACHE_OWNERSHIP_UNVERIFIED": 503,
     "REQUEST_ID": 422, "ADMISSION_CONFIGURATION": 422, "DUPLICATE_REQUEST": 422,
 }
 
@@ -279,47 +287,116 @@ def qwen_verified():
         and item.get("digest") == LOCK["qwen"]["manifest_sha256"] for item in tags["models"])
 
 
-def stream_chat(identity, body, timeout):
-    """Track the connection before waiting for headers, including cold load."""
-    connection = http.client.HTTPConnection("idp-ollama", 11434, timeout=timeout)
-    UPSTREAM[identity] = connection
-    chunks, length, final = [], 0, {}
+def memory_request(identity, budget, path, body=None, *, cleanup=False):
+    def operation(connection):
+        raw = json.dumps(body).encode() if body is not None else None
+        connection.request("POST" if body is not None else "GET", "/api" + path, body=raw,
+                           headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        try:
+            data = response.read(65537)
+            if response.status != 200 or len(data) > 65536:
+                raise MEMORY.UnsafeLifecycle("GPU_RESIDENCY_UNVERIFIED")
+            return json.loads(data)
+        finally:
+            response.close()
+    return upstream_read(identity, budget, operation, cleanup=cleanup)
+
+
+def upstream_read(identity, budget, operation, *, cleanup=False):
+    def publish(handle):
+        if UPSTREAM:
+            raise MEMORY.UnsafeLifecycle("GPU_READER_QUIESCENCE_UNVERIFIED")
+        UPSTREAM[identity] = handle
+    def withdraw(handle):
+        if UPSTREAM.get(identity) is not handle:
+            raise MEMORY.UnsafeLifecycle("GPU_READER_QUIESCENCE_UNVERIFIED")
+        UPSTREAM.pop(identity)
+    return MEMORY.read_joined(operation, budget, lambda: identity in CANCELLED, publish, withdraw, cleanup=cleanup,
+        connection_factory=http.client.HTTPConnection)
+
+
+def memory_barrier(identity, budget, *, cleanup=False):
+    return MEMORY.quiet_ollama(budget,
+        lambda path, body, final: memory_request(identity, budget, path, body, cleanup=final),
+        LOCK["qwen"], lambda: not ACTIVE and not UPSTREAM, cleanup=cleanup)
+
+
+def cache_hygiene(budget):
+    if not CACHE_HYGIENE:
+        return {"status": "DISABLED"}
+    if ACTIVE or UPSTREAM:
+        raise MEMORY.UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+    name = "idp_cache_advice.py"
+    if hashlib.sha256((APP_ROOT / name).read_bytes()).hexdigest() != STARTUP_HASHES[name]:
+        raise MEMORY.UnsafeLifecycle("CACHE_OWNERSHIP_UNVERIFIED")
+    # Advisory work gets only the remaining caller allowance, never a new quota.
+    remaining = budget.join_remaining()
+    if remaining <= .05:
+        return {"status": "SKIPPED_NO_REMAINING_BUDGET"}
+    started = time.monotonic()
+    def observed(value):
+        return {**value, "elapsed_seconds": round(time.monotonic() - started, 4)}
+    process = subprocess.Popen(["/usr/local/bin/python", "-I", "-B", str(APP_ROOT / name), str(min(4.0, remaining))],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        start_new_session=True, close_fds=True)
     try:
-        if identity in CANCELLED:
-            raise ValueError("CANCELLED")
+        output, _ = process.communicate(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=budget.join_remaining())
+        except subprocess.TimeoutExpired:
+            raise MEMORY.UnsafeLifecycle("CACHE_OWNERSHIP_UNVERIFIED") from None
+        return observed({"status": "ADVICE_TIMEOUT", "reclaim_or_cold_state_guaranteed": False})
+    if process.returncode != 0 or len(output) > 4096:
+        return observed({"status": "ADVICE_UNAVAILABLE", "reclaim_or_cold_state_guaranteed": False})
+    try:
+        result = json.loads(output)
+    except (ValueError, UnicodeError):
+        return observed({"status": "ADVICE_UNAVAILABLE", "reclaim_or_cold_state_guaranteed": False})
+    if not isinstance(result, dict) or result.get("status") == "OWNERSHIP_UNVERIFIED":
+        raise MEMORY.UnsafeLifecycle("CACHE_OWNERSHIP_UNVERIFIED")
+    return observed(result)
+
+
+def stream_chat(identity, body, timeout):
+    """One joined reader; queue, socket and cleanup share the admitted deadline."""
+    budget = BUDGETS.get(identity) or MEMORY.Budget(max(30, min(1800, timeout)), timeout)
+    def operation(connection):
         connection.request("POST", "/api/chat", body=json.dumps({**body, "stream": True}).encode(),
                            headers={"Content-Type": "application/json"})
         response = connection.getresponse()
-        if response.status != 200:
-            # Inspect a bounded upstream diagnostic only to select a fixed code.
-            # The model's message, document text and paths are never returned.
-            raw_error = response.read(4097)
-            raise ValueError(_llm_error(raw_error, response.status))
-        while True:
-            if identity in CANCELLED:
-                raise ValueError("CANCELLED")
-            raw = response.readline(1024 * 1024 + 1)
-            if not raw:
-                break
-            if len(raw) > 1024 * 1024:
-                raise ValueError("LLM_RESPONSE_LIMIT")
-            item = json.loads(raw)
-            if item.get("error"):
-                raise ValueError(_llm_error(raw, item.get("status")))
-            content = item.get("message", {}).get("content", "")
-            length += len(content.encode())
-            if length > 16 * 1024**2:
-                raise ValueError("LLM_RESPONSE_LIMIT")
-            chunks.append(content)
-            if item.get("done"):
-                final = item
-                break
-        if not final:
-            raise ValueError("LLM_INCOMPLETE")
-        return {**final, "message": {"content": "".join(chunks)}}
-    finally:
-        UPSTREAM.pop(identity, None)
-        connection.close()
+        try:
+            if response.status != 200:
+                raise ValueError(_llm_error(response.read(4097), response.status))
+            chunks, length, final = [], 0, {}
+            while True:
+                if identity in CANCELLED:
+                    raise ValueError("CANCELLED")
+                budget.remaining()
+                raw = response.readline(1024 * 1024 + 1)
+                if not raw:
+                    break
+                if len(raw) > 1024 * 1024:
+                    raise ValueError("LLM_RESPONSE_LIMIT")
+                item = json.loads(raw)
+                if item.get("error"):
+                    raise ValueError(_llm_error(raw, item.get("status")))
+                content = item.get("message", {}).get("content", "")
+                length += len(content.encode())
+                if length > 16 * 1024**2:
+                    raise ValueError("LLM_RESPONSE_LIMIT")
+                chunks.append(content)
+                if item.get("done"):
+                    final = item
+                    break
+            if not final:
+                raise ValueError("LLM_INCOMPLETE")
+            return {**final, "message": {"content": "".join(chunks)}}
+        finally:
+            response.close()
+    return upstream_read(identity, budget, operation)
 
 
 def _llm_error(raw, status=None):
@@ -341,12 +418,12 @@ def health():
         qwen_installed = qwen_verified()
     except (OSError, ValueError):
         pass
-    ready = installed and qwen_installed and RUNTIME.get("ready") is True
+    ready = installed and qwen_installed and RUNTIME.get("ready") is True and MEMORY_STATE["status"] == "AVAILABLE"
     return {"ready": ready, "reason": "Modelos verificados y kernel CUDA comprobado; aceptación del corpus registrada por separado." if ready else "Modelos o runtime CUDA pendientes/no disponibles.",
             "models_installed": {"paddle": installed, "qwen": qwen_installed}, "runtime": RUNTIME,
             "observed_model_inference": dict(OBSERVED_INFERENCE),
             "runtime_provenance": {"gateway": startup_provenance()},
-            "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
+            "memory_lifecycle": dict(MEMORY_STATE), "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -375,6 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, {"error": "NOT_FOUND"})
 
     def do_POST(self):
+        arrived = time.monotonic()
         slot = False
         control_slot = False
         admitted = False
@@ -418,11 +496,7 @@ class Handler(BaseHTTPRequestHandler):
                     except ProcessLookupError:
                         pass
                 upstream = UPSTREAM.get(identity)
-                if upstream and upstream.sock:
-                    try:
-                        upstream.sock.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
+                if upstream:
                     upstream.close()
                 self.send(200, {"cancelled": accepted})
                 return
@@ -445,29 +519,60 @@ class Handler(BaseHTTPRequestHandler):
                 admitted = True
             queued = time.monotonic()
             queue_timeout = min(1800, max(30, int(body["configuration"].get("timeout_seconds", 300))))
+            if "request_budget_seconds" in body and body["request_budget_seconds"] is None:
+                raise ValueError("REQUEST_BUDGET_INVALID")
+            BUDGETS[identity] = budget = MEMORY.Budget(queue_timeout, body.get("request_budget_seconds"), started=arrived)
             STATES[identity] = {"phase": "QUEUED", "progress": 15}
-            while not GATE.acquire(timeout=.2):
+            while not GATE.acquire(timeout=min(.2, budget.remaining())):
                 if identity in CANCELLED or time.monotonic() - queued >= queue_timeout:
                     code = "CANCELLED" if identity in CANCELLED else "GPU_QUEUE_TIMEOUT"
                     CANCELLED.discard(identity)
                     STATES.pop(identity, None)
                     self.send(422, {"error": code})
                     return
+            acquired = time.monotonic()
+            result, failure, released = None, None, None
+            quarantined_on_entry = MEMORY_STATE["status"] != "AVAILABLE"
             try:
+                if quarantined_on_entry:
+                    raise MEMORY.UnsafeLifecycle("GPU_MEMORY_UNAVAILABLE")
                 if identity in CANCELLED:
                     raise ValueError("CANCELLED")
                 result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
-                result["engine"]["queue_seconds"] = round(time.monotonic() - queued - result["engine"]["elapsed_seconds"], 4)
-                self.send(200, result)
             except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
-                    urllib.error.URLError, http.client.HTTPException):
-                if identity in CANCELLED:
-                    raise ValueError("CANCELLED") from None
-                raise
+                    urllib.error.URLError, http.client.HTTPException) as error:
+                failure = error
             finally:
-                CANCELLED.discard(identity)
-                STATES.pop(identity, None)
+                if not quarantined_on_entry:
+                    try:
+                        released = memory_barrier(identity, budget, cleanup=True)
+                        released["cache_advice"] = cache_hygiene(budget)
+                    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
+                            urllib.error.URLError, http.client.HTTPException) as cleanup_error:
+                        global MEMORY_FAILURE
+                        code = str(cleanup_error) if isinstance(cleanup_error, MEMORY.UnsafeLifecycle) else "GPU_RESIDENCY_UNVERIFIED"
+                        # Latch the first original candidate/failure. Rejected requests cannot erase evidence.
+                        if MEMORY_FAILURE is None:
+                            MEMORY_FAILURE = {"candidate": result, "original_error": "CANCELLED" if identity in CANCELLED
+                                else safe_error(failure, identity)[1] if failure else None,
+                                "cleanup_error": code, "source_sha256": body.get("source_sha256")}
+                            MEMORY_STATE.update(status="UNAVAILABLE", reason=code)
+                        failure = MEMORY.UnsafeLifecycle(code)
+                with ADMISSION_LOCK:
+                    was_cancelled = identity in CANCELLED
+                    ADMISSIONS.pop(identity, None)
+                    CANCELLED.discard(identity)
+                    BUDGETS.pop(identity, None)
+                    STATES.pop(identity, None)
+                    admitted = False  # No later cleanup may erase a subsequent admission with the same ID.
+                if was_cancelled and not isinstance(failure, MEMORY.UnsafeLifecycle):
+                    failure = ValueError("CANCELLED")
                 GATE.release()
+            if failure is not None:
+                raise failure
+            result["engine"]["memory_lifecycle"] = released
+            result["engine"]["queue_seconds"] = round(acquired - queued, 4)
+            self.send(200, result)
         except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
                 urllib.error.URLError, http.client.HTTPException) as error:
             status, code = safe_error(error, identity)
@@ -481,6 +586,8 @@ class Handler(BaseHTTPRequestHandler):
                 with ADMISSION_LOCK:
                     ADMISSIONS.pop(identity, None)
                     CANCELLED.discard(identity)
+                    BUDGETS.pop(identity, None)
+                    STATES.pop(identity, None)
 
     def extract(self, body):
         if RUNTIME.get("ready") is not True:
@@ -499,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
         if not raw or len(raw) > 32 * 1024**2 or hashlib.sha256(raw).hexdigest() != body["source_sha256"]:
             raise ValueError("SOURCE_INTEGRITY")
         started = time.monotonic()
+        budget = BUDGETS[body["request_id"]]
+        memory_barrier(body["request_id"], budget)
         STATES[body["request_id"]] = {"phase": "PADDLE", "progress": 25}
         with tempfile.TemporaryDirectory(prefix="idp-") as temporary:
             folder = Path(temporary)
@@ -510,6 +619,7 @@ class Handler(BaseHTTPRequestHandler):
             (folder / "request.json").write_text(json.dumps({"filename": filename, "source_sha256": body["source_sha256"], "regions": regions}))
             if body["request_id"] in CANCELLED:
                 raise ValueError("CANCELLED")
+            budget.remaining()
             with (folder / "error.log").open("wb") as error_stream:
                 process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", temporary],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_stream,
@@ -517,7 +627,7 @@ class Handler(BaseHTTPRequestHandler):
             ACTIVE[body["request_id"]] = process
             failure_code = None
             try:
-                deadline = time.monotonic() + timeout
+                deadline = budget.work_deadline
                 while process.poll() is None:
                     if body["request_id"] in CANCELLED:
                         raise ValueError("CANCELLED")
@@ -548,14 +658,17 @@ class Handler(BaseHTTPRequestHandler):
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                    process.wait(timeout=5)
+                    try:
+                        process.wait(timeout=budget.join_remaining())
+                    except subprocess.TimeoutExpired:
+                        raise MEMORY.UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
                 ACTIVE.pop(body["request_id"], None)
                 if failure_code in {"INFERENCE_TIMEOUT", "PADDLE_FAILURE", "CANCELLED"}:
                     try:
                         FAILURE_DIAGNOSTICS.retain(folder, owned_job_identity, body["request_id"],
                             body["source_sha256"], failure_code, process)
-                    except Exception:
-                        pass  # Diagnostics must never replace the original normalized failure.
+                    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                        RUNTIME["diagnostic_retention_available"] = False
         # The coordinator runs confined template validation before deciding
         # whether a separate /interpret request is necessary.
         result["engine"]["elapsed_seconds"] = round(time.monotonic() - started, 4)
@@ -569,7 +682,11 @@ class Handler(BaseHTTPRequestHandler):
         config = body["configuration"]
         if config["llm_model"] != LOCK["qwen"]["model"] or config["prompt_version"] not in PROMPTS:
             raise ValueError("MODEL_NOT_PINNED")
-        if not qwen_verified():
+        budget = BUDGETS[body["request_id"]]
+        memory_barrier(body["request_id"], budget)
+        tags = memory_request(body["request_id"], budget, "/tags")
+        if not isinstance(tags, dict) or not any(isinstance(item, dict) and item.get("name") == LOCK["qwen"]["model"]
+                and item.get("digest") == LOCK["qwen"]["manifest_sha256"] for item in tags.get("models", [])):
             raise ValueError("LLM_MODEL_INTEGRITY")
         started = time.monotonic()
         timeout = min(1800, max(30, int(config.get("timeout_seconds", 300))))

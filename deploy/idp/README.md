@@ -198,9 +198,50 @@ texto no confiable: nunca se devuelve por HTTP, estado, detalles de error o logs
 generales. Exportar esa evidencia privada antes de recrear el contenedor; el
 almacenamiento es efímero. Un fallo de diagnóstico conserva el error original.
 
-El runtime ahora empaqueta13 fuentes verificadas, incluido
-`idp_observability.py`, capturado por el gateway y el hijo. La salud separa
+El runtime empaqueta 15 fuentes verificadas. El gateway captura doce al arrancar,
+incluidos `idp_memory_lifecycle.py` e `idp_cache_advice.py`; el hijo Paddle conserva
+sus tres fuentes capturadas, incluido `idp_observability.py`. La salud separa
 archivos instalados, kernel CUDA y las inferencias realmente observadas.
 Kernel PASS no prueba lectura de documentos ni aceptación del corpus. Una
 prueba con proceso/tmpfs nuevos no demuestra que estén frías las cachés del
 controlador o del sistema; esos estados permanecen sin verificar.
+
+
+## Presupuesto y cierre de recursos de inferencia
+
+Cada solicitud puede llevar `request_budget_seconds`, una asignación efímera del
+presupuesto ya vigente en el coordinador, fuera de la configuración congelada.
+El gateway mide un único plazo desde la llegada: recepción, cola, inferencia y
+cierre consumen esa asignación. Una reserva interna permite detener y recoger al
+hijo Paddle y cerrar y esperar al lector HTTP de Ollama. La conexión conserva su
+socket propio incluso si la respuesta HTTP lo separa del objeto de conexión.
+La cancelación aceptada durante el cierre impide devolver un candidato exitoso.
+
+Antes de iniciar otra etapa y tras terminarla, se exige ausencia de hijos y
+lectores propios, además de observar `/api/ps` vacío. Si queda exactamente el
+modelo fijado por nombre y digest, se vuelve a verificar `/api/tags` y se solicita
+su descarga de VRAM con una petición vacía y `keep_alive=0`; después se observa
+la residencia vacía. La respuesta `done_reason=unload` por sí sola no prueba que
+el modelo ya haya salido de memoria. Un propietario desconocido, hash distinto,
+lector sin cerrar o estado de residencia no comprobado bloquea ambas rutas de
+inferencia con HTTP 503 y salud no disponible; `/status` y `/cancel` permanecen
+accesibles. Se conserva privadamente el primer candidato y fallo originales.
+La recuperación exige comprobar el cierre antes de recrear el gateway propio.
+
+`IDP_CACHE_HYGIENE=1` habilita un consejo opcional de caché sólo desde el entorno
+privado de despliegue; por defecto está deshabilitado. Requiere además un montaje
+propio verificado de sólo lectura de la raíz de modelos Ollama en
+`/models/ollama`, mediante un overlay privado revisado. El compose predeterminado
+no incorpora ese montaje adicional ni activa esta opción. Los modelos y software
+deben pertenecer al UID 65532 y conservar las identidades verificadas. Una
+configuración incompleta queda bloqueada; no se adopta un volumen ajeno.
+
+Tras comprobar el cierre y la residencia vacía, un hijo sin datos documentales
+puede aconsejar DONTNEED sólo en `/opt/venv`, `/models/paddle`, `/models/layout`
+y `/models/ollama`: descriptores sin seguir enlaces, mismo dispositivo y dueño,
+archivos de un solo enlace, directorios y bytes inmutables. No lee contenidos
+para aconsejar ni cambia controles globales o WSL. Su límite de 128 MiB y hasta
+4 s pertenece al tiempo restante de la misma solicitud; no abre otro presupuesto.
+Los errores ordinarios de consejo son metadatos y no cambian el candidato. Una
+identidad de recurso desconocida o un hijo sin recoger bloquea nueva inferencia.
+El consejo no garantiza recuperar RAM de Windows ni certificar cachés frías.
