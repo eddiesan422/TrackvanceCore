@@ -32,13 +32,14 @@ APP_ROOT = Path(__file__).resolve().parent
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
     "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
-    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "idp_memory_lifecycle.py", "idp_cache_advice.py", "models.lock.json")}
+    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "idp_memory_lifecycle.py", "idp_cache_advice.py", "recognition.py", "prompt-visual-v1.txt", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
 PROMPT = STARTUP_FILES["prompt-v1.txt"].decode("utf-8")
 PROMPTS = {"trackvance-idp-098-v1": PROMPT,
            "trackvance-idp-098-v2": STARTUP_FILES["prompt-v2.txt"].decode("utf-8")}
+VISUAL_PROMPT = STARTUP_FILES["prompt-visual-v1.txt"].decode("utf-8")
 
 
 class FrozenSourceLoader(importlib.abc.SourceLoader):
@@ -76,6 +77,7 @@ RULES = frozen_module("document_template_builder_rules.py")
 TABLES = frozen_module("document_literal_tables.py")
 DIAGNOSTICS = frozen_module("idp_observability.py")
 MEMORY = frozen_module("idp_memory_lifecycle.py")
+RECOGNITION = frozen_module("recognition.py")
 CHILD_SOURCE_HASHES = {name: STARTUP_HASHES[name] for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
 FAILURE_DIAGNOSTICS = DIAGNOSTICS.FailureRing(CHILD_SOURCE_HASHES)
 GATE = threading.Lock()
@@ -360,7 +362,7 @@ def cache_hygiene(budget):
     return observed(result)
 
 
-def stream_chat(identity, body, timeout):
+def stream_chat(identity, body, timeout, raw_capture=None):
     """One joined reader; queue, socket and cleanup share the admitted deadline."""
     budget = BUDGETS.get(identity) or MEMORY.Budget(max(30, min(1800, timeout)), timeout)
     def operation(connection):
@@ -370,7 +372,7 @@ def stream_chat(identity, body, timeout):
         try:
             if response.status != 200:
                 raise ValueError(_llm_error(response.read(4097), response.status))
-            chunks, length, final = [], 0, {}
+            chunks, length, final, stream_length = [], 0, {}, 0
             while True:
                 if identity in CANCELLED:
                     raise ValueError("CANCELLED")
@@ -380,6 +382,11 @@ def stream_chat(identity, body, timeout):
                     break
                 if len(raw) > 1024 * 1024:
                     raise ValueError("LLM_RESPONSE_LIMIT")
+                stream_length += len(raw)
+                if stream_length > 16 * 1024**2:
+                    raise ValueError("LLM_RESPONSE_LIMIT")
+                if raw_capture is not None:
+                    raw_capture(raw)
                 item = json.loads(raw)
                 if item.get("error"):
                     raise ValueError(_llm_error(raw, item.get("status")))
@@ -422,6 +429,8 @@ def health():
     return {"ready": ready, "reason": "Modelos verificados y kernel CUDA comprobado; aceptación del corpus registrada por separado." if ready else "Modelos o runtime CUDA pendientes/no disponibles.",
             "models_installed": {"paddle": installed, "qwen": qwen_installed}, "runtime": RUNTIME,
             "observed_model_inference": dict(OBSERVED_INFERENCE),
+            "recognition": {"contract": "TRACKVANCE_RECOGNITION_V1",
+                "strategies": ["QWEN_VISUAL", "PADDLE_STRUCTURED"], "incremental_originals": True},
             "runtime_provenance": {"gateway": startup_provenance()},
             "memory_lifecycle": dict(MEMORY_STATE), "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
 
@@ -446,7 +455,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.send(200, health())
         elif re.fullmatch(r"/status/[a-f0-9]{32}", self.path):
-            state = STATES.get(self.path.rsplit("/", 1)[1])
+            identity = self.path.rsplit("/", 1)[1]
+            state = STATES.get(identity) or RECOGNITION.terminal_for(identity)
             self.send(200 if state else 404, state or {"phase": "UNKNOWN"})
         else:
             self.send(404, {"error": "NOT_FOUND"})
@@ -458,11 +468,11 @@ class Handler(BaseHTTPRequestHandler):
         admitted = False
         identity = None
         try:
-            if self.path not in {"/extract", "/interpret", "/refine", "/cancel"}:
+            if self.path not in {"/extract", "/interpret", "/refine", "/recognize", "/cancel"}:
                 self.close_connection = True
                 self.send(404, {"error": "NOT_FOUND"})
                 return
-            if self.path in {"/extract", "/interpret", "/refine"}:
+            if self.path in {"/extract", "/interpret", "/refine", "/recognize"}:
                 slot = REQUEST_SLOTS.acquire(blocking=False)
                 if not slot:
                     self.close_connection = True
@@ -500,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
                     upstream.close()
                 self.send(200, {"cancelled": accepted})
                 return
-            if self.path not in {"/extract", "/interpret", "/refine"}:
+            if self.path not in {"/extract", "/interpret", "/refine", "/recognize"}:
                 self.send(404, {"error": "NOT_FOUND"})
                 return
             if not isinstance(body.get("configuration"), dict):
@@ -522,7 +532,8 @@ class Handler(BaseHTTPRequestHandler):
             if "request_budget_seconds" in body and body["request_budget_seconds"] is None:
                 raise ValueError("REQUEST_BUDGET_INVALID")
             BUDGETS[identity] = budget = MEMORY.Budget(queue_timeout, body.get("request_budget_seconds"), started=arrived)
-            STATES[identity] = {"phase": "QUEUED", "progress": 15}
+            STATES[identity] = ({"phase": "QUEUED", "page_one_based": None, "expected_pages": None, "emitted_pages": []}
+                if self.path == "/recognize" else {"phase": "QUEUED", "progress": 15})
             while not GATE.acquire(timeout=min(.2, budget.remaining())):
                 if identity in CANCELLED or time.monotonic() - queued >= queue_timeout:
                     code = "CANCELLED" if identity in CANCELLED else "GPU_QUEUE_TIMEOUT"
@@ -531,14 +542,18 @@ class Handler(BaseHTTPRequestHandler):
                     self.send(422, {"error": code})
                     return
             acquired = time.monotonic()
-            result, failure, released = None, None, None
+            result, failure, released, recognition = None, None, None, None
             quarantined_on_entry = MEMORY_STATE["status"] != "AVAILABLE"
             try:
                 if quarantined_on_entry:
                     raise MEMORY.UnsafeLifecycle("GPU_MEMORY_UNAVAILABLE")
                 if identity in CANCELLED:
                     raise ValueError("CANCELLED")
-                result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
+                if self.path == "/recognize":
+                    recognition = RECOGNITION.Session(globals(), self, body)
+                    result = recognition.execute()
+                else:
+                    result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
             except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
                     urllib.error.URLError, http.client.HTTPException) as error:
                 failure = error
@@ -569,14 +584,24 @@ class Handler(BaseHTTPRequestHandler):
                     failure = ValueError("CANCELLED")
                 GATE.release()
             if failure is not None:
+                if recognition is not None:
+                    code = safe_error(failure, identity)[1]
+                    status = "CANCELLED" if code == "CANCELLED" else "TIMEOUT" if code == "INFERENCE_TIMEOUT" else "FAILED"
+                    recognition.finish(status, released, code)
+                    if recognition.started:
+                        return
                 raise failure
             result["engine"]["memory_lifecycle"] = released
             result["engine"]["queue_seconds"] = round(acquired - queued, 4)
+            if recognition is not None:
+                recognition.finish("COMPLETE", released)
+                return
             self.send(200, result)
         except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
                 urllib.error.URLError, http.client.HTTPException) as error:
             status, code = safe_error(error, identity)
-            self.send(status, {"error": code})
+            if not getattr(self, "recognition_stream_started", False):
+                self.send(status, {"error": code})
         finally:
             if slot:
                 REQUEST_SLOTS.release()

@@ -48,15 +48,17 @@ logger = logging.getLogger(__name__)
 TIMEOUT_SECONDS = 120
 
 
-def _authority(db, document_id, owner):
+def _authority(db, document_id, owner, *, expected_attempt=None, allow_cancelled=False):
     original = db.scalar(select(DocumentOriginal).where(DocumentOriginal.id == document_id).with_for_update())
     job = db.scalar(select(Job).where(Job.document_id == document_id).with_for_update())
     if not original or not job or job.lease_owner != owner or job.status != "RUNNING" or not job.lease_until:
         raise OperationError(409, "DOCUMENT_LEASE_LOST", "El intento perdió autoridad de publicación.")
+    if expected_attempt is not None and job.attempts != expected_attempt:
+        raise OperationError(409, "DOCUMENT_LEASE_LOST", "El resultado pertenece a un intento documental anterior.")
     from .scheduler import aware
     if aware(job.lease_until) <= utcnow():
         raise OperationError(409, "DOCUMENT_LEASE_LOST", "El lease documental expiró.")
-    if original.cancel_requested:
+    if original.cancel_requested and not allow_cancelled:
         raise OperationError(409, "DOCUMENT_CANCELLED", "El procesamiento documental fue cancelado.")
     user = db.get(User, original.uploaded_by_id)
     if not user or user.deleted or not user.active:
@@ -182,10 +184,12 @@ def process_once(owner=None, active=None):
         if not job:
             return False
         result = db.execute(update(Job).where(Job.id == job.id, eligible).values(status="RUNNING", lease_owner=owner,
-                            lease_until=utcnow() + timedelta(seconds=LEASE_SECONDS), attempts=Job.attempts + 1))
+                            lease_until=utcnow() + timedelta(seconds=LEASE_SECONDS), attempts=Job.attempts + 1)
+                            .execution_options(synchronize_session=False))
         if cast(CursorResult, result).rowcount != 1:
             db.rollback()
             return False
+        db.refresh(job)  # Read the claimed attempt; never evaluate aware lease timestamps against stale SQLite objects.
         if job.document_reference_id:
             return process_reference(db, job, owner, active)
         original = require_record(db, DocumentOriginal, job.document_id)
@@ -210,6 +214,10 @@ def process_once(owner=None, active=None):
             db.commit()
             return True
         artifact = require_record(db, Artifact, original.artifact_id)
+        lossless = (configuration["provider"] == "PADDLE_QWEN_LOCAL"
+            and configuration.get("extraction_strategy", "LEGACY") != "LEGACY")
+        worker_attempt_number = job.attempts
+        attempt_id = f"{job.id}-{worker_attempt_number}"
         db.commit()
     active["job_id"] = job_id
     last_progress, last_check = -1, 0.0
@@ -235,17 +243,63 @@ def process_once(owner=None, active=None):
         except OperationError as error:
             raise DocumentCheckpointFailure(error) from None
 
+    saved_events = []
+
+    def persist_event(event):
+        from .document_recognition_store import persist_recognition_event
+
+        terminal = event.get("kind") == "TERMINAL"
+        if budget is not None and not terminal:
+            budget.require()
+        with SessionLocal() as db:
+            current, current_job, _ = _authority(db, document_id, owner,
+                expected_attempt=worker_attempt_number, allow_cancelled=terminal)
+            refs = persist_recognition_event(db, current, event, attempt_id=attempt_id,
+                configuration_sha256=canonical_hash(configuration), job_id=job_id,
+                worker_attempt_number=worker_attempt_number)
+            current.processing_phase = event["stage"][:30]
+            current_job.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
+            db.commit()
+        saved_events.append({**event, "event_sha256": refs["event_sha256"], "durable_refs": refs})
+        return refs
+
     try:
         if budget is not None:
             budget.require(budget.extraction_deadline)
         source = storage_provider.materialize(artifact)
-        data = execute_provider(source, definition, configuration, legacy_runner=run_engine, check=checkpoint, budget=budget)
+        if lossless:
+            from .document_recognition_store import latest_recognition_events
+
+            with SessionLocal() as db:
+                current, _, _ = _authority(db, document_id, owner, expected_attempt=worker_attempt_number)
+                recovered = latest_recognition_events(db, current, hydrate=True)
+            if recovered and any(event["kind"] == "PAGE" for event in recovered):
+                from .document_lossless import adapt_saved_recognition
+
+                data = adapt_saved_recognition(recovered, definition, configuration, source_sha256=artifact.sha256,
+                    attempt_context={"recovery": True, "attempt_id": attempt_id})
+                data["engine"]["recovered_from_attempt"] = recovered[-1]["attempt_id"]
+                saved_events.extend(recovered)
+            else:
+                data = execute_provider(source, definition, configuration, legacy_runner=run_engine, check=checkpoint,
+                    budget=budget, on_event=persist_event, attempt_context={"attempt_id": attempt_id,
+                        "source_sha256": artifact.sha256, "configuration_sha256": canonical_hash(configuration),
+                        "job_id": job_id, "worker_attempt_number": worker_attempt_number})
+        else:
+            data = execute_provider(source, definition, configuration, legacy_runner=run_engine, check=checkpoint, budget=budget)
         marker = data["engine"].get("inference_completion")
         if marker is not None and (marker.get("source_sha256") != artifact.sha256
                 or marker.get("definition_sha256") != canonical_hash(definition)
                 or marker.get("configuration_sha256") != canonical_hash(configuration)):
             raise OperationError(422, "DOCUMENT_PROVIDER_CONTRACT", "El resultado parcial no corresponde al original y configuración congelados.")
-        if definition["publication"]["review_policy"] == "AUTO_VERIFIED":
+        if lossless:
+            from .document_recognition_service import recognition_source_context
+            from .document_validation_policy import certify_lossless_candidate
+
+            context = recognition_source_context(saved_events, artifact.sha256)
+            data["engine"]["validation"] = certify_lossless_candidate(data, definition, artifact.sha256,
+                source_context=context, check=lambda: checkpoint(95))
+        if not lossless and definition["publication"]["review_policy"] == "AUTO_VERIFIED":
             with SessionLocal() as db:
                 current, _, _ = _authority(db, document_id, owner)
                 current.processing_phase = "VALIDATION"
@@ -272,7 +326,8 @@ def process_once(owner=None, active=None):
         with SessionLocal() as db:
             if budget is not None:
                 budget.require()
-            original, job, user = _authority(db, document_id, owner)
+            original, job, user = _authority(db, document_id, owner,
+                **({"expected_attempt": worker_attempt_number} if lossless else {}))
             # Recovered workers never append another automatic extraction after completion.
             if not original.extraction_id:
                 extraction = DocumentExtraction(organization_id=original.organization_id, document_id=original.id,
@@ -337,7 +392,7 @@ def process_once(owner=None, active=None):
 def process_reference(db, job, owner, active):
     """The same fenced DOCUMENT lane reads corpus without operational documents."""
     reference = require_record(db, DocumentReference, job.document_reference_id)
-    identity, job_id = reference.id, job.id
+    identity, job_id, attempt = reference.id, job.id, job.attempts
     artifact = require_record(db, Artifact, reference.artifact_id)
     reference.status = "RUNNING"
     try:
@@ -349,11 +404,14 @@ def process_reference(db, job, owner, active):
         return True
     db.commit()
     active["job_id"] = job_id
+    lossless = (configuration["provider"] == "PADDLE_QWEN_LOCAL"
+        and configuration.get("extraction_strategy", "LEGACY") != "LEGACY")
+    budget = AttemptBudget(configuration["timeout_seconds"]) if configuration["provider"] == "PADDLE_QWEN_LOCAL" else None
 
     def authority(session):
         current = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
         from .scheduler import aware
-        if not current or current.lease_owner != owner or current.status != "RUNNING" or not current.lease_until or aware(current.lease_until) <= utcnow():
+        if not current or current.lease_owner != owner or current.attempts != attempt or current.status != "RUNNING" or not current.lease_until or aware(current.lease_until) <= utcnow():
             raise OperationError(409, "DOCUMENT_LEASE_LOST", "La lectura de referencia perdió autoridad.")
         item = require_record(session, DocumentReference, identity)
         actor = require_record(session, User, item.actor_id)
@@ -364,15 +422,40 @@ def process_reference(db, job, owner, active):
         return current, item, actor
 
     def checkpoint(_progress):
+        if budget is not None:
+            budget.require()
         with SessionLocal() as session:
             current, _, _ = authority(session)
             current.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
             session.commit()
 
+    def persist_event(event):
+        from .document_recognition_store import persist_recognition_event
+
+        if budget is not None and event.get("kind") != "TERMINAL":
+            budget.require()
+        with SessionLocal() as session:
+            current, item, _ = authority(session)
+            refs = persist_recognition_event(session, item, event, attempt_id=f"{job_id}-{attempt}",
+                configuration_sha256=canonical_hash(configuration), job_id=job_id, worker_attempt_number=attempt)
+            current.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
+            session.commit()
+        return refs
+
     try:
         source = storage_provider.materialize(artifact)
         data = execute_provider(source, {"fields": [], "tables": []}, configuration,
-            legacy_runner=run_engine, check=checkpoint)
+            legacy_runner=run_engine, check=checkpoint, budget=budget,
+            **({"on_event": persist_event, "attempt_context": {"purpose": "REFERENCE_DISCOVERY",
+                "attempt_id": f"{job_id}-{attempt}", "source_sha256": artifact.sha256,
+                "configuration_sha256": canonical_hash(configuration)}} if lossless else {}))
+        if lossless:
+            representation = data["payload"].get("document_representation", {})
+            if not any(page.get("blocks") or page.get("tables") or page.get("native", {}).get("lines")
+                    for page in representation.get("pages", [])):
+                raise OperationError(422, "DOCUMENT_REFERENCE_EMPTY", "No se reconoció contenido de referencia; conserva el original y revisa la estrategia.")
+            if data["engine"].get("execution", {}).get("recognition_complete") is not True:
+                raise OperationError(422, "DOCUMENT_REFERENCE_INCOMPLETE", "La referencia conserva resultados parciales; faltan páginas por reconocer.")
         with SessionLocal() as session:
             current, item, actor = authority(session)
             if item.payload is None:
@@ -382,8 +465,9 @@ def process_reference(db, job, owner, active):
             audit(session, "DOCUMENT_REFERENCE_READ", "document_reference", item.id, "Referencia disponible para configurar; sin publicación operativa", actor.name,
                   actor.organization_id, {"sha256": item.sha256, "payload_hash": item.payload_hash, "engine": item.engine})
             session.commit()
-    except (OperationError, ArtifactIntegrityError) as error:
-        error_code = error.code if isinstance(error, OperationError) else "DOCUMENT_ARTIFACT_INTEGRITY"
+    except (OperationError, ArtifactIntegrityError, DocumentDeadlineExpired, DocumentCheckpointFailure) as error:
+        failure = error.original if isinstance(error, DocumentCheckpointFailure) else error
+        error_code = failure.code if isinstance(failure, OperationError) else "DOCUMENT_TIMEOUT" if isinstance(error, DocumentDeadlineExpired) else "DOCUMENT_ARTIFACT_INTEGRITY"
         with SessionLocal() as session:
             current = require_record(session, Job, job_id)
             if current.lease_owner == owner and current.status == "RUNNING":

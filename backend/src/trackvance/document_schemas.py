@@ -15,6 +15,7 @@ from pydantic import (
 
 from .document_invoice_controls import validated_invoice_controls
 from .document_invoice_schemas import InvoiceControls
+from .document_normalization import DocumentNormalization
 from .document_template_builder_schemas import VisualFieldRule, VisualTableRule
 
 
@@ -36,11 +37,26 @@ class DocumentField(BaseModel):
     section: Literal["DOCUMENT", "ISSUER", "BUYER", "TOTALS"] = "DOCUMENT"
     visual: VisualFieldRule | None = None
     visual_alternatives: list[VisualFieldRule] = Field(default_factory=list, max_length=20)
+    normalization: DocumentNormalization | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_normalization(self, handler):
+        result = handler(self)
+        if self.normalization is None:
+            result.pop("normalization", None)
+        return result
 
     @model_validator(mode="after")
     def numeric_format(self):
         if self.thousands_separator == self.decimal_separator:
             raise ValueError("Los separadores decimal y de millares deben ser distintos.")
+        if self.normalization:
+            if self.normalization.numeric_semantics == "DEDUCTION_MAGNITUDE" and self.logical_type != "DECIMAL":
+                raise ValueError("La magnitud de deducción requiere un campo decimal explícito.")
+            if self.normalization.decimal_scale is not None and self.logical_type != "DECIMAL":
+                raise ValueError("La escala declarada requiere un campo decimal.")
+            if self.normalization.currency_equivalences and self.logical_type != "STRING":
+                raise ValueError("La normalización de moneda requiere un campo de texto.")
         return self
 
     @field_validator("pattern")
@@ -62,9 +78,24 @@ class DocumentTable(BaseModel):
     required: bool = True
     row_label: str = Field(default="", max_length=160)
     visual: VisualTableRule | None = None
+    structured_header_labels: list[str] | None = Field(default=None, min_length=1, max_length=40)
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_table(self, handler):
+        result = handler(self)
+        if self.structured_header_labels is None:
+            result.pop("structured_header_labels", None)
+        return result
 
     @model_validator(mode="after")
     def row_groups(self):
+        if self.structured_header_labels is not None:
+            if (self.visual is not None or self.row_pattern or len(self.structured_header_labels) != len(self.fields)
+                    or any(not label.strip() or len(label) > 160 for label in self.structured_header_labels)
+                    or len({label.casefold().strip() for label in self.structured_header_labels}) != len(self.fields)
+                    or len({field.name.casefold() for field in self.fields}) != len(self.fields)):
+                raise ValueError("La tabla estructurada requiere etiquetas únicas por columna y conserva geometría desconocida.")
+            return self
         if self.visual:
             if len(self.fields) != len(self.visual.header_labels):
                 raise ValueError("La tabla visual requiere una definición por columna.")
@@ -118,6 +149,14 @@ class DocumentPublication(BaseModel):
         return self
 
 
+class DocumentValidationPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    version: Literal["EVIDENCE_V2"] = "EVIDENCE_V2"
+    allow_noncritical_source_bound: bool = False
+    critical_corroboration: Literal["INDEPENDENT_SOURCE"] = "INDEPENDENT_SOURCE"
+    require_table_structure: Literal[True] = True
+
+
 class DocumentDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fields: list[DocumentField] = Field(min_length=1, max_length=100)
@@ -127,6 +166,7 @@ class DocumentDefinition(BaseModel):
     arithmetic: list["DocumentArithmetic"] = Field(default_factory=list, max_length=50)
     cross_totals: list["DocumentCrossTotal"] = Field(default_factory=list, max_length=30)
     invoice_controls: InvoiceControls | None = None
+    validation_policy: DocumentValidationPolicy | None = None
 
     @model_serializer(mode="wrap")
     def preserve_historical_definition(self, handler):
@@ -135,6 +175,8 @@ class DocumentDefinition(BaseModel):
             result.pop("cross_totals", None)
         if self.invoice_controls is None:
             result.pop("invoice_controls", None)
+        if self.validation_policy is None:
+            result.pop("validation_policy", None)
         return result
 
     @model_validator(mode="after")

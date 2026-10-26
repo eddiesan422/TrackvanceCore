@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SLOTS = threading.BoundedSemaphore(16)
 MAX_REQUEST = 48 * 1024**2
 MAX_RESPONSE = 16 * 1024**2
+MAX_RECOGNITION_RESPONSE = 64 * 1024**2
 
 
 class Relay(BaseHTTPRequestHandler):
@@ -35,7 +36,7 @@ class Relay(BaseHTTPRequestHandler):
 
     def forward(self):
         allowed = self.command == "GET" and (self.path == "/health" or re.fullmatch(r"/status/[a-f0-9]{32}", self.path))
-        allowed = allowed or self.command == "POST" and self.path in {"/extract", "/refine", "/interpret", "/cancel"}
+        allowed = allowed or self.command == "POST" and self.path in {"/extract", "/refine", "/interpret", "/recognize", "/cancel"}
         if not allowed:
             self.close_connection = True
             self.error(404)
@@ -63,6 +64,24 @@ class Relay(BaseHTTPRequestHandler):
                 upstream.send(chunk)
                 remaining -= len(chunk)
             response = upstream.getresponse()
+            if self.path == "/recognize" and response.status == 200 and response.getheader("Content-Type") == "application/x-ndjson":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                sent = True
+                self.close_connection = True
+                observed = 0
+                while True:
+                    chunk = response.read1(64 * 1024)
+                    if not chunk:
+                        break
+                    observed += len(chunk)
+                    if observed > MAX_RECOGNITION_RESPONSE:
+                        raise ValueError("RESPONSE_LIMIT")
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                return
             result_size = int(response.getheader("Content-Length", "0"))
             if not 0 < result_size <= MAX_RESPONSE:
                 raise ValueError("RESPONSE_LIMIT")

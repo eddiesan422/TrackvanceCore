@@ -2,7 +2,7 @@
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 238 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 241 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -137,6 +137,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/documents/builder/references/{id}` | `documents:configure` |
 | GET | `/documents/builder/references/{id}/file` | `documents:download` |
 | GET | `/documents/builder/references/{id}/pages/{page}` | `documents:download` |
+| GET | `/documents/builder/references/{id}/recognition-artifacts/{artifact_id}/content` | `documents:download` |
 | GET | `/documents/engines` | `documents:read` |
 | GET | `/documents/families` | `documents:read` |
 | GET | `/documents/families/{id}` | `documents:read` |
@@ -149,6 +150,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/documents/originals/{id}/builder` | `documents:configure` |
 | GET | `/documents/originals/{id}/file` | `documents:download` |
 | GET | `/documents/originals/{id}/pages/{page}` | `documents:download` |
+| GET | `/documents/originals/{id}/recognition-artifacts/{artifact_id}/content` | `documents:download` |
 | GET | `/exceptions` | `exceptions:read` |
 | GET | `/exceptions/assignees` | `exceptions:read` |
 | GET | `/exceptions/{id}` | `exceptions:read` |
@@ -276,6 +278,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/documents/families/{id}/templates/{template_id}/activate` | `documents:configure` |
 | POST | `/documents/originals/{id}/builder/propose` | `documents:configure` |
 | POST | `/documents/originals/{id}/cancel` | `documents:write` |
+| POST | `/documents/originals/{id}/replay` | `documents:review` |
 | POST | `/documents/originals/{id}/retry` | `documents:write` |
 | POST | `/documents/originals/{id}/review` | `documents:review` |
 | POST | `/exceptions/{id}/attachments` | `exceptions:write` |

@@ -15230,6 +15230,73 @@
         "x-required-permission": "documents:configure"
       }
     },
+    "/api/v1/documents/builder/references/{identity}/recognition-artifacts/{artifact_id}/content": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Reference Recognition Content",
+        "operationId": "reference_recognition_content_api_v1_documents_builder_references__identity__recognition_artifacts__artifact_id__content_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:download"
+      }
+    },
     "/api/v1/documents/builder/references/{identity}/propose": {
       "post": {
         "tags": [
@@ -17498,6 +17565,149 @@
           }
         ],
         "x-required-permission": "documents:review"
+      }
+    },
+    "/api/v1/documents/originals/{identity}/replay": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Replay Recognition",
+        "operationId": "replay_recognition_api_v1_documents_originals__identity__replay_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:review"
+      }
+    },
+    "/api/v1/documents/originals/{identity}/recognition-artifacts/{artifact_id}/content": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Recognition Content",
+        "operationId": "recognition_content_api_v1_documents_originals__identity__recognition_artifacts__artifact_id__content_get",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:download"
       }
     },
     "/api/v1/documents/originals/{identity}/cancel": {
@@ -21515,6 +21725,16 @@
                 "type": "null"
               }
             ]
+          },
+          "validation_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentValidationPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -21576,6 +21796,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/InvoiceControls"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validation_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentValidationPolicy"
               },
               {
                 "type": "null"
@@ -21712,6 +21942,16 @@
             "type": "array",
             "maxItems": 20,
             "title": "Visual Alternatives"
+          },
+          "normalization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentNormalization"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -21720,6 +21960,62 @@
           "name"
         ],
         "title": "DocumentField"
+      },
+      "DocumentNormalization": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Version",
+            "default": 1
+          },
+          "numeric_semantics": {
+            "type": "string",
+            "enum": [
+              "SIGNED",
+              "DEDUCTION_MAGNITUDE"
+            ],
+            "title": "Numeric Semantics",
+            "default": "SIGNED"
+          },
+          "decimal_scale": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 18.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decimal Scale"
+          },
+          "rounding": {
+            "type": "string",
+            "enum": [
+              "EXACT",
+              "HALF_UP",
+              "HALF_EVEN"
+            ],
+            "title": "Rounding",
+            "default": "EXACT"
+          },
+          "currency_equivalences": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "maxProperties": 30,
+            "title": "Currency Equivalences"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DocumentNormalization"
       },
       "DocumentPublication": {
         "properties": {
@@ -21865,6 +22161,22 @@
                 "type": "null"
               }
             ]
+          },
+          "structured_header_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 40,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structured Header Labels"
           }
         },
         "additionalProperties": false,
@@ -21874,6 +22186,36 @@
           "fields"
         ],
         "title": "DocumentTable"
+      },
+      "DocumentValidationPolicy": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "EVIDENCE_V2",
+            "title": "Version",
+            "default": "EVIDENCE_V2"
+          },
+          "allow_noncritical_source_bound": {
+            "type": "boolean",
+            "title": "Allow Noncritical Source Bound",
+            "default": false
+          },
+          "critical_corroboration": {
+            "type": "string",
+            "const": "INDEPENDENT_SOURCE",
+            "title": "Critical Corroboration",
+            "default": "INDEPENDENT_SOURCE"
+          },
+          "require_table_structure": {
+            "type": "boolean",
+            "const": true,
+            "title": "Require Table Structure",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DocumentValidationPolicy"
       },
       "DomainBody": {
         "properties": {
@@ -22047,6 +22389,18 @@
             "type": "boolean",
             "title": "Use Llm",
             "default": true
+          },
+          "extraction_strategy": {
+            "type": "string",
+            "enum": [
+              "LEGACY",
+              "NATIVE_FIRST",
+              "QWEN_VISUAL",
+              "PADDLE_STRUCTURED",
+              "SELECTIVE"
+            ],
+            "title": "Extraction Strategy",
+            "default": "LEGACY"
           }
         },
         "additionalProperties": false,
@@ -24015,6 +24369,44 @@
           "reason"
         ],
         "title": "ReleaseBody"
+      },
+      "ReplayBody": {
+        "properties": {
+          "expected_extraction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Extraction Id"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1800,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_extraction_id",
+          "reason"
+        ],
+        "title": "ReplayBody"
       },
       "ResolveBody": {
         "properties": {

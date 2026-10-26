@@ -28,7 +28,7 @@ from .document_builder_workspace import (
 from .document_header_review import HeaderConfirmation
 from .document_models import DocumentBuilderTest, DocumentDraft, DocumentFamily, DocumentReference
 from .document_schemas import DocumentDraftDefinition
-from .document_service import MAX_BYTES, lock_family, owned
+from .document_service import MAX_BYTES, lock_family, owned, permission
 from .document_template_builder import propose
 from .document_template_builder_schemas import BuilderProposal
 from .models import Artifact, ArtifactLink, Job, User
@@ -119,7 +119,30 @@ def references(identity: str, offset: int = Query(0, ge=0), limit: int = Query(2
 @router.get("/builder/references/{identity}")
 def reference(identity: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     authority(db, user)
-    return reference_dto(owned(db, DocumentReference, identity, user), detail=True)
+    item = owned(db, DocumentReference, identity, user)
+    result = reference_dto(item, detail=True)
+    if (item.engine_snapshot or {}).get("extraction_strategy", "LEGACY") != "LEGACY":
+        from .document_recognition_store import recognition_metadata
+
+        result["execution"], result["recognition_artifacts"] = recognition_metadata(db, item)
+    return result
+
+
+@router.get("/builder/references/{identity}/recognition-artifacts/{artifact_id}/content")
+def reference_recognition_content(identity: str, artifact_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_recognition_store import recognition_artifact
+
+    authority(db, user)
+    permission(db, user, "download")
+    item = owned(db, DocumentReference, identity, user)
+    artifact = recognition_artifact(db, item, artifact_id)
+    source = storage_provider.materialize(artifact)
+    audit(db, "DOCUMENT_RECOGNITION_ACCESSED", "document_reference", item.id,
+        "Resultado original de referencia descargado", user.name, user.organization_id,
+        {"artifact_id": artifact.id, "sha256": artifact.sha256})
+    db.commit()
+    return FileResponse(source, media_type=artifact.media_type, filename=artifact.name,
+        content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/builder/references/{identity}/propose")

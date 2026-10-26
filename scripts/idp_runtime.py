@@ -28,7 +28,7 @@ BUILDKIT = "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd9
 SOURCES = ("server.py", "paddle_runner.py", "runtime_probe.py", "runtime_init.py",
            "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt", "document_semantic_fragments.py",
            "document_literal_tables.py", "document_template_builder_rules.py", "model_snapshot.py", "idp_observability.py", "idp_memory_lifecycle.py",
-           "idp_cache_advice.py", "models.lock.json")
+           "idp_cache_advice.py", "recognition.py", "prompt-visual-v1.txt", "models.lock.json")
 BACKEND_SOURCES = {"document_semantic_fragments.py", "document_literal_tables.py", "document_template_builder_rules.py"}
 
 

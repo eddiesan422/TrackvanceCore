@@ -17,9 +17,9 @@ SPEC.loader.exec_module(runtime)
 
 
 def test_packaging_includes_shared_source_catalog_and_both_immutable_prompts():
-    assert len(runtime.SOURCES) == len(set(runtime.SOURCES)) == 15
+    assert len(runtime.SOURCES) == len(set(runtime.SOURCES)) == 17
     assert {"prompt-v1.txt", "prompt-v2.txt", "document_semantic_fragments.py", "model_snapshot.py", "idp_observability.py",
-            "idp_memory_lifecycle.py", "idp_cache_advice.py"} <= set(runtime.SOURCES)
+            "idp_memory_lifecycle.py", "idp_cache_advice.py", "recognition.py", "prompt-visual-v1.txt"} <= set(runtime.SOURCES)
     assert runtime.source_path("document_semantic_fragments.py") == runtime.ROOT / "backend/src/trackvance/document_semantic_fragments.py"
     assert runtime.source_path("prompt-v1.txt") == runtime.DEPLOY / "prompt-v1.txt"
     for name in ("idp_memory_lifecycle.py", "idp_cache_advice.py"):

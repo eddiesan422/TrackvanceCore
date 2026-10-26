@@ -868,6 +868,11 @@
     },
     {
       "method": "GET",
+      "path": "/documents/builder/references/{id}/recognition-artifacts/{artifact_id}/content",
+      "permission": "documents:download"
+    },
+    {
+      "method": "GET",
       "path": "/documents/engines",
       "permission": "documents:read"
     },
@@ -924,6 +929,11 @@
     {
       "method": "GET",
       "path": "/documents/originals/{id}/pages/{page}",
+      "permission": "documents:download"
+    },
+    {
+      "method": "GET",
+      "path": "/documents/originals/{id}/recognition-artifacts/{artifact_id}/content",
       "permission": "documents:download"
     },
     {
@@ -1560,6 +1570,11 @@
       "method": "POST",
       "path": "/documents/originals/{id}/cancel",
       "permission": "documents:write"
+    },
+    {
+      "method": "POST",
+      "path": "/documents/originals/{id}/replay",
+      "permission": "documents:review"
     },
     {
       "method": "POST",

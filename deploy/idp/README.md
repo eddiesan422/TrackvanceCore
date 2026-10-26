@@ -198,7 +198,7 @@ texto no confiable: nunca se devuelve por HTTP, estado, detalles de error o logs
 generales. Exportar esa evidencia privada antes de recrear el contenedor; el
 almacenamiento es efímero. Un fallo de diagnóstico conserva el error original.
 
-El runtime empaqueta 15 fuentes verificadas. El gateway captura doce al arrancar,
+El runtime empaqueta 17 fuentes verificadas. El gateway captura catorce al arrancar,
 incluidos `idp_memory_lifecycle.py` e `idp_cache_advice.py`; el hijo Paddle conserva
 sus tres fuentes capturadas, incluido `idp_observability.py`. La salud separa
 archivos instalados, kernel CUDA y las inferencias realmente observadas.
@@ -245,3 +245,45 @@ para aconsejar ni cambia controles globales o WSL. Su límite de 128 MiB y hasta
 Los errores ordinarios de consejo son metadatos y no cambian el candidato. Una
 identidad de recurso desconocida o un hijo sin recoger bloquea nueva inferencia.
 El consejo no garantiza recuperar RAM de Windows ni certificar cachés frías.
+
+## Reconocimiento incremental y rutas explícitas
+
+Las configuraciones históricas sin `extraction_strategy` conservan `LEGACY` y
+sus endpoints `/extract`, `/refine` e `/interpret`. Una configuración nueva puede
+elegir `NATIVE_FIRST`, `QWEN_VISUAL`, `PADDLE_STRUCTURED` o `SELECTIVE`. La decisión
+de lectura nativa y de un mecanismo secundario pertenece al coordinador; cada
+solicitud `POST /recognize` ejecuta sólo Qwen visual o Paddle estructurado. La
+lectura visual recibe imágenes RGB reales y un esquema de campos/tablas, sin
+depender del catálogo de fragmentos Paddle. El contexto y el presupuesto de
+salida se mantienen en la configuración del trabajo; para páginas completas la
+configuración de prueba utiliza contexto32768 y salida máxima8192.
+
+`/recognize` transmite `application/x-ndjson`, con límite de64MiB por solicitud
+y24MiB por evento. Abrir HTTP200 no acredita éxito: el cliente exige un evento
+`TERMINAL` completo, integridad, cierre de lectores y prueba de liberación de
+recursos. Los eventos `PHASE`, `PAGE` y `TERMINAL` ligan fuente, intento, request,
+configuración y definición por SHA-256, más secuencia y hash del propio evento.
+`page_one_based` es explícito; antes de abrir el original el número esperado de
+páginas puede ser desconocido. No se deduce un porcentaje del tiempo transcurrido.
+
+Paddle consume `predict_iter()` y escribe el JSON oficial y HTML de cada página
+atómicamente antes de su adaptación. Un modo separado del hijo renderiza las
+imágenes Qwen sin importar Paddle ni cargar sus pesos. El coordinador recibe los
+originales, valida sus hashes y los persiste mediante StorageProvider antes de
+continuar la adaptación. El servicio GPU conserva únicamente temporales propios;
+no recibe credenciales, base de datos ni montajes de almacenamiento operativo.
+
+Los artefactos incluyen JSON/HTML Paddle, PNG enviados, flujo NDJSON original de
+Ollama, respuesta ensamblada y selección estructurada cuando es válida. Una
+respuesta inválida o vencida conserva su evidencia disponible y no se transforma
+en un resultado completo. La geometría de consulta de una página se distingue de
+mediciones de palabras o celdas. No se descartan filas por compartir código.
+
+La misma reserva temporal existente recoge el hijo y los lectores y comprueba la
+residencia del modelo. El terminal sólo se emite después de esa barrera. El
+estado consultable de un reconocimiento terminado conserva una prueba acotada
+(16terminales, TTL10minutos), para que una cancelación de transporte pueda
+comprobar la terminación remota; un ACK o404 no la demuestra. Si no se acredita
+el cierre, el cliente y el gateway bloquean otra inferencia hasta recuperación.
+Las rutas nuevas no acreditan que esté resuelta la intermitencia de Paddle ni
+conceden autoridad de validación, revisión humana o publicación al modelo.

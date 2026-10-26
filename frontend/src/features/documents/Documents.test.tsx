@@ -159,6 +159,26 @@ describe('Documentos guided operations', () => {
     expect(within(dialog).getByRole('button', { name: 'Confirmar fuente completa mediante revisión manual' })).toBeDisabled()
   })
 
+  it('keeps pending original pages navigable and does not draw a query region as measured value geometry', async () => {
+    const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? {
+      ...original,
+      execution: { expected_pages: [1, 2, 3], emitted_pages: [1], pending_pages: [2, 3], recognition_complete: false, stage: 'PADDLE' },
+      extraction: { ...original.extraction, payload: { ...original.extraction.payload, pages: [1], fields: { invoice: { ...original.extraction.payload.fields.invoice, geometry_kind: 'QUERY_REGION', origin: { page: 2, region: [.1, .2, .7, .8], method: 'QWEN_VISUAL' } }, native: { ...original.extraction.payload.fields.invoice, geometry_kind: 'MEASURED_SOURCE' } } } },
+    } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:download'] })
+    await screen.findByLabelText('Página del original')
+    await user.selectOptions(screen.getByLabelText('Página del original'), '3')
+    expect(screen.getByRole('img', { name: 'Página 3 del original PDF' })).toHaveAttribute('src', '/api/v1/documents/originals/original/pages/3')
+    await user.click(screen.getByRole('button', { name: 'native' }))
+    expect(document.querySelector('.document-origin-region')).toBeInTheDocument()
+    expect(screen.getByText(/native: página 1, región medida/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'invoice' }))
+    expect(screen.getByRole('img', { name: 'Página 2 del original PDF' })).toBeVisible()
+    expect(document.querySelector('.document-origin-region')).not.toBeInTheDocument()
+    expect(screen.getByText(/Región consultada; la ubicación exacta/)).toBeVisible()
+  })
+
   it('sends only a separately acknowledged opaque full-source binding and resolves as manual, preserving the partial marker', async () => {
     const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
     const binding = { source_sha256: 'source-sha', expected_extraction_id: 'partial-2', expected_payload_hash: 'reviewed-payload', expected_marker_hash: 'immutable-partial-marker', pages: [1, 2] }

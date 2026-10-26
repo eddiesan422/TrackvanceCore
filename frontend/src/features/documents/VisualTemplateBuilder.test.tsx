@@ -75,14 +75,20 @@ describe('DOC097 independent draft and references', () => {
 
   it('discovers then tests the same server snapshot and keeps value corrections separate from rule changes', async () => {
     localStorage.setItem('document-draft:family', 'draft')
+    const basePost = vi.mocked(post).getMockImplementation()!
+    vi.mocked(post).mockImplementation(async (path, body) => path.endsWith('/test') ? { ...tested, automatic_results: { reference: { ...payload, fields: { invoice: { ...payload.fields.invoice, geometry_kind: 'QUERY_REGION', candidate_alternatives: [{ stage: 'QWEN_VISUAL', candidate: { observed: '000099', value: '000099' } }] } } } } } : basePost(path, body))
     const user = userEvent.setup()
     renderApp(<VisualTemplateBuilder identity="family" refresh={vi.fn()}/>)
     await user.click(await screen.findByRole('button', { name: 'Analizar documentos y proponer plantilla' }))
     await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/builder/drafts/draft/discover', { expected_version: 3 }))
     await user.click(screen.getByRole('button', { name: 'Probar todas las referencias' }))
     expect(await screen.findByLabelText('Corregir valor de este documento: invoice')).toHaveValue('000001')
-    await user.clear(screen.getByLabelText('Corregir valor de este documento: invoice'))
-    await user.type(screen.getByLabelText('Corregir valor de este documento: invoice'), '000099')
+    await user.click(screen.getByRole('button', { name: 'Resaltar origen' }))
+    expect(document.querySelector('.visual-builder-selection')).not.toBeInTheDocument()
+    expect(screen.getByText(/Región consultada; la ubicación exacta/)).toBeVisible()
+    await user.click(screen.getByText('Alternativas conservadas (1)'))
+    await user.click(screen.getByRole('button', { name: 'Preparar esta alternativa' }))
+    expect(screen.getByLabelText('Corregir valor de este documento: invoice')).toHaveValue('000099')
     await user.click(screen.getByLabelText('Confirmar contra original'))
     await user.type(screen.getByLabelText('Motivo de la revisión de valores'), 'Comprobado contra original')
     await user.click(screen.getByRole('button', { name: 'Guardar revisión de este documento' }))

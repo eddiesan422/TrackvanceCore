@@ -75,6 +75,12 @@ class ReviewBody(BaseModel):
     incomplete_source_confirmation: IncompleteSourceConfirmation | None = None
 
 
+class ReplayBody(BaseModel):
+    expected_extraction_id: str | None
+    reason: str = Field(min_length=1, max_length=1800)
+    template_id: str | None = None
+
+
 class BatchBody(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=120)
     template_id: str
@@ -321,6 +327,32 @@ def review_original(identity: str, body: ReviewBody, db: Session = Depends(get_d
     except OperationError:
         db.rollback()
     return original_dto(db, item, detail=True)
+
+
+@router.post("/originals/{identity}/replay")
+def replay_recognition(identity: str, body: ReplayBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_recognition_service import replay_original
+
+    item = owned(db, DocumentOriginal, identity, user)
+    replay_original(db, item, body.expected_extraction_id, body.reason, user, body.template_id)
+    db.commit()
+    return original_dto(db, item, detail=True)
+
+
+@router.get("/originals/{identity}/recognition-artifacts/{artifact_id}/content")
+def recognition_content(identity: str, artifact_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_recognition_store import recognition_artifact
+
+    item = owned(db, DocumentOriginal, identity, user)
+    permission(db, user, "download")
+    artifact = recognition_artifact(db, item, artifact_id)
+    source = storage_provider.materialize(artifact)
+    audit(db, "DOCUMENT_RECOGNITION_ACCESSED", "document", item.id,
+        "Resultado original de reconocimiento descargado", user.name, user.organization_id,
+        {"artifact_id": artifact.id, "sha256": artifact.sha256})
+    db.commit()
+    return FileResponse(source, media_type=artifact.media_type, filename=artifact.name,
+        content_disposition_type="attachment", headers={"X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/originals/{identity}/cancel")

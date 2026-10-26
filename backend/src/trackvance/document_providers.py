@@ -11,7 +11,7 @@ import hashlib
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -38,6 +38,14 @@ class EngineConfiguration(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=2)
     max_parallel_jobs: int = Field(default=1, ge=1, le=4)
     use_llm: bool = True
+    extraction_strategy: Literal["LEGACY", "NATIVE_FIRST", "QWEN_VISUAL", "PADDLE_STRUCTURED", "SELECTIVE"] = "LEGACY"
+
+    @model_serializer(mode="wrap")
+    def preserve_historical_configuration(self, handler):
+        value = handler(self)
+        if self.extraction_strategy == "LEGACY":
+            value.pop("extraction_strategy", None)
+        return value
 
 
 class EngineSettingsBody(BaseModel):
@@ -78,7 +86,11 @@ def settings_for(db, organization_id, family_id=None, *, exact=False):
 
 def provider_catalog():
     from .document_local_inference import availability
+    from .document_recognition_transport import transport_available
     local = availability()
+    if not transport_available():
+        local.update(status="UNAVAILABLE", available=False, execution_enabled=False,
+            reason="Debe comprobarse el cierre del reconocimiento anterior antes de otra inferencia.")
     return [
         {"id": "PADDLE_QWEN_LOCAL", "name": "PaddleOCR-VL + Qwen local",
          "model": "PaddleOCR-VL-1.6 / Qwen3.5 9B Q4_K_M", **local},
@@ -159,7 +171,8 @@ def freeze_configuration(db, subject):
     return copy.deepcopy(snapshot)
 
 
-def execute_provider(source, definition, configuration, *, legacy_runner, check, budget=None):
+def execute_provider(source, definition, configuration, *, legacy_runner, check, budget=None,
+                     on_event=None, attempt_context=None):
     from .document_inference_completion import LocalCandidateResult, canonical_hash
     from .document_quality import validate_candidate_contract
     provider = configuration["provider"]
@@ -168,8 +181,13 @@ def execute_provider(source, definition, configuration, *, legacy_runner, check,
     if provider == "TESSERACT_LEGACY":
         data = legacy_runner(source, definition, check=check)
     elif provider == "PADDLE_QWEN_LOCAL":
-        from .document_local_inference import run_local
-        data = run_local(source, definition, configuration, legacy_runner=legacy_runner, check=check, budget=budget)
+        if configuration.get("extraction_strategy", "LEGACY") == "LEGACY":
+            from .document_local_inference import run_local
+            data = run_local(source, definition, configuration, legacy_runner=legacy_runner, check=check, budget=budget)
+        else:
+            from .document_lossless import run_lossless
+            data = run_lossless(source, definition, configuration, legacy_runner=legacy_runner, check=check,
+                budget=budget, on_event=on_event, attempt_context=attempt_context)
     else:
         raise OperationError(422, "DOCUMENT_PROVIDER_UNKNOWN", "El proveedor no pertenece al contrato autorizado.")
     validate_candidate_contract(data, definition)

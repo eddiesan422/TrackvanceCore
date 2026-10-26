@@ -94,6 +94,12 @@ def issues(extraction, definition, *, source_binding=None, ignore_incomplete=Fal
     payload = extraction.payload
     policy = definition["publication"]
     result = []
+    if getattr(extraction, "engine", {}).get("lossless_contract_version") == 1:
+        execution = extraction.engine.get("execution", {})
+        if execution.get("recognition_complete") is not True:
+            result.append("RECOGNITION_INCOMPLETE")
+        if execution.get("resources_released") is not True:
+            result.append("RECOGNITION_CLOSURE_UNVERIFIED")
     if not ignore_incomplete:
         result.extend(completion_issues(extraction, definition))
     from .document_quality import cell_is_valid, semantic_issues
@@ -161,6 +167,15 @@ def original_dto(db, original, *, detail=False):
         result["incomplete_inference"] = {"status": "PARTIAL" if pending else "HUMAN_RESOLVED",
             "failed_stage": marker["failed_stage"], "error_code": marker["error_code"],
             "automatic_approval_blocked": True, "requires_full_source_review": pending, "can_confirm": False}
+    if original.engine_snapshot and original.engine_snapshot.get("extraction_strategy", "LEGACY") != "LEGACY":
+        from .document_recognition_store import recognition_metadata
+
+        execution, recognition_artifacts = recognition_metadata(db, original)
+        if execution is not None:
+            execution["validation_complete"] = bool(extraction and original.status not in {"QUEUED", "RUNNING"})
+            result["execution"] = execution
+        if detail:
+            result["recognition_artifacts"] = recognition_artifacts
     if detail:
         result["template"] = template_dto(definition_for(db, original))
         result["extraction"] = extraction_dto(extraction) if extraction else None
@@ -398,9 +413,16 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
                 raw = row[field["name"]]
                 if raw is not None and (not isinstance(raw, str) or len(raw) > 65536):
                     raise OperationError(422, "DOCUMENT_REVIEW_VALUE", "Conserva texto exacto en las celdas corregidas.")
-                value, validity = validate_value(raw, field)
+                if previous.engine.get("lossless_contract_version") == 1:
+                    from .document_normalization import normalize_observation
+
+                    value, validity, normalization = normalize_observation(raw, field)
+                else:
+                    value, validity = validate_value(raw, field)
+                    normalization = None
                 cells[field["name"]] = {"value": value, "validity": validity, "observed": None,
-                    "origin": None, "confidence": None, "reviewed": validity == "VALID", "corrected": True}
+                    "origin": None, "confidence": None, "reviewed": validity == "VALID", "corrected": True,
+                    **({"correction_normalization": normalization, "correction_input": raw} if normalization else {})}
             corrected.append(cells)
         payload["tables"][name] = corrected
         payload.setdefault("table_unparsed", {})[name] = []
@@ -418,7 +440,13 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
             raw = changes[path]
             if raw is not None and (not isinstance(raw, str) or len(raw) > 65536):
                 raise OperationError(422, "DOCUMENT_REVIEW_VALUE", "Las correcciones conservan texto exacto hasta 65536 caracteres.")
-            value, validity = validate_value(raw, field)
+            if previous.engine.get("lossless_contract_version") == 1:
+                from .document_normalization import normalize_observation
+
+                value, validity, normalization = normalize_observation(raw, field)
+                cell.update(correction_normalization=normalization, correction_input=raw)
+            else:
+                value, validity = validate_value(raw, field)
             cell.update(value=value, validity=validity, reviewed=False)
             # The region proves the observed source, never a newly invented value.
             cell["corrected"] = value != cell.get("observed")

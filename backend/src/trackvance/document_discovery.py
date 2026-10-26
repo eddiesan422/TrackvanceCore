@@ -1,9 +1,11 @@
 """Bounded, local proposals from every configuration reference, without an oracle."""
+import copy
 import re
 from itertools import pairwise
 
 from .document_engine import extract
-from .document_schemas import DocumentDefinition
+from .document_lossless import map_representation
+from .document_schemas import DocumentDefinition, DocumentDraftDefinition
 from .document_template_builder_rules import (
     anchor,
     box,
@@ -69,7 +71,115 @@ def section_lines(lines, section):
     return result, [left, right], label
 
 
+def extract_reference(reference, definition):
+    """Use direct documentary cells when present; keep historical lines unchanged."""
+    payload = reference.payload
+    if "document_representation" not in payload:
+        return extract(payload["lines"], definition, payload.get("page_geometry"))
+    representation = payload["document_representation"]
+    stages = list(dict.fromkeys(page["stage"] for page in representation["pages"]))
+    stage = next((value for value in stages if value.startswith("QWEN")), stages[0] if stages else None)
+    result = map_representation(representation, definition, stage=stage)
+    result["lines"] = copy.deepcopy(payload["lines"])
+    if "page_geometry" in payload:
+        result["page_geometry"] = copy.deepcopy(payload["page_geometry"])
+    return result
+
+
+def _discover_ir(references):
+    """Propose from explicit text labels/HTML headers, without invented cell boxes."""
+    observations: dict[str, list[dict]] = {}
+    fields: dict[str, dict] = {}
+    proposals, unproposed = [], []
+    aliases: dict[str, set[str]] = {}
+    for name, (_, _, labels) in FIELDS.items():
+        for label in labels:
+            aliases.setdefault(normalized(label), set()).add(name)
+    known = {label: next(iter(names)) for label, names in aliases.items() if len(names) == 1}
+    column_labels = {normalized(label) for label in COLUMNS}
+
+    def observe(reference_id, label, value, evidence):
+        label, value = label.strip().rstrip(":"), value.strip()
+        if not label or len(label) > 160 or not value:
+            return
+        name = known.get(normalized(label), field_name(label))
+        if name not in fields:
+            if len(fields) >= 100:
+                raise OperationError(422, "DOCUMENT_DISCOVERY_VARIANTS_LIMIT", "Las etiquetas explícitas superan 100 campos; reduce referencias o selecciona las etiquetas necesarias.")
+            # Type and normalization are editable declarations, never inferred
+            # from a code, a currency symbol, or a mathematically plausible value.
+            fields[name] = {"name": name, "label": label, "logical_type": "STRING"}
+        observations.setdefault(name, []).append({"reference_id": reference_id, "value": value,
+            "source_evidence_id": evidence, "geometry_kind": "UNKNOWN"})
+
+    for reference in references:
+        representation = reference.payload.get("document_representation") or {}
+        for line_index, line in enumerate(reference.payload["lines"]):
+            for text in line["text"].splitlines():
+                label, separator, value = text.partition(":")
+                if separator:
+                    observe(reference.id, label, value, "line:" + str(line_index))
+        for page in representation.get("pages", []):
+            if page.get("recognition_status") == "INCOMPLETE":
+                continue
+            for table in page.get("tables", []):
+                owners = {cell["id"]: cell for cell in table["cells"]}
+                rows = [[owners.get(slot["cell_id"]) for slot in row["slots"]] for row in table["rows"]]
+                header = None
+                header_cells = []
+                for index, row in enumerate(rows):
+                    present = [cell for cell in row if cell is not None]
+                    if (not 2 <= len(row) <= 40 or len(present) != len(row)
+                            or any(cell["rowspan"] != 1 or cell["colspan"] != 1 for cell in present)):
+                        continue
+                    labels = [cell["text"].strip() for cell in present]
+                    explicit = all(cell.get("tag") == "th" for cell in present)
+                    if not explicit:
+                        explicit = sum(normalized(label) in column_labels for label in labels) >= 2
+                    if explicit and all(labels) and len({normalized(label) for label in labels}) == len(labels):
+                        header = index
+                        header_cells = present
+                        break
+                if header is None:
+                    for row in rows:
+                        if len(row) == 2:
+                            label_cell, value_cell = row
+                            if label_cell is not None and value_cell is not None and (label_cell["text"].rstrip().endswith(":") or normalized(label_cell["text"]) in known):
+                                observe(reference.id, label_cell["text"], value_cell["text"], value_cell["id"])
+                    unproposed.append({"reference_id": reference.id, "source_table_id": table["id"],
+                        "reason": "EXPLICIT_HEADER_NOT_LOCATED", "geometry_kind": "UNKNOWN"})
+                    continue
+                labels = [cell["text"].strip() for cell in header_cells]
+                names = [field_name(label, "column_" + str(index + 1)) for index, label in enumerate(labels)]
+                if len(set(names)) != len(names):
+                    unproposed.append({"reference_id": reference.id, "source_table_id": table["id"],
+                        "reason": "COLUMN_NAMES_AMBIGUOUS", "geometry_kind": "UNKNOWN"})
+                    continue
+                proposed = {"name": "detalle", "fields": [{"name": name, "label": label, "logical_type": "STRING"}
+                    for name, label in zip(names, labels, strict=True)], "structured_header_labels": labels}
+                proposals.append({"reference_id": reference.id, "definition": proposed, "source_table_id": table["id"],
+                    "source_header_row_id": table["rows"][header]["id"],
+                    "source_body_row_ids": [row["id"] for row in table["rows"][header + 1:]],
+                    "geometry_kind": "UNKNOWN", "query_geometry": copy.deepcopy(table.get("query_geometry"))})
+    for name, field in fields.items():
+        field["required"] = len({sample["reference_id"] for sample in observations[name]}) == len(references)
+    tables = []
+    if proposals:
+        chosen = max(proposals, key=lambda proposal: sum(proposal["definition"]["structured_header_labels"]
+            == other["definition"]["structured_header_labels"] for other in proposals))
+        tables = [chosen["definition"]]
+    definition = DocumentDraftDefinition.model_validate({"fields": list(fields.values()), "tables": tables}).model_dump(mode="json")
+    return {"definition": definition, "observations": observations, "table_alternatives": proposals,
+        "unproposed_tables": unproposed, "results": {reference.id: extract_reference(reference, definition)
+            for reference in references} if fields else {},
+        "notice": ("Propuesta editable desde estructura original; confirma tipos, etiquetas y filas sin geometría de celda medida."
+            if fields else "Se conservaron las tablas originales; configura al menos un campo de cabecera antes de probar la plantilla.")}
+
+
 def discover(references):
+    if any(page.get("stage") != "DIGITAL_NATIVE" for reference in references
+            for page in reference.payload.get("document_representation", {}).get("pages", [])):
+        return _discover_ir(references)
     observations: dict[str, list[dict]] = {name: [] for name in FIELDS}
     table_proposals: list[dict] = []
     for reference in references:
@@ -184,7 +294,6 @@ def discover(references):
     definition = DocumentDefinition.model_validate({"fields": fields, "tables": tables}).model_dump(mode="json")
     return {"definition": definition, "observations": observations,
             "expected_not_located": [name for name, samples in observations.items() if not samples],
-            "results": {reference.id: extract(reference.payload["lines"], definition,
-                reference.payload.get("page_geometry")) for reference in references},
+            "results": {reference.id: extract_reference(reference, definition) for reference in references},
             "table_alternatives": table_proposals,
             "notice": "Propuesta editable obtenida de todas las referencias de configuración; revisa ambigüedades, formatos y filas no interpretadas."}

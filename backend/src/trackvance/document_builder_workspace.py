@@ -47,7 +47,10 @@ def authority(db, user):
 
 def processor_identity():
     return {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in
-            ("document_engine.py", "document_template_builder_rules.py", "document_invoice_controls.py", "document_invoice_schemas.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py", "document_local_inference.py", "document_semantic_fragments.py", "document_literal_tables.py", "document_quality.py", "document_providers.py", "document_worker.py", "document_inference_completion.py", "document_candidate_arbitration.py")}
+            ("document_engine.py", "document_template_builder_rules.py", "document_invoice_controls.py", "document_invoice_schemas.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py", "document_local_inference.py", "document_semantic_fragments.py", "document_literal_tables.py", "document_quality.py", "document_providers.py", "document_worker.py", "document_inference_completion.py", "document_candidate_arbitration.py",
+             "document_representation.py", "document_normalization.py", "document_lossless.py",
+             "document_validation_policy.py", "document_recognition_transport.py", "document_recognition_store.py",
+             "document_recognition_service.py")}
 
 
 def reference_dto(item, detail=False):
@@ -142,13 +145,17 @@ def discover_draft(db, item, expected_version, user):
     references = [reference for reference in selected if reference.role == "CONFIGURATION"]
     if not references:
         raise OperationError(422, "DOCUMENT_DISCOVERY_REFERENCES", "Selecciona referencias de configuración; la variante reservada se utiliza solo para probar.")
-    result = run_builder("DISCOVER", [{"id": reference.id, "lines": reference.payload["lines"],
-        **({"page_geometry": reference.payload["page_geometry"]} if "page_geometry" in reference.payload else {})} for reference in references])
+    result = run_builder("DISCOVER", [builder_reference(reference) for reference in references])
     for reference in references:
         reference.configuration_used = True
     save_draft(db, item, expected_version, result["definition"], item.reference_ids, item.name, user,
                discovered_from=[reference.id for reference in references])
     return {"draft": draft_dto(item), "proposal": result}
+
+
+def builder_reference(reference):
+    return {"id": reference.id, "lines": reference.payload["lines"],
+        **{key: reference.payload[key] for key in ("page_geometry", "document_representation") if key in reference.payload}}
 
 
 def snapshot_for(db, item, user):
@@ -178,8 +185,7 @@ def test_draft(db, item, expected_version, user):
     previous = db.scalar(select(DocumentBuilderTest).where(DocumentBuilderTest.draft_id == item.id, DocumentBuilderTest.snapshot_hash == hashed))
     if previous:
         return previous
-    results = run_builder("EXTRACT", [{"id": reference.id, "lines": reference.payload["lines"],
-        **({"page_geometry": reference.payload["page_geometry"]} if "page_geometry" in reference.payload else {})}
+    results = run_builder("EXTRACT", [builder_reference(reference)
         for reference in references_for(db, item.family_id, item.reference_ids, user)], snapshot["definition"])
     tested = DocumentBuilderTest(organization_id=user.organization_id, draft_id=item.id, draft_version=item.version,
         snapshot=snapshot, snapshot_hash=hashed, automatic_results=results, automatic_results_hash=digest(results), actor_id=user.id)

@@ -58,6 +58,17 @@ describe('Document engine configuration', () => {
     expect(screen.queryByRole('button', { name: 'Guardar configuración auditada' })).not.toBeInTheDocument()
   })
 
+  it('saves a new strategy only after an explicit selection and leaves historical work unchanged', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...result, configuration: { ...configuration, provider: 'PADDLE_QWEN_LOCAL' }, providers: result.providers.map(provider => provider.id === 'PADDLE_QWEN_LOCAL' ? { ...provider, status: 'AVAILABLE', available: true, execution_enabled: true } : provider) })
+    renderApp(<DocumentEngineSettings familyId="family-1"/>, { permissions: ['documents:read', 'documents:configure'] })
+    expect(await screen.findByLabelText('Estrategia de extracción')).toHaveValue('LEGACY')
+    await user.selectOptions(screen.getByLabelText('Estrategia de extracción'), 'NATIVE_FIRST')
+    await user.type(screen.getByLabelText('Motivo del cambio de motor'), 'Prueba aislada con ruta visual explícita')
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración auditada' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/documents/engines?family_id=family-1', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ expected_version: 3, configuration: { ...configuration, provider: 'PADDLE_QWEN_LOCAL', extraction_strategy: 'NATIVE_FIRST' }, reason: 'Prueba aislada con ruta visual explícita' }) })))
+  })
+
   it('keeps a rejected save visible without reporting success or changing frozen work', async () => {
     const user = userEvent.setup()
     vi.mocked(api).mockImplementation(async (_path, options) => { if (options?.method === 'PUT') throw new Error('La configuración cambió; actualiza antes de guardar.'); return result })
@@ -66,5 +77,24 @@ describe('Document engine configuration', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar configuración auditada' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('La configuración cambió')
     expect(screen.queryByText(/Configuración guardada/)).not.toBeInTheDocument()
+  })
+
+  it('prepares the visual context only from an untouched legacy default and preserves an explicit user context', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...result, configuration: { ...configuration, provider: 'PADDLE_QWEN_LOCAL', context_tokens: 8192 }, providers: result.providers.map(provider => provider.id === 'PADDLE_QWEN_LOCAL' ? { ...provider, status: 'AVAILABLE', available: true, execution_enabled: true } : provider) })
+    renderApp(<DocumentEngineSettings/>, { permissions: ['documents:read', 'documents:configure'] })
+    const context = await screen.findByLabelText('Contexto máximo (tokens)')
+    expect(context).toHaveValue(8192)
+    await user.selectOptions(screen.getByLabelText('Estrategia de extracción'), 'QWEN_VISUAL')
+    expect(context).toHaveValue(32768)
+    expect(screen.getByText(/Se preparó un contexto de 32768/)).toBeVisible()
+    await user.selectOptions(screen.getByLabelText('Estrategia de extracción'), 'LEGACY')
+    expect(context).toHaveValue(8192)
+    await user.selectOptions(screen.getByLabelText('Estrategia de extracción'), 'SELECTIVE')
+    expect(context).toHaveValue(32768)
+    await user.clear(context); await user.type(context, '16000')
+    await user.selectOptions(screen.getByLabelText('Estrategia de extracción'), 'NATIVE_FIRST')
+    expect(context).toHaveValue(16000)
+    expect(vi.mocked(api).mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
   })
 })

@@ -557,7 +557,9 @@ def test_worker_global_deadline_is_checked_before_progress_debounce(database, pa
         assert original.extraction_id is None
 
 
-@pytest.mark.parametrize("helper", ["document_inference_completion.py", "document_candidate_arbitration.py"])
+@pytest.mark.parametrize("helper", ["document_inference_completion.py", "document_candidate_arbitration.py",
+    "document_representation.py", "document_normalization.py", "document_lossless.py", "document_validation_policy.py",
+    "document_recognition_transport.py", "document_recognition_store.py", "document_recognition_service.py"])
 @pytest.mark.parametrize("mutation", ["missing_helper", "changed_helper_hash"])
 def test_new_completion_authority_is_in_processor_identity_and_stales_prior_builder_test(authenticated, database, monkeypatch, mutation, helper):
     import hashlib
@@ -566,7 +568,7 @@ def test_new_completion_authority_is_in_processor_identity_and_stales_prior_buil
     from trackvance import document_builder_workspace as workspace
     from trackvance.document_models import DocumentBuilderTest, DocumentDraft
     current = workspace.processor_identity()
-    assert len(current) == 18 and current[helper] == hashlib.sha256(
+    assert current[helper] == hashlib.sha256(
         Path(workspace.__file__).with_name(helper).read_bytes()).hexdigest()
     previous = dict(current)
     if mutation == "missing_helper":

@@ -29,6 +29,7 @@ def _region(value):
 
 
 def _valid_request(request):
+    from trackvance.document_representation import validate_representation
     from trackvance.document_template_builder_rules import valid_page_geometry
 
     if not isinstance(request, dict) or request.get("operation") not in {"EXTRACT", "DISCOVER"}:
@@ -41,6 +42,12 @@ def _valid_request(request):
         if not isinstance(reference, dict) or not isinstance(reference.get("id"), str) or not 1 <= len(reference["id"]) <= 128:
             return False
         ids.append(reference["id"])
+        representation = reference.get("document_representation")
+        if representation is not None:
+            try:
+                validate_representation(representation)
+            except (KeyError, TypeError, ValueError):
+                return False
         lines = reference.get("lines")
         if not isinstance(lines, list) or len(lines) > 100000:
             return False
@@ -48,10 +55,15 @@ def _valid_request(request):
         for line in lines:
             if (not isinstance(line, dict) or not isinstance(line.get("text"), str)
                 or not isinstance(line.get("page"), int) or not 1 <= line["page"] <= 50
-                or line.get("method") not in {"DIGITAL", "OCR"} or not _region(line.get("region"))):
+                or line.get("method") not in ({"DIGITAL", "OCR", "PADDLE_BLOCK"} if representation is not None else {"DIGITAL", "OCR"})
+                or not _region(line.get("region"))):
                 return False
             characters += len(line["text"])
             words = line.get("words")
+            if representation is not None and line.get("method") == "PADDLE_BLOCK" and words is None:
+                if line.get("geometry_kind") != "QUERY_REGION" or characters > 2_000_000:
+                    return False
+                continue
             if not isinstance(words, list) or not words or len(words) > 100000:
                 return False
             for word in words:
@@ -60,7 +72,8 @@ def _valid_request(request):
                 word_characters += len(word["text"])
             if max(characters, word_characters) > 2_000_000:
                 return False
-        if "page_geometry" in reference and not valid_page_geometry(reference["page_geometry"], {line["page"] for line in lines}):
+        pages = ({page["page_one_based"] for page in representation["pages"]} if representation is not None else {line["page"] for line in lines})
+        if "page_geometry" in reference and not valid_page_geometry(reference["page_geometry"], pages):
             return False
     if len(set(ids)) != len(ids):
         return False
@@ -95,6 +108,14 @@ def _valid_result(result, request):
         if not isinstance(definition, dict) or not isinstance(definition.get("fields"), list) or not isinstance(definition.get("tables"), list):
             return False
         if not definition["fields"]:
+            if any("document_representation" in reference for reference in request["references"]):
+                from trackvance.document_schemas import DocumentDraftDefinition
+
+                try:
+                    DocumentDraftDefinition.model_validate(definition)
+                except ValueError:
+                    return False
+                return result.get("results") == {}
             return not definition["tables"] and ("results" not in result or result["results"] == {})
         result = result.get("results")
     if (not isinstance(definition, dict) or not isinstance(definition.get("fields"), list)
@@ -115,16 +136,21 @@ def _valid_result(result, request):
     sources = {reference["id"]: reference["lines"] for reference in request["references"]}
     geometries = {reference["id"]: reference.get("page_geometry") for reference in request["references"]}
     geometry_present = {reference["id"]: "page_geometry" in reference for reference in request["references"]}
+    representations = {reference["id"]: reference.get("document_representation") for reference in request["references"]}
     definition_digest = None
     for identity, payload in result.items():
         if (not isinstance(payload, dict) or not isinstance(payload.get("fields"), dict)
             or not isinstance(payload.get("tables"), dict) or not isinstance(payload.get("table_unparsed"), dict)
             or "header_resolutions" in payload):
             return False
+        expected_pages = (sorted({page["page_one_based"] for page in representations[identity]["pages"]})
+            if representations[identity] is not None else sorted({line["page"] for line in sources[identity]}))
         if (set(payload["fields"]) != names or set(payload["tables"]) != set(columns)
             or set(payload["table_unparsed"]) != set(columns) or payload.get("lines") != sources[identity]
-            or payload.get("pages") != sorted({line["page"] for line in sources[identity]})
+            or payload.get("pages") != expected_pages
             or payload.get("page_geometry") != geometries[identity]):
+            return False
+        if representations[identity] is not None and payload.get("document_representation") != representations[identity]:
             return False
         if (("page_geometry" in payload) != geometry_present[identity]
             or geometry_present[identity] and (not valid_page_geometry(payload["page_geometry"], payload["pages"])
@@ -276,8 +302,8 @@ def _child(folder):
 
     # The code path is fixed by this installed executable, never by the request.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from trackvance.document_discovery import discover
-    from trackvance.document_engine import confine, extract
+    from trackvance.document_discovery import discover, extract_reference
+    from trackvance.document_engine import confine
     from trackvance.document_schemas import DocumentDefinition
     from trackvance.operations_common import OperationError
 
@@ -294,12 +320,13 @@ def _child(folder):
             ZoneInfo(request["definition"].get("publication", {}).get("timezone", "America/Bogota"))
         confine(folder)
         references = request["references"]
+        sources = [SimpleNamespace(id=reference["id"], payload={"lines": reference["lines"],
+            **{key: reference[key] for key in ("page_geometry", "document_representation") if key in reference}}) for reference in references]
         if request["operation"] == "DISCOVER":
-            result = discover([SimpleNamespace(id=reference["id"], payload={"lines": reference["lines"],
-                **({"page_geometry": reference["page_geometry"]} if "page_geometry" in reference else {})}) for reference in references])
+            result = discover(sources)
         else:
             definition = DocumentDefinition.model_validate(request["definition"]).model_dump(mode="json")
-            result = {reference["id"]: extract(reference["lines"], definition, reference.get("page_geometry")) for reference in references}
+            result = {reference.id: extract_reference(reference, definition) for reference in sources}
         _write_json(folder / "result.json", result)
     except (ArithmeticError, KeyError, MemoryError, OSError, RecursionError, TypeError, ValueError, OperationError) as error:
         code = error.code if isinstance(error, OperationError) else str(error)

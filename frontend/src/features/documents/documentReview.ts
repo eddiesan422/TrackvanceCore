@@ -2,6 +2,53 @@ import type { RecordData } from '../../api/client'
 
 export type ReviewCell = { path: string; name: string; value: RecordData }
 
+export const extractionStrategies: Record<string, string> = {
+  LEGACY: 'Compatibilidad histórica',
+  NATIVE_FIRST: 'Lectura nativa y Qwen visual cuando sea necesario',
+  QWEN_VISUAL: 'Qwen visual directo',
+  PADDLE_STRUCTURED: 'Paddle estructurado',
+  SELECTIVE: 'Combinación selectiva con controles',
+}
+
+export function originalPages(item: RecordData): number[] {
+  const pages = item.execution?.expected_pages?.length ? item.execution.expected_pages : item.extraction?.payload?.pages
+  return Array.isArray(pages) && pages.length ? [...new Set<number>(pages.filter((page: unknown) => typeof page === 'number' && Number.isInteger(page) && page > 0))].sort((a, b) => a - b) : [1]
+}
+
+export function sourceGeometryKind(value: RecordData): string {
+  const kind = String(value.geometry_kind || value.origin?.geometry_kind || (value.origin ? 'MEASURED' : 'UNKNOWN')).toUpperCase()
+  if (['MEASURED', 'MEASURED_SOURCE'].includes(kind)) return 'MEASURED'
+  if (['QUERY_REGION', 'TABLE_REGION', 'MEASURED_BLOCK'].includes(kind)) return 'QUERY_REGION'
+  return 'UNKNOWN'
+}
+
+export function sourceSelection(value: RecordData, name: string): RecordData {
+  const origin = value.origin || value.observed_origin
+  if (!origin) return { name, geometry_kind: 'UNKNOWN' }
+  const kind = sourceGeometryKind({ ...value, origin })
+  return { ...origin, name, geometry_kind: kind,
+    region: kind === 'MEASURED' && Array.isArray(origin.region) && origin.region.length === 4 ? origin.region : undefined }
+}
+
+export function sourceDescription(selection: RecordData): string {
+  if (!selection.page) return `${selection.name}: sin referencia demostrable`
+  if (selection.geometry_kind === 'QUERY_REGION') return `${selection.name}: página ${selection.page}. Región consultada; la ubicación exacta del valor no está medida.`
+  if (selection.geometry_kind === 'UNKNOWN') return `${selection.name}: página ${selection.page}. Ubicación exacta no demostrada.`
+  return `${selection.name}: página ${selection.page}${selection.region ? `, región medida ${selection.region.map((number: number) => number.toFixed(3)).join(', ')}` : ', sin región medida'}${selection.method ? ` · ${selection.method}` : ''}`
+}
+
+export function publicationBlockReason(item: RecordData): string | null {
+  if (item.is_example) return 'Las referencias de plantilla no se publican como documentos operativos.'
+  if (item.duplicate_of_id) return 'El archivo es un duplicado; consulta el documento original.'
+  if (item.incomplete_inference?.status === 'PARTIAL' || item.execution?.recognition_complete === false) return 'El reconocimiento está incompleto. Resuelve la ejecución y las páginas pendientes antes de publicar.'
+  if (item.execution?.resources_released === false) return 'La ejecución todavía no ha liberado sus recursos. Espera su cierre antes de publicar.'
+  if (!item.extraction) return 'Todavía no hay una extracción para publicar.'
+  if (item.issues?.length) return `Hay ${item.issues.length} controles pendientes. Resuelve las excepciones antes de publicar.`
+  if (!['REVIEWED', 'AUTO_VERIFIED', 'PUBLISHED'].includes(item.status)) return 'La revisión o la validación todavía no habilita la publicación.'
+  if (item.publications?.some((publication: RecordData) => publication.extraction_id === item.extraction.id)) return 'Esta revisión ya tiene una publicación. Una corrección necesita una revisión nueva.'
+  return null
+}
+
 export function extractionCells(payload?: RecordData): ReviewCell[] {
   if (!payload) return []
   return [
@@ -38,6 +85,10 @@ export function issueDescription(issue: string): string {
     TABLE_REQUIRED: 'No se encontró una tabla obligatoria', TABLE_ROWS_UNRECOGNIZED: 'Hay filas o regiones sin interpretar',
     QUALITY_ROW_COVERAGE: 'La cantidad de filas no está demostrada', QUALITY_DUPLICATE_KEY: 'Hay claves duplicadas en el detalle',
     EXTRACTION_PENDING: 'La extracción sigue pendiente',
+    QUALITY_INCOMPLETE_SOURCE: 'Faltan páginas o etapas de reconocimiento por resolver',
+    QUALITY_CRITICAL_CORROBORATION: 'Un dato crítico necesita evidencia independiente de la fuente',
+    QUALITY_TABLE_STRUCTURE: 'La estructura de la tabla necesita revisión',
+    NORMALIZATION_INVALID: 'La normalización declarada no pudo aplicarse de forma segura',
   }
   const message = description[code] || (code.startsWith('ARITHMETIC_') ? 'Revisa la coherencia de los importes' : 'El control independiente requiere atención')
   return `${message}${target.length ? `: ${target.join(' · ')}` : ''}`

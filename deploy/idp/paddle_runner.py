@@ -8,7 +8,9 @@ block rectangle, and its limited spatial resolution remains explicit metadata.
 from __future__ import annotations
 
 import hashlib
+import importlib.abc
 import importlib.metadata
+import importlib.util
 import json
 import math
 import os
@@ -21,8 +23,21 @@ APP_ROOT = Path(__file__).resolve().parent
 RUNNER_BYTES = Path(__file__).read_bytes()
 PIPELINE_BYTES = (APP_ROOT / "pipeline.yml").read_bytes()
 DIAGNOSTIC_BYTES = (APP_ROOT / "idp_observability.py").read_bytes()
-DIAGNOSTICS = {"__name__": "trackvance_idp_child_diagnostics"}
-exec(compile(DIAGNOSTIC_BYTES, str(APP_ROOT / "idp_observability.py"), "exec"), DIAGNOSTICS)
+class CapturedDiagnostics(importlib.abc.SourceLoader):
+    def get_filename(self, _fullname):
+        return str(APP_ROOT / "idp_observability.py")
+
+    def get_data(self, path):
+        if path != self.get_filename(""):
+            raise OSError("FROZEN_MODULE_PATH")
+        return DIAGNOSTIC_BYTES
+
+
+_SPEC = importlib.util.spec_from_loader("trackvance_idp_child_diagnostics", CapturedDiagnostics())
+_DIAGNOSTICS_MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _DIAGNOSTICS_MODULE
+_SPEC.loader.exec_module(_DIAGNOSTICS_MODULE)
+DIAGNOSTICS = vars(_DIAGNOSTICS_MODULE)
 STARTUP_HASHES = {"paddle_runner.py": hashlib.sha256(RUNNER_BYTES).hexdigest(),
                   "pipeline.yml": hashlib.sha256(PIPELINE_BYTES).hexdigest(),
                   "idp_observability.py": hashlib.sha256(DIAGNOSTIC_BYTES).hexdigest()}
@@ -138,6 +153,178 @@ def predictions(pipeline, source, regions):
             pdf.close()
 
 
+def atomic_json(path, value):
+    """Publish one child checkpoint only after all referenced bytes are durable."""
+    pending = path.with_suffix(path.suffix + ".pending")
+    raw = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+    with pending.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    pending.replace(path)
+
+
+def file_record(path, folder, kind, **metadata):
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        after = os.fstat(stream.fileno())
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise ValueError("SOURCE_INTEGRITY")
+    if before.st_size > 16 * 1024**2:
+        raise ValueError("PADDLE_RESULT_LIMIT")
+    return {"path": path.relative_to(folder).as_posix(), "kind": kind,
+        "sha256": digest, "bytes": before.st_size, "metadata": metadata}
+
+
+def source_page_metadata(source):
+    """Read intrinsic page geometry; never infer a cell box from a table box."""
+    if source.suffix == ".pdf":
+        import pypdfium2 as pdfium
+        document = pdfium.PdfDocument(str(source))
+        try:
+            if not 1 <= len(document) <= 50:
+                raise ValueError("DOCUMENT_PAGE_LIMIT")
+            pages = []
+            for number in range(len(document)):
+                page = document[number]
+                try:
+                    width, height = page.get_size()
+                    pages.append({"page": number + 1, "width": width, "height": height,
+                        "unit": "PDF_POINT", "rotation_degrees": page.get_rotation()})
+                finally:
+                    page.close()
+            return pages
+        finally:
+            document.close()
+    from PIL import Image
+    with Image.open(source) as image:
+        width, height = image.size
+    if not 0 < width * height <= 20_000_000:
+        raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
+    return [{"page": 1, "width": width, "height": height, "unit": "PIXEL", "rotation_degrees": 0}]
+
+
+def render_pages(folder, request, diagnostic):
+    """Bounded render-only child. It never imports Paddle or loads a model."""
+    from PIL import Image
+    source = folder / request["filename"]
+    diagnostic.mark("OPEN_SOURCE")
+    metadata = source_page_metadata(source)
+    wanted = request.get("pages") or list(range(1, len(metadata) + 1))
+    if (not isinstance(wanted, list) or not wanted or len(set(wanted)) != len(wanted)
+            or any(type(page) is not int or not 1 <= page <= len(metadata) for page in wanted)):
+        raise ValueError("DOCUMENT_PAGE_LIMIT")
+    manifest = {"version": 1, "source_sha256": request["source_sha256"],
+        "expected_pages": len(metadata), "pages": [], "status": "INCOMPLETE"}
+    pdf = None
+    if source.suffix == ".pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(source))
+    try:
+        for number in wanted:
+            diagnostic.mark("RENDER_PAGE", number)
+            page_meta = metadata[number - 1]
+            scale = min(150 / 72, 2000 / max(page_meta["width"], page_meta["height"])) if pdf else min(1, 2000 / max(page_meta["width"], page_meta["height"]))
+            if pdf:
+                page = pdf[number - 1]
+                try:
+                    bitmap = page.render(scale=scale)
+                    try:
+                        image = bitmap.to_pil().convert("RGB")
+                    finally:
+                        bitmap.close()
+                finally:
+                    page.close()
+            else:
+                with Image.open(source) as opened:
+                    image = opened.convert("RGB")
+                if scale < 1:
+                    resized = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))))
+                    image.close()
+                    image = resized
+            try:
+                if not 0 < image.width * image.height <= 4_000_000 or max(image.size) > 2200:
+                    raise ValueError("DOCUMENT_RESOLUTION_LIMIT")
+                name = f"image-{number:03}.png"
+                pending = folder / (name + ".pending")
+                image.save(pending, format="PNG")
+                with pending.open("r+b") as stream:
+                    os.fsync(stream.fileno())
+                pending.replace(folder / name)
+                geometry = {"width": image.width, "height": image.height, "unit": "PIXEL",
+                    "rotation_degrees": page_meta["rotation_degrees"],
+                    "transformations": [{"operation": "RENDER_RGB", "scale": scale,
+                        "source_unit": page_meta["unit"], "source_width": page_meta["width"], "source_height": page_meta["height"]}]}
+                manifest["pages"].append({"page": number, "page_geometry": geometry,
+                    "artifacts": [file_record(folder / name, folder, "PAGE_IMAGE_PNG")]})
+                atomic_json(folder / "pages.manifest.json", manifest)
+            finally:
+                image.close()
+    finally:
+        if pdf:
+            pdf.close()
+    manifest["status"] = "COMPLETE"
+    atomic_json(folder / "pages.manifest.json", manifest)
+    atomic_json(folder / "result.json", {"source_sha256": request["source_sha256"],
+        "expected_pages": len(metadata), "emitted_pages": wanted, "engine": {"runtime_provenance": {"paddle_runner": startup_provenance()}}})
+    diagnostic.mark("DONE")
+
+
+def structured_pages(pipeline, folder, request, diagnostic):
+    """Save official results before any field mapping or table text projection."""
+    source = folder / request["filename"]
+    expected = source_page_metadata(source)
+    manifest = {"version": 1, "source_sha256": request["source_sha256"],
+        "expected_pages": len(expected), "pages": [], "status": "INCOMPLETE"}
+    diagnostic.mark("PREDICT_NEXT")
+    for ordinal, result in enumerate(pipeline.predict_iter(str(source)), 1):
+        if ordinal > len(expected):
+            raise ValueError("DOCUMENT_PAGE_LIMIT")
+        diagnostic.mark("PERSIST_ORIGINAL_PAGE", ordinal)
+        directory = folder / f"page-{ordinal:03}"
+        directory.mkdir()
+        pending = directory / "official.pending.json"
+        result.save_to_json(str(pending), ensure_ascii=False)
+        with pending.open("r+b") as stream:
+            os.fsync(stream.fileno())
+        pending.replace(directory / "official.json")
+        raw = json.loads((directory / "official.json").read_bytes())
+        raw = raw.get("res", raw) if isinstance(raw, dict) else {}
+        artifacts = [file_record(directory / "official.json", folder, "PADDLE_PAGE_JSON")]
+        for index, block in enumerate(raw.get("parsing_res_list", [])):
+            if isinstance(block, dict) and block.get("block_label") == "table" and isinstance(block.get("block_content"), str):
+                html = directory / f"table-{index:03}.html"
+                with html.open("xb") as stream:
+                    stream.write(block["block_content"].encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                artifacts.append(file_record(html, folder, "PADDLE_TABLE_HTML", block_index=index))
+        width, height = raw.get("width"), raw.get("height")
+        width = width[0] if isinstance(width, list) and width else width
+        height = height[0] if isinstance(height, list) and height else height
+        geometry = {"width": width, "height": height, "unit": "PIXEL",
+            "rotation_degrees": expected[ordinal - 1]["rotation_degrees"], "transformations": [],
+            "source_page_geometry": expected[ordinal - 1]}
+        manifest["pages"].append({"page": ordinal, "page_geometry": geometry, "artifacts": artifacts})
+        atomic_json(folder / "pages.manifest.json", manifest)
+        if raw.get("page_index") is not None and raw["page_index"] != ordinal - 1:
+            raise ValueError("DOCUMENT_PAGE_LIMIT")
+        diagnostic.mark("PREDICT_NEXT")
+    if len(manifest["pages"]) != len(expected):
+        raise ValueError("DOCUMENT_PAGE_LIMIT")
+    manifest["status"] = "COMPLETE"
+    atomic_json(folder / "pages.manifest.json", manifest)
+    atomic_json(folder / "result.json", {"source_sha256": request["source_sha256"],
+        "expected_pages": len(expected), "emitted_pages": [page["page"] for page in manifest["pages"]],
+        "engine": {"paddle_model": "PaddleOCR-VL-1.6", "paddle_version": importlib.metadata.version("paddlepaddle-gpu"),
+            "paddleocr_version": importlib.metadata.version("paddleocr"),
+            "evidence_resolution": "STRUCTURED_NATIVE", "pipeline_sha256": hashlib.sha256(PIPELINE_BYTES).hexdigest(),
+            "generation_overrides": {}, "requested_device": "gpu:0",
+            "runtime_provenance": {"paddle_runner": startup_provenance()}}})
+    diagnostic.mark("DONE")
+
+
 def main():
     import resource
 
@@ -147,6 +334,12 @@ def main():
         enable_stacks=os.environ.get("TRACKVANCE_IDP_STACK_DIAGNOSTICS") == "1")
     try:
         diagnostic.arm()
+        folder = Path(sys.argv[1])
+        request = json.loads((folder / "request.json").read_text())
+        diagnostic.bind_source(request["source_sha256"])
+        if request.get("operation") == "RENDER":
+            render_pages(folder, request, diagnostic)
+            return
         diagnostic.mark("IMPORT_PADDLE")
         import paddle
         diagnostic.mark("IMPORT_PADDLEOCR")
@@ -163,6 +356,9 @@ def main():
             vl_rec_model_dir="/models/paddle", layout_detection_model_dir="/models/layout",
             use_doc_orientation_classify=False, use_doc_unwarping=False,
             vl_rec_max_concurrency=1, use_queues=False)
+        if request.get("operation") == "STRUCTURED":
+            structured_pages(pipeline, folder, request, diagnostic)
+            return
         lines, geometries, raw_pages = [], {}, []
         regions = request.get("regions", [])
         diagnostic.mark("PREDICT_NEXT")

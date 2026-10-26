@@ -143,6 +143,9 @@ def _observed_in_source(cell, lines, field):
 
 def cell_is_valid(cell, field, *, allow_multiline=False):
     raw = cell.get("observed")
+    if cell.get("normalization") is not None and not cell.get("reviewed"):
+        from .document_normalization import normalization_matches
+        return cell.get("validity") == "VALID" and normalization_matches(cell, field)
     if cell.get("reviewed"):
         raw = cell.get("value")
         # Human revisions store canonical ISO dates/decimal points. Their original
@@ -182,6 +185,11 @@ def semantic_issues(payload, *, reviewed=False):
         elif kind in {"TABLE", "REEXTRACTION_TABLE"}:
             rows = payload.get("tables", {}).get(name, [])
             resolved = reviewed and bool(rows) and all(cell.get("reviewed") for row in rows for cell in row.values())
+        elif kind == "CELL":
+            parts = name.split(".")
+            rows = payload.get("tables", {}).get(parts[0], []) if len(parts) == 3 else []
+            resolved = bool(reviewed and len(parts) == 3 and parts[1].isdigit()
+                and int(parts[1]) < len(rows) and rows[int(parts[1])].get(parts[2], {}).get("reviewed"))
         else:
             resolved = False
         if not resolved:
@@ -258,6 +266,9 @@ def certify_candidate(data, independent, definition, source_sha256, check=lambda
 def quality_report(extraction, definition, *, ignore_incomplete=False):
     if extraction is None:
         return {"validator_version": VALIDATOR_VERSION, "status": "REVIEW_REQUIRED", "issues": ["EXTRACTION_PENDING"], "checks": {}}
+    if (getattr(extraction, "engine", None) or {}).get("lossless_contract_version") == 1:
+        from .document_validation_policy import lossless_quality_report
+        return lossless_quality_report(extraction, definition, ignore_incomplete=ignore_incomplete)
     payload = extraction.payload
     proof = (getattr(extraction, "engine", None) or {}).get("validation") or {}
     signed = {key: value for key, value in proof.items() if key != "attestation_sha256"}
