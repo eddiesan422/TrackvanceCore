@@ -43,6 +43,21 @@ CURRENT_MIGRATION = "0028_document_idp_098"
 CORE098_TABLES = frozenset({"document_engine_settings"})
 CORE098_DEFAULTS = {"document_originals": {"engine_snapshot": None, "engine_snapshot_hash": None, "processing_phase": None},
     "document_references": {"engine_snapshot": None, "engine_snapshot_hash": None}}
+# Schema 13 / TRACKVANCE_RECOGNITION_V1 persisted stages. Keep this verifier
+# independent of production imports: document_worker persists event.stage,
+# document_lossless emits native stages, and recognition.Session forwards its
+# own stages plus the validated idp_observability.STAGES child contract.
+# Gateway health-only TERMINAL/PADDLE/QWEN and orchestrator strategy/purpose
+# names are not persisted event stages. All declared stages fit String(30).
+CORE098_DOCUMENT_PHASES = frozenset({
+    "QUEUED", "EXTRACTION", "OCR", "LLM", "VALIDATION", "REVIEW_REQUIRED",
+    "PUBLICATION", "COMPLETE", "FAILED", "CANCELLED",
+    "NATIVE_SOURCE_PROBE", "DIGITAL_NATIVE", "QWEN_VISUAL", "PADDLE_STRUCTURED",
+    "PADDLE_RECOGNITION", "RENDER_SOURCE", "QWEN_GENERATION",
+    "IMPORT_PADDLE", "IMPORT_PADDLEOCR", "CREATE_PIPELINE", "PREDICT_NEXT",
+    "POSTPROCESS_PAGE", "SERIALIZE_OBSERVATIONS", "HASH_MODEL", "WRITE_RESULT",
+    "DONE", "OPEN_SOURCE", "RENDER_PAGE", "PERSIST_ORIGINAL_PAGE",
+})
 CORE097_TABLES = frozenset({"document_references", "document_drafts", "document_builder_tests"})
 CORE097_DEFAULTS = {"acquisition_occurrences": {"dispatched_at": None, "coalesced_intervals": 0,
     "reason_message": None, "error_details": None}, "jobs": {"document_reference_id": None},
@@ -610,7 +625,6 @@ def validate_core098_relationships(rows, index):
                 or type(setting.get("version")) is not int or setting["version"] < 1):
             raise ValueError("La configuración del motor documental perdió su integridad.")
         checks += 1
-    phases = {"QUEUED", "EXTRACTION", "OCR", "LLM", "VALIDATION", "REVIEW_REQUIRED", "PUBLICATION", "COMPLETE", "FAILED", "CANCELLED"}
     for name in ("document_originals", "document_references"):
         for item in rows.get(name, []):
             snapshot, digest = item.get("engine_snapshot"), item.get("engine_snapshot_hash")
@@ -621,7 +635,8 @@ def validate_core098_relationships(rows, index):
                 if family is None or snapshot["family_id"] != item.get("family_id"):
                     raise ValueError("La instantánea del motor no corresponde a la familia documental.")
                 _require_same_organization(item, family, "engine_snapshot.family_id")
-            if name == "document_originals" and item.get("processing_phase") is not None and item["processing_phase"] not in phases:
+            if (name == "document_originals" and item.get("processing_phase") is not None
+                    and item["processing_phase"] not in CORE098_DOCUMENT_PHASES):
                 raise ValueError("La fase documental persistida no es reconocida.")
             checks += int(snapshot is not None)
     return checks
