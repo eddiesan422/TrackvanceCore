@@ -31,6 +31,29 @@ def other_events(value, stage="PADDLE_STRUCTURED"):
     return events(raw={"parsing_res_list": [{"block_label": "text", "block_content": "Reference: " + value}]}, stage=stage)
 
 
+def test_corroboration_provenance_has_canonical_source_order(monkeypatch):
+    from trackvance import document_validation_policy as policy
+
+    fields = [{"name": name, "logical_type": "STRING", "required": True}
+        for name in ("code", "description")]
+
+    def rows(prefix):
+        return [{field["name"]: _cell(value, field, 1, prefix + field["name"] + value)
+            for field, value in zip(fields, values, strict=True)}
+            for values in [("001-A", "first"), ("002-B", "second")]]
+
+    monkeypatch.setattr(policy, "align_rows", lambda *_: (
+        {1: 1, 0: 0}, {1: "FULL_ROW_OCCURRENCE", 0: "FULL_ROW_OCCURRENCE"}))
+    payload = {"fields": {}, "tables": {"lines": rows("primary-")}}
+    definition = {"fields": [], "tables": [{"name": "lines", "fields": fields}]}
+    control = {"fields": {}, "tables": {"lines": rows("control-")},
+        "_mechanism": "PADDLE", "_stage": "PADDLE_STRUCTURED", "_completed_pages": [1]}
+    _, structure, provenance = policy._corroborated(payload, definition, [control], primary_stage="QWEN_VISUAL")
+    assert structure == {"lines": True}
+    assert [(item["source_occurrence"], item["control_occurrence"])
+        for item in provenance["lines"]] == [(0, 0), (1, 1)]
+
+
 @pytest.mark.parametrize("missing", [None, "", " \t "])
 def test_absent_primary_is_completed_from_bound_alternative_without_self_corroboration(missing):
     config = definition(critical=True)

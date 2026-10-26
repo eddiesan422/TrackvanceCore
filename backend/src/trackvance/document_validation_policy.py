@@ -159,7 +159,7 @@ def _corroborated(payload, definition, controls, *, primary_stage=None):
                 for field in fields) >= 2 for i, j in matches.items())
             if rows and len(rows) == len(control_rows) == len(matches) and independent_identity:
                 structural[name] = True
-            for index, target in matches.items():
+            for index, target in sorted(matches.items()):
                 if sum(_different_source(rows[index][field["name"]], other, primary_stage)
                         and _control_located(control_rows[target].get(field["name"]), other, field)
                         and _normalized(rows[index].get(field["name"]), field) is not None
