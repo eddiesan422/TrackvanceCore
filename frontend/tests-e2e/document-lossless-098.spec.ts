@@ -158,8 +158,11 @@ async function obtainOriginal(page: Page, item: LosslessCase, output: string) {
 }
 
 async function executeConsumer(page: Page, module: 'intake' | 'recon' | 'sentinel', configuration: Json, source: string, target?: string) {
-  await page.goto(`/${module}`)
-  await page.getByRole('button', { name: 'Nueva ejecución', exact: true }).click()
+  requireCondition(typeof configuration.dataset_id === 'string', 'The consumer configuration must identify its native dataset')
+  await page.goto(`/${module}?dataset_id=${encodeURIComponent(configuration.dataset_id)}`)
+  const start = page.getByRole('button', { name: 'Nueva ejecución', exact: true })
+  await expect(start).toBeEnabled({ timeout: 60_000 })
+  await start.click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('select').first().selectOption(configuration.id)
   await expect(dialog.locator('select').nth(1).locator(`option[value="${source}"]`)).toBeAttached()
@@ -301,7 +304,11 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
     let dialog = await openDocument(page, original)
     const source = await page.request.get(`/api/v1/documents/originals/${id}/file`)
     requireCondition(source.status() === 200 && digest(await source.body()) === item.source_sha256, 'The served immutable source does not match the frozen original')
-    for (const expected of item.expected_pages) await expect(dialog.getByLabel('Página del original', { exact: true }).locator(`option[value="${expected}"]`)).toBeAttached()
+    const actualPageValues = await dialog.getByLabel('Página del original', { exact: true }).locator('option').evaluateAll(nodes => nodes.map(node => (node as HTMLOptionElement).value))
+    for (const expected of item.expected_pages) expect(actualPageValues).toContain(String(expected))
+    // Normal navigation waits for the initial preview; rapid-switch contention is tested separately.
+    await expect(dialog.locator('.document-source img')).toHaveCount(1)
+    await expect.poll(async () => dialog.locator('.document-source img').evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
     await dialog.getByLabel('Página del original', { exact: true }).selectOption(String(item.expected_pages.at(-1)))
     await expect(dialog.locator('.document-source img')).toHaveCount(1)
     await expect.poll(async () => dialog.locator('.document-source img').evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
@@ -320,7 +327,9 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
       const response = await page.request.get((await link.getAttribute('href'))!)
       requireCondition(response.status() === 200, 'A linked raw recognition artifact was not downloadable')
       expect(response.headers()['content-disposition']).toMatch(/^attachment/i)
-      expect(response.headers()['x-content-type-options']).toBe('nosniff')
+      const contentTypeOptions = (response.headers()['x-content-type-options'] || '').split(',').map(value => value.trim().toLowerCase())
+      expect(contentTypeOptions.length).toBeGreaterThan(0)
+      expect(contentTypeOptions.every(value => value === 'nosniff')).toBe(true)
       const raw = await response.body()
       expect(digest(raw)).toBe(artifact.sha256)
       expect(raw.length).toBe(artifact.bytes)

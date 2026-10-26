@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +8,7 @@ import Documents from './Documents'
 import type { RecordData } from '../../api/client'
 
 vi.mock('../../api/client', () => ({ api: vi.fn(), post: vi.fn() }))
+vi.mock('./DocumentPreview', () => ({ default: ({ source, alt, zoom, children }: { source: string; alt: string; zoom: number; children?: ReactNode }) => <div className="document-image" style={{ width: `${zoom}%` }}><img src={source} alt={alt}/>{children}</div> }))
 const definition = { fields: [{ name: 'invoice', logical_type: 'STRING', required: true, critical: true, business_key: true, label: 'Invoice', pattern: '(.*)' }], tables: [], publication: { mode: 'SCHEDULED', timezone: 'America/Bogota' } }
 const family = { id: 'family', name: 'Invoices', active_template_id: 'template', description: 'Known invoices', document_count: 1, pending_count: 1, output_datasets: { headers: 'stable-header' }, publication: definition.publication, templates: [{ id: 'template', revision: 1, sha256: 'hash', definition }] }
 const original = { id: 'original', family_id: 'family', filename: 'known.pdf', template_id: 'template', status: 'REVIEW_REQUIRED', template: { definition }, issues: ['REVIEW_REQUIRED:headers.0.invoice'], publications: [], revisions: [], extraction: { id: 'extraction-1', revision: 1, payload: { fields: { invoice: { value: '000001', observed: '000001', validity: 'VALID', confidence: 99, reviewed: false, origin: { page: 1, region: [0.1, 0.2, 0.3, 0.4], method: 'OCR' } } }, tables: {} } } }
