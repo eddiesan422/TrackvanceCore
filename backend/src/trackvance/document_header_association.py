@@ -252,7 +252,8 @@ def header_observations(pages, fields):
     # Preserve original strings for token offsets, normalized keys only for membership.
     original_labels = {label for choices in rules.values() for rule in choices for label in rule["labels"]}
     sections = {label_key(rule["section_label"]) for choices in rules.values() for rule in choices if rule.get("section_label")}
-    observations, associations = {field["name"]: [] for field in fields}, {field["name"]: [] for field in fields}
+    observations: dict[str, list[tuple]] = {field["name"]: [] for field in fields}
+    associations: dict[str, list[dict]] = {field["name"]: [] for field in fields}
     for page in pages:
         if "selection" in page:
             continue
