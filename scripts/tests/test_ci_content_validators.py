@@ -305,6 +305,7 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
         'document-visual-builder-095.spec.ts': ('TV_CORE095_VISUAL_E2E', 'compose-functional'),
         'acquisition-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
         'resolution-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        'document-lossless-098.spec.ts': ('TV_CORE098_LOSSLESS_E2E', 'LOCAL_GPU_E3_NOT_STANDARD_CI'),
     }
     value = {'selected_spec_files': list(spec['browser_required_specs']),
              'excluded_opt_in_specs': [{'file': 'tests-e2e/' + name, 'required_flag': flag, 'covered_by_group': group}
@@ -324,6 +325,16 @@ def test_general_browser_cannot_omit_applicable_specs_or_hide_unknown_opt_ins(tm
         (fixture / 'new.spec.ts').write_text('')
         monkeypatch.setattr(validators, 'ROOT', tmp_path)
     with pytest.raises(EvidenceError, match='BROWSER_'):
+        validators.browser_selection(value, spec)
+
+
+def test_general_browser_cannot_claim_private_local_gpu_campaign_as_explicit_ci_coverage():
+    from scripts.ci import validators
+
+    private_spec = 'tests-e2e/document-lossless-098.spec.ts'
+    spec = {'browser_required_specs': [private_spec], 'browser_selection_mode': 'explicit'}
+    value = {'selected_spec_files': [private_spec], 'browser_selection_mode': 'explicit'}
+    with pytest.raises(EvidenceError, match='BROWSER_LOCAL_GPU_CI_SELECTION'):
         validators.browser_selection(value, spec)
 
 

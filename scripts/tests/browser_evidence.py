@@ -17,6 +17,9 @@ CI_OPT_IN_SPECS = {
     "tests-e2e/documents-095.spec.ts": ("TV_CORE095_DOCUMENT_E2E", "compose-functional"),
     "tests-e2e/document-visual-builder-095.spec.ts": ("TV_CORE095_VISUAL_E2E", "compose-functional"),
     "tests-e2e/resolution-095.spec.ts": ("TV_CORE095_DOCUMENT_E2E", "compose-functional"),
+    # Backend loopback doubles run in CI; this browser spec runs real models
+    # only in the separately frozen private local GPU campaign.
+    "tests-e2e/document-lossless-098.spec.ts": ("TV_CORE098_LOSSLESS_E2E", "LOCAL_GPU_E3_NOT_STANDARD_CI"),
     "tests-e2e/automation.spec.ts": ("TV_AUTOMATION_E2E", "async-volume-100"),
     "tests-e2e/volume.spec.ts": ("TV_VOLUME_E2E", "async-volume-100"),
     "tests-e2e/corrections-volume.spec.ts": ("TV_CORRECTIONS_E2E", "corrections-browser"),
@@ -33,6 +36,10 @@ def ci_spec_selection(arguments: list[str], root: Path, environment: dict[str, s
     """Select all actual specs except named opt-ins lacking their exact flag."""
     if not environment.get("TRACKVANCE_CI_IMAGE_MANIFEST"):
         return arguments, None
+    local_gpu = {name: flag for name, (flag, group) in CI_OPT_IN_SPECS.items()
+                 if group == "LOCAL_GPU_E3_NOT_STANDARD_CI"}
+    if any(name in arguments or environment.get(flag) == "true" for name, flag in local_gpu.items()):
+        raise RuntimeError("CI_BROWSER_LOCAL_GPU_SPEC_FORBIDDEN")
     if arguments:
         if all(re.fullmatch(r"tests-e2e/[a-z0-9-]+\.spec\.ts", name) for name in arguments):
             if len(set(arguments)) != len(arguments) or any(

@@ -268,7 +268,7 @@ def ephemeral_http_observation(value: dict[str, Any]) -> None:
 
 
 def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
-    """All applicable specs run; foreign fixtures are covered by dedicated groups."""
+    """Inventory every spec, identifying CI groups and private local GPU campaigns."""
     opt_ins = {
         'automation.spec.ts': ('TV_AUTOMATION_E2E', 'async-volume-100'),
         'corrections-volume.spec.ts': ('TV_CORRECTIONS_E2E', 'corrections-browser'),
@@ -283,9 +283,14 @@ def browser_selection(value: dict[str, Any], spec: dict[str, Any]) -> None:
         'document-visual-builder-095.spec.ts': ('TV_CORE095_VISUAL_E2E', 'compose-functional'),
         'acquisition-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
         'resolution-095.spec.ts': ('TV_CORE095_DOCUMENT_E2E', 'compose-functional'),
+        # CI tests backend contracts with loopback doubles. The real visual
+        # browser campaign requires the frozen private local GPU environment.
+        'document-lossless-098.spec.ts': ('TV_CORE098_LOSSLESS_E2E', 'LOCAL_GPU_E3_NOT_STANDARD_CI'),
     }
 
     required = spec['browser_required_specs']
+    require(not any('tests-e2e/' + name in required for name, (_, group) in opt_ins.items()
+                    if group == 'LOCAL_GPU_E3_NOT_STANDARD_CI'), 'BROWSER_LOCAL_GPU_CI_SELECTION')
     selected = value.get('selected_spec_files')
     require(isinstance(selected, list) and sorted(selected) == sorted(required)
             and len(set(selected)) == len(selected), 'BROWSER_APPLICABLE_SPEC_SELECTION')

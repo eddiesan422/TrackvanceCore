@@ -222,7 +222,7 @@ def real_spec_names(tmp_path):
     return tmp_path, sorted(names)
 
 
-def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_thirteen_opt_ins(real_spec_names):
+def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_fourteen_opt_ins(real_spec_names):
     root, names = real_spec_names
     environment = {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}
     selected, metadata = browser_evidence.ci_spec_selection([], root, environment)
@@ -231,12 +231,15 @@ def test_ci_selection_includes_every_core_and_new_spec_and_explains_all_thirteen
     assert metadata["excluded_opt_in_specs"] == [
         {"file": name, "required_flag": flag, "covered_by_group": group}
         for name, (flag, group) in sorted(browser_evidence.CI_OPT_IN_SPECS.items())]
-    assert len(metadata["excluded_opt_in_specs"]) == 13
+    assert len(metadata["excluded_opt_in_specs"]) == 14
     assert {"file": "tests-e2e/document-visual-builder-095.spec.ts",
             "required_flag": "TV_CORE095_VISUAL_E2E", "covered_by_group": "compose-functional"} in metadata["excluded_opt_in_specs"]
+    assert {"file": "tests-e2e/document-lossless-098.spec.ts", "required_flag": "TV_CORE098_LOSSLESS_E2E",
+            "covered_by_group": "LOCAL_GPU_E3_NOT_STANDARD_CI"} in metadata["excluded_opt_in_specs"]
 
 
-@pytest.mark.parametrize("flag", sorted({flag for flag, _ in browser_evidence.CI_OPT_IN_SPECS.values()}))
+@pytest.mark.parametrize("flag", sorted({flag for flag, group in browser_evidence.CI_OPT_IN_SPECS.values()
+                                       if group != "LOCAL_GPU_E3_NOT_STANDARD_CI"}))
 def test_active_opt_in_flag_selects_all_its_specs_and_does_not_exclude_them(real_spec_names, flag):
     root, _ = real_spec_names
     selected, metadata = browser_evidence.ci_spec_selection([], root,
@@ -244,6 +247,15 @@ def test_active_opt_in_flag_selects_all_its_specs_and_does_not_exclude_them(real
     activated = {name for name, value in browser_evidence.CI_OPT_IN_SPECS.items() if value[0] == flag}
     assert activated <= set(selected)
     assert not activated & {entry["file"] for entry in metadata["excluded_opt_in_specs"]}
+
+
+@pytest.mark.parametrize("arguments,enabled", [([], True), (["tests-e2e/document-lossless-098.spec.ts"], False),
+                                             (["tests-e2e/document-lossless-098.spec.ts"], True)])
+def test_ci_refuses_real_local_gpu_browser_campaign_even_with_an_explicit_opt_in(real_spec_names, arguments, enabled):
+    root, _ = real_spec_names
+    environment = {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json", "TV_CORE098_LOSSLESS_E2E": "true" if enabled else "false"}
+    with pytest.raises(RuntimeError, match="CI_BROWSER_LOCAL_GPU_SPEC_FORBIDDEN"):
+        browser_evidence.ci_spec_selection(arguments, root, environment)
 
 
 @pytest.mark.parametrize("value", ["false", "True", "TRUE", "1", "true ", ""])
@@ -256,6 +268,7 @@ def test_opt_in_values_follow_existing_spec_exact_true_condition(real_spec_names
 
 @pytest.mark.parametrize("arguments,environment", [
     ([], {}), ([], {"TRACKVANCE_CI_IMAGE_MANIFEST": ""}),
+    (["tests-e2e/document-lossless-098.spec.ts"], {"TV_CORE098_LOSSLESS_E2E": "true"}),
     (["--grep", "local test"], {"TRACKVANCE_CI_IMAGE_MANIFEST": "private/images.json"}),
 ])
 def test_explicit_arguments_and_non_ci_discovery_remain_unchanged(tmp_path, arguments, environment):
@@ -325,4 +338,4 @@ def test_ci_browser_publishes_exact_selection_and_keeps_unexpected_skip_failure(
     assert summary["selected_spec_files"] == expected
     assert summary["skipped"] == skipped
     assert summary["status"] == ("FAIL" if skipped else "PASS")
-    assert len(summary["excluded_opt_in_specs"]) == 13
+    assert len(summary["excluded_opt_in_specs"]) == 14
