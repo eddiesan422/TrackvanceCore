@@ -386,7 +386,7 @@ class Session:
 
     def finish(self, status, released, error_code=None):
         payload = {"memory_lifecycle": released, "engine": self.engine, "error_code": error_code}
-        event = self.event("TERMINAL", payload, stage="TERMINAL", status=status,
+        event = self.event("TERMINAL", payload, stage=self.strategy, status=status,
             emitted_pages=list(self.pages), completed_pages=list(self.completed_pages),
             pending_pages=[page for page in range(1, (self.expected or 0) + 1) if page not in self.completed_pages],
             resources_released=released is not None)

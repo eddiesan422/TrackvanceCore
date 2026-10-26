@@ -12,7 +12,9 @@ import pytest
 
 from trackvance import document_recognition_transport as transport
 from trackvance.document_inference_completion import AttemptBudget, canonical_hash
+from trackvance.document_lossless import run_lossless
 from trackvance.document_providers import EngineConfiguration
+from trackvance.document_schemas import DocumentDefinition
 from trackvance.operations_common import OperationError
 
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6OdwAAAAASUVORK5CYII=")
@@ -75,11 +77,11 @@ def invoke(source, strategy, on_event, check=lambda _: None):
         check=check, budget=AttemptBudget(60), on_event=on_event, attempt_context={"attempt_id": "attempt-1"})
 
 
-def synthetic_paddle_child(session, folder, operation, consume):
+def synthetic_paddle_child(session, folder, operation, consume, *, page_count=2):
     assert operation == "STRUCTURED"
     session.phase("PADDLE_RECOGNITION")
-    session.expected = 2
-    for number in (1, 2):
+    session.expected = page_count
+    for number in range(1, page_count + 1):
         if session.identity in session.api["CANCELLED"]:
             raise ValueError("CANCELLED")
         raw = json.dumps({"res": {"page_index": number - 1, "width": 10, "height": 20,
@@ -229,6 +231,62 @@ def test_visual_route_sends_real_image_and_preserves_original_reply_and_stream(s
     assert {item["kind"] for item in artifacts} == {"PAGE_IMAGE_PNG", "QWEN_REPLY_JSON", "QWEN_STREAM_NDJSON", "QWEN_SELECTION_JSON"}
     selection = next(item for item in artifacts if item["kind"] == "QWEN_SELECTION_JSON")
     assert json.loads(base64.b64decode(selection["content_b64"]))["fields"]["identifier"]["observed"] == "0007"
+
+
+def incomplete_native_probe(pages):
+    return {"engine": {"key": "EXPLICIT_NATIVE_READER_DOUBLE", "pages": pages},
+        "payload": {"lines": [], "pages": list(range(1, pages + 1)), "native_incomplete_pages": list(range(1, pages + 1))}}
+
+
+def lossless_definition():
+    return DocumentDefinition.model_validate({**DEFINITION, "tables": [{**DEFINITION["tables"][0],
+        "row_label": "ROW ", "row_pattern": r"^ROW (?P<code>.+)$"}]}).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("strategy,pages", [("QWEN_VISUAL", 1), ("PADDLE_STRUCTURED", 2)])
+def test_real_session_terminal_reaches_lossless_completion_for_its_provider_stage(service, monkeypatch, strategy, pages):
+    gateway, source = service
+    if strategy == "QWEN_VISUAL":
+        install_visual(gateway, monkeypatch)
+    else:
+        monkeypatch.setattr(gateway.RECOGNITION.Session, "child", synthetic_paddle_child)
+    definition = lossless_definition()
+    emitted = []
+    result = run_lossless(source, definition, configuration(strategy),
+        legacy_runner=lambda *_args, **_kwargs: incomplete_native_probe(pages),
+        check=lambda _: None, budget=AttemptBudget(60), on_event=emitted.append,
+        attempt_context={"attempt_id": "real-terminal-1"}, recognize=transport.recognize_stream)
+    # The HTTP gateway uses the actual Session.finish and emits the terminal;
+    # this test never constructs a provider terminal event in its fixture.
+    assert result["engine"]["execution"]["recognition_complete"] is True
+    assert result["engine"]["execution"]["resources_released"] is True
+    terminal = next(event for event in reversed(emitted) if event["kind"] == "TERMINAL")
+    assert terminal["stage"] == strategy and terminal["status"] == "COMPLETE"
+    assert terminal["completed_pages"] == list(range(1, pages + 1))
+    assert result["payload"]["document_representation"]["terminals"][-1]["event_sha256"] == terminal["event_sha256"]
+
+
+def test_real_failed_qwen_terminal_cannot_borrow_later_paddle_completion(service, monkeypatch):
+    gateway, source = service
+    install_visual(gateway, monkeypatch, invalid=True)
+    render = gateway.RECOGNITION.Session.child
+    def selective_child(session, folder, operation, consume):
+        if operation == "RENDER":
+            return render(session, folder, operation, consume)
+        return synthetic_paddle_child(session, folder, operation, consume, page_count=1)
+    monkeypatch.setattr(gateway.RECOGNITION.Session, "child", selective_child)
+    definition = lossless_definition()
+    result = run_lossless(source, definition, configuration("SELECTIVE"),
+        legacy_runner=lambda *_args, **_kwargs: incomplete_native_probe(1),
+        check=lambda _: None, budget=AttemptBudget(60),
+        attempt_context={"attempt_id": "real-selective-terminal-1"}, recognize=transport.recognize_stream)
+    terminals = result["payload"]["document_representation"]["terminals"]
+    assert [(event["stage"], event["status"]) for event in terminals] == [
+        ("QWEN_VISUAL", "FAILED"), ("PADDLE_STRUCTURED", "COMPLETE")]
+    assert len({event["request_id"] for event in terminals}) == 2
+    assert result["engine"]["execution"]["stage"] == "QWEN_VISUAL"
+    assert result["engine"]["execution"]["recognition_complete"] is False
+    assert result["engine"]["execution"]["resources_released"] is True
 
 
 def test_invalid_selection_keeps_originals_and_fails_terminal(service, monkeypatch):
