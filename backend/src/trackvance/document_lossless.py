@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from .document_engine import arithmetic_checks, cross_table_checks, extract
+from .document_header_association import header_observations
 from .document_inference_completion import AttemptBudget
 from .document_normalization import canonical_hash, normalize_observation
 from .document_representation import representation_from_events, stable_id, validate_representation
@@ -107,7 +108,6 @@ def map_representation(representation, definition, *, stage=None):
         mapped.update(document_representation=copy.deepcopy(representation), row_provenance={},
             candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []))
         return mapped
-    from .document_header_association import header_observations
     documentary_headers, associations = header_observations(pages, definition["fields"])
     for page in pages:
         ordinal = page["page_one_based"]
