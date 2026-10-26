@@ -107,6 +107,8 @@ def map_representation(representation, definition, *, stage=None):
         mapped.update(document_representation=copy.deepcopy(representation), row_provenance={},
             candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []))
         return mapped
+    from .document_header_association import header_observations
+    documentary_headers, associations = header_observations(pages, definition["fields"])
     for page in pages:
         ordinal = page["page_one_based"]
         if "selection" in page:
@@ -129,19 +131,12 @@ def map_representation(representation, definition, *, stage=None):
                     payload["row_provenance"].setdefault(name, []).append({"occurrence_id": row_id,
                         "source_page": ordinal, "stage": page["stage"], "geometry_kind": "QUERY_REGION"})
             continue
-        strings = []
         for block in page["blocks"]:
             if block["type"] != "table" and isinstance(block["text"], str):
-                strings.append((block["text"], block["id"]))
                 payload["lines"].append({"text": block["text"], "page": ordinal,
                     "region": [0, 0, 1, 1], "geometry_kind": "QUERY_REGION", "method": "PADDLE_BLOCK", "confidence": None})
         for table in page["tables"]:
             rows = _table_rows(table)
-            # Label/value rows remain documentary cells; labels are normalized,
-            # observations never are. No field is selected from arithmetic.
-            for row in rows:
-                if len(row) >= 2 and row[0] and row[1]:
-                    strings.append((row[0]["text"] + ": " + row[1]["text"], row[1]["id"]))
             for target in definition["tables"]:
                 labels = [_label(value) for value in (target.get("structured_header_labels")
                     or (target.get("visual") or {}).get("header_labels", []))]
@@ -197,16 +192,21 @@ def map_representation(representation, definition, *, stage=None):
                     payload["tables"][name].append(cells)
                     payload["row_provenance"].setdefault(name, []).append({"occurrence_id": table["rows"][index]["id"],
                         "source_page": ordinal, "source_table_id": table["id"], "stage": page["stage"], "geometry_kind": "TABLE_REGION"})
-        for field in definition["fields"]:
-            label = field.get("label")
-            if not label:
-                continue
-            for text, evidence in strings:
-                before, separator, after = text.partition(":")
-                if separator and _label(before) == _label(label):
-                    headers[field["name"]].append((after.strip(), ordinal, evidence, False, []))
+    payload["header_associations"] = associations
     for field in definition["fields"]:
+        headers[field["name"]].extend(documentary_headers[field["name"]])
         payload["fields"][field["name"]] = _resolve(headers[field["name"]], field)
+        cell = payload["fields"][field["name"]]
+        bindings = [item for item in associations[field["name"]] if item["value_refs"][0] in cell["evidence_refs"]]
+        if bindings:
+            cell["association"] = {"version": "DECLARED_HEADER_ASSOCIATION_V1", "bindings": copy.deepcopy(bindings)}
+            first = bindings[0]
+            cell["geometry_kind"] = first["geometry_kind"]
+            cell["origin"]["geometry_kind"] = first["geometry_kind"]
+            if first["region"] is not None:
+                cell["origin"]["region"] = list(first["region"])
+            else:
+                cell["origin"]["region_semantics"] = "PAGE_LOCATOR_ONLY"
     payload["arithmetic"] = arithmetic_checks(payload, definition)
     payload["cross_totals"] = cross_table_checks(payload, definition)
     return payload
@@ -244,75 +244,61 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
     stages = list(dict.fromkeys(page["stage"] for page in representation["pages"]))
     if not stages:
         raise OperationError(409, "DOCUMENT_RECOGNITION_MISSING", "El intento no emitió páginas utilizables.")
-    stage = next((value for value in stages if value.startswith("QWEN")), stages[0])
+    # The request order is evidence. A mechanism name is not a quality rank.
+    stage = stages[0]
     payload = map_representation(representation, definition, stage=stage)
     alternatives = []
     for other in stages:
         candidate = map_representation(representation, definition, stage=other)
-        alternatives.append({"stage": other, "payload": candidate, "payload_sha256": canonical_hash(candidate)})
+        alternatives.append({"stage": other, "payload": candidate, "payload_sha256": canonical_hash(candidate),
+            "execution": _execution(representation, other)})
     if len(alternatives) > 1:
         _retain_alternatives(payload, alternatives, definition, stage)
+        payload["arithmetic"] = arithmetic_checks(payload, definition)
+        payload["cross_totals"] = cross_table_checks(payload, definition)
     return {"payload": payload, "engine": {"key": "TRACKVANCE_LOSSLESS_098_V1", "lossless_contract_version": 1,
         "route": stage, "configuration": copy.deepcopy(configuration), "configuration_sha256": canonical_hash(configuration),
         "recognition_configuration_sha256": configuration_sha, "source_sha256": source_sha256,
         "recognition_definition_sha256": representation["definition_sha256"], "definition_sha256": canonical_hash(definition),
         "recognition_event_hashes": [event.get("event_sha256") for event in events],
+        "recorded_selective_decisions": [{"event_sha256": event.get("event_sha256"),
+            "decision": copy.deepcopy(event["payload"].get("decision"))} for event in events
+            if event.get("kind") == "PHASE" and event.get("stage") == "SELECTIVE_DECISION"],
         "execution": _execution(representation, stage), "replay_without_inference_supported": True,
         "validation_policy": copy.deepcopy(definition.get("validation_policy")), "candidate_stages": stages}}
 
 
 def _retain_alternatives(payload, candidates, definition, selected):
-    payload["candidate_history"] = [{"stage": item["stage"], "payload_sha256": item["payload_sha256"],
-        "fields": copy.deepcopy(item["payload"]["fields"]), "tables": copy.deepcopy(item["payload"]["tables"])} for item in candidates]
-    for item in candidates:
-        if item["stage"] == selected:
-            continue
-        for field in definition["fields"]:
-            first, other = payload["fields"][field["name"]], item["payload"]["fields"][field["name"]]
-            if other.get("observed") is not None:
-                first["candidate_alternatives"].append({"stage": item["stage"], "candidate": copy.deepcopy(other)})
-                left, right = first.get("value"), other.get("value")
-                comparable = first.get("validity") == other.get("validity") == "VALID" and left is not None and right is not None
-                if comparable and field["logical_type"] == "DECIMAL":
-                    left, right = Decimal(left), Decimal(right)
-                if comparable and left != right:
-                    first.update(value=None, validity="AMBIGUOUS")
-                    payload["semantic_conflicts"].append("FIELD:" + field["name"])
-        for table in definition["tables"]:
-            name = table["name"]
-            # Complete table hypotheses are retained. No ordinal/SKU patching or
-            # combination search is allowed to construct a plausible total.
-            from .document_validation_policy import align_rows
-            left, right = payload["tables"][name], item["payload"]["tables"][name]
-            if not right:
-                continue
-            matches, _ = align_rows(left, right, table["fields"])
-            if len(left) != len(right) or len(matches) != len(left):
-                payload["semantic_conflicts"].append("TABLE:" + name)
-                continue
-            for index, target in matches.items():
-                for field in table["fields"]:
-                    first, other = left[index][field["name"]], right[target][field["name"]]
-                    first["candidate_alternatives"].append({"stage": item["stage"], "candidate": copy.deepcopy(other)})
-                    a, b = first.get("value"), other.get("value")
-                    comparable = first.get("validity") == other.get("validity") == "VALID" and a is not None and b is not None
-                    if comparable and field["logical_type"] == "DECIMAL":
-                        a, b = Decimal(a), Decimal(b)
-                    if comparable and a != b:
-                        first.update(value=None, validity="AMBIGUOUS")
-                        payload["semantic_conflicts"].append(f"CELL:{name}.{index}.{field['name']}")
+    from .document_candidate_selection import combine_candidates
+
+    combine_candidates(payload, candidates, definition, selected)
 
 
-def _requires_second(payload, definition):
-    for field in definition["fields"]:
-        cell = payload["fields"][field["name"]]
-        if field.get("critical") or field["logical_type"] in {"DECIMAL", "INT64"} or cell["validity"] != "VALID":
-            return True
-    if any(field.get("critical") or field["logical_type"] in {"DECIMAL", "INT64"}
-            for table in definition["tables"] for field in table["fields"]):
-        return True
-    return bool(any(payload["table_unparsed"].values()) or payload.get("semantic_conflicts")
-        or any(cell["validity"] != "VALID" for rows in payload["tables"].values() for row in rows for cell in row.values()))
+def _requires_second(payload, definition, engine=None):
+    from .document_candidate_selection import secondary_decision
+
+    return secondary_decision({"payload": payload, "engine": engine or {}}, definition)["required"]
+
+
+def _recognition_call(strategy, events, elapsed, *, kind, decision=None):
+    terminals = [event for event in events if event.get("kind") == "TERMINAL"]
+    pages = [event for event in events if event.get("kind") == "PAGE"]
+    return {"kind": kind, "strategy": strategy, "scope": "WHOLE_DOCUMENT", "focal_reread": False,
+        "decision": copy.deepcopy(decision), "elapsed_seconds": round(elapsed, 4),
+        "http_requests_observed": len({event["request_id"] for event in terminals}) if terminals else None,
+        "page_results_observed": len(pages), "terminal_statuses": [event.get("status") for event in terminals]}
+
+
+def _secondary_decision_event(decision, source_sha, configuration_sha, definition, context):
+    raw = json.dumps(decision, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    event = {"version": 1, "kind": "PHASE", "sequence": 0, "request_id": uuid.uuid4().hex,
+        "attempt_id": context["attempt_id"], "source_sha256": source_sha, "configuration_sha256": configuration_sha,
+        "definition_sha256": canonical_hash(definition), "stage": "SELECTIVE_DECISION", "page_one_based": None,
+        "expected_pages": context.get("expected_pages"), "payload": {"decision": copy.deepcopy(decision),
+            "artifacts": [{"kind": "SELECTIVE_DECISION_JSON", "media_type": "application/json",
+                "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw), "content_b64": base64.b64encode(raw).decode()}]}}
+    event["event_sha256"] = canonical_hash(event)
+    return event
 
 
 def _native_events(native, source_sha, configuration_sha, context, *, definition_sha256):
@@ -402,6 +388,7 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
     strategy = configuration.get("extraction_strategy", "NATIVE_FIRST")
     first = "PADDLE_STRUCTURED" if reference_discovery or strategy == "PADDLE_STRUCTURED" else "QWEN_VISUAL"
     recognized_before = len(events)
+    call_started = budget.clock()
     response = recognize(source, definition, configuration, strategy=first, check=check,
         budget=budget, on_event=accept, attempt_context=context)
     # A transport may invoke callbacks incrementally or return the same immutable
@@ -410,13 +397,32 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         for event in [*response.get("pages", []), response.get("terminal")]:
             if event:
                 accept(event)
+    call_history = [_recognition_call(first, events[recognized_before:], budget.clock() - call_started, kind="PRIMARY")]
     result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
-    if strategy == "SELECTIVE" and not reference_discovery and _requires_second(result["payload"], definition):
+    from .document_candidate_selection import secondary_decision
+
+    decision = secondary_decision(result, definition) if strategy == "SELECTIVE" and not reference_discovery else None
+    if decision is not None and decision["required"]:
         terminal = response.get("terminal") or {}
         if terminal.get("resources_released") is True and budget.require(budget.extraction_deadline) > 10:
-            recognize(source, definition, configuration, strategy="PADDLE_STRUCTURED", check=check,
+            accept(_secondary_decision_event(decision, source_sha, configuration_sha, definition, context))
+            recognized_before = len(events)
+            call_started = budget.clock()
+            secondary = recognize(source, definition, configuration, strategy="PADDLE_STRUCTURED", check=check,
                 budget=budget, on_event=accept, attempt_context=context)
+            if len(events) == recognized_before:
+                for event in [*secondary.get("pages", []), secondary.get("terminal")]:
+                    if event:
+                        accept(event)
+            call_history.append(_recognition_call("PADDLE_STRUCTURED", events[recognized_before:],
+                budget.clock() - call_started, kind="SECONDARY", decision=decision))
             result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
+            result["engine"]["post_secondary_decision"] = secondary_decision(result, definition)
         else:
             result["engine"]["secondary_route_blocked"] = "PRIOR_RESOURCES_OR_REMAINING_BUDGET_UNVERIFIED"
+    if decision is not None:
+        result["engine"]["selective_decision"] = decision
+    if not reference_discovery:
+        result["engine"]["evidence_requirements"] = secondary_decision(result, definition)
+    result["engine"]["recognition_calls"] = call_history
     return completed(result)

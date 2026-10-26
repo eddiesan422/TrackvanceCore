@@ -5,10 +5,10 @@ Historical definitions keep their existing independent validation policy.
 """
 from __future__ import annotations
 
-from collections import Counter
 from decimal import Decimal
 from typing import Any
 
+from .document_candidate_selection import mechanism_family
 from .document_engine import arithmetic_checks, cross_table_checks
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
 from .document_representation import validate_representation
@@ -45,15 +45,18 @@ def _normalized(cell, field):
 def _independent_candidates(data, independent):
     result = []
     if isinstance(independent, dict) and isinstance(independent.get("payload"), dict):
-        result.append(independent["payload"])
-    primary = data["engine"].get("route")
+        result.append({**independent["payload"], "_mechanism": "LEGACY_INDEPENDENT", "_stage": "LEGACY_INDEPENDENT",
+            "_completed_pages": independent["payload"].get("pages", data["engine"].get("execution", {}).get("completed_pages", []))})
     for candidate in data["payload"].get("candidate_history", []):
-        if candidate.get("stage") != primary and candidate.get("stage", "").startswith("PADDLE"):
+        family = mechanism_family(candidate.get("stage"))
+        if family is not None and not candidate.get("structural_issues"):
             from .document_lossless import _execution
 
             execution = _execution(data["payload"]["document_representation"], candidate["stage"])
             if execution["recognition_complete"] and execution["resources_released"]:
-                result.append({"fields": candidate["fields"], "tables": candidate["tables"]})
+                result.append({"fields": candidate["fields"], "tables": candidate["tables"],
+                    "table_unparsed": candidate.get("table_unparsed", {}),
+                    "_mechanism": family, "_stage": candidate["stage"], "_completed_pages": execution["completed_pages"]})
     return result
 
 
@@ -70,6 +73,8 @@ def align_rows(rows, control_rows, fields):
     # Indistinguishable complete rows are matched by occurrence only when both
     # readings retain exactly the same multiplicity on the same source page.
     for vector in set(left):
+        if vector[0] is None or sum(value is not None and value != "" for value in vector[1:]) < 2:
+            continue
         a = [i for i, value in enumerate(left) if value == vector]
         b = [i for i, value in enumerate(right) if value == vector]
         if len(a) == len(b):
@@ -78,44 +83,95 @@ def align_rows(rows, control_rows, fields):
     anchors = [index + 1 for index, field in enumerate(fields) if not field.get("critical")]
     remaining_left = set(range(len(rows))) - set(matches)
     remaining_right = set(range(len(control_rows))) - set(matches.values())
-    while remaining_left and remaining_right:
-        candidates = {i: {j for j in remaining_right if left[i][0] is not None and left[i][0] == right[j][0]
-            and sum(left[i][column] is not None and left[i][column] != "" and left[i][column] == right[j][column]
-                for column in anchors) >= 2} for i in remaining_left}
-        reverse = Counter(j for choices in candidates.values() for j in choices)
-        agreed = [(i, next(iter(choices))) for i, choices in candidates.items()
-            if len(choices) == 1 and reverse[next(iter(choices))] == 1]
-        if not agreed:
-            break
-        for i, j in agreed:
+    identity = [index + 1 for index, field in enumerate(fields) if field.get("business_key")]
+
+    def score(first, second):
+        if first[0] is None or first[0] != second[0] or any(first[column] is not None
+                and second[column] is not None and first[column] != second[column] for column in identity):
+            return 0
+        return sum(first[column] is not None and first[column] != "" and first[column] == second[column]
+            for column in anchors)
+
+    def unique_best(first, population):
+        best, target, tied = 1, None, False
+        for index, second in enumerate(population):
+            support = score(first, second)
+            if support > best:
+                best, target, tied = support, index, False
+            elif support == best:
+                tied = True
+        return None if tied else target
+
+    # Global uniqueness is measured against immutable original populations.
+    # Consuming a complete match must not turn two weak EA/quantity matches into
+    # a supposedly unique identity. Nor may a consumed stronger match be ignored.
+    forward = {index: unique_best(left[index], right) for index in remaining_left}
+    reverse = {index: unique_best(right[index], left) for index in remaining_right}
+    for i, j in forward.items():
+        if j in remaining_right and reverse.get(j) == i:
             matches[i], bases[i] = j, "UNIQUE_MULTI_COLUMN_SOURCE_PAGE"
-            remaining_left.remove(i)
-            remaining_right.remove(j)
     return matches, bases
 
 
-def _corroborated(payload, definition, controls):
+def _selected_mechanism(cell, primary_stage):
+    return (cell.get("candidate_selection") or {}).get("selected_mechanism") or mechanism_family(primary_stage)
+
+
+def _different_source(cell, control, primary_stage):
+    selected = _selected_mechanism(cell, primary_stage)
+    return bool(selected and control.get("_mechanism") and selected != control["_mechanism"])
+
+
+def _control_located(cell, control, field):
+    if not isinstance(cell, dict) or (cell.get("origin") or {}).get("page") not in control.get("_completed_pages", []):
+        return False
+    if cell.get("evidence_refs"):
+        return True
+    if control.get("_mechanism") == "LEGACY_INDEPENDENT":
+        from .document_quality import _observed_in_source
+
+        return _observed_in_source(cell, control.get("lines", []), field)
+    return False
+
+
+def _corroborated(payload, definition, controls, *, primary_stage=None):
     paths, structural = set(), {}
     provenance: dict[str, list[dict[str, Any]]] = {}
     for field in definition["fields"]:
         value = _normalized(payload["fields"].get(field["name"]), field)
-        if value is not None and any(_normalized(other.get("fields", {}).get(field["name"]), field) == value for other in controls):
+        if value is not None and any(_different_source(payload["fields"][field["name"]], other, primary_stage)
+                and _control_located(other.get("fields", {}).get(field["name"]), other, field)
+                and _normalized(other.get("fields", {}).get(field["name"]), field) == value for other in controls):
             paths.add("headers.0." + field["name"])
     for table in definition["tables"]:
         name, fields = table["name"], table["fields"]
         rows = payload["tables"].get(name, [])
         structural[name] = False
         for other in controls:
+            if other.get("table_unparsed", {}).get(name):
+                continue
             control_rows = other.get("tables", {}).get(name, [])
             matches, bases = align_rows(rows, control_rows, fields)
-            if rows and len(rows) == len(control_rows) == len(matches):
+            independent_identity = all(sum(_different_source(rows[i][field["name"]], other, primary_stage)
+                and _control_located(control_rows[j].get(field["name"]), other, field)
+                and _normalized(rows[i].get(field["name"]), field) is not None
+                and _normalized(rows[i].get(field["name"]), field) == _normalized(control_rows[j].get(field["name"]), field)
+                for field in fields) >= 2 for i, j in matches.items())
+            if rows and len(rows) == len(control_rows) == len(matches) and independent_identity:
                 structural[name] = True
             for index, target in matches.items():
-                provenance.setdefault(name, []).append({"source_occurrence": index,
-                    "control_occurrence": target, "basis": bases[index]})
+                if sum(_different_source(rows[index][field["name"]], other, primary_stage)
+                        and _control_located(control_rows[target].get(field["name"]), other, field)
+                        and _normalized(rows[index].get(field["name"]), field) is not None
+                        and _normalized(rows[index].get(field["name"]), field)
+                            == _normalized(control_rows[target].get(field["name"]), field) for field in fields) >= 2:
+                    provenance.setdefault(name, []).append({"source_occurrence": index,
+                        "control_occurrence": target, "basis": bases[index], "control_stage": other.get("_stage")})
                 for field in fields:
                     value = _normalized(rows[index].get(field["name"]), field)
-                    if value is not None and value == _normalized(control_rows[target].get(field["name"]), field):
+                    if (value is not None and _different_source(rows[index][field["name"]], other, primary_stage)
+                            and _control_located(control_rows[target].get(field["name"]), other, field)
+                            and value == _normalized(control_rows[target].get(field["name"]), field)):
                         paths.add(f"{name}.{index}.{field['name']}")
     return paths, structural, provenance
 
@@ -145,7 +201,7 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
         and execution.get("resources_released") is True and source.get("resources_released") is True
         and not execution.get("pending_pages"))
     controls = _independent_candidates(data, independent)
-    corroborated, structure, row_alignment = _corroborated(payload, definition, controls)
+    corroborated, structure, row_alignment = _corroborated(payload, definition, controls, primary_stage=engine.get("route"))
     verified, findings, coverage = {}, [], {}
     if policy.get("version") != "EVIDENCE_V2":
         findings.append("QUALITY_POLICY_REQUIRED")
@@ -203,7 +259,9 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
         "definition_sha256": canonical_hash(definition), "candidate_sha256": canonical_hash(payload),
         "source_context_sha256": canonical_hash(source), "durable_source_bound": source_bound,
         "recognition_complete": complete, "verified_cells": verified, "table_coverage": coverage,
-        "arithmetic": arithmetic, "issues": findings, "independent_extraction": bool(controls) or native,
+        "arithmetic": arithmetic, "issues": findings, "independent_extraction": native or any(
+            control.get("_mechanism") != mechanism_family(engine.get("route")) for control in controls
+            if mechanism_family(engine.get("route")) is not None),
         "risk_policy": policy, "source_context": source, "row_alignment": row_alignment}
     proof["attestation_sha256"] = canonical_hash(proof)
     check()

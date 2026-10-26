@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { RecordData as Json } from '../src/api/client'
 import { fillSecret } from './identity-helpers'
+import { NativeEvidenceJournal } from './native-evidence-journal'
 
 // This driver never starts services, installs a model, mocks inference, or creates
 // templates. The campaign owner freezes those inputs and the call budget first.
@@ -18,6 +19,11 @@ interface ConsumerFixture {
   receiver_destination_url: string
   receiver_receipt_url: string
   receiver_expected: Json
+}
+interface SourceReviewEvidence {
+  expected_extraction_id: string
+  evidence_path: string
+  evidence_sha256: string
 }
 interface LosslessCase {
   id: string
@@ -38,10 +44,11 @@ interface LosslessCase {
   query_region_cell?: string
   normalization?: { path: string; observed: string; normalized: string; rule: string }[]
   replay?: boolean
-  review?: { changes: Record<string, string>; confirmed: string[]; oracle_sha256: string }
+  review?: { changes: Record<string, string>; confirmed: string[]; oracle_sha256?: string; source_review?: SourceReviewEvidence }
   publish?: boolean
-  profiles?: Record<string, { row_count: number; sample_sha256?: string }>
+  profiles?: Record<string, { row_count: number; sample_sha256?: string; expected_rows?: Json[] }>
   consumers?: ConsumerFixture | ConsumerFixture[]
+  receiver_guard?: { url: string; baseline_sha256: string; expected: Json; observation_ms: number }
 }
 interface Manifest {
   version: 1
@@ -119,6 +126,26 @@ async function post(page: Page, csrf: string, path: string, data: Json, status: 
   return response.json()
 }
 
+async function sourceReviewEvidence(item: LosslessCase, original: Json) {
+  const reference = item.review?.source_review
+  requireCondition(reference && isAbsolute(reference.evidence_path) && sha(reference.evidence_sha256), 'Real scanned review needs separately frozen source-view evidence')
+  requireCondition(!item.review?.oracle_sha256 && original.execution?.recognition_complete === true, 'A real source review neither consumes a benchmark oracle nor resolves an incomplete recognition by assertion')
+  const bytes = await readFile(reference.evidence_path)
+  requireCondition(digest(bytes) === reference.evidence_sha256, 'Source-review evidence bytes changed')
+  const proof = JSON.parse(bytes.toString('utf8'))
+  requireCondition(proof.version === 1 && proof.actor_kind === 'AUTOMATED_TEST_AGENT' && proof.independent_human_acceptance === false && proof.oracle_used_for_review === false, 'Source review is an automated test action, not an oracle or independent human acceptance')
+  requireCondition(proof.original_id === original.id && proof.source_sha256 === original.sha256 && proof.expected_extraction_id === reference.expected_extraction_id, 'Source-review proof belongs to another immutable source/revision')
+  requireCondition(sha(proof.automatic_evaluation_receipt_sha256) && isAbsolute(proof.automatic_evaluation_receipt_path), 'Freeze automatic evaluation before any source-review mutation')
+  requireCondition(digest(await readFile(proof.automatic_evaluation_receipt_path)) === proof.automatic_evaluation_receipt_sha256, 'Frozen automatic evaluation bytes changed')
+  requireCondition(Array.isArray(proof.source_views) && proof.source_views.length > 0 && proof.source_views.every((view: Json) => view.kind === 'ORIGINAL_SOURCE_PAGE' && Number.isInteger(view.page) && view.page > 0 && sha(view.sha256)), 'Review must reference actual viewed source pages without invented geometry')
+  for (const view of proof.source_views) {
+    requireCondition(isAbsolute(view.path) && view.source_sha256 === original.sha256 && digest(await readFile(view.path)) === view.sha256, 'Viewed source-page bytes or immutable original binding changed')
+  }
+  expect(proof.changes).toEqual(item.review!.changes)
+  expect(proof.confirmed).toEqual(item.review!.confirmed)
+  return reference
+}
+
 async function openDocument(page: Page, item: Json) {
   await page.goto(`/documents/families/${item.family_id}?document=${item.id}`)
   const dialog = page.getByRole('dialog')
@@ -157,23 +184,32 @@ async function obtainOriginal(page: Page, item: LosslessCase, output: string) {
   return String(result.items[0].id)
 }
 
-async function executeConsumer(page: Page, module: 'intake' | 'recon' | 'sentinel', configuration: Json, source: string, target?: string) {
+async function executeConsumer(page: Page, module: 'intake' | 'recon' | 'sentinel', configuration: Json, source: string, target?: string, journal?: NativeEvidenceJournal) {
   requireCondition(typeof configuration.dataset_id === 'string', 'The consumer configuration must identify its native dataset')
-  await page.goto(`/${module}?dataset_id=${encodeURIComponent(configuration.dataset_id)}`)
-  const start = page.getByRole('button', { name: 'Nueva ejecución', exact: true })
-  await expect(start).toBeEnabled({ timeout: 60_000 })
-  await start.click()
-  const dialog = page.getByRole('dialog')
-  await dialog.locator('select').first().selectOption(configuration.id)
-  await expect(dialog.locator('select').nth(1).locator(`option[value="${source}"]`)).toBeAttached()
-  await dialog.locator('select').nth(1).selectOption(source)
-  if (target) {
-    await expect(dialog.locator('select').nth(2).locator(`option[value="${target}"]`)).toBeAttached()
-    await dialog.locator('select').nth(2).selectOption(target)
+  const create = async () => {
+    await page.goto(`/${module}?dataset_id=${encodeURIComponent(configuration.dataset_id)}`)
+    const start = page.getByRole('button', { name: 'Nueva ejecución', exact: true })
+    await expect(start).toBeEnabled({ timeout: 60_000 })
+    await start.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.locator('select').first().selectOption(configuration.id)
+    await expect(dialog.locator('select').nth(1).locator(`option[value="${source}"]`)).toBeAttached()
+    await dialog.locator('select').nth(1).selectOption(source)
+    if (target) {
+      await expect(dialog.locator('select').nth(2).locator(`option[value="${target}"]`)).toBeAttached()
+      await dialog.locator('select').nth(2).selectOption(target)
+    }
+    const started = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/runs'))
+    await dialog.getByRole('button', { name: { intake: 'Validar datos', recon: 'Conciliar fuentes', sentinel: 'Evaluar monitor' }[module], exact: true }).click()
+    const response = await started
+    requireCondition(response.status() === 202, 'The native consumer did not acknowledge its run')
+    const queued = await response.json()
+    requireCondition(queued.id, 'The native consumer acknowledgement has no run ID')
+    return queued
   }
-  await dialog.getByRole('button', { name: { intake: 'Validar datos', recon: 'Conciliar fuentes', sentinel: 'Evaluar monitor' }[module], exact: true }).click()
-  await page.waitForURL(/\/runs\/[^/?]+$/)
-  const id = new URL(page.url()).pathname.split('/runs/')[1]
+  const queued = journal ? await journal.perform(module + '-run', { configuration_id: configuration.id, source, target: target ?? null }, create) : await create()
+  const id = String(queued.id)
+  await page.goto(`/runs/${id}`)
   await expect.poll(async () => (await get(page, `/runs/${id}`)).status, { timeout: 180_000 }).toBe('SUCCESS')
   const run = await get(page, `/runs/${id}`)
   expect(run.dataset_version_id).toBe(source)
@@ -181,7 +217,7 @@ async function executeConsumer(page: Page, module: 'intake' | 'recon' | 'sentine
   return run
 }
 
-async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, original: Json, spec: ConsumerFixture, prefix: string) {
+async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, original: Json, spec: ConsumerFixture, prefix: string, journal: NativeEvidenceJournal) {
   localURL(spec.receiver_receipt_url)
   requireCondition(Object.keys(spec.receiver_expected).length > 0, 'The local receiver must verify actual fields, counts or payload hashes')
   const publication = original.publications.find((entry: Json) => entry.extraction_id === original.extraction.id)
@@ -189,22 +225,26 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
   const version = publication.versions[spec.structure]
   const family = await get(page, `/documents/families/${item.family_id}`)
   const dataset = family.output_datasets[spec.structure]
-  const contract = await post(page, csrf, '/intake/contracts', { name: `${prefix} Intake`, dataset_id: dataset, description: 'Automated E3 integration fixture; no human corpus acceptance.', config: { required_columns: spec.required_columns, max_error_rate: 0 } }, 201)
-  const intake = await executeConsumer(page, 'intake', contract, version)
+  const contractBody = { name: `${prefix} Intake`, dataset_id: dataset, description: 'Automated E3 integration fixture; no human corpus acceptance.', config: { required_columns: spec.required_columns, max_error_rate: 0 } }
+  const contract = await journal.perform('intake-contract', contractBody, () => post(page, csrf, '/intake/contracts', contractBody, 201))
+  const intake = await executeConsumer(page, 'intake', contract, version, undefined, journal)
   expect(intake.decision).toBe('APPROVED')
   requireCondition(intake.output_version_id, 'Intake did not create its native approved output')
   const approved = await get(page, `/dataset-versions/${intake.output_version_id}/profile`)
   expect(approved.source_type).toBe('INTAKE_OUTPUT')
   const source = await get(page, `/dataset-versions/${version}/profile`)
   expect(approved.row_count).toBe(source.row_count)
+    requireCondition(source.row_count <= 20 && source.sample.length === source.row_count && approved.sample.length === approved.row_count && !source.sample_limited && !approved.sample_limited, 'Small consumer checks must compare every row, not an incomplete profile sample')
   const sourceColumns = (source.schema || []).map((column: Json) => column.name)
   const project = (rows: Json[]) => rows.map(row => Object.fromEntries(sourceColumns.map((column: string) => [column, row[column]])))
   requireCondition(sourceColumns.length && jsonDigest(project(approved.sample)) === jsonDigest(project(source.sample)), 'Intake changed the native published sample despite having no transforms')
-  const control = await post(page, csrf, '/recon/controls', { name: `${prefix} Recon`, dataset_id: dataset, target_dataset_id: approved.dataset_id, config: { key_columns: spec.key_columns, key_normalization: { trim: false, case: 'NONE', unicode_normalization: 'NONE' }, comparison_rules: [{ type: 'numeric_tolerance', source_column: spec.comparison_column, target_column: spec.comparison_column, parameters: { abs: '0' } }] } }, 201)
-  const recon = await executeConsumer(page, 'recon', control, version, intake.output_version_id)
+  const controlBody = { name: `${prefix} Recon`, dataset_id: dataset, target_dataset_id: approved.dataset_id, config: { key_columns: spec.key_columns, key_normalization: { trim: false, case: 'NONE', unicode_normalization: 'NONE' }, comparison_rules: [{ type: 'numeric_tolerance', source_column: spec.comparison_column, target_column: spec.comparison_column, parameters: { abs: '0' } }] } }
+  const control = await journal.perform('recon-control', controlBody, () => post(page, csrf, '/recon/controls', controlBody, 201))
+  const recon = await executeConsumer(page, 'recon', control, version, intake.output_version_id, journal)
   expect(recon.decision).toBe('CONFORME')
-  const monitor = await post(page, csrf, '/monitors', { name: `${prefix} Sentinel`, dataset_id: dataset, config: { required_columns: spec.required_columns, null_columns: spec.key_columns, max_null_rate: 0 } }, 201)
-  const sentinel = await executeConsumer(page, 'sentinel', monitor, version)
+  const monitorBody = { name: `${prefix} Sentinel`, dataset_id: dataset, config: { required_columns: spec.required_columns, null_columns: spec.key_columns, max_null_rate: 0 } }
+  const monitor = await journal.perform('sentinel-monitor', monitorBody, () => post(page, csrf, '/monitors', monitorBody, 201))
+  const sentinel = await executeConsumer(page, 'sentinel', monitor, version, undefined, journal)
   expect(sentinel.decision).toBe('HEALTHY')
   let delivery: Json
   if (spec.delivery_draft) {
@@ -215,7 +255,8 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
     expect(destination.options.url).toBe(spec.receiver_destination_url)
     const draft = { ...spec.delivery_draft, dataset_version_id: intake.output_version_id }
     expect((await post(page, csrf, '/delivery/preflight', draft, 200)).status).toBe('PASS')
-    delivery = await post(page, csrf, '/delivery/configurations', { ...draft, name: `${prefix} Delivery` }, 201)
+    const deliveryBody = { ...draft, name: `${prefix} Delivery` }
+    delivery = await journal.perform('delivery-configuration', deliveryBody, () => post(page, csrf, '/delivery/configurations', deliveryBody, 201))
   } else {
     const configurations = await get(page, '/delivery/configurations')
     delivery = configurations.items.find((entry: Json) => entry.id === spec.delivery_configuration_id)
@@ -225,13 +266,15 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
     expect(destination.options.url).toBe(spec.receiver_destination_url)
   }
   requireCondition((delivery.dataset_version_id || delivery.config?.dataset_version_id) === intake.output_version_id || (delivery.dataset_version_id || delivery.config?.dataset_version_id) === version, 'Delivery must be pinned to this publication or its actual approved Intake version')
-  await page.goto('/delivery')
-  const card = page.locator('.delivery-config-list .config-card').filter({ has: page.getByRole('heading', { name: delivery.name, exact: true }) })
-  const started = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/delivery/runs')
-  await card.getByRole('button', { name: 'Ejecutar', exact: true }).click()
-  const response = await started
-  requireCondition(response.status() === 202, 'Delivery did not register its native run')
-  const queued = await response.json()
+  const queued = await journal.perform('delivery-run', { configuration_id: delivery.id, version: intake.output_version_id }, async () => {
+    await page.goto('/delivery')
+    const card = page.locator('.delivery-config-list .config-card').filter({ has: page.getByRole('heading', { name: delivery.name, exact: true }) })
+    const started = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/delivery/runs')
+    await card.getByRole('button', { name: 'Ejecutar', exact: true }).click()
+    const response = await started
+    requireCondition(response.status() === 202, 'Delivery did not register its native run')
+    return response.json()
+  })
   await expect.poll(async () => (await get(page, `/runs/${queued.id}`)).status, { timeout: 180_000 }).toBe('SUCCESS')
   const receipt = await get(page, `/delivery/runs/${queued.id}/receipt`)
   expect(receipt.result).toBe('COMMITTED')
@@ -268,6 +311,14 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
     requireCondition(item.provenance !== 'COORDINATION_FAULT' || sha(item.fixture_receipt_sha256), 'Fault fixtures require a separately identified coordination receipt')
     const family = await get(page, `/documents/families/${item.family_id}`)
     requireCondition(family.name.startsWith('D098 E3 ') && family.active_template_id === item.template_id, 'Only explicitly reserved E3 families with a pinned active template are allowed')
+    if (item.receiver_guard) {
+      localURL(item.receiver_guard.url)
+      requireCondition(sha(item.receiver_guard.baseline_sha256) && item.receiver_guard.observation_ms >= 15_000 && item.receiver_guard.observation_ms <= 60_000, 'The local no-resend observation must have a frozen receipt and bounded declared window')
+      const received = await page.request.get(item.receiver_guard.url)
+      requireCondition(received.status() === 200 && digest(await received.body()) === item.receiver_guard.baseline_sha256, 'Local receiver changed before the correction phase')
+      const body = await received.json()
+      for (const [key, value] of Object.entries(item.receiver_guard.expected)) expect(body[key]).toEqual(value)
+    }
     if (item.configure_strategy) {
       await page.goto(`/documents/families/${item.family_id}?view=references`)
       await page.getByText('Motor específico de esta familia', { exact: true }).click()
@@ -288,6 +339,15 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
     expect(original.execution.expected_pages).toEqual(item.expected_pages)
     expect(original.execution.recognition_complete).toBe(item.expect_complete)
     requireCondition(original.recognition_artifacts?.length, 'No durable recognition artifact reached the existing document review')
+    if (item.provenance === 'REAL_MODEL' && (item.publish || item.consumers)) {
+      const structures = ['headers', ...original.template.definition.tables.map((table: Json) => table.name)]
+      expect(Object.keys(item.profiles || {}).sort()).toEqual([...structures].sort())
+      for (const structure of structures) requireCondition(item.profiles?.[structure]?.expected_rows, 'The real scanned publication must bind every small header/detail row value before execution')
+      if (item.consumers) {
+        const fixtures = Array.isArray(item.consumers) ? item.consumers : [item.consumers]
+        expect(fixtures.map(fixture => fixture.structure).sort()).toEqual([...structures].sort())
+      }
+    }
     if (item.expect_complete) expect(original.execution.pending_pages).toEqual([])
     else {
       requireCondition(original.execution.pending_pages.length || !original.execution.recognition_complete, 'The partial fixture must remain explicitly incomplete')
@@ -351,15 +411,33 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
       dialog = await openDocument(page, original)
     }
     if (item.review) {
-      requireCondition(sha(item.review.oracle_sha256) && item.provenance === 'SYNTHETIC_NATIVE', 'Automatic review confirmation is restricted to a separately frozen synthetic source oracle')
-      for (const [path, value] of Object.entries(item.review.changes)) await dialog.getByLabel(`Valor ${path}`, { exact: true }).fill(value)
-      for (const path of item.review.confirmed) await dialog.locator(`[id="document-cell-${path}"]`).getByRole('checkbox', { name: 'Confirmar valor', exact: true }).check()
-      await dialog.getByLabel('Motivo de la revisión', { exact: true }).fill(`Automated E3 synthetic-oracle check ${item.review.oracle_sha256}; actor is an automated test agent, not a human corpus reviewer.`)
-      const saved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/documents/originals/${id}/review`)
-      await dialog.getByRole('button', { name: /Guardar revisión y comprobar publicación|Guardar valores de la revisión parcial/ }).click()
-      const response = await saved
-      requireCondition(response.status() === 200, 'The explicit synthetic review did not save')
-      original = await response.json()
+      const sourceReview = item.provenance === 'REAL_MODEL' ? await sourceReviewEvidence(item, original) : undefined
+      requireCondition(sourceReview || sha(item.review.oracle_sha256) && item.provenance === 'SYNTHETIC_NATIVE', 'Synthetic-oracle and real source-view reviews have separate, explicitly frozen authorities')
+      const expectedExtraction = sourceReview?.expected_extraction_id || original.extraction.id
+      const reviewJournal = new NativeEvidenceJournal(join(output, item.id, 'review'))
+      const acknowledged = await reviewJournal.perform('source-review', { original_id: id, expected_extraction_id: expectedExtraction,
+        changes: item.review.changes, confirmed: item.review.confirmed, source_review_sha256: sourceReview?.evidence_sha256 ?? null, synthetic_oracle_sha256: item.review.oracle_sha256 ?? null }, async () => {
+        requireCondition(original.extraction.id === expectedExtraction, 'Automatic extraction changed before the authorized source review')
+        await writeFile(join(output, `${item.id}.automatic-before-review.private.json`), JSON.stringify({ extraction_id: original.extraction.id, payload_sha256: original.extraction.sha256,
+          status: original.status, quality: original.quality, issues: original.issues, actor: 'AUTOMATED_TEST_AGENT', review_applied: false, human_corpus_acceptance: false }, null, 2), { flag: 'wx' })
+        for (const [path, value] of Object.entries(item.review!.changes)) await dialog.getByLabel(`Valor ${path}`, { exact: true }).fill(value)
+        for (const path of item.review!.confirmed) await dialog.locator(`[id="document-cell-${path}"]`).getByRole('checkbox', { name: 'Confirmar valor', exact: true }).check()
+        const reason = sourceReview ? `Automated test-agent source review ${sourceReview.evidence_sha256}; actual original pages checked after frozen automatic evaluation; no oracle used, no automatic or independent human acceptance.`
+          : `Automated E3 synthetic-oracle check ${item.review!.oracle_sha256}; actor is an automated test agent, not a human corpus reviewer.`
+        await dialog.getByLabel('Motivo de la revisión', { exact: true }).fill(reason)
+        const saved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/documents/originals/${id}/review`)
+        await dialog.getByRole('button', { name: /Guardar revisión y comprobar publicación|Guardar valores de la revisión parcial/ }).click()
+        const response = await saved
+        requireCondition(response.status() === 200, 'The explicitly authorized review did not save')
+        return response.json()
+      })
+      original = await get(page, `/documents/originals/${id}`)
+      requireCondition(original.extraction.id === acknowledged.extraction.id && original.extraction.id !== expectedExtraction, 'Reconcile the native review acknowledgement before continuing')
+      expect(artifacts(original)).toEqual(rawBefore)
+      expect(original.sha256).toBe(item.source_sha256)
+      await writeFile(join(output, `${item.id}.review-classification.private.json`), JSON.stringify({ actor: 'AUTOMATED_TEST_AGENT', provenance: sourceReview ? 'ORIGINAL_SOURCE_VIEW_REVIEW' : 'SYNTHETIC_ORACLE_CHECK',
+        independent_human_acceptance: false, automatic_accuracy_credit_for_reviewed_values: false, changed_paths: Object.keys(item.review.changes), confirmed_paths: item.review.confirmed,
+        before_extraction_id: expectedExtraction, after_extraction_id: original.extraction.id, quality_status_after: original.quality?.status, publications_after_review: original.publications.length }, null, 2))
       dialog = await openDocument(page, original)
     }
     if (item.publish && !original.publications.some((entry: Json) => entry.extraction_id === original.extraction.id)) {
@@ -379,12 +457,34 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
       const profile = await get(page, `/dataset-versions/${publication.versions[structure]}/profile`)
       expect(profile.row_count).toBe(expected.row_count)
       if (expected.sample_sha256) expect(jsonDigest(profile.sample)).toBe(expected.sample_sha256)
+      if (expected.expected_rows) {
+        requireCondition(expected.expected_rows.length === expected.row_count && expected.row_count <= 20 && profile.sample.length === profile.row_count && !profile.sample_limited, 'Full publication values require all small test rows, not only a sample')
+        const fields = structure === 'headers' ? original.template.definition.fields : original.template.definition.tables.find((table: Json) => table.name === structure)?.fields
+        requireCondition(fields?.length, 'The published structure has no frozen field contract')
+        const columns = fields.map((field: Json) => field.name)
+        for (const row of expected.expected_rows) expect(Object.keys(row).sort()).toEqual([...columns].sort())
+        expect(profile.sample.map((row: Json) => Object.fromEntries(columns.map((column: string) => [column, row[column]])))).toEqual(expected.expected_rows)
+        for (const [index, row] of profile.sample.entries()) {
+          expect(row.document_id).toBe(id); expect(row.extraction_id).toBe(original.extraction.id); expect(row.batch_id).toBe(publication.batch_id)
+          if (structure !== 'headers') expect(String(row.row_number)).toBe(String(index + 1))
+        }
+      }
       await page.goto(`/datasets/${profile.dataset_id}?version=${publication.versions[structure]}`)
       await expect(page.getByRole('heading').first()).toBeVisible()
     }
     const consumers = []
-    for (const fixture of item.consumers ? Array.isArray(item.consumers) ? item.consumers : [item.consumers] : []) consumers.push(await verifyConsumers(page, csrf, item, original, fixture, `D098 E3 ${manifest.run_id} ${item.id} ${fixture.structure}`))
-    results.push({ id: item.id, scenarios: item.scenarios, provenance: item.provenance, original_id: id, source_sha256: original.sha256, extraction_id: original.extraction?.id, execution: original.execution, raw_artifacts: artifacts(original), publication_ids: original.publications.map((entry: Json) => entry.batch_id), consumers, actor: 'AUTOMATED_TEST_AGENT', human_corpus_acceptance: false })
+    for (const fixture of item.consumers ? Array.isArray(item.consumers) ? item.consumers : [item.consumers] : []) consumers.push(await verifyConsumers(page, csrf, item, original, fixture,
+      `D098 E3 ${manifest.run_id} ${item.id} ${fixture.structure}`, new NativeEvidenceJournal(join(output, item.id, fixture.structure))))
+    if (item.receiver_guard) {
+      requireCondition(consumers.length === 0, 'A correction no-resend check must not create fresh consumer or Delivery runs')
+      await page.waitForTimeout(item.receiver_guard.observation_ms)
+      const received = await page.request.get(item.receiver_guard.url)
+      requireCondition(received.status() === 200 && digest(await received.body()) === item.receiver_guard.baseline_sha256, 'Correction caused a resend or changed the independently frozen receiver receipt')
+      const body = await received.json()
+      for (const [key, value] of Object.entries(item.receiver_guard.expected)) expect(body[key]).toEqual(value)
+    }
+    results.push({ id: item.id, scenarios: item.scenarios, provenance: item.provenance, original_id: id, source_sha256: original.sha256, extraction_id: original.extraction?.id, execution: original.execution, raw_artifacts: artifacts(original), publication_ids: original.publications.map((entry: Json) => entry.batch_id), consumers,
+      receiver_no_resend: item.receiver_guard ? { unchanged: true, observed_ms: item.receiver_guard.observation_ms, receipt_sha256: item.receiver_guard.baseline_sha256 } : null, actor: 'AUTOMATED_TEST_AGENT', human_corpus_acceptance: false })
     await writeFile(join(output, `${item.id}.receipt.private.json`), JSON.stringify(results.at(-1), null, 2))
   }
   const organizationAfter = await get(page, '/documents/engines')

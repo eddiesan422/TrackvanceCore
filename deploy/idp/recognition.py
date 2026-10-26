@@ -21,6 +21,19 @@ from pathlib import Path
 MAX_EVENT = 24 * 1024**2
 MAX_STREAM = 64 * 1024**2
 TERMINALS = {}
+VISUAL_PROMPT_VERSION = "trackvance-idp-098-visual-v2"
+VISUAL_SOURCE_INSTRUCTIONS = (
+    "Field names, sections, declared aliases and source context describe the requested meaning; "
+    "a repeated caption alone does not identify the issuer, buyer or another section. "
+    "An anchor_label locates a value according to its direction and section; it is not "
+    "necessarily the semantic name of that value. Declared search regions are template hints, "
+    "not measured value coordinates or evidence of correctness. "
+    "Copy every visible requested amount into observed as a string, preserving its printed sign, "
+    "currency and separators. A numeric logical type does not authorize an empty transcription "
+    "or a calculated value. Return null for a field absent or unreadable on this page; "
+    "retain genuinely blank source cells and unresolved alternatives. "
+    "The JSON schema is a shape contract, not expected data or evidence of correctness."
+)
 
 
 def canonical(value):
@@ -94,12 +107,53 @@ def validate_selection(selection, definition):
 
 
 def semantic_definition(definition):
-    """Labels/types only; regex captures, samples and private values never enter."""
-    def field(value):
-        return {key: value[key] for key in ("name", "label", "aliases", "logical_type") if key in value}
-    return {"fields": [field(item) for item in definition.get("fields", [])],
-        "tables": [{"name": table["name"], "fields": [field(item) for item in table["fields"]]}
-            for table in definition.get("tables", [])]}
+    """Declared semantic context, not parser samples, expected values or authority."""
+    def field(value, extra_labels=()):
+        result = {key: value[key] for key in ("name", "label", "logical_type", "required", "section",
+            "date_format", "decimal_separator", "thousands_separator", "currency_symbols") if key in value}
+        rules = [rule for rule in [value.get("visual"), *value.get("visual_alternatives", [])] if rule]
+        labels = [*value.get("aliases", []), *extra_labels]
+        contexts = []
+        for rule in rules:
+            labels.extend([rule.get("label"), *rule.get("label_aliases", [])])
+            context = {key: rule[key] for key in ("page", "section_label", "direction", "end_label") if key in rule}
+            if rule.get("label"):
+                context["anchor_label"] = rule["label"]
+            if rule.get("region"):
+                context["declared_search_region"] = list(rule["region"])
+            if context and context not in contexts:
+                contexts.append(context)
+        aliases = list(dict.fromkeys(label for label in labels if isinstance(label, str) and label and label != value.get("label")))
+        if aliases:
+            result["aliases"] = aliases
+        if contexts:
+            result["source_context"] = contexts
+        return result
+    tables = []
+    for table in definition.get("tables", []):
+        visual = table.get("visual") or {}
+        labels = table.get("structured_header_labels") or visual.get("header_labels", [])
+        aliases = visual.get("header_label_aliases") or []
+        columns = [field(value, ([labels[index]] if index < len(labels) else [])
+            + (aliases[index] if index < len(aliases) else [])) for index, value in enumerate(table["fields"])]
+        tables.append({"name": table["name"], "fields": columns, "declared_column_labels": list(labels)})
+    return {"semantic_definition_version": "trackvance-visual-semantic-098-v2",
+        "reading_mode": "VERBATIM_OBSERVED_VALUES_NOT_NORMALIZED_OR_EXPECTED_ANSWERS",
+        "fields": [field(item) for item in definition.get("fields", [])], "tables": tables}
+
+
+def visual_request_metadata(body, *, source_sha256, definition_sha256, configuration_sha256, image, page):
+    """Exact effective text/schema/options, linked to separately retained image bytes."""
+    without_images = {**body, "messages": [{key: value for key, value in message.items() if key != "images"}
+        for message in body["messages"]]}
+    return {"version": "TRACKVANCE_QWEN_REQUEST_V1", "strategy": "QWEN_VISUAL", "request_sha256": digest(body),
+        "source_sha256": source_sha256, "definition_sha256": definition_sha256,
+        "configuration_sha256": configuration_sha256, "request_without_image_bytes": without_images,
+        "transport_options": {"stream": True},
+        "image": {"sha256": image["sha256"], "source_page": page["page"],
+            "width": page["page_geometry"]["width"], "height": page["page_geometry"]["height"],
+            "query_region": [0, 0, 1, 1], "geometry_kind": "QUERY_REGION",
+            "transformations": page["page_geometry"].get("transformations", [])}}
 
 
 class Session:
@@ -306,7 +360,7 @@ class Session:
         if type(context) is not int or not 1024 <= context <= 32768:
             raise ValueError("LLM_CONTEXT_LIMIT")
         output_budget = min(8192, context // 2)
-        prompt = self.api["VISUAL_PROMPT"]
+        prompt = self.api["VISUAL_PROMPT"] + "\n" + VISUAL_SOURCE_INSTRUCTIONS
         for page in rendered:
             number = page["page"]
             self.phase("QWEN_GENERATION", number)
@@ -314,11 +368,29 @@ class Session:
             body = {"model": self.api["LOCK"]["qwen"]["model"], "think": False, "keep_alive": 0,
                 "format": schema, "truncate": False, "shift": False,
                 "messages": [{"role": "system", "content": prompt}, {"role": "user",
-                    "content": json.dumps({"page": number, "pages": self.expected,
-                        "definition": semantic_definition(definition)}, ensure_ascii=False),
+                    "content": json.dumps({"page": number, "document_pages": self.expected,
+                        "definition": semantic_definition(definition), "json_schema": schema,
+                        "targets": {"fields": [field["name"] for field in definition.get("fields", [])],
+                            "tables": [table["name"] for table in definition.get("tables", [])]}}, ensure_ascii=False),
                     "images": [image["content_b64"]]}],
                 "options": {"num_ctx": context, "num_predict": output_budget, "temperature": 0, "seed": 98,
                     "presence_penalty": 0, "repeat_penalty": 1, "top_k": 20, "top_p": .95}}
+            metadata = visual_request_metadata(body, source_sha256=self.source_sha,
+                definition_sha256=self.body["definition_sha256"], configuration_sha256=self.configuration_sha,
+                image=image, page=page)
+            metadata_path = folder / f"qwen-{number:03}.request.json"
+            metadata_bytes = canonical(metadata)
+            if len(metadata_bytes) > 256 * 1024:
+                raise ValueError("LLM_CONTEXT_LIMIT")
+            metadata_path.write_bytes(metadata_bytes)
+            metadata_record = {"path": metadata_path.name, "kind": "QWEN_REQUEST_JSON",
+                "bytes": len(metadata_bytes), "sha256": hashlib.sha256(metadata_bytes).hexdigest()}
+            # This precedes model generation on the stream. The existing transport
+            # durably acknowledges it on the coordinator thread; the gateway does
+            # not claim an additional reverse-channel persistence barrier.
+            self.emit("PHASE", {"phase": "QWEN_GENERATION", "remaining_work_seconds": self.budget.remaining(),
+                "recognition_strategy": "QWEN_VISUAL",
+                "artifacts": [self.artifact(folder, metadata_record)]}, stage="QWEN_GENERATION", page=number)
             stream_path = folder / f"qwen-{number:03}.ndjson"
             failure = None
             with stream_path.open("xb") as stream:
@@ -356,7 +428,10 @@ class Session:
                     "sha256": hashlib.sha256(selection_path.read_bytes()).hexdigest()})
             engine = {**{key: value for key, value in self.engine.items() if key != "page_engines"}, "llm_model": self.api["LOCK"]["qwen"]["model"],
                 "llm_manifest_sha256": self.api["LOCK"]["qwen"]["manifest_sha256"],
-                "prompt_version": "trackvance-idp-098-visual-v1", "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "prompt_version": VISUAL_PROMPT_VERSION, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "semantic_definition_version": "trackvance-visual-semantic-098-v2",
+                "semantic_definition_sha256": digest(semantic_definition(definition)),
+                "selection_schema_sha256": digest(schema), "request_artifact_sha256": metadata_record["sha256"],
                 "ollama_metrics": metrics, "request_sha256": digest(body),
                 "context_budget": {"context_tokens": context, "input_tokens": context - output_budget,
                     "output_tokens": output_budget, "truncate": False, "shift": False},

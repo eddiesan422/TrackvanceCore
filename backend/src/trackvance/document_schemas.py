@@ -57,6 +57,9 @@ class DocumentField(BaseModel):
                 raise ValueError("La escala declarada requiere un campo decimal.")
             if self.normalization.currency_equivalences and self.logical_type != "STRING":
                 raise ValueError("La normalización de moneda requiere un campo de texto.")
+            if self.normalization.text_linebreaks and (self.logical_type != "STRING"
+                    or self.business_key or self.normalization.currency_equivalences):
+                raise ValueError("Los saltos de línea declarados requieren texto documental, no claves ni moneda.")
         return self
 
     @field_validator("pattern")

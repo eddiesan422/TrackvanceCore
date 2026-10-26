@@ -22011,6 +22011,18 @@
             "type": "object",
             "maxProperties": 30,
             "title": "Currency Equivalences"
+          },
+          "text_linebreaks": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "DECLARED_MULTILINE_V1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Linebreaks"
           }
         },
         "additionalProperties": false,

@@ -34,7 +34,7 @@ MAX_SOURCE = 32 * 1024**2
 MAX_EVENT = 24 * 1024**2
 MAX_STREAM = 64 * 1024**2
 ARTIFACT_KINDS = {"PADDLE_PAGE_JSON", "PADDLE_TABLE_HTML", "PAGE_IMAGE_PNG", "QWEN_REPLY_JSON",
-    "QWEN_SELECTION_JSON", "QWEN_STREAM_NDJSON"}
+    "QWEN_SELECTION_JSON", "QWEN_STREAM_NDJSON", "QWEN_REQUEST_JSON"}
 TRANSPORT_UNAVAILABLE = False
 STREAM_ERRORS = (OperationError, DocumentCheckpointFailure, DocumentDeadlineExpired, ValueError, TypeError,
     KeyError, OSError, RuntimeError, AssertionError, asyncio.CancelledError, httpx.HTTPError)
@@ -61,6 +61,35 @@ def _json(raw):
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
 
 
+def _validate_visual_request(raw, event):
+    if len(raw) > 256 * 1024:
+        raise _invalid()
+    try:
+        value = _json(raw)
+        if (not isinstance(value, dict) or set(value) != {"version", "strategy", "request_sha256", "source_sha256",
+                "definition_sha256", "configuration_sha256", "request_without_image_bytes", "transport_options", "image"}
+                or value["version"] != "TRACKVANCE_QWEN_REQUEST_V1"
+                or value["strategy"] != "QWEN_VISUAL"
+                or value["transport_options"] != {"stream": True}
+                or any(value[key] != event[key] for key in ("source_sha256", "definition_sha256", "configuration_sha256"))
+                or not isinstance(value["request_sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", value["request_sha256"])):
+            raise _invalid()
+        body, image = value["request_without_image_bytes"], value["image"]
+        if (not isinstance(body, dict) or set(body) != {"model", "think", "keep_alive", "format", "truncate", "shift", "messages", "options"}
+                or not isinstance(body["messages"], list) or len(body["messages"]) != 2
+                or [message.get("role") for message in body["messages"]] != ["system", "user"]
+                or any(set(message) != {"role", "content"} or not isinstance(message["content"], str) for message in body["messages"])
+                or not isinstance(image, dict) or set(image) != {"sha256", "source_page", "width", "height", "query_region", "geometry_kind", "transformations"}
+                or not isinstance(image["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", image["sha256"])
+                or image["source_page"] != event["page_one_based"]
+                or any(type(image[key]) is not int or not 1 <= image[key] <= 32768 for key in ("width", "height"))
+                or image["query_region"] != [0, 0, 1, 1] or image["geometry_kind"] != "QUERY_REGION"
+                or not isinstance(image["transformations"], list) or len(image["transformations"]) > 32):
+            raise _invalid()
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise _invalid() from None
+
+
 def validate_event(event, binding, sequence, *, status_poll=False):
     if not isinstance(event, dict) or "durable_refs" in event:
         raise _invalid()
@@ -83,9 +112,12 @@ def validate_event(event, binding, sequence, *, status_poll=False):
         raise _invalid()
     if page is not None and (type(page) is not int or not 1 <= page <= 50 or expected is not None and page > expected):
         raise _invalid()
-    if kind == "PAGE":
+    if kind == "PAGE" or kind == "PHASE" and "artifacts" in event["payload"]:
         artifacts = event["payload"].get("artifacts")
         if expected is None or page is None or not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 1000:
+            raise _invalid()
+        if kind == "PHASE" and (event["stage"] != "QWEN_GENERATION" or event["payload"].get("phase") != "QWEN_GENERATION"
+                or len(artifacts) != 1 or not isinstance(artifacts[0], dict) or artifacts[0].get("kind") != "QWEN_REQUEST_JSON"):
             raise _invalid()
         for item in artifacts:
             if not isinstance(item, dict) or set(item) != {"kind", "media_type", "sha256", "bytes", "content_b64"}:
@@ -102,6 +134,10 @@ def validate_event(event, binding, sequence, *, status_poll=False):
                 raise _invalid() from None
             if len(raw) != item["bytes"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
                 raise _invalid()
+            if item["kind"] == "QWEN_REQUEST_JSON":
+                if item["media_type"] != "application/json":
+                    raise _invalid()
+                _validate_visual_request(raw, event)
     if kind == "TERMINAL":
         if (event.get("status") not in {"COMPLETE", "PARTIAL", "CANCELLED", "FAILED", "TIMEOUT"}
                 or type(event.get("resources_released")) is not bool or page is not None):

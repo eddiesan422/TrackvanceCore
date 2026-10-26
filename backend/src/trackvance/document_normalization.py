@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 def canonical_hash(value):
@@ -21,6 +22,14 @@ class DocumentNormalization(BaseModel):
     decimal_scale: int | None = Field(default=None, ge=0, le=18)
     rounding: Literal["EXACT", "HALF_UP", "HALF_EVEN"] = "EXACT"
     currency_equivalences: dict[str, list[str]] = Field(default_factory=dict, max_length=30)
+    text_linebreaks: Literal["DECLARED_MULTILINE_V1"] | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_existing_contract(self, handler):
+        result = handler(self)
+        if self.text_linebreaks is None:
+            result.pop("text_linebreaks", None)
+        return result
 
     @model_validator(mode="after")
     def unambiguous_aliases(self):
@@ -59,7 +68,15 @@ def normalize_observation(observed, field, *, evidence_refs=None):
     if observed is None or not policy:
         trace["normalized"] = value
         return value, validity, trace
-    if policy["currency_equivalences"]:
+    if policy.get("text_linebreaks"):
+        if field["logical_type"] != "STRING" or field.get("business_key") or policy["currency_equivalences"]:
+            return observed, "INVALID", trace
+        # Exactly the declared documentary separator is interpreted. This does
+        # not apply unicode_escape decoding or repair identifiers/path strings.
+        value = re.sub(r"[ \t]*(?:(?:\r\n|\n|(?<!\\)\\n)[ \t]*)+", " ", value)
+        validity = "VALID" if value else "MISSING" if field.get("required", True) else "VALID"
+        rules.append("DECLARED_MULTILINE_V1")
+    elif policy["currency_equivalences"]:
         if field["logical_type"] != "STRING":
             return observed, "INVALID", trace
         aliases = {" ".join(alias.casefold().split()): code
