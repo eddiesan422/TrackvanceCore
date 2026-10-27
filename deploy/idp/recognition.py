@@ -23,12 +23,19 @@ MAX_STREAM = 64 * 1024**2
 TERMINALS = {}
 VISUAL_PROMPT_VERSION = "trackvance-idp-098-visual-v2"
 SOURCE_ASSOCIATION = "DECLARED_LABEL_CONTEXT_V1"
-ASSOCIATION_PROMPT_VERSION = "trackvance-idp-098-visual-v3-source-association"
-ASSOCIATION_SEMANTIC_VERSION = "trackvance-visual-semantic-098-v3-source-association"
+ASSOCIATION_PROMPT_VERSION = "trackvance-idp-098-visual-v4-source-association-roles"
+ASSOCIATION_SEMANTIC_VERSION = "trackvance-visual-semantic-098-v4-source-association-roles"
 SOURCE_ASSOCIATION_INSTRUCTIONS = (
-    "For a field declaring source_association, transcribe its printed anchor caption and section "
-    "caption into source_context.anchor_label and source_context.section_label. These are literal "
-    "source observations, not your explanation or the requested field name. Use only an anchor "
+    "For a field declaring source_association, keep these three transcription roles separate. "
+    "observed contains the requested printed VALUE. source_context.anchor_label contains the literal "
+    "printed CAPTION introducing that value according to the declared direction. Put the caption "
+    "in anchor_label and its associated value in observed; do not put the value in anchor_label "
+    "or move the anchor caption into section_label. source_context.section_label contains a separate "
+    "enclosing printed SECTION HEADING only when the current declared source_context rule requests "
+    "a nonempty section_label and that heading is visible on this page. Otherwise return "
+    "source_context.section_label=null. The field's section is a logical grouping, not a printed "
+    "heading. These are literal source observations, not your explanation or the requested field "
+    "name; a declared caption is not proof that it is visible. Use only an anchor "
     "and page/section allowed by that field's declared source_context. A similar word in another "
     "caption or section does not establish the requested relationship. If the allowed anchor/value "
     "relation is absent on this page, return observed=null and source_context labels=null; do not "
@@ -75,9 +82,23 @@ def visual_contract(definition):
                     "items": {"type": "string", "maxLength": 16000}}},
             "required": ["observed", "ambiguous", "alternatives"]}
         if field.get("source_association") == SOURCE_ASSOCIATION:
+            result["properties"]["observed"]["description"] = (
+                "Requested VALUE transcribed literally from the page, associated with the printed "
+                "caption recorded in source_context.anchor_label. Return null when the requested "
+                "value or allowed caption/value relation is absent or unreadable."
+            )
             result["properties"]["source_context"] = {"type": "object", "additionalProperties": False,
-                "properties": {name: {"type": ["string", "null"], "maxLength": 160}
-                    for name in ("anchor_label", "section_label")}, "required": ["anchor_label", "section_label"]}
+                "properties": {
+                    "anchor_label": {"type": ["string", "null"], "maxLength": 160,
+                        "description": "Literal printed CAPTION introducing the observed value according "
+                            "to the declared direction. Transcribe the caption here and its associated "
+                            "value in observed. Return null when the allowed relation is not visible."},
+                    "section_label": {"type": ["string", "null"], "maxLength": 160,
+                        "description": "Separate enclosing printed SECTION HEADING, only if requested by "
+                            "a nonempty section_label in the current declared source_context rule and "
+                            "visible on this page. Otherwise null. The anchor caption and the field's "
+                            "logical section grouping do not supply this heading."}},
+                "required": ["anchor_label", "section_label"]}
             result["required"].append("source_context")
         return result
     def fields(items):
