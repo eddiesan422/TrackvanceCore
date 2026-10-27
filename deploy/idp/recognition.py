@@ -22,6 +22,20 @@ MAX_EVENT = 24 * 1024**2
 MAX_STREAM = 64 * 1024**2
 TERMINALS = {}
 VISUAL_PROMPT_VERSION = "trackvance-idp-098-visual-v2"
+SOURCE_ASSOCIATION = "DECLARED_LABEL_CONTEXT_V1"
+ASSOCIATION_PROMPT_VERSION = "trackvance-idp-098-visual-v3-source-association"
+ASSOCIATION_SEMANTIC_VERSION = "trackvance-visual-semantic-098-v3-source-association"
+SOURCE_ASSOCIATION_INSTRUCTIONS = (
+    "For a field declaring source_association, transcribe its printed anchor caption and section "
+    "caption into source_context.anchor_label and source_context.section_label. These are literal "
+    "source observations, not your explanation or the requested field name. Use only an anchor "
+    "and page/section allowed by that field's declared source_context. A similar word in another "
+    "caption or section does not establish the requested relationship. If the allowed anchor/value "
+    "relation is absent on this page, return observed=null and source_context labels=null; do not "
+    "borrow a value from another label or page. Equal values may legitimately appear under different "
+    "labels: keep each only when its own declared anchor/context is visible. A reported caption "
+    "is not independent corroboration or measured geometry."
+)
 VISUAL_SOURCE_INSTRUCTIONS = (
     "Field names, sections, declared aliases and source context describe the requested meaning; "
     "a repeated caption alone does not identify the issuer, buyer or another section. "
@@ -54,18 +68,24 @@ def terminal_for(identity):
 
 
 def visual_contract(definition):
-    def cell():
-        return {"type": "object", "additionalProperties": False,
+    def cell(field):
+        result = {"type": "object", "additionalProperties": False,
             "properties": {"observed": {"type": ["string", "null"], "maxLength": 16000},
                 "ambiguous": {"type": "boolean"}, "alternatives": {"type": "array", "maxItems": 16,
                     "items": {"type": "string", "maxLength": 16000}}},
             "required": ["observed", "ambiguous", "alternatives"]}
+        if field.get("source_association") == SOURCE_ASSOCIATION:
+            result["properties"]["source_context"] = {"type": "object", "additionalProperties": False,
+                "properties": {name: {"type": ["string", "null"], "maxLength": 160}
+                    for name in ("anchor_label", "section_label")}, "required": ["anchor_label", "section_label"]}
+            result["required"].append("source_context")
+        return result
     def fields(items):
         names = [item["name"] for item in items]
         if len(names) != len(set(names)) or any(not isinstance(name, str) or not 1 <= len(name) <= 100 for name in names):
             raise ValueError("LLM_SELECTION_INVALID")
         return {"type": "object", "additionalProperties": False,
-            "properties": {name: cell() for name in names}, "required": names}
+            "properties": {item["name"]: cell(item) for item in items}, "required": names}
     tables = definition.get("tables", [])
     names = [table["name"] for table in tables]
     if len(names) != len(set(names)):
@@ -85,14 +105,24 @@ def validate_selection(selection, definition):
     def cells(values, fields):
         if not isinstance(values, dict) or set(values) != field_names(fields):
             raise ValueError("LLM_SELECTION_INVALID")
-        for value in values.values():
-            if (not isinstance(value, dict) or set(value) != {"observed", "ambiguous", "alternatives"}
+        for field in fields:
+            value = values[field["name"]]
+            required = {"observed", "ambiguous", "alternatives"}
+            if field.get("source_association") == SOURCE_ASSOCIATION:
+                required.add("source_context")
+            if (not isinstance(value, dict) or set(value) != required
                     or value["observed"] is not None and not isinstance(value["observed"], str)
                     or type(value["ambiguous"]) is not bool or not isinstance(value["alternatives"], list)
                     or len(value["alternatives"]) > 16
                     or any(not isinstance(text, str) or len(text) > 16000 for text in value["alternatives"])
                     or isinstance(value["observed"], str) and len(value["observed"]) > 16000):
                 raise ValueError("LLM_SELECTION_INVALID")
+            if "source_context" in required:
+                witness = value["source_context"]
+                if (not isinstance(witness, dict) or set(witness) != {"anchor_label", "section_label"}
+                        or any(text is not None and (not isinstance(text, str) or len(text) > 160)
+                            for text in witness.values())):
+                    raise ValueError("LLM_SELECTION_INVALID")
     if not isinstance(selection, dict) or set(selection) != {"fields", "tables"}:
         raise ValueError("LLM_SELECTION_INVALID")
     cells(selection["fields"], definition.get("fields", []))
@@ -110,7 +140,7 @@ def semantic_definition(definition):
     """Declared semantic context, not parser samples, expected values or authority."""
     def field(value, extra_labels=()):
         result = {key: value[key] for key in ("name", "label", "logical_type", "required", "section",
-            "date_format", "decimal_separator", "thousands_separator", "currency_symbols") if key in value}
+            "date_format", "decimal_separator", "thousands_separator", "currency_symbols", "source_association") if key in value}
         rules = [rule for rule in [value.get("visual"), *value.get("visual_alternatives", [])] if rule]
         labels = [*value.get("aliases", []), *extra_labels]
         contexts = []
@@ -137,7 +167,8 @@ def semantic_definition(definition):
         columns = [field(value, ([labels[index]] if index < len(labels) else [])
             + (aliases[index] if index < len(aliases) else [])) for index, value in enumerate(table["fields"])]
         tables.append({"name": table["name"], "fields": columns, "declared_column_labels": list(labels)})
-    return {"semantic_definition_version": "trackvance-visual-semantic-098-v2",
+    scoped = any(item.get("source_association") == SOURCE_ASSOCIATION for item in definition.get("fields", []))
+    return {"semantic_definition_version": ASSOCIATION_SEMANTIC_VERSION if scoped else "trackvance-visual-semantic-098-v2",
         "reading_mode": "VERBATIM_OBSERVED_VALUES_NOT_NORMALIZED_OR_EXPECTED_ANSWERS",
         "fields": [field(item) for item in definition.get("fields", [])], "tables": tables}
 
@@ -361,6 +392,11 @@ class Session:
             raise ValueError("LLM_CONTEXT_LIMIT")
         output_budget = min(8192, context // 2)
         prompt = self.api["VISUAL_PROMPT"] + "\n" + VISUAL_SOURCE_INSTRUCTIONS
+        source_association = any(field.get("source_association") == SOURCE_ASSOCIATION for field in definition.get("fields", []))
+        if source_association:
+            prompt += "\n" + SOURCE_ASSOCIATION_INSTRUCTIONS
+        prompt_version = ASSOCIATION_PROMPT_VERSION if source_association else VISUAL_PROMPT_VERSION
+        semantics = semantic_definition(definition)
         for page in rendered:
             number = page["page"]
             self.phase("QWEN_GENERATION", number)
@@ -369,7 +405,7 @@ class Session:
                 "format": schema, "truncate": False, "shift": False,
                 "messages": [{"role": "system", "content": prompt}, {"role": "user",
                     "content": json.dumps({"page": number, "document_pages": self.expected,
-                        "definition": semantic_definition(definition), "json_schema": schema,
+                        "definition": semantics, "json_schema": schema,
                         "targets": {"fields": [field["name"] for field in definition.get("fields", [])],
                             "tables": [table["name"] for table in definition.get("tables", [])]}}, ensure_ascii=False),
                     "images": [image["content_b64"]]}],
@@ -428,9 +464,9 @@ class Session:
                     "sha256": hashlib.sha256(selection_path.read_bytes()).hexdigest()})
             engine = {**{key: value for key, value in self.engine.items() if key != "page_engines"}, "llm_model": self.api["LOCK"]["qwen"]["model"],
                 "llm_manifest_sha256": self.api["LOCK"]["qwen"]["manifest_sha256"],
-                "prompt_version": VISUAL_PROMPT_VERSION, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-                "semantic_definition_version": "trackvance-visual-semantic-098-v2",
-                "semantic_definition_sha256": digest(semantic_definition(definition)),
+                "prompt_version": prompt_version, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "semantic_definition_version": semantics["semantic_definition_version"],
+                "semantic_definition_sha256": digest(semantics),
                 "selection_schema_sha256": digest(schema), "request_artifact_sha256": metadata_record["sha256"],
                 "ollama_metrics": metrics, "request_sha256": digest(body),
                 "context_budget": {"context_tokens": context, "input_tokens": context - output_budget,

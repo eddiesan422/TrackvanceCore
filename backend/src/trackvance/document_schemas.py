@@ -37,6 +37,7 @@ class DocumentField(BaseModel):
     section: Literal["DOCUMENT", "ISSUER", "BUYER", "TOTALS"] = "DOCUMENT"
     visual: VisualFieldRule | None = None
     visual_alternatives: list[VisualFieldRule] = Field(default_factory=list, max_length=20)
+    source_association: Literal["DECLARED_LABEL_CONTEXT_V1"] | None = None
     normalization: DocumentNormalization | None = None
 
     @model_serializer(mode="wrap")
@@ -44,10 +45,16 @@ class DocumentField(BaseModel):
         result = handler(self)
         if self.normalization is None:
             result.pop("normalization", None)
+        if self.source_association is None:
+            result.pop("source_association", None)
         return result
 
     @model_validator(mode="after")
     def numeric_format(self):
+        if self.source_association:
+            rules = [rule for rule in [self.visual, *self.visual_alternatives] if rule]
+            if not rules or any(rule.kind != "LABEL_VALUE" or not any(char.isalnum() for char in rule.label) for rule in rules):
+                raise ValueError("La asociación de fuente requiere anclas literales LABEL_VALUE declaradas.")
         if self.thousands_separator == self.decimal_separator:
             raise ValueError("Los separadores decimal y de millares deben ser distintos.")
         if self.normalization:
@@ -92,6 +99,8 @@ class DocumentTable(BaseModel):
 
     @model_validator(mode="after")
     def row_groups(self):
+        if any(field.source_association for field in self.fields):
+            raise ValueError("La asociación literal de contexto se declara sólo en cabeceras.")
         if self.structured_header_labels is not None:
             if (self.visual is not None or self.row_pattern or len(self.structured_header_labels) != len(self.fields)
                     or any(not label.strip() or len(label) > 160 for label in self.structured_header_labels)

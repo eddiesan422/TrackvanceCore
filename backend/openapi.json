@@ -21943,6 +21943,18 @@
             "maxItems": 20,
             "title": "Visual Alternatives"
           },
+          "source_association": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "DECLARED_LABEL_CONTEXT_V1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Association"
+          },
           "normalization": {
             "anyOf": [
               {

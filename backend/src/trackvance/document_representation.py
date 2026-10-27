@@ -180,6 +180,12 @@ def _selection(value):
                     or type(cell.get("ambiguous")) is not bool or not isinstance(cell.get("alternatives"), list)
                     or any(not isinstance(item, str) for item in cell["alternatives"])):
                 raise ValueError("VISUAL_SELECTION_CONTRACT")
+            if "source_context" in cell:
+                context = cell["source_context"]
+                if (not isinstance(context, dict) or set(context) != {"anchor_label", "section_label"}
+                        or any(item is not None and (not isinstance(item, str) or len(item) > 160)
+                            for item in context.values())):
+                    raise ValueError("VISUAL_SELECTION_CONTRACT")
     return value
 
 

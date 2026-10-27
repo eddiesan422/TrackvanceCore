@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from .document_engine import arithmetic_checks, cross_table_checks, extract
-from .document_header_association import header_observations
+from .document_header_association import header_observations, selection_source_association
 from .document_inference_completion import AttemptBudget
 from .document_normalization import canonical_hash, normalize_observation
 from .document_representation import representation_from_events, stable_id, validate_representation
@@ -109,14 +109,26 @@ def map_representation(representation, definition, *, stage=None):
             candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []))
         return mapped
     documentary_headers, associations = header_observations(pages, definition["fields"])
+    rejected_headers: dict[str, list[dict]] = {}
     for page in pages:
         ordinal = page["page_one_based"]
         if "selection" in page:
             selection = page["selection"]
             for field in definition["fields"]:
                 raw = selection.get("fields", {}).get(field["name"], {})
+                evidence = stable_id(page["id"], "field", field["name"])
+                relation = selection_source_association(raw, field, ordinal, evidence)
+                if relation is not None:
+                    if not relation["eligible"]:
+                        if raw.get("observed") is not None:
+                            rejected_headers.setdefault(field["name"], []).append({"observed": raw["observed"],
+                                "page": ordinal, "evidence_refs": [evidence], "ambiguous": raw.get("ambiguous", False),
+                                "alternatives": copy.deepcopy(raw.get("alternatives", [])),
+                                "eligible_for_field": False, "association": copy.deepcopy(relation)})
+                        continue
+                    associations[field["name"]].append(relation)
                 headers[field["name"]].append((raw.get("observed"), ordinal,
-                    stable_id(page["id"], "field", field["name"]), raw.get("ambiguous", False), raw.get("alternatives", [])))
+                    evidence, raw.get("ambiguous", False), raw.get("alternatives", [])))
             for table in definition["tables"]:
                 name = table["name"]
                 for index, raw_row in enumerate(selection.get("tables", {}).get(name, [])):
@@ -197,6 +209,8 @@ def map_representation(representation, definition, *, stage=None):
         headers[field["name"]].extend(documentary_headers[field["name"]])
         payload["fields"][field["name"]] = _resolve(headers[field["name"]], field)
         cell = payload["fields"][field["name"]]
+        if rejected_headers.get(field["name"]):
+            cell["candidate_alternatives"].extend(copy.deepcopy(rejected_headers[field["name"]]))
         bindings = [item for item in associations[field["name"]] if item["value_refs"][0] in cell["evidence_refs"]]
         if bindings:
             cell["association"] = {"version": "DECLARED_HEADER_ASSOCIATION_V1", "bindings": copy.deepcopy(bindings)}
@@ -207,6 +221,8 @@ def map_representation(representation, definition, *, stage=None):
                 cell["origin"]["region"] = list(first["region"])
             else:
                 cell["origin"]["region_semantics"] = "PAGE_LOCATOR_ONLY"
+    if rejected_headers:
+        payload["header_association_rejections"] = copy.deepcopy(rejected_headers)
     payload["arithmetic"] = arithmetic_checks(payload, definition)
     payload["cross_totals"] = cross_table_checks(payload, definition)
     return payload

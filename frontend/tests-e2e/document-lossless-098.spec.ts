@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
 import type { RecordData as Json } from '../src/api/client'
 import { fillSecret } from './identity-helpers'
 import { NativeEvidenceJournal } from './native-evidence-journal'
+import { verifySentinelExpectation, type SentinelVolumeAlertExpectation } from './sentinel-expectation'
 
 // This driver never starts services, installs a model, mocks inference, or creates
 // templates. The campaign owner freezes those inputs and the call budget first.
@@ -19,6 +20,7 @@ interface ConsumerFixture {
   receiver_destination_url: string
   receiver_receipt_url: string
   receiver_expected: Json
+  sentinel_expectation?: SentinelVolumeAlertExpectation
 }
 interface SourceReviewEvidence {
   expected_extraction_id: string
@@ -36,6 +38,7 @@ interface LosslessCase {
   source_sha256: string
   expected_pages: number[]
   original_id?: string
+  expected_extraction_id?: string
   upload_path?: string
   configure_strategy?: boolean
   expected_issue_prefixes?: string[]
@@ -49,6 +52,8 @@ interface LosslessCase {
   profiles?: Record<string, { row_count: number; sample_sha256?: string; expected_rows?: Json[] }>
   consumers?: ConsumerFixture | ConsumerFixture[]
   receiver_guard?: { url: string; baseline_sha256: string; expected: Json; observation_ms: number }
+  publication_idempotency?: boolean
+  consumer_quiet?: { observation_ms: number; expected_delivery_posts: number }
 }
 interface Manifest {
   version: 1
@@ -244,8 +249,11 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
   expect(recon.decision).toBe('CONFORME')
   const monitorBody = { name: `${prefix} Sentinel`, dataset_id: dataset, config: { required_columns: spec.required_columns, null_columns: spec.key_columns, max_null_rate: 0 } }
   const monitor = await journal.perform('sentinel-monitor', monitorBody, () => post(page, csrf, '/monitors', monitorBody, 201))
+  const baseline = spec.sentinel_expectation ? await get(page, `/dataset-versions/${spec.sentinel_expectation.baseline_version_id}/profile`) : undefined
+  const versions = spec.sentinel_expectation ? (await get(page, `/datasets/${dataset}`)).versions : undefined
   const sentinel = await executeConsumer(page, 'sentinel', monitor, version, undefined, journal)
-  expect(sentinel.decision).toBe('HEALTHY')
+  const sentinelResult = verifySentinelExpectation(sentinel, { dataset_id: dataset, source_version_id: version,
+    source_profile: source, monitor, key_columns: spec.key_columns, baseline_profile: baseline, dataset_versions: versions }, spec.sentinel_expectation)
   let delivery: Json
   if (spec.delivery_draft) {
     const destination = await get(page, `/delivery/destinations/${spec.delivery_draft.destination_id}`)
@@ -254,7 +262,8 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
     // is frozen by the owner; the browser receipt/control endpoint is loopback.
     expect(destination.options.url).toBe(spec.receiver_destination_url)
     const draft = { ...spec.delivery_draft, dataset_version_id: intake.output_version_id }
-    expect((await post(page, csrf, '/delivery/preflight', draft, 200)).status).toBe('PASS')
+    const preflight = await journal.perform('delivery-preflight', draft, () => post(page, csrf, '/delivery/preflight', draft, 200))
+    expect(preflight.status).toBe('PASS')
     const deliveryBody = { ...draft, name: `${prefix} Delivery` }
     delivery = await journal.perform('delivery-configuration', deliveryBody, () => post(page, csrf, '/delivery/configurations', deliveryBody, 201))
   } else {
@@ -284,7 +293,8 @@ async function verifyConsumers(page: Page, csrf: string, item: LosslessCase, ori
     const body = await result.json()
     return Object.entries(spec.receiver_expected).every(([key, value]) => jsonDigest(body[key]) === jsonDigest(value))
   }, { timeout: 180_000 }).toBe(true)
-  return { source_version_id: version, intake_run: intake.id, approved_version: intake.output_version_id, recon_run: recon.id, sentinel_run: sentinel.id, delivery_run: queued.id, delivery_receipt_sha256: jsonDigest(receipt), approved_sample_sha256: jsonDigest(approved.sample) }
+  return { source_version_id: version, intake_run: intake.id, approved_version: intake.output_version_id, recon_run: recon.id,
+    sentinel_run: sentinel.id, sentinel_result: sentinelResult, delivery_run: queued.id, delivery_receipt_sha256: jsonDigest(receipt), approved_sample_sha256: jsonDigest(approved.sample) }
 }
 
 test('E3 lossless browser flow uses native revisions, publication and four consumers', async ({ page }, info) => {
@@ -333,6 +343,7 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
     const id = await obtainOriginal(page, item, output)
     await expect.poll(async () => terminal(await get(page, `/documents/originals/${id}`)), { timeout: 1_200_000, intervals: [1000, 3000, 5000] }).toBe(true)
     let original = await get(page, `/documents/originals/${id}`)
+    if (item.expected_extraction_id) expect(original.extraction.id).toBe(item.expected_extraction_id)
     expect(original.sha256).toBe(item.source_sha256)
     expect(original.template_id).toBe(item.template_id)
     expect(original.engine_snapshot.extraction_strategy).toBe(item.extraction_strategy)
@@ -472,9 +483,43 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
       await page.goto(`/datasets/${profile.dataset_id}?version=${publication.versions[structure]}`)
       await expect(page.getByRole('heading').first()).toBeVisible()
     }
+    let publicationIdempotency = null
+    if (item.publication_idempotency) {
+      const publication = original.publications.find((entry: Json) => entry.extraction_id === original.extraction.id)
+      requireCondition(publication?.batch_id && Object.keys(publication.versions || {}).length > 0, 'Idempotency requires this existing native publication')
+      const before = [...original.publications]
+      const repeated = await new NativeEvidenceJournal(join(output, item.id, 'publication')).perform('existing-publication-idempotency',
+        { original_id: id, batch_id: publication.batch_id, expected_versions: publication.versions },
+        () => post(page, csrf, `/documents/batches/${publication.batch_id}/publish`, {}, 200))
+      expect(repeated.id).toBe(publication.batch_id); expect(repeated.status).toBe('PUBLISHED')
+      expect(repeated.published_versions).toEqual(publication.versions)
+      const unchanged = await get(page, `/documents/originals/${id}`)
+      expect(unchanged.publications).toEqual(before); expect(unchanged.extraction).toEqual(original.extraction)
+      for (const [version, hash] of oldProfiles) expect(profileDigest(await get(page, `/dataset-versions/${version}/profile`))).toBe(hash)
+      publicationIdempotency = { batch_id: repeated.id, versions: repeated.published_versions, repeated_publish_created_no_versions: true }
+    }
     const consumers = []
     for (const fixture of item.consumers ? Array.isArray(item.consumers) ? item.consumers : [item.consumers] : []) consumers.push(await verifyConsumers(page, csrf, item, original, fixture,
       `D098 E3 ${manifest.run_id} ${item.id} ${fixture.structure}`, new NativeEvidenceJournal(join(output, item.id, fixture.structure))))
+    let consumerQuiet = null
+    if (item.consumer_quiet) {
+      const fixtures = item.consumers ? Array.isArray(item.consumers) ? item.consumers : [item.consumers] : []
+      requireCondition(fixtures.length === 2 && consumers.length === 2 && item.consumer_quiet.observation_ms >= 1000
+        && item.consumer_quiet.observation_ms <= 30000 && item.consumer_quiet.expected_delivery_posts === 2,
+      'The complete small header/detail fixture needs a bounded two-Delivery quiet observation')
+      requireCondition(new Set(fixtures.map(fixture => fixture.receiver_receipt_url)).size === 1, 'Both structures must use the same explicitly local receipt')
+      const response = await page.request.get(fixtures[0].receiver_receipt_url)
+      requireCondition(response.status() === 200, 'The completed receiver receipt is unavailable before quiet')
+      const body = await response.body(), receipt = JSON.parse(body.toString('utf8'))
+      expect(receipt.post_attempts).toBe(2); expect(receipt.accepted_batches).toBe(2)
+      expect(receipt.all_values_exact).toBe(true); expect(receipt.header_detail_identity_consistent).toBe(true)
+      const hash = digest(body)
+      await page.waitForTimeout(item.consumer_quiet.observation_ms)
+      const after = await page.request.get(fixtures[0].receiver_receipt_url)
+      requireCondition(after.status() === 200 && digest(await after.body()) === hash, 'A new send or population change occurred during the bounded observation')
+      consumerQuiet = { unchanged: true, observed_ms: item.consumer_quiet.observation_ms, receipt_sha256: hash,
+        delivery_POSTs: 2, requires_external_live_dispatch_proof: true, universal_exactly_once_guarantee: false }
+    }
     if (item.receiver_guard) {
       requireCondition(consumers.length === 0, 'A correction no-resend check must not create fresh consumer or Delivery runs')
       await page.waitForTimeout(item.receiver_guard.observation_ms)
@@ -484,7 +529,7 @@ test('E3 lossless browser flow uses native revisions, publication and four consu
       for (const [key, value] of Object.entries(item.receiver_guard.expected)) expect(body[key]).toEqual(value)
     }
     results.push({ id: item.id, scenarios: item.scenarios, provenance: item.provenance, original_id: id, source_sha256: original.sha256, extraction_id: original.extraction?.id, execution: original.execution, raw_artifacts: artifacts(original), publication_ids: original.publications.map((entry: Json) => entry.batch_id), consumers,
-      receiver_no_resend: item.receiver_guard ? { unchanged: true, observed_ms: item.receiver_guard.observation_ms, receipt_sha256: item.receiver_guard.baseline_sha256 } : null, actor: 'AUTOMATED_TEST_AGENT', human_corpus_acceptance: false })
+      publication_idempotency: publicationIdempotency, receiver_no_resend: consumerQuiet || (item.receiver_guard ? { unchanged: true, observed_ms: item.receiver_guard.observation_ms, receipt_sha256: item.receiver_guard.baseline_sha256 } : null), actor: 'AUTOMATED_TEST_AGENT', human_corpus_acceptance: false })
     await writeFile(join(output, `${item.id}.receipt.private.json`), JSON.stringify(results.at(-1), null, 2))
   }
   const organizationAfter = await get(page, '/documents/engines')
