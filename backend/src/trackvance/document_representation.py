@@ -16,6 +16,7 @@ from typing import Any
 from .document_normalization import canonical_hash
 
 VERSION = "TRACKVANCE_DOCUMENT_IR_V1"
+REUSED_VERSION = "TRACKVANCE_DOCUMENT_IR_V2_REUSED_INPUTS"
 MAX_ARTIFACT_BYTES = 16 * 1024**2
 
 
@@ -189,10 +190,16 @@ def _selection(value):
     return value
 
 
-def representation_from_events(events, *, source_sha256, configuration_sha256, expected_pages=None):
+def representation_from_events(events, *, source_sha256, configuration_sha256, expected_pages=None, approved_bindings=None):
     """Rebuild an IR from durable recognition events without calling any model."""
     pages, stage_pages, terminal, terminals = [], {}, None, []
     definition_sha = events[0].get("definition_sha256") if events else None
+    if approved_bindings:
+        from .document_recognition_compatibility import validate_recognition_bindings
+
+        validate_recognition_bindings(approved_bindings, events, source_sha256=source_sha256,
+            configuration_sha256=configuration_sha256)
+        definition_sha = next(iter(approved_bindings.values()))["current_definition_sha256"]
     if not isinstance(definition_sha, str) or re.fullmatch(r"[a-f0-9]{64}", definition_sha) is None:
         raise ValueError("RECOGNITION_DEFINITION_BINDING")
     probes = [event for event in events if event.get("kind") == "PHASE" and event.get("stage") == "NATIVE_SOURCE_PROBE"]
@@ -222,9 +229,13 @@ def representation_from_events(events, *, source_sha256, configuration_sha256, e
         bound = {key: value for key, value in event.items() if key not in {"event_sha256", "durable_refs"}}
         if event.get("event_sha256") != canonical_hash(bound):
             raise ValueError("RECOGNITION_EVENT_INTEGRITY")
-        if event.get("source_sha256") != source_sha256 or event.get("configuration_sha256") != configuration_sha256:
+        binding = (approved_bindings or {}).get(event.get("stage"), {})
+        reused = event.get("event_sha256") in binding.get("event_hashes", [])
+        expected_configuration = binding["configuration_sha256"] if reused else configuration_sha256
+        expected_definition = binding["definition_sha256"] if reused else definition_sha
+        if event.get("source_sha256") != source_sha256 or event.get("configuration_sha256") != expected_configuration:
             raise ValueError("RECOGNITION_EVENT_BINDING")
-        if event.get("definition_sha256") != definition_sha:
+        if event.get("definition_sha256") != expected_definition:
             raise ValueError("RECOGNITION_DEFINITION_BINDING")
         if event["kind"] == "TERMINAL":
             if expected_pages is not None and event.get("expected_pages") != expected_pages:
@@ -241,6 +252,7 @@ def representation_from_events(events, *, source_sha256, configuration_sha256, e
             raise ValueError("RECOGNITION_PAGE_COUNT_BINDING")
         page = {"id": stable_id(source_sha256, event["stage"], number, event.get("event_sha256")),
             "page_one_based": number, "stage": event["stage"], "attempt_id": event["attempt_id"],
+            "configuration_sha256": event["configuration_sha256"], "definition_sha256": event["definition_sha256"],
             "event_sha256": event.get("event_sha256"), "geometry": copy.deepcopy(event["payload"].get("page_geometry")),
             "recognition_status": event.get("recognition_status", event["payload"].get("recognition_status", "COMPLETE")),
             "image": copy.deepcopy(event["payload"].get("image")), "blocks": [], "tables": [],
@@ -280,18 +292,24 @@ def representation_from_events(events, *, source_sha256, configuration_sha256, e
             raise ValueError("DUPLICATE_STAGE_PAGE")
         stage_pages[key] = page["id"]
         pages.append(page)
-    return {"version": VERSION, "source_sha256": source_sha256, "configuration_sha256": configuration_sha256,
+    result = {"version": REUSED_VERSION if approved_bindings else VERSION,
+        "source_sha256": source_sha256, "configuration_sha256": configuration_sha256,
         "definition_sha256": definition_sha,
         "source_page_count_verified": bool(source_probe and source_probe["expected_pages"] is not None),
         "source_probe": source_probe,
         "expected_pages": expected_pages or (terminal or {}).get("expected_pages"), "pages": pages,
         "terminal": terminal, "terminals": terminals, "geometry_contract": "MEASURED_BLOCK_TABLE_QUERY_AND_UNKNOWN_ARE_DISTINCT",
         "row_identity": "SOURCE_OCCURRENCE_NOT_SKU"}
+    if approved_bindings:
+        result["recognition_bindings"] = copy.deepcopy(approved_bindings)
+    return result
 
 
 def validate_representation(value):
-    if not isinstance(value, dict) or value.get("version") != VERSION or not isinstance(value.get("pages"), list):
+    if not isinstance(value, dict) or value.get("version") not in {VERSION, REUSED_VERSION} or not isinstance(value.get("pages"), list):
         raise ValueError("DOCUMENT_IR_VERSION")
+    if value.get("version") == REUSED_VERSION and not value.get("recognition_bindings"):
+        raise ValueError("DOCUMENT_IR_REUSE_BINDINGS_REQUIRED")
     ids = [page["id"] for page in value["pages"]]
     if len(ids) != len(set(ids)) or len(ids) > 150:
         raise ValueError("DOCUMENT_IR_PAGE_IDENTITY")

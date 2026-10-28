@@ -54,6 +54,7 @@ def events(selection=None, *, raw=None, count=1, emitted=1, released=True, stage
     terminal = {"version": 1, "kind": "TERMINAL", "sequence": len(result), "request_id": "request",
         "attempt_id": "attempt", "source_sha256": "a" * 64, "configuration_sha256": "b" * 64, "definition_sha256":"c" * 64,
         "stage": stage, "status": "COMPLETE", "expected_pages": count, "emitted_pages": list(range(1, emitted + 1)),
+        "completed_pages": list(range(1, emitted + 1)),
         "pending_pages": [], "resources_released": released, "payload": {}}
     terminal["event_sha256"] = canonical_hash(terminal)
     return [*result, terminal]
@@ -73,7 +74,8 @@ def replay(items, config):
                 {"engine":{"pages":first["expected_pages"]}, "payload":{"native_incomplete_pages":[]}})]}}
         probe["event_sha256"] = canonical_hash(probe)
         items.insert(0, probe)
-    return adapt_saved_recognition(items, config, {"extraction_strategy": "QWEN_VISUAL"}, source_sha256="a" * 64)
+    return adapt_saved_recognition(items, config, {"extraction_strategy": "QWEN_VISUAL",
+        "llm_model": "qwen3.5:9b-q4_K_M", "paddle_model": "PaddleOCR-VL-1.6"}, source_sha256="a" * 64)
 
 
 def attest(data, config, items, independent=None):
@@ -178,14 +180,15 @@ def test_critical_code_not_verified_by_valid_json_or_same_model_repeat():
     assert "QUALITY_INDEPENDENT_SOURCE_REQUIRED:headers.0.reference" in extraction.engine["validation"]["issues"]
 
 
-def test_independent_row_matching_retains_repeated_occurrences():
+def test_copied_payload_without_independent_raw_source_cannot_establish_coverage():
     config = definition(table=True)
     row = {name:{"observed":value,"ambiguous":False,"alternatives":[]} for name,value in {"code":"0001","description":"Repeated"}.items()}
     items = events(selection(rows=[row, row]))
     data = replay(items, config)
     control = {"payload": copy.deepcopy(data["payload"])}
     extraction = attest(data, config, items, control)
-    assert quality_report(extraction, config)["status"] == "AUTO_VERIFIED"
+    assert quality_report(extraction, config)["status"] == "REVIEW_REQUIRED"
+    assert "QUALITY_ROW_COVERAGE:detail" in extraction.engine["validation"]["issues"]
     control["payload"]["tables"]["detail"].pop()
     extraction = attest(data, config, items, control)
     assert "QUALITY_ROW_COVERAGE:detail" in extraction.engine["validation"]["issues"]

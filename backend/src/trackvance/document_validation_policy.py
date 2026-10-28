@@ -13,7 +13,8 @@ from .document_engine import arithmetic_checks, cross_table_checks
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
 from .document_representation import validate_representation
 
-VALIDATOR_VERSION = "TRACKVANCE_DOCUMENT_EVIDENCE_098_V2"
+VALIDATOR_VERSION = "TRACKVANCE_DOCUMENT_EVIDENCE_098_V3"
+LEGACY_VALIDATOR_VERSION = "TRACKVANCE_DOCUMENT_EVIDENCE_098_V2"
 
 
 def cells(payload, definition):
@@ -200,9 +201,11 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
     complete = bool(source_bound and execution.get("recognition_complete") is True
         and execution.get("resources_released") is True and source.get("resources_released") is True
         and not execution.get("pending_pages"))
-    controls = _independent_candidates(data, independent)
-    corroborated, structure, row_alignment = _corroborated(payload, definition, controls, primary_stage=engine.get("route"))
-    verified, findings, coverage = {}, [], {}
+    from .document_evidence_v3 import corroboration_v3
+
+    evidence = corroboration_v3(data, definition, source_context=source, independent=independent)
+    corroborated, structure, row_alignment = evidence["paths"], evidence["structure"], evidence["row_alignment"]
+    verified, findings, coverage = {}, list(evidence["integrity_issues"]), {}
     if policy.get("version") != "EVIDENCE_V2":
         findings.append("QUALITY_POLICY_REQUIRED")
     if not source_bound:
@@ -210,13 +213,22 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
     if not complete:
         findings.append("RECOGNITION_INCOMPLETE_OR_RESOURCES_UNVERIFIED")
     emitted = set(execution.get("emitted_pages", []))
-    native = engine.get("route") == "DIGITAL_NATIVE"
+    native = any(control["stage"] == engine.get("route") and control["mechanism"] == "NATIVE"
+        for control in evidence["controls"])
     from .document_quality import _arithmetic_fields
     arithmetic_fields = _arithmetic_fields(definition)
     for path, cell, field in cells(payload, definition):
         check()
+        from .document_observation_uncertainty import unresolved_uncertainty
+
+        if isinstance(cell, dict) and unresolved_uncertainty(cell):
+            findings.append("QUALITY_OBSERVATION_UNCERTAINTY:" + path)
+            continue
         if not isinstance(cell, dict) or cell.get("validity") != "VALID" or not normalization_matches(cell, field):
             findings.append("QUALITY_VALUE:" + path)
+            continue
+        if path not in evidence["source_bound_paths"]:
+            findings.append("QUALITY_SOURCE_VALUE_BINDING:" + path)
             continue
         if cell.get("value") is None and not field.get("required", True):
             verified[path] = cell_hash(cell)
@@ -245,10 +257,12 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
             and all(occurrence_ids))
         if native:
             occurrences = bool(rows)  # The native parser retains individual source occurrences.
-        optional_absent = not rows and not table.get("required", True) and not payload.get("table_unparsed", {}).get(name)
+        optional_absent = bool(not rows and not table.get("required", True)
+            and not payload.get("table_unparsed", {}).get(name) and evidence["optional_absence"].get(name))
+        native_inventory = evidence["table_inventory"].get(name, {}).get(engine.get("route"), {})
         coverage[name] = bool(complete and not payload.get("structural_issues") and (optional_absent or (rows
             and not payload.get("table_unparsed", {}).get(name) and occurrences
-            and (native or structure.get(name)))))
+            and (native and native_inventory.get("covered") or structure.get(name)))))
         if not coverage[name]:
             findings.append("QUALITY_ROW_COVERAGE:" + name)
     arithmetic_checks_actual = [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]
@@ -259,10 +273,10 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
         "definition_sha256": canonical_hash(definition), "candidate_sha256": canonical_hash(payload),
         "source_context_sha256": canonical_hash(source), "durable_source_bound": source_bound,
         "recognition_complete": complete, "verified_cells": verified, "table_coverage": coverage,
-        "arithmetic": arithmetic, "issues": findings, "independent_extraction": native or any(
-            control.get("_mechanism") != mechanism_family(engine.get("route")) for control in controls
-            if mechanism_family(engine.get("route")) is not None),
-        "risk_policy": policy, "source_context": source, "row_alignment": row_alignment}
+        "arithmetic": arithmetic, "issues": findings, "independent_extraction": native or len({
+            control["mechanism"] for control in evidence["controls"]}) > 1,
+        "risk_policy": policy, "source_context": source, "row_alignment": row_alignment,
+        "recognition_sources": evidence["controls"], "source_table_inventory": evidence["table_inventory"]}
     proof["attestation_sha256"] = canonical_hash(proof)
     check()
     return proof
@@ -272,13 +286,20 @@ def lossless_quality_report(extraction, definition, *, ignore_incomplete=False):
     payload, engine = extraction.payload, extraction.engine
     proof = engine.get("validation") or {}
     signed = {key: value for key, value in proof.items() if key != "attestation_sha256"}
-    trusted = bool(proof.get("validator_version") == VALIDATOR_VERSION
+    # A new writer must not silently revoke or reclassify an immutable V2
+    # extraction when an existing publication is queried. V2 retains its exact
+    # signed definition/payload/risk-policy contract; only new attestations use V3.
+    trusted = bool(proof.get("validator_version") in {LEGACY_VALIDATOR_VERSION, VALIDATOR_VERSION}
         and proof.get("definition_sha256") == canonical_hash(definition)
         and proof.get("attestation_sha256") == canonical_hash(signed)
         and proof.get("durable_source_bound") is True
         and proof.get("risk_policy", {}).get("version") == "EVIDENCE_V2"
         and (extraction.reviewed or proof.get("candidate_sha256") == canonical_hash(payload)))
     findings, total, verified = [], 0, 0
+    if trusted and proof.get("validator_version") == VALIDATOR_VERSION and not extraction.reviewed:
+        # New worker proofs may contain source/history integrity exceptions in
+        # addition to per-cell and table findings. They must reach approval.
+        findings.extend(proof.get("issues", []))
     if not extraction.reviewed and (definition.get("validation_policy") or {}).get("version") != "EVIDENCE_V2":
         findings.append("QUALITY_POLICY_REQUIRED")
     if payload.get("structural_issues") and not extraction.reviewed:
@@ -308,7 +329,10 @@ def lossless_quality_report(extraction, definition, *, ignore_incomplete=False):
     if not arithmetic:
         findings.append("QUALITY_ARITHMETIC")
     status = "REVIEW_REQUIRED" if findings else "HUMAN_VERIFIED" if extraction.reviewed else "AUTO_VERIFIED"
-    return {"validator_version": VALIDATOR_VERSION, "status": status, "issues": list(dict.fromkeys(findings)),
+    reported_version = proof.get("validator_version")
+    if reported_version not in {LEGACY_VALIDATOR_VERSION, VALIDATOR_VERSION}:
+        reported_version = VALIDATOR_VERSION
+    return {"validator_version": reported_version, "status": status, "issues": list(dict.fromkeys(findings)),
         "checks": {"durable_source_bound": trusted, "recognition_complete": bool(execution.get("recognition_complete")),
             "scalar_and_evidence": verified == total, "arithmetic": arithmetic, "row_coverage": coverage,
             "independent_extraction": bool(trusted and proof.get("independent_extraction")), "duplicate_keys": True},

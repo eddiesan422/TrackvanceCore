@@ -5,8 +5,15 @@ import copy
 from decimal import Decimal
 
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
+from .document_observation_uncertainty import (
+    empty_observation,
+    null_alternatives_equivalent,
+    null_observations,
+    uncertainty_trace,
+    unresolved_uncertainty,
+)
 
-SELECTION_VERSION = "TRACKVANCE_CANDIDATE_SELECTION_098_V2"
+SELECTION_VERSION = "TRACKVANCE_CANDIDATE_SELECTION_098_V3"
 SECONDARY_VERSION = "TRACKVANCE_SELECTIVE_DECISION_098_V2"
 
 
@@ -48,17 +55,16 @@ def _located(cell, candidate):
 def _absent(cell):
     # An unobserved value with actual competing suggestions is an exception,
     # rather than an empty slot that another mechanism may silently fill.
-    def empty(value):
-        return value is None or isinstance(value, str) and not value.strip()
-
-    if not empty(cell.get("observed")):
+    if unresolved_uncertainty(cell) or not empty_observation(cell.get("observed")):
         return False
     for alternative in cell.get("candidate_alternatives", []):
         if isinstance(alternative, str) and alternative.strip():
             return False
         if isinstance(alternative, dict):
+            if alternative.get("eligible_for_field") is False:
+                continue
             observation = alternative.get("candidate", alternative)
-            if not empty(observation.get("observed")) or any(
+            if not empty_observation(observation.get("observed")) or any(
                     isinstance(value, str) and value.strip() for value in observation.get("alternatives", [])):
                 return False
     return True
@@ -76,7 +82,7 @@ def _resolve_cell(first, field, choices, selected, *, identity):
     eligible = [(candidate, cell) for candidate, cell in choices if _complete(candidate)
         and normalized_value(cell, field) is not None and _located(cell, candidate)]
     retained = [{"stage": candidate["stage"], "candidate": copy.deepcopy(cell)}
-        for candidate, cell in choices if cell.get("observed") is not None]
+        for candidate, cell in choices if cell.get("observed") is not None or unresolved_uncertainty(cell)]
     first["candidate_alternatives"] = [*first.get("candidate_alternatives", []), *retained]
     values = {normalized_value(cell, field) for _, cell in eligible}
     current = normalized_value(first, field)
@@ -86,17 +92,42 @@ def _resolve_cell(first, field, choices, selected, *, identity):
         first.update(value=None, validity="AMBIGUOUS")
         _record(first, selected, "CONTRADICTORY_NORMALIZED_OBSERVATIONS", identity)
         return first, {"case": "C", "reason": "CONTRADICTORY_NORMALIZED_OBSERVATIONS"}
-    if _absent(original) and eligible:
+    uncertain = [original] if unresolved_uncertainty(original) else []
+    uncertain.extend(cell for candidate, cell in choices if _complete(candidate)
+        and _located(cell, candidate) and unresolved_uncertainty(cell))
+    source_ambiguous = any((cell.get("observation_policy") or {}).get("source_ambiguous") for cell in uncertain)
+    anchor = original.get("observed") if current is not None else eligible[0][1].get("observed") if eligible else None
+    null_records = [record for cell in uncertain for record in null_observations(cell)]
+    equivalence = bool(uncertain and all(empty_observation(cell.get("observed")) for cell in uncertain)
+        and null_alternatives_equivalent(anchor, field, null_records))
+    if uncertain and not equivalence:
+        first.update(value=None, validity="AMBIGUOUS")
+        first["observation_policy"] = uncertainty_trace(unresolved=True,
+            reason="UNRESOLVED_SOURCE_CANDIDATE", source_ambiguous=source_ambiguous, signal_count=len(uncertain))
+        _record(first, selected, "UNRESOLVED_SOURCE_CANDIDATE", identity)
+        return first, {"case": "D", "reason": "UNRESOLVED_SOURCE_CANDIDATE"}
+    if equivalence:
+        first["observation_policy"] = uncertainty_trace(unresolved=False,
+            reason="DECLARED_NULL_ALTERNATIVES_EQUIVALENCE", source_ambiguous=source_ambiguous, signal_count=len(uncertain))
+    if (_absent(original) or equivalence and empty_observation(original.get("observed"))) and eligible:
         candidate, cell = eligible[0]
         result = copy.deepcopy(cell)
         result["candidate_alternatives"] = [{"stage": selected, "candidate": original},
             *copy.deepcopy(retained), *result.get("candidate_alternatives", [])]
         _record(result, candidate["stage"], "ABSENT_PRIMARY_SOURCE_BOUND_ALTERNATIVE", identity)
+        if equivalence:
+            result["observation_policy"] = uncertainty_trace(unresolved=False,
+                reason="DECLARED_NULL_ALTERNATIVES_EQUIVALENCE", source_ambiguous=source_ambiguous, signal_count=len(uncertain))
         return result, {"case": "A", "reason": "ABSENT_PRIMARY_SOURCE_BOUND_ALTERNATIVE",
             "selected_stage": candidate["stage"]}
     if current is not None and eligible:
         _record(first, selected, "DECLARED_NORMALIZATION_EQUIVALENCE", identity)
         return first, {"case": "B", "reason": "DECLARED_NORMALIZATION_EQUIVALENCE"}
+    if current is not None and equivalence:
+        first["observation_policy"] = uncertainty_trace(unresolved=False,
+            reason="DECLARED_NULL_ALTERNATIVES_EQUIVALENCE", source_ambiguous=source_ambiguous, signal_count=len(uncertain))
+        _record(first, selected, "DECLARED_NULL_ALTERNATIVES_EQUIVALENCE", identity)
+        return first, {"case": "B", "reason": "DECLARED_NULL_ALTERNATIVES_EQUIVALENCE"}
     if first.get("observed") is not None and current is None:
         _record(first, selected, "INVALID_OR_UNRESOLVED_PRIMARY_OBSERVATION", identity)
         return first, {"case": "D", "reason": "INVALID_OR_UNRESOLVED_PRIMARY_OBSERVATION"}

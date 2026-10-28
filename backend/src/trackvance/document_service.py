@@ -149,7 +149,7 @@ def template_dto(item):
             "created_at": iso(item.created_at)}
 
 
-def original_dto(db, original, *, detail=False):
+def original_dto(db, original, *, detail=False, user=None):
     extraction = extraction_for(db, original)
     result = {"id": original.id, "family_id": original.family_id, "template_id": original.template_id,
               "filename": original.filename, "sha256": original.sha256, "received_at": iso(original.received_at),
@@ -177,6 +177,25 @@ def original_dto(db, original, *, detail=False):
         if detail:
             result["recognition_artifacts"] = recognition_artifacts
     if detail:
+        if user is not None:
+            from .document_verification_service import verification_action_dto
+
+            result["verification_action"] = verification_action_dto(db, original, user)
+        pending_verification = None
+        if original.status in {"QUEUED", "RUNNING"}:
+            from .document_recognition_store import verification_request_for
+
+            pending_verification = verification_request_for(db, original)
+        if pending_verification:
+            result["verification_configuration"] = {
+                **copy.deepcopy(pending_verification["payload"]["configuration"]),
+                "snapshot_sha256": pending_verification["configuration_sha256"],
+                "base_snapshot_sha256": original.engine_snapshot_hash}
+        elif extraction and extraction.engine.get("verification_request"):
+            result["verification_configuration"] = {
+                **copy.deepcopy(extraction.engine["configuration"]),
+                "snapshot_sha256": extraction.engine["configuration_sha256"],
+                "base_snapshot_sha256": original.engine_snapshot_hash}
         result["template"] = template_dto(definition_for(db, original))
         result["extraction"] = extraction_dto(extraction) if extraction else None
         result["issues"] = issues(extraction, result["template"]["definition"])

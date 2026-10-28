@@ -2,7 +2,7 @@
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 241 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 242 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -281,6 +281,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/documents/originals/{id}/replay` | `documents:review` |
 | POST | `/documents/originals/{id}/retry` | `documents:write` |
 | POST | `/documents/originals/{id}/review` | `documents:review` |
+| POST | `/documents/originals/{id}/verify` | `documents:review` |
 | POST | `/exceptions/{id}/attachments` | `exceptions:write` |
 | POST | `/exceptions/{id}/comments` | `exceptions:write` |
 | POST | `/exceptions/{id}/validate` | `exceptions:write` |

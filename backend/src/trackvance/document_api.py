@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -79,6 +79,13 @@ class ReplayBody(BaseModel):
     expected_extraction_id: str | None
     reason: str = Field(min_length=1, max_length=1800)
     template_id: str | None = None
+
+
+class VerificationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_extraction_id: str = Field(min_length=1, max_length=100, strict=True)
+    expected_settings_version: int = Field(ge=0, strict=True)
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 class BatchBody(BaseModel):
@@ -252,7 +259,7 @@ async def upload(identity: str, files: list[UploadFile] = File(...), template_id
             audit(db, "DOCUMENT_RECEIVED", "document", original.id, "Recepción completa del original inmutable", user.name,
                   user.organization_id, {"family_id": item.id, "template_id": selected.id, "sha256": artifact.sha256,
                                          "duplicate_of_id": original.duplicate_of_id, "is_example": is_example})
-            result.append(original_dto(db, original))
+            result.append(original_dto(db, original, user=user))
         finally:
             temporary.unlink(missing_ok=True)
             await file.close()
@@ -262,7 +269,7 @@ async def upload(identity: str, files: list[UploadFile] = File(...), template_id
 
 @router.get("/originals/{identity}")
 def original(identity: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return original_dto(db, owned(db, DocumentOriginal, identity, user), detail=True)
+    return original_dto(db, owned(db, DocumentOriginal, identity, user), detail=True, user=user)
 
 
 @router.get("/originals/{identity}/file")
@@ -326,7 +333,7 @@ def review_original(identity: str, body: ReviewBody, db: Session = Depends(get_d
         db.commit()
     except OperationError:
         db.rollback()
-    return original_dto(db, item, detail=True)
+    return original_dto(db, item, detail=True, user=user)
 
 
 @router.post("/originals/{identity}/replay")
@@ -336,7 +343,7 @@ def replay_recognition(identity: str, body: ReplayBody, db: Session = Depends(ge
     item = owned(db, DocumentOriginal, identity, user)
     replay_original(db, item, body.expected_extraction_id, body.reason, user, body.template_id)
     db.commit()
-    return original_dto(db, item, detail=True)
+    return original_dto(db, item, detail=True, user=user)
 
 
 @router.get("/originals/{identity}/recognition-artifacts/{artifact_id}/content")
@@ -369,7 +376,7 @@ def cancel(identity: str, db: Session = Depends(get_db), user: User = Depends(cu
         job.status = "CANCELLED"
     audit(db, "DOCUMENT_CANCEL_REQUESTED", "document", item.id, "Cancelación documental solicitada", user.name, user.organization_id)
     db.commit()
-    return original_dto(db, item)
+    return original_dto(db, item, user=user)
 
 
 @router.post("/originals/{identity}/retry")
@@ -385,7 +392,20 @@ def retry(identity: str, db: Session = Depends(get_db), user: User = Depends(cur
     job.status, job.lease_owner, job.lease_until = "QUEUED", None, None
     audit(db, "DOCUMENT_RETRY_QUEUED", "document", item.id, "Reintento con plantilla y original congelados", user.name, user.organization_id)
     db.commit()
-    return original_dto(db, item)
+    return original_dto(db, item, user=user)
+
+
+@router.post("/originals/{identity}/verify")
+def verify(identity: str, body: VerificationBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_verification_service import queue_verification
+
+    item = owned(db, DocumentOriginal, identity, user)
+    queued = queue_verification(db, item, expected_extraction_id=body.expected_extraction_id,
+        expected_settings_version=body.expected_settings_version, reason=body.reason, user=user)
+    db.commit()
+    result = original_dto(db, item, detail=True, user=user)
+    result["verification_queue"] = queued
+    return result
 
 
 @router.get("/families/{identity}/batches")

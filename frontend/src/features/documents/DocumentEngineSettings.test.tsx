@@ -19,6 +19,22 @@ beforeEach(() => {
 })
 
 describe('Document engine configuration', () => {
+  it('requires an explicit new automatic policy and preserves the semantic opt-out', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...result, configuration: { ...configuration, provider: 'PADDLE_QWEN_LOCAL', extraction_strategy: 'PADDLE_STRUCTURED', use_llm: false }, providers: result.providers.map(provider => provider.id === 'PADDLE_QWEN_LOCAL' ? { ...provider, status: 'AVAILABLE', available: true, execution_enabled: true } : provider) })
+    renderApp(<DocumentEngineSettings familyId="family-1"/>, { permissions: ['documents:read', 'documents:configure'] })
+    const automatic = await screen.findByRole('checkbox', { name: 'Completar controles pendientes automáticamente' })
+    expect(automatic).not.toBeChecked()
+    await user.click(automatic)
+    expect(screen.getByRole('checkbox', { name: 'Interpretación semántica cuando sea necesaria' })).not.toBeChecked()
+    expect(screen.getByText(/como máximo una lectura de un mecanismo distinto/)).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo del cambio de motor'), 'Comprobaciones locales acotadas para documentos nuevos')
+    await user.click(screen.getByRole('button', { name: 'Guardar configuración auditada' }))
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/documents/engines?family_id=family-1', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify({ expected_version: 3, configuration: { ...configuration, provider: 'PADDLE_QWEN_LOCAL', extraction_strategy: 'PADDLE_STRUCTURED', use_llm: false, automatic_verification: 'BOUNDED_LOCAL_V1' }, reason: 'Comprobaciones locales acotadas para documentos nuevos' }),
+    })))
+  })
+
   it('shows observed availability and keeps prepared AWS execution disabled', async () => {
     renderApp(<DocumentEngineSettings/>, { permissions: ['documents:read', 'documents:configure'] })
     expect(await screen.findByRole('heading', { name: 'Motor y disponibilidad' })).toBeVisible()

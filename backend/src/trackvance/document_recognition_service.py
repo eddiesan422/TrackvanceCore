@@ -16,15 +16,12 @@ from .services import audit
 
 
 def recognition_source_context(events, source_sha256):
-    terminal = [event for event in events if event["kind"] == "TERMINAL"]
-    probes = [event for event in events if event["kind"] == "PHASE" and event["stage"] == "NATIVE_SOURCE_PROBE"]
-    expected = probes[0].get("expected_pages") if len(probes) == 1 else None
-    if type(expected) is not int or not 1 <= expected <= 50:
-        expected = 0
-    return {"source_sha256": source_sha256, "expected_pages": expected,
-        "persisted_event_hashes": [event["durable_refs"]["event_sha256"] for event in events],
-        "artifacts": [record for event in events for record in event["durable_refs"]["artifacts"]],
-        "resources_released": bool(terminal and all(event.get("resources_released") is True for event in terminal))}
+    from .document_automatic_verification import source_context
+
+    if any(not isinstance(event.get("durable_refs"), dict)
+           or not event["durable_refs"].get("event_sha256") for event in events):
+        raise OperationError(422, "DOCUMENT_RECOGNITION_INTEGRITY", "Falta la procedencia durable del reconocimiento.")
+    return source_context(events, source_sha256)
 
 
 def replay_original(db, original, expected_extraction_id, reason, user, template_id=None):
@@ -48,9 +45,15 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
         raise OperationError(409, "DOCUMENT_REPLAY_UNAVAILABLE", "Aún no hay páginas originales persistidas para reproducir.")
     artifact = owned(db, Artifact, original.artifact_id, user)
     storage_provider.materialize(artifact)
-    configuration = copy.deepcopy(original.engine_snapshot or {})
-    if not configuration or canonical_hash(configuration) != original.engine_snapshot_hash:
+    base_configuration = copy.deepcopy(original.engine_snapshot or {})
+    if not base_configuration or canonical_hash(base_configuration) != original.engine_snapshot_hash:
         raise OperationError(409, "DOCUMENT_ENGINE_SNAPSHOT_INTEGRITY", "La configuración guardada perdió integridad.")
+    configuration = base_configuration
+    previous = owned(db, DocumentExtraction, original.extraction_id, user) if original.extraction_id else None
+    if previous is not None and previous.engine.get("verification_request"):
+        configuration = copy.deepcopy(previous.engine.get("configuration") or {})
+        if (not configuration or canonical_hash(configuration) != previous.engine.get("configuration_sha256")):
+            raise OperationError(409, "DOCUMENT_ENGINE_SNAPSHOT_INTEGRITY", "La configuración de verificación conservada perdió integridad.")
     from .document_lossless import adapt_saved_recognition
     from .document_validation_policy import certify_lossless_candidate
 

@@ -11,7 +11,7 @@ import hashlib
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -39,12 +39,22 @@ class EngineConfiguration(BaseModel):
     max_parallel_jobs: int = Field(default=1, ge=1, le=4)
     use_llm: bool = True
     extraction_strategy: Literal["LEGACY", "NATIVE_FIRST", "QWEN_VISUAL", "PADDLE_STRUCTURED", "SELECTIVE"] = "LEGACY"
+    automatic_verification: Literal["OFF", "BOUNDED_LOCAL_V1"] = "OFF"
+
+    @model_validator(mode="after")
+    def automatic_verification_requires_local_lossless_route(self):
+        if self.automatic_verification != "OFF" and (self.provider != "PADDLE_QWEN_LOCAL"
+                or self.extraction_strategy == "LEGACY"):
+            raise ValueError("AUTOMATIC_VERIFICATION_REQUIRES_LOCAL_LOSSLESS_ROUTE")
+        return self
 
     @model_serializer(mode="wrap")
     def preserve_historical_configuration(self, handler):
         value = handler(self)
         if self.extraction_strategy == "LEGACY":
             value.pop("extraction_strategy", None)
+        if self.automatic_verification == "OFF":
+            value.pop("automatic_verification", None)
         return value
 
 
@@ -123,6 +133,10 @@ def save_settings(db, user, body, family_id=None):
         raise OperationError(422, "DOCUMENT_ENGINE_REASON_REQUIRED", "Registra el motivo del cambio.")
     _family(db, user.organization_id, family_id)
     config = body.configuration.model_dump()
+    if config.get("automatic_verification") == "BOUNDED_LOCAL_V1" and (
+            config["provider"] != "PADDLE_QWEN_LOCAL" or config.get("extraction_strategy", "LEGACY") == "LEGACY"):
+        raise OperationError(422, "DOCUMENT_VERIFICATION_STRATEGY_REQUIRED",
+            "La corroboración automática requiere una estrategia local sin pérdida en una configuración nueva.")
     if config["provider"] == "AWS_TEXTRACT":
         raise OperationError(422, "DOCUMENT_EXTERNAL_PROVIDER_DISABLED", "AWS real permanece bloqueado en 0.9.8; utiliza el simulador contractual.")
     item = settings_for(db, user.organization_id, family_id, exact=True)
@@ -173,9 +187,13 @@ def freeze_configuration(db, subject):
 
 def execute_provider(source, definition, configuration, *, legacy_runner, check, budget=None,
                      on_event=None, attempt_context=None):
+    from .document_automatic_verification import enabled
     from .document_inference_completion import LocalCandidateResult, canonical_hash
     from .document_quality import validate_candidate_contract
     provider = configuration["provider"]
+    if configuration.get("automatic_verification") not in {None, "OFF"} and not enabled(configuration):
+        raise OperationError(422, "DOCUMENT_VERIFICATION_STRATEGY_REQUIRED",
+            "La verificación automática requiere una estrategia local sin pérdida.")
     if provider == "AWS_TEXTRACT":
         raise OperationError(503, "DOCUMENT_EXTERNAL_PROVIDER_DISABLED", "No se permiten llamadas reales a AWS en 0.9.8.")
     if provider == "TESSERACT_LEGACY":

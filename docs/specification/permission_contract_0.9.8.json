@@ -1588,6 +1588,11 @@
     },
     {
       "method": "POST",
+      "path": "/documents/originals/{id}/verify",
+      "permission": "documents:review"
+    },
+    {
+      "method": "POST",
       "path": "/exceptions/{id}/attachments",
       "permission": "exceptions:write"
     },

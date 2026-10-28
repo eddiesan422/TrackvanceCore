@@ -89,6 +89,15 @@ def _read_engine_progress(path, previous):
             os.close(descriptor)
 
 
+def _verification_actor(db, original, request):
+    actor = db.get(User, request["payload"].get("actor_id"))
+    if not actor or actor.organization_id != original.organization_id or actor.deleted or not actor.active:
+        raise OperationError(403, "DOCUMENT_ACTOR_DISABLED", "El responsable de la verificación ya no está habilitado.")
+    permission(db, actor, "write")
+    permission(db, actor, "review")
+    return actor
+
+
 def run_engine(source, definition, *, check=lambda progress: None, preview_page=None,
                native_only=False, candidate_lines=None, deadline=None, control_deadline=False):
     if sys.platform != "linux":
@@ -176,6 +185,7 @@ def _commit_before_deadline(db, budget):
 def process_once(owner=None, active=None):
     attempt_started = time.monotonic()
     budget = None
+    verification_request = None
     owner = owner or uid()
     active = active if active is not None else {}
     eligible = or_(Job.status == "QUEUED", and_(Job.status == "RUNNING", Job.lease_until < utcnow()))
@@ -202,8 +212,19 @@ def process_once(owner=None, active=None):
         original.status, original.progress, original.started_at = "RUNNING", 0, utcnow()
         original.processing_phase = "EXTRACTION"
         try:
-            configuration = freeze_configuration(db, original)
+            from .document_recognition_store import verification_request_for
+
+            verification_request = verification_request_for(db, original, worker_attempt_number=job.attempts)
+            configuration = (verification_request["payload"]["configuration"] if verification_request
+                             else freeze_configuration(db, original))
             definition = definition_for(db, original).definition
+            if verification_request:
+                _verification_actor(db, original, verification_request)
+                if (verification_request["payload"].get("template_id") != original.template_id
+                        or verification_request.get("definition_sha256") != canonical_hash(definition)
+                        or configuration.get("automatic_verification") != "BOUNDED_LOCAL_V1"):
+                    raise OperationError(409, "DOCUMENT_VERIFICATION_CONFLICT", "La fuente o configuración de la verificación cambió.")
+                original.processing_phase = "VALIDATION"
             if configuration["provider"] == "PADDLE_QWEN_LOCAL":
                 budget = AttemptBudget(configuration["timeout_seconds"], started=attempt_started)
         except OperationError as error:
@@ -229,7 +250,9 @@ def process_once(owner=None, active=None):
         if progress == last_progress and time.monotonic() - last_check < 0.5:
             return
         with SessionLocal() as db:
-            original, job, _ = _authority(db, document_id, owner)
+            original, job, _ = _authority(db, document_id, owner, expected_attempt=worker_attempt_number)
+            if verification_request:
+                _verification_actor(db, original, verification_request)
             if budget is not None:
                 budget.require()
             original.progress = min(progress, 99)
@@ -254,10 +277,13 @@ def process_once(owner=None, active=None):
         with SessionLocal() as db:
             current, current_job, _ = _authority(db, document_id, owner,
                 expected_attempt=worker_attempt_number, allow_cancelled=terminal)
+            if verification_request:
+                _verification_actor(db, current, verification_request)
             refs = persist_recognition_event(db, current, event, attempt_id=attempt_id,
                 configuration_sha256=canonical_hash(configuration), job_id=job_id,
                 worker_attempt_number=worker_attempt_number)
-            current.processing_phase = event["stage"][:30]
+            current.processing_phase = ("VALIDATION" if event["stage"] in
+                {"AUTOMATIC_VERIFICATION", "RECOVERY_REUSE", "VERIFICATION_REQUEST"} else event["stage"][:30])
             current_job.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
             db.commit()
         saved_events.append({**event, "event_sha256": refs["event_sha256"], "durable_refs": refs})
@@ -268,18 +294,40 @@ def process_once(owner=None, active=None):
             budget.require(budget.extraction_deadline)
         source = storage_provider.materialize(artifact)
         if lossless:
-            from .document_recognition_store import latest_recognition_events
+            from .document_recognition_store import (
+                latest_recognition_events,
+                reusable_recognition_source,
+            )
 
+            reused_source = None
             with SessionLocal() as db:
                 current, _, _ = _authority(db, document_id, owner, expected_attempt=worker_attempt_number)
                 recovered = latest_recognition_events(db, current, hydrate=True)
+                if not recovered:
+                    reused_source = reusable_recognition_source(db, current, configuration, definition)
+                    if reused_source:
+                        recovered = reused_source["events"]
             if recovered and any(event["kind"] == "PAGE" for event in recovered):
-                from .document_lossless import adapt_saved_recognition
+                from .document_automatic_verification import enabled
+                from .document_lossless import adapt_saved_recognition, run_lossless
 
-                data = adapt_saved_recognition(recovered, definition, configuration, source_sha256=artifact.sha256,
-                    attempt_context={"recovery": True, "attempt_id": attempt_id})
-                data["engine"]["recovered_from_attempt"] = recovered[-1]["attempt_id"]
                 saved_events.extend(recovered)
+                if enabled(configuration):
+                    data = run_lossless(source, definition, configuration, legacy_runner=run_engine,
+                        check=checkpoint, budget=budget, on_event=persist_event, saved_events=recovered,
+                        attempt_context={"recovery": True, "attempt_id": attempt_id,
+                            "source_sha256": artifact.sha256, "configuration_sha256": canonical_hash(configuration),
+                            "job_id": job_id, "worker_attempt_number": worker_attempt_number,
+                            **({"recognition_bindings": verification_request["payload"].get("recognition_bindings", {})}
+                               if verification_request else {}),
+                            **({key: reused_source[key] for key in ("recognition_bindings", "source_original_id",
+                                "source_administrative_event_hashes")} if reused_source else {})})
+                else:
+                    data = adapt_saved_recognition(recovered, definition, configuration, source_sha256=artifact.sha256,
+                        attempt_context={"recovery": True, "attempt_id": attempt_id})
+                data["engine"]["recovered_from_attempt"] = recovered[-1]["attempt_id"]
+                if reused_source:
+                    data["engine"]["recovered_from_original_id"] = reused_source["source_original_id"]
             else:
                 data = execute_provider(source, definition, configuration, legacy_runner=run_engine, check=checkpoint,
                     budget=budget, on_event=persist_event, attempt_context={"attempt_id": attempt_id,
@@ -328,10 +376,25 @@ def process_once(owner=None, active=None):
                 budget.require()
             original, job, user = _authority(db, document_id, owner,
                 **({"expected_attempt": worker_attempt_number} if lossless else {}))
+            previous = None
+            if verification_request:
+                user = _verification_actor(db, original, verification_request)
+                if original.extraction_id != verification_request["payload"]["expected_extraction_id"]:
+                    raise OperationError(409, "DOCUMENT_VERIFICATION_CONFLICT", "La extracción cambió durante la verificación.")
+                previous = require_record(db, DocumentExtraction, original.extraction_id)
+                data["engine"]["verification_request"] = {
+                    "request_event_sha256": verification_request["event_sha256"],
+                    "previous_extraction_id": previous.id, "actor_id": user.id,
+                    "reason": verification_request["payload"]["reason"],
+                    "configuration_sha256": canonical_hash(configuration),
+                    "base_configuration_sha256": original.engine_snapshot_hash}
             # Recovered workers never append another automatic extraction after completion.
-            if not original.extraction_id:
+            if previous is not None or not original.extraction_id:
                 extraction = DocumentExtraction(organization_id=original.organization_id, document_id=original.id,
-                    template_id=original.template_id, revision=1, payload=data["payload"], payload_hash=digest(data["payload"]),
+                    template_id=original.template_id, revision=previous.revision + 1 if previous else 1,
+                    previous_id=previous.id if previous else None,
+                    reason=verification_request["payload"]["reason"] if verification_request else "Extracción automática",
+                    payload=data["payload"], payload_hash=digest(data["payload"]),
                     engine=data["engine"], reviewed=False, actor_id=user.id)
                 db.add(extraction)
                 db.flush()
@@ -347,7 +410,7 @@ def process_once(owner=None, active=None):
             job.status, job.lease_until = "SUCCESS", None
             audit(db, "DOCUMENT_EXTRACTED", "document", original.id, "Extracción documental conservada", user.name,
                   user.organization_id, {"extraction_id": extraction.id, "provider": configuration["provider"],
-                      "config_hash": original.engine_snapshot_hash, "sha256": extraction.payload_hash})
+                      "config_hash": canonical_hash(configuration), "sha256": extraction.payload_hash})
             if marker is not None:
                 audit(db, "DOCUMENT_INFERENCE_PARTIAL", "document_extraction", extraction.id,
                     "Candidato conservado; fase IA opcional incompleta requiere revisión del original completo", user.name,
@@ -360,14 +423,15 @@ def process_once(owner=None, active=None):
                     "Controles independientes satisfactorios; sin revisión humana declarada", user.name,
                     user.organization_id, {"status": report["status"], "validator_version": report["validator_version"],
                         "extraction_id": extraction.id, "validation_sha256": data["engine"]["validation"]["attestation_sha256"],
-                        "independent_extraction": True, "config_hash": original.engine_snapshot_hash})
+                        "independent_extraction": True, "config_hash": canonical_hash(configuration)})
             committed_after_deadline = _commit_before_deadline(db, budget)
         if committed_after_deadline:
             return True  # Durable result wins; publication is separately recoverable.
         # Publication is separately recoverable and does not discard successful OCR.
         with SessionLocal() as db:
             original = require_record(db, DocumentOriginal, document_id)
-            user = db.get(User, original.uploaded_by_id)
+            user = (_verification_actor(db, original, verification_request) if verification_request
+                    else db.get(User, original.uploaded_by_id))
             dispatch_individual(db, original, user)
             db.commit()
     except (OperationError, ArtifactIntegrityError, DocumentDeadlineExpired, DocumentCheckpointFailure) as error:

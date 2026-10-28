@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
+from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import select
@@ -25,6 +26,7 @@ EVENT_KIND = "DOCUMENT_RECOGNITION_EVENT"
 MAX_ARTIFACT_BYTES = 16 * 1024**2
 MAX_PAGE_BYTES = 32 * 1024**2
 MAX_EVENTS = 1000
+MAX_REUSE_CANDIDATES = 8
 SHA = re.compile(r"[0-9a-f]{64}")
 IDENTITY = re.compile(r"[A-Za-z0-9_.:-]{1,120}")
 
@@ -195,23 +197,204 @@ def latest_recognition_events(db, original, *, hydrate=False):
     if not grouped:
         return []
     current = max(grouped.values(), key=lambda group: (max(x["worker_attempt_number"] for x in group), max(x["created_at"] for x in group)))
-    return [x["event"] for x in current]
+    links = [row for row in current if row["event"].get("stage") in {"RECOVERY_REUSE", "VERIFICATION_REQUEST"}]
+    if not links:
+        return [x["event"] for x in current]
+    if len(links) != 1:
+        raise _error()
+    link = links[0]
+    payload = link["event"]["payload"]
+    hashes, attempts = payload.get("reused_event_hashes"), payload.get("reused_attempt_ids")
+    if (not isinstance(hashes, list) or not 1 <= len(hashes) <= MAX_EVENTS
+            or not all(isinstance(value, str) and SHA.fullmatch(value) for value in hashes)
+            or len(set(hashes)) != len(hashes)
+            or not isinstance(attempts, list) or not attempts
+            or not all(isinstance(value, str) and IDENTITY.fullmatch(value) for value in attempts)
+            or len(set(attempts)) != len(attempts)):
+        raise _error()
+    source_id = payload.get("source_original_id", original.id)
+    if not isinstance(source_id, str) or not 1 <= len(source_id) <= 64:
+        raise _error()
+    if source_id != original.id:
+        source = _reuse_source(db, original, source_id)
+        source_entries = recognition_journal(db, source, hydrate=hydrate)
+        if _has_peer_reuse(source_entries, source.id):
+            raise _error()
+        administrative = payload.get("source_administrative_event_hashes", [])
+        if (not isinstance(administrative, list)
+                or not all(isinstance(value, str) and SHA.fullmatch(value) for value in administrative)
+                or len(set(administrative)) != len(administrative)):
+            raise _error()
+        source_hashes = {row["event"]["event_sha256"]: row for row in source_entries}
+        if any(value not in source_hashes or source_hashes[value]["created_at"] > link["created_at"]
+               for value in administrative):
+            raise _error()
+    else:
+        source_entries = entries
+    by_hash = {row["event"]["event_sha256"]: row for row in source_entries}
+    if len(by_hash) != len(source_entries):
+        raise _error()
+    reused = []
+    bindings = payload.get("recognition_bindings")
+    for value in hashes:
+        row = by_hash.get(value)
+        if (row is None or row["event"]["attempt_id"] not in attempts or row in current
+                or row["created_at"] > link["created_at"]
+                or row["event"].get("source_sha256") != link["event"].get("source_sha256")
+                or source_id != original.id and row["event"] not in _model_source_events([row["event"]])
+                or not bindings and any(row["event"].get(key) != link["event"].get(key)
+                       for key in ("configuration_sha256", "definition_sha256"))):
+            raise _error()
+        reused.append(row["event"])
+    # A peer receipt is one hop into an older, same-family/source journal. All
+    # original event/RAW identities remain attached to that source document.
+    combined = reused + [x["event"] for x in current]
+    if source_id != original.id and (not bindings or not _complete_model_events(reused)):
+        raise _error()
+    if bindings:
+        from .document_recognition_compatibility import validate_recognition_bindings
+
+        try:
+            # Receipt equivalence checks the original RPC bytes and hashes, not
+            # the registry's unhydrated artifact records used by DTO listings.
+            verified_events = combined if hydrate else latest_recognition_events(db, original, hydrate=True)
+            validate_recognition_bindings(bindings, verified_events, source_sha256=original.sha256,
+                configuration_sha256=link["event"]["configuration_sha256"],
+                definition_sha256=link["event"].get("definition_sha256"))
+        except (ValueError, TypeError, KeyError) as error:
+            raise _error() from error
+    return combined
+
+
+def _reuse_source(db, original, source_id):
+    from .document_models import DocumentOriginal
+    from .scheduler import aware
+
+    source = db.get(DocumentOriginal, source_id)
+    if (source is None or source.id == original.id or source.organization_id != original.organization_id
+            or source.family_id != original.family_id or source.sha256 != original.sha256
+            or aware(source.created_at) >= aware(original.created_at)):
+        raise _error()
+    return source
+
+
+def _has_peer_reuse(entries, source_id):
+    return any(row["event"].get("stage") == "RECOVERY_REUSE"
+        and row["event"].get("payload", {}).get("source_original_id", source_id) != source_id for row in entries)
+
+
+def _model_source_events(events):
+    """Keep actual model/native inputs and outputs; administrative actions stay trace refs."""
+    return [event for event in events if event.get("kind") in {"PAGE", "TERMINAL"}
+        or any(item.get("kind") in {"NATIVE_SOURCE_PROBE_JSON", "QWEN_REQUEST_JSON"}
+            for item in event.get("payload", {}).get("artifacts", []))]
+
+
+def _complete_model_events(events):
+    pages = [event for event in events if event.get("kind") == "PAGE"]
+    if not pages:
+        return False
+    for stage in {event["stage"] for event in pages}:
+        group = [event for event in events if event["stage"] == stage]
+        terminal: dict[str, Any] = next((event for event in reversed(group) if event["kind"] == "TERMINAL"), {})
+        count = terminal.get("expected_pages")
+        expected = list(range(1, count + 1)) if type(count) is int and 1 <= count <= 50 else []
+        if (not expected or terminal.get("status") != "COMPLETE" or terminal.get("resources_released") is not True
+                or terminal.get("completed_pages") != expected
+                or sorted(event["page_one_based"] for event in group if event["kind"] == "PAGE"
+                    and event.get("payload", {}).get("recognition_status", "COMPLETE") == "COMPLETE") != expected):
+            return False
+    return True
+
+
+def reusable_recognition_source(db, original, configuration, definition):
+    """Find a bounded, compatible saved read before a new normal-flow primary.
+
+    Selection uses source ownership and input compatibility, never extracted
+    answers or approval quality. The worker persists the returned receipt under
+    its own fenced attempt before adapting any source events.
+    """
+    from .document_automatic_verification import enabled
+    from .document_models import DocumentOriginal
+    from .document_recognition_compatibility import approve_recognition_reuse
+    from .document_verification_service import _source_snapshots
+    from .models import Job
+
+    if not enabled(configuration):
+        return None
+    sources = db.scalars(select(DocumentOriginal).where(
+        DocumentOriginal.organization_id == original.organization_id,
+        DocumentOriginal.family_id == original.family_id, DocumentOriginal.sha256 == original.sha256,
+        DocumentOriginal.id != original.id, DocumentOriginal.created_at < original.created_at,
+        DocumentOriginal.extraction_id.is_not(None), DocumentOriginal.cancel_requested.is_(False),
+        DocumentOriginal.status.in_({"EXTRACTED", "AUTO_VERIFIED", "REVIEW_REQUIRED", "PUBLISHED"}))
+        .order_by(DocumentOriginal.created_at.desc(), DocumentOriginal.id).limit(MAX_REUSE_CANDIDATES))
+    for source in sources:
+        if db.scalar(select(Job.id).where(Job.document_id == source.id,
+                Job.organization_id == original.organization_id, Job.status.in_({"QUEUED", "RUNNING"}))):
+            continue
+        entries = recognition_journal(db, source)
+        if _has_peer_reuse(entries, source.id):
+            continue
+        resolved = latest_recognition_events(db, source, hydrate=True)
+        events = _model_source_events(resolved)
+        if not _complete_model_events(events):
+            continue
+        snapshots, definitions = _source_snapshots(db, source, configuration, definition)
+        try:
+            bindings = approve_recognition_reuse(events, source_sha256=original.sha256,
+                configuration=configuration, definition=definition,
+                configuration_snapshots=snapshots, definition_snapshots=definitions)
+        except (ValueError, KeyError, TypeError):
+            continue
+        hashes = [event["event_sha256"] for event in events]
+        return {"events": events, "recognition_bindings": bindings, "source_original_id": source.id,
+            "source_administrative_event_hashes": [event["event_sha256"] for event in resolved
+                if event["event_sha256"] not in set(hashes)]}
+    return None
+
+
+def verification_request_for(db, original, *, worker_attempt_number=None):
+    """Read the latest native request for this exact original and extraction.
+
+    Only the native service can persist these phase events. It freezes the new
+    verification configuration without changing the original base snapshot.
+    """
+    rows = [row for row in recognition_journal(db, original)
+            if row["event"].get("stage") == "VERIFICATION_REQUEST"
+            and row["event"].get("kind") == "PHASE"
+            and (worker_attempt_number is None or row["worker_attempt_number"] <= worker_attempt_number)]
+    if not rows:
+        return None
+    row = max(rows, key=lambda value: (value["worker_attempt_number"], value["created_at"]))
+    event = row["event"]
+    payload = event["payload"]
+    if payload.get("expected_extraction_id") != getattr(original, "extraction_id", None):
+        return None
+    if (payload.get("version") != "TRACKVANCE_VERIFICATION_REQUEST_098_V1"
+            or not isinstance(payload.get("configuration"), dict)
+            or hashlib.sha256(canonical(payload["configuration"])).hexdigest() != event["configuration_sha256"]
+            or payload.get("configuration_sha256") != event["configuration_sha256"]):
+        raise _error()
+    return copy.deepcopy(event)
 
 
 def recognition_metadata(db, original):
     events = latest_recognition_events(db, original)
     if not events:
         return None, []
-    pages = sorted({e["page_one_based"] for e in events if e["kind"] == "PAGE"})
+    primary = next((e["stage"] for e in events if e["kind"] == "PAGE"), None)
+    primary_events = [e for e in events if e["stage"] == primary]
+    pages = sorted({e["page_one_based"] for e in primary_events if e["kind"] == "PAGE"})
     count = max((e["expected_pages"] for e in events if type(e.get("expected_pages")) is int), default=0)
     expected = list(range(1, count + 1))
-    terminal = next((e for e in reversed(events) if e["kind"] == "TERMINAL"), None)
+    terminal = next((e for e in reversed(primary_events) if e["kind"] == "TERMINAL"), None)
     last = events[-1]
-    completed = sorted({e["page_one_based"] for e in events if e["kind"] == "PAGE"
+    completed = sorted({e["page_one_based"] for e in primary_events if e["kind"] == "PAGE"
         and e["payload"].get("recognition_status", "COMPLETE") == "COMPLETE"})
     if terminal:
         completed = [page for page in completed if page in terminal.get("completed_pages", [])]
-    incomplete = {e["page_one_based"] for e in events if e["kind"] == "PAGE"
+    incomplete = {e["page_one_based"] for e in primary_events if e["kind"] == "PAGE"
         and e["payload"].get("recognition_status") == "INCOMPLETE"}
     complete = bool(count and terminal and terminal.get("status") == "COMPLETE" and pages == expected
         and completed == expected and not incomplete)
@@ -225,14 +408,34 @@ def recognition_metadata(db, original):
         "emitted_pages": pages, "pending_pages": sorted(set(expected) - set(completed) | incomplete),
         "recognition_complete": complete, "validation_complete": False,
         "publication_complete": publication,
-        "resources_released": bool(terminal and terminal.get("resources_released") is True)}
+        "resources_released": bool(terminal and all(e.get("resources_released") is True for e in events if e["kind"] == "TERMINAL"))}
+    verification = next((e["payload"]["verification"] for e in reversed(events)
+                         if e.get("stage") == "AUTOMATIC_VERIFICATION"
+                         and isinstance(e.get("payload", {}).get("verification"), dict)), None)
+    if verification is not None:
+        execution["verification"] = copy.deepcopy(verification)
+    request_position = next((index for index in range(len(events) - 1, -1, -1)
+                             if events[index].get("stage") == "VERIFICATION_REQUEST"), -1)
+    progress_position = next((index for index in range(len(events) - 1, -1, -1)
+                              if events[index].get("stage") == "AUTOMATIC_VERIFICATION"), -1)
+    if (request_position > progress_position and original.status in {"QUEUED", "RUNNING"}
+            and events[request_position]["payload"].get("expected_extraction_id") == original.extraction_id):
+        execution["verification"] = {"policy_version": "TRACKVANCE_AUTOMATIC_VERIFICATION_098_V1",
+            "status": "QUEUED" if original.status == "QUEUED" else "VERIFYING", "primary_reused": True,
+            "requested_reason": events[request_position]["payload"].get("reason"),
+            "reasons_before": [], "remaining_reasons": [], "resolved_paths": [],
+            "scope": {"kind": "WHOLE_DOCUMENT", "pages": expected},
+            "max_secondary_calls": 1, "rereads_allowed": 0,
+            "automatic_approval_granted": False, "human_reviewed": False}
     metadata = [record for e in events for record in e["durable_refs"]["artifacts"]]
     return execution, metadata
 
 
 def recognition_artifact(db, original, artifact_id):
-    for row in recognition_journal(db, original):
-        for record in row["event"]["durable_refs"]["artifacts"]:
+    events = [row["event"] for row in recognition_journal(db, original)]
+    events.extend(latest_recognition_events(db, original))
+    for event in events:
+        for record in event["durable_refs"]["artifacts"]:
             if record["artifact_id"] == artifact_id:
                 artifact = db.get(Artifact, artifact_id)
                 if artifact and artifact.organization_id == original.organization_id:

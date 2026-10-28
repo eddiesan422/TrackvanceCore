@@ -4,6 +4,19 @@ import { renderApp } from '../../test/render'
 import DocumentExecution from './DocumentExecution'
 
 describe('Observed document execution', () => {
+  it('shows the pending verification snapshot and current journal instead of an old completed result', () => {
+    renderApp(<DocumentExecution document={{ status: 'QUEUED',
+      engine_snapshot: { provider: 'PADDLE_QWEN_LOCAL', configuration_version: 1, snapshot_sha256: 'original-snapshot' },
+      verification_configuration: { provider: 'PADDLE_QWEN_LOCAL', configuration_version: 2, snapshot_sha256: 'verification-snapshot', base_snapshot_sha256: 'original-snapshot' },
+      extraction: { engine: { verification: { status: 'CONTROLS_COMPLETED', remaining_reasons: [] } } },
+      execution: { stage: 'VERIFICATION_REQUEST', verification: { status: 'QUEUED', reasons_before: [], remaining_reasons: [], primary_reused: true, scope: { kind: 'WHOLE_DOCUMENT', pages: [1] } } },
+    }}/>)
+    expect(screen.getByText('Verificación en cola')).toBeVisible()
+    expect(screen.queryByText('Controles adicionales completados')).not.toBeInTheDocument()
+    expect(screen.getByText(/Configuración congelada · versión 2 · verification-snapshot/)).toBeVisible()
+    expect(screen.getByText(/el motor original conserva su snapshot anterior/)).toBeVisible()
+  })
+
   it('shows frozen engine settings and observed timing without inventing human review', () => {
     renderApp(<DocumentExecution document={{ status: 'RUNNING', phase: 'VALIDATION', progress: 75, quality: { status: 'AUTO_VERIFIED', validator_version: 'idp098-v1' }, engine_snapshot: { provider: 'PADDLE_QWEN_LOCAL', paddle_model: 'PaddleOCR-VL-1.6', llm_model: 'Qwen3.5 9B', use_llm: true, configuration_version: 4, snapshot_sha256: 'immutable-snapshot' }, extraction: { engine: { resources: { elapsed_seconds: 2.5 } } } }}/>)
     expect(screen.getByText('Fase: Validación independiente')).toBeVisible()

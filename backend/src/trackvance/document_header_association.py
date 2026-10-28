@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from .document_observation_uncertainty import OBSERVATION_POLICY_VERSION, null_uncertainty
+
 VERSION = "DECLARED_HEADER_ASSOCIATION_V1"
 SOURCE_ASSOCIATION = "DECLARED_LABEL_CONTEXT_V1"
 
@@ -25,30 +27,37 @@ def selection_source_association(raw, field, page, evidence):
         "label_refs": [evidence], "value_refs": [evidence], "region": [0, 0, 1, 1],
         "geometry_kind": "QUERY_REGION", "source_context": witness,
         "witness_kind": "MODEL_REPORTED_LITERAL_NOT_INDEPENDENT_CORROBORATION"}
-    if raw.get("observed") is None:
-        return {**trace, "eligible": False, "reason": "NO_VALUE_OBSERVED_ON_THIS_PAGE"}
     rules = [rule for rule in [field.get("visual"), *field.get("visual_alternatives", [])] if rule]
     scoped = [rule for rule in rules if rule.get("page") == page]
     if not scoped:
         return {**trace, "eligible": False, "reason": "PAGE_OUTSIDE_DECLARED_SOURCE_CONTEXT"}
+    uncertain_null = null_uncertainty(raw.get("observed"), raw.get("ambiguous", False), raw.get("alternatives", []))
+    if raw.get("observed") is None and not uncertain_null:
+        return {**trace, "eligible": False, "reason": "NO_VALUE_OBSERVED_ON_THIS_PAGE"}
     if (not isinstance(witness, dict) or set(witness) != {"anchor_label", "section_label"}
             or any(value is not None and (not isinstance(value, str) or len(value) > 160)
                 for value in witness.values())):
-        return {**trace, "eligible": False, "reason": "LITERAL_SOURCE_CONTEXT_MISSING_OR_INVALID"}
+        return {**trace, "eligible": False, "reason": "LITERAL_SOURCE_CONTEXT_MISSING_OR_INVALID",
+            **({"uncertainty_relevant": True, "observation_policy": OBSERVATION_POLICY_VERSION} if uncertain_null else {})}
     anchored = [rule for rule in scoped if label_key(witness["anchor_label"] or "")
         in {label_key(label) for label in [rule.get("label"), *rule.get("label_aliases", [])] if label}]
     if not anchored:
-        return {**trace, "eligible": False, "reason": "OBSERVED_ANCHOR_NOT_DECLARED_FOR_FIELD"}
+        return {**trace, "eligible": False, "reason": "OBSERVED_ANCHOR_NOT_DECLARED_FOR_FIELD",
+            **({"uncertainty_relevant": True, "observation_policy": OBSERVATION_POLICY_VERSION}
+                if uncertain_null and not witness["anchor_label"] else {})}
     sectioned = [rule for rule in anchored if not rule.get("section_label")
         or label_key(witness["section_label"] or "") == label_key(rule["section_label"])]
     if not sectioned:
-        return {**trace, "eligible": False, "reason": "OBSERVED_SECTION_NOT_DECLARED_FOR_FIELD"}
+        return {**trace, "eligible": False, "reason": "OBSERVED_SECTION_NOT_DECLARED_FOR_FIELD",
+            **({"uncertainty_relevant": True, "observation_policy": OBSERVATION_POLICY_VERSION}
+                if uncertain_null and not witness["section_label"] else {})}
     # Full-page Qwen observations have no measured value/anchor box. A literal
     # caption cannot claim that a narrower ROI or horizontal bound was met.
     supported = [rule for rule in sectioned if rule.get("region") == [0, 0, 1, 1]
         and (not rule.get("section_bounds") or rule["section_bounds"] == [0, 1])]
     if not supported:
-        return {**trace, "eligible": False, "reason": "DECLARED_REGION_REQUIRES_MEASURED_SOURCE_GEOMETRY"}
+        return {**trace, "eligible": False, "reason": "DECLARED_REGION_REQUIRES_MEASURED_SOURCE_GEOMETRY",
+            **({"uncertainty_relevant": True, "observation_policy": OBSERVATION_POLICY_VERSION} if uncertain_null else {})}
     return {**trace, "eligible": True, "reason": "DECLARED_LITERAL_ANCHOR_AND_CONTEXT",
         "rule": "DECLARED_VISUAL_ANCHOR_CONTEXT",
         "declared_context": [{key: rule[key] for key in ("page", "label", "label_aliases", "section_label", "direction", "region")

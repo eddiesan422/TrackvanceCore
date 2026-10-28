@@ -10,6 +10,27 @@ const item = { id: 'source-1', status: 'REVIEW_REQUIRED', extraction: { id: 'ext
 beforeEach(() => vi.clearAllMocks())
 
 describe('Durable recognition results and replay', () => {
+  it('queues native verification with both extraction and settings guards without declaring human review', async () => {
+    const user = userEvent.setup(), refresh = vi.fn()
+    vi.mocked(post).mockResolvedValue({ status: 'QUEUED', extraction: item.extraction })
+    renderApp(<DocumentRecognition document={{ ...item, verification_action: { available: true, configuration_version: 4 } }} canDownload canReplay refresh={refresh}/>)
+    await user.type(screen.getByLabelText('Motivo de la verificación automática'), 'Completar controles con evidencia independiente')
+    await user.click(screen.getByRole('button', { name: 'Completar comprobaciones pendientes' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/originals/source-1/verify', {
+      expected_extraction_id: 'extraction-1', expected_settings_version: 4, reason: 'Completar controles con evidencia independiente',
+    }))
+    expect(await screen.findByText(/Estado: QUEUED/)).toBeVisible()
+    expect(screen.getByText(/no se declara una revisión humana/)).toBeVisible()
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('shows a concrete configuration block and cannot queue a control while unavailable', () => {
+    renderApp(<DocumentRecognition document={{ ...item, verification_action: { available: false, configuration_version: 1, message: 'Guarda una configuración nueva para completar los controles.' } }} canDownload canReplay refresh={vi.fn()}/>)
+    expect(screen.getByRole('button', { name: 'Completar comprobaciones pendientes' })).toBeDisabled()
+    expect(screen.getByText('Guarda una configuración nueva para completar los controles.')).toBeVisible()
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('requests a new adaptation from saved results and retains the original result link', async () => {
     const user = userEvent.setup(), refresh = vi.fn()
     vi.mocked(post).mockResolvedValue({ status: 'REVIEW_REQUIRED', extraction: { revision: 2 } })

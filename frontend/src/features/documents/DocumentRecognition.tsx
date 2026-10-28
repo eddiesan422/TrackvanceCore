@@ -7,6 +7,7 @@ export default function DocumentRecognition({ document: item, canDownload, canRe
   document: RecordData; canDownload: boolean; canReplay: boolean; refresh: () => Promise<unknown>; resource?: 'originals' | 'builder/references'
 }) {
   const [reason, setReason] = useState('')
+  const [verificationReason, setVerificationReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [notice, setNotice] = useState('')
@@ -32,6 +33,22 @@ export default function DocumentRecognition({ document: item, canDownload, canRe
       <Field label="Motivo de la nueva adaptación"><input value={reason} maxLength={1800} disabled={busy || blocked} onChange={event => setReason(event.target.value)}/></Field>
       <button type="submit" className="button secondary" disabled={busy || blocked || !reason.trim()}>Adaptar resultados guardados sin nueva inferencia</button>
       {blocked && <small>Espera el cierre de la ejecución activa y la liberación de sus recursos antes de adaptar sus resultados.</small>}
+    </form>}
+    {canReplay && resource === 'originals' && item.verification_action && <form onSubmit={async event => {
+      event.preventDefault(); setBusy(true); setError(null); setNotice('')
+      try {
+        const result = await post(`/documents/originals/${item.id}/verify`, {
+          expected_extraction_id: item.extraction?.id,
+          expected_settings_version: item.verification_action.configuration_version,
+          reason: verificationReason.trim(),
+        })
+        setNotice(`Verificación solicitada. Estado: ${result.status}. Se conserva la extracción anterior hasta completar los controles; no se declara una revisión humana.`)
+        setVerificationReason(''); await refresh()
+      } catch (failure) { setError(failure) } finally { setBusy(false) }
+    }}>
+      <Field label="Motivo de la verificación automática"><input value={verificationReason} maxLength={1800} disabled={busy || blocked || !item.verification_action.available} onChange={event => setVerificationReason(event.target.value)}/></Field>
+      <button type="submit" className="button secondary" disabled={busy || blocked || !item.verification_action.available || !verificationReason.trim()}>Completar comprobaciones pendientes</button>
+      {!item.verification_action.available && <small>{item.verification_action.message || item.verification_action.blocked_reason || 'La verificación no está disponible para este resultado. Revisa los controles pendientes, la configuración y el cierre de recursos antes de continuar.'}</small>}
     </form>}
     {notice && <Notice success>{notice}</Notice>}{!!error && <ErrorState error={error}/>}
   </section>

@@ -15,6 +15,13 @@ from .document_engine import arithmetic_checks, cross_table_checks, extract
 from .document_header_association import header_observations, selection_source_association
 from .document_inference_completion import AttemptBudget
 from .document_normalization import canonical_hash, normalize_observation
+from .document_observation_uncertainty import (
+    OBSERVATION_POLICY_VERSION,
+    empty_observation,
+    null_alternatives_equivalent,
+    null_uncertainty,
+    uncertainty_trace,
+)
 from .document_representation import representation_from_events, stable_id, validate_representation
 from .operations_common import OperationError
 
@@ -32,30 +39,56 @@ def _origin(page, evidence, *, region=None, geometry_kind="QUERY_REGION"):
 def _cell(observed, field, page=None, evidence=None, *, ambiguous=False, alternatives=None):
     refs = [evidence] if evidence else []
     value, validity, normalization = normalize_observation(observed, field, evidence_refs=refs)
-    return {"observed": observed, "value": None if ambiguous else value,
+    source_ambiguous = ambiguous
+    ambiguous = bool(ambiguous or null_uncertainty(observed, alternatives=alternatives or []))
+    result = {"observed": observed, "value": None if ambiguous else value,
         "validity": "AMBIGUOUS" if ambiguous else validity, "confidence": None, "reviewed": False,
         "origin": _origin(page, evidence) if page else None, "geometry_kind": "QUERY_REGION" if page else "UNKNOWN",
         "evidence_refs": refs, "normalization": normalization,
         "candidate_alternatives": copy.deepcopy(alternatives or [])}
+    if ambiguous:
+        result["observation_policy"] = uncertainty_trace(unresolved=True,
+            reason="UNRESOLVED_SOURCE_OBSERVATION", source_ambiguous=source_ambiguous)
+    return result
 
 
 def _resolve(observations, field):
-    nonempty = [item for item in observations if item[0] is not None]
-    if not nonempty:
-        return _cell(None, field)
+    retained_source = [item for item in observations if not empty_observation(item[0])
+        or null_uncertainty(item[0], item[3], item[4])]
+    if not retained_source:
+        empty_sources = [item for item in observations if item[0] is not None]
+        if not empty_sources:
+            return _cell(None, field)
+        first = empty_sources[0]
+        retained = [{"observed": item[0], "page": item[1], "evidence_refs": [item[2]],
+            "ambiguous": item[3], "alternatives": copy.deepcopy(item[4])} for item in empty_sources]
+        result = _cell(first[0], field, first[1], first[2], alternatives=retained)
+        result["evidence_refs"] = [item[2] for item in empty_sources]
+        result["normalization"]["evidence_refs"] = list(result["evidence_refs"])
+        return result
+    nonempty = [item for item in retained_source if not empty_observation(item[0])]
+    null_signals = [{"observed": item[0], "ambiguous": item[3], "alternatives": copy.deepcopy(item[4]),
+        **({"context_unresolved": item[5]} if len(item) > 5 else {})}
+        for item in retained_source if empty_observation(item[0])]
     groups: dict[tuple, list[tuple]] = {}
     for observed, page, evidence, ambiguous, alternatives in nonempty:
         value, validity, _ = normalize_observation(observed, field, evidence_refs=[evidence])
         comparable = Decimal(value) if validity == "VALID" and value is not None and field["logical_type"] == "DECIMAL" else value
         key = (comparable, validity)
         groups.setdefault(key, []).append((observed, page, evidence, ambiguous, alternatives))
-    first = nonempty[0]
-    ambiguous = len(groups) != 1 or any(item[3] for item in nonempty)
+    first = nonempty[0] if nonempty else retained_source[0]
+    null_equivalent = bool(nonempty and null_alternatives_equivalent(first[0], field, null_signals))
+    ambiguous = len(groups) != 1 or any(item[3] for item in nonempty) or bool(null_signals and not null_equivalent)
     retained = [{"observed": item[0], "page": item[1], "evidence_refs": [item[2]],
-        "ambiguous": item[3], "alternatives": copy.deepcopy(item[4])} for item in nonempty]
+        "ambiguous": item[3], "alternatives": copy.deepcopy(item[4]),
+        **({"context_unresolved": item[5]} if len(item) > 5 else {})} for item in retained_source]
     result = _cell(first[0], field, first[1], first[2], ambiguous=ambiguous, alternatives=retained)
-    result["evidence_refs"] = [item[2] for item in nonempty]
+    result["evidence_refs"] = [item[2] for item in retained_source]
     result["normalization"]["evidence_refs"] = list(result["evidence_refs"])
+    if null_signals:
+        result["observation_policy"] = uncertainty_trace(unresolved=ambiguous,
+            reason="DECLARED_NULL_ALTERNATIVES_EQUIVALENCE" if null_equivalent and not ambiguous else "UNRESOLVED_NULL_SOURCE_OBSERVATION",
+            source_ambiguous=any(item["ambiguous"] for item in null_signals), signal_count=len(null_signals))
     return result
 
 
@@ -73,6 +106,7 @@ def map_representation(representation, definition, *, stage=None):
         "table_unparsed": {table["name"]: [] for table in definition["tables"]}, "lines": [],
         "pages": sorted({page["page_one_based"] for page in pages}), "row_provenance": {},
         "candidate_history": [], "document_representation": copy.deepcopy(representation), "semantic_conflicts": []}
+    payload["observation_policy"] = {"version": OBSERVATION_POLICY_VERSION}
     payload["structural_issues"] = [{"source_table_id": table["id"], "errors": list(table["errors"])}
         for page in pages for table in page["tables"] if table.get("errors")]
     headers: dict[str, list[tuple]] = {field["name"]: [] for field in definition["fields"]}
@@ -106,7 +140,8 @@ def map_representation(representation, definition, *, stage=None):
                     value["geometry_kind"] = "MEASURED_SOURCE" if value["origin"] else "UNKNOWN"
                     row[field["name"]] = value
         mapped.update(document_representation=copy.deepcopy(representation), row_provenance={},
-            candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []))
+            candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []),
+            observation_policy={"version": OBSERVATION_POLICY_VERSION})
         return mapped
     documentary_headers, associations = header_observations(pages, definition["fields"])
     rejected_headers: dict[str, list[dict]] = {}
@@ -120,11 +155,15 @@ def map_representation(representation, definition, *, stage=None):
                 relation = selection_source_association(raw, field, ordinal, evidence)
                 if relation is not None:
                     if not relation["eligible"]:
-                        if raw.get("observed") is not None:
+                        if not empty_observation(raw.get("observed")) or null_uncertainty(
+                                raw.get("observed"), raw.get("ambiguous", False), raw.get("alternatives", [])):
                             rejected_headers.setdefault(field["name"], []).append({"observed": raw["observed"],
                                 "page": ordinal, "evidence_refs": [evidence], "ambiguous": raw.get("ambiguous", False),
                                 "alternatives": copy.deepcopy(raw.get("alternatives", [])),
                                 "eligible_for_field": False, "association": copy.deepcopy(relation)})
+                        if relation.get("uncertainty_relevant"):
+                            headers[field["name"]].append((raw.get("observed"), ordinal, evidence,
+                                raw.get("ambiguous", False), raw.get("alternatives", []), relation["reason"]))
                         continue
                     associations[field["name"]].append(relation)
                 headers[field["name"]].append((raw.get("observed"), ordinal,
@@ -251,10 +290,15 @@ def _execution(representation, stage):
 def adapt_saved_recognition(events, definition, configuration, *, source_sha256, attempt_context=None):
     if not events:
         raise OperationError(409, "DOCUMENT_RECOGNITION_MISSING", "No hay reconocimiento guardado para reproducir.")
-    configuration_sha = events[0]["configuration_sha256"]
+    bindings = (attempt_context or {}).get("recognition_bindings") or next((
+        event["payload"]["recognition_bindings"] for event in reversed(events)
+        if event.get("stage") in {"VERIFICATION_REQUEST", "RECOVERY_REUSE"}
+        and event.get("payload", {}).get("recognition_bindings")), None)
+    configuration_sha = canonical_hash(configuration) if bindings else events[0]["configuration_sha256"]
     try:
         representation = representation_from_events(events, source_sha256=source_sha256,
-            configuration_sha256=configuration_sha, expected_pages=(attempt_context or {}).get("expected_pages"))
+            configuration_sha256=configuration_sha, expected_pages=(attempt_context or {}).get("expected_pages"),
+            **({"approved_bindings": bindings} if bindings else {}))
     except (ValueError, TypeError, KeyError) as error:
         raise OperationError(422, "DOCUMENT_RECOGNITION_INTEGRITY", "El reconocimiento guardado perdió integridad o excede sus límites.") from error
     stages = list(dict.fromkeys(page["stage"] for page in representation["pages"]))
@@ -272,7 +316,7 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
         _retain_alternatives(payload, alternatives, definition, stage)
         payload["arithmetic"] = arithmetic_checks(payload, definition)
         payload["cross_totals"] = cross_table_checks(payload, definition)
-    return {"payload": payload, "engine": {"key": "TRACKVANCE_LOSSLESS_098_V1", "lossless_contract_version": 1,
+    result = {"payload": payload, "engine": {"key": "TRACKVANCE_LOSSLESS_098_V1", "lossless_contract_version": 1,
         "route": stage, "configuration": copy.deepcopy(configuration), "configuration_sha256": canonical_hash(configuration),
         "recognition_configuration_sha256": configuration_sha, "source_sha256": source_sha256,
         "recognition_definition_sha256": representation["definition_sha256"], "definition_sha256": canonical_hash(definition),
@@ -282,6 +326,14 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
             if event.get("kind") == "PHASE" and event.get("stage") == "SELECTIVE_DECISION"],
         "execution": _execution(representation, stage), "replay_without_inference_supported": True,
         "validation_policy": copy.deepcopy(definition.get("validation_policy")), "candidate_stages": stages}}
+    from .document_automatic_verification import recognition_sources
+    from .document_observation_uncertainty import OBSERVATION_POLICY_VERSION
+
+    result["engine"]["recognition_sources"] = recognition_sources(events, configuration, bindings)
+    if bindings:
+        result["engine"]["recognition_bindings"] = copy.deepcopy(bindings)
+    result["engine"]["observation_policy_version"] = OBSERVATION_POLICY_VERSION
+    return result
 
 
 def _retain_alternatives(payload, candidates, definition, selected):
@@ -353,12 +405,14 @@ def _native_events(native, source_sha, configuration_sha, context, *, definition
 
 
 def run_lossless(source, definition, configuration, *, legacy_runner, check, budget, on_event=None,
-                 attempt_context=None, recognize=None):
+                 attempt_context=None, recognize=None, saved_events=None):
+    from . import document_automatic_verification as verification
+
     budget = budget or AttemptBudget(configuration.get("timeout_seconds", 300))
     context = dict(attempt_context or {})
     context.setdefault("attempt_id", uuid.uuid4().hex)
     reference_discovery = context.get("purpose") == "REFERENCE_DISCOVERY"
-    events = []
+    events = copy.deepcopy(saved_events or [])
     with source.open("rb") as stream:
         source_sha = hashlib.file_digest(stream, "sha256").hexdigest()
     configuration_sha = canonical_hash(configuration)
@@ -377,50 +431,121 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         events.append(copy.deepcopy(event))
         return reference
 
-    from .document_local_inference import _sufficient
-    native = legacy_runner(source, definition, check=check, native_only=True, deadline=budget.extraction_deadline)
-    count = native["engine"].get("pages")
-    source_count = count if type(count) is int and 1 <= count <= 50 else None
-    raw_probe = json.dumps(native, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    probe = {"version":1, "kind":"PHASE", "sequence":1, "request_id":uuid.uuid4().hex,
-        "attempt_id":context["attempt_id"], "source_sha256":source_sha, "configuration_sha256":configuration_sha,
-        "definition_sha256":canonical_hash(definition), "stage":"NATIVE_SOURCE_PROBE", "page_one_based":None,
-        "expected_pages":source_count, "payload":{"artifacts":[{"kind":"NATIVE_SOURCE_PROBE_JSON",
-            "media_type":"application/json", "sha256":hashlib.sha256(raw_probe).hexdigest(), "bytes":len(raw_probe),
-            "content_b64":base64.b64encode(raw_probe).decode("ascii")}], "source_page_count_verified":source_count is not None}}
-    probe["event_sha256"] = canonical_hash(probe)
-    accept(probe)
-    native_complete = (type(count) is int and 1 <= count <= 50
-        and native["payload"].get("pages") == list(range(1, count + 1)))
-    if native_complete and _sufficient(native["payload"], definition):
-        for event in _native_events(native, source_sha, configuration_sha, context, definition_sha256=canonical_hash(definition)):
-            accept(event)
-        if events:
-            return completed(adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context))
-    context["expected_pages"] = source_count
+    def phase(stage, payload):
+        event = {"version": 1, "kind": "PHASE", "sequence": 0, "request_id": uuid.uuid4().hex,
+                 "attempt_id": context["attempt_id"], "source_sha256": source_sha,
+                 "configuration_sha256": configuration_sha, "definition_sha256": canonical_hash(definition),
+                 "stage": stage, "page_one_based": None, "expected_pages": context.get("expected_pages"),
+                 "payload": payload}
+        event["event_sha256"] = canonical_hash(event)
+        accept(event)
+
+    native_ready = False
+    if events:
+        probes = [e for e in events if e.get("stage") == "NATIVE_SOURCE_PROBE"]
+        context["expected_pages"] = probes[0].get("expected_pages") if len(probes) == 1 else None
+        # The new attempt points to immutable previous events instead of changing
+        # their hashes or silently dropping its primary after another recovery.
+        if verification.enabled(configuration) and not any(e.get("stage") == "VERIFICATION_REQUEST"
+                and e.get("attempt_id") == context["attempt_id"] for e in events):
+            phase("RECOVERY_REUSE", {"reused_event_hashes": [e["event_sha256"] for e in events],
+                                      "reused_attempt_ids": list(dict.fromkeys(e["attempt_id"] for e in events)),
+                                      "recognition_bindings": copy.deepcopy(context.get("recognition_bindings", {})),
+                                      **({key: copy.deepcopy(context[key]) for key in ("source_original_id",
+                                          "source_administrative_event_hashes")} if context.get("source_original_id") else {})})
+    else:
+        from .document_local_inference import _sufficient
+
+        native = legacy_runner(source, definition, check=check, native_only=True, deadline=budget.extraction_deadline)
+        count = native["engine"].get("pages")
+        source_count = count if type(count) is int and 1 <= count <= 50 else None
+        context["expected_pages"] = source_count
+        raw_probe = json.dumps(native, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        probe = {"version":1, "kind":"PHASE", "sequence":1, "request_id":uuid.uuid4().hex,
+            "attempt_id":context["attempt_id"], "source_sha256":source_sha, "configuration_sha256":configuration_sha,
+            "definition_sha256":canonical_hash(definition), "stage":"NATIVE_SOURCE_PROBE", "page_one_based":None,
+            "expected_pages":source_count, "payload":{"artifacts":[{"kind":"NATIVE_SOURCE_PROBE_JSON",
+                "media_type":"application/json", "sha256":hashlib.sha256(raw_probe).hexdigest(), "bytes":len(raw_probe),
+                "content_b64":base64.b64encode(raw_probe).decode("ascii")}], "source_page_count_verified":source_count is not None}}
+        probe["event_sha256"] = canonical_hash(probe)
+        accept(probe)
+        native_ready = bool(type(count) is int and 1 <= count <= 50
+            and native["payload"].get("pages") == list(range(1, count + 1)) and _sufficient(native["payload"], definition))
+        if native_ready:
+            for event in _native_events(native, source_sha, configuration_sha, context, definition_sha256=canonical_hash(definition)):
+                accept(event)
+            if not verification.enabled(configuration):
+                return completed(adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context))
     if recognize is None:
         from .document_recognition_transport import recognize_stream
         recognize = recognize_stream
     strategy = configuration.get("extraction_strategy", "NATIVE_FIRST")
-    first = "PADDLE_STRUCTURED" if reference_discovery or strategy == "PADDLE_STRUCTURED" else "QWEN_VISUAL"
-    recognized_before = len(events)
-    call_started = budget.clock()
-    response = recognize(source, definition, configuration, strategy=first, check=check,
-        budget=budget, on_event=accept, attempt_context=context)
-    # A transport may invoke callbacks incrementally or return the same immutable
-    # list for replay. Never persist duplicate callbacks a second time.
-    if len(events) == recognized_before:
-        for event in [*response.get("pages", []), response.get("terminal")]:
-            if event:
-                accept(event)
-    call_history = [_recognition_call(first, events[recognized_before:], budget.clock() - call_started, kind="PRIMARY")]
+    first = "PADDLE_STRUCTURED" if (reference_discovery or strategy == "PADDLE_STRUCTURED"
+        or verification.enabled(configuration) and configuration.get("use_llm") is False) else "QWEN_VISUAL"
+    response, call_history = {}, []
+    if not saved_events and not native_ready:
+        recognized_before = len(events)
+        call_started = budget.clock()
+        response = recognize(source, definition, configuration, strategy=first, check=check,
+            budget=budget, on_event=accept, attempt_context=context)
+        # Callback durability belongs to this coordinator, never its reader.
+        if len(events) == recognized_before:
+            for event in [*response.get("pages", []), response.get("terminal")]:
+                if event:
+                    accept(event)
+        call_history.append(_recognition_call(first, events[recognized_before:], budget.clock() - call_started, kind="PRIMARY"))
     result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
+    if verification.enabled(configuration) and not reference_discovery:
+        before = verification.decision(result, definition, verification.source_context(events, source_sha))
+        blocked = None
+        if before["required"]:
+            budget.require()  # A control cannot extend the frozen total attempt.
+            control_remaining = budget.extraction_deadline - budget.clock()
+            bindings = result["engine"]["recognition_sources"]
+            families = {value["mechanism_family"] for value in bindings.values()} - {"UNKNOWN", "NATIVE"}
+            target = "PADDLE_STRUCTURED" if families == {"QWEN"} else "QWEN_VISUAL" if families == {"PADDLE"} else None
+            if not result["engine"]["execution"]["resources_released"]:
+                blocked = "PRIOR_RESOURCES_NOT_RELEASED"
+            elif not result["engine"]["execution"]["recognition_complete"]:
+                blocked = "PRIMARY_RECOGNITION_INCOMPLETE"
+            elif not before["actionable"]:
+                blocked = "DECLARED_CONTROLS_OR_SOURCE_BINDING_REQUIRED"
+            elif target is None:
+                blocked = "INDEPENDENT_MECHANISMS_ALREADY_ATTEMPTED_OR_SOURCE_UNVERIFIED"
+            elif target == "QWEN_VISUAL" and not configuration.get("use_llm", True):
+                blocked = "QWEN_DISABLED_IN_FROZEN_CONFIGURATION"
+            elif control_remaining < verification.MINIMUM_CONTROL_SECONDS:
+                blocked = "INSUFFICIENT_FROZEN_ATTEMPT_BUDGET"
+            else:
+                phase("AUTOMATIC_VERIFICATION", {"verification": verification.report(before, before,
+                    status="VERIFYING", primary_reused=bool(saved_events), calls=call_history)})
+                recognized_before = len(events)
+                call_started = budget.clock()
+                secondary = recognize(source, definition, configuration, strategy=target, check=check,
+                    budget=budget, on_event=accept, attempt_context=context)
+                if len(events) == recognized_before:
+                    for event in [*secondary.get("pages", []), secondary.get("terminal")]:
+                        if event:
+                            accept(event)
+                call_history.append(_recognition_call(target, events[recognized_before:],
+                    budget.clock() - call_started, kind="SECONDARY", decision=before))
+                result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
+        after = verification.decision(result, definition, verification.source_context(events, source_sha))
+        status = "BLOCKED" if blocked else "REVIEW_REQUIRED" if after["required"] else "CONTROLS_COMPLETED"
+        report = verification.report(before, after, status=status, primary_reused=bool(saved_events),
+            calls=call_history, blocked_reason=blocked)
+        phase("AUTOMATIC_VERIFICATION", {"verification": report})
+        result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
+        result["engine"]["verification"] = report
+        result["engine"]["evidence_requirements"] = after
+        result["engine"]["recognition_calls"] = call_history
+        return completed(result)
     from .document_candidate_selection import secondary_decision
 
     decision = secondary_decision(result, definition) if strategy == "SELECTIVE" and not reference_discovery else None
     if decision is not None and decision["required"]:
         terminal = response.get("terminal") or {}
-        if terminal.get("resources_released") is True and budget.require(budget.extraction_deadline) > 10:
+        if not saved_events and terminal.get("resources_released") is True and budget.require(budget.extraction_deadline) > 10:
             accept(_secondary_decision_event(decision, source_sha, configuration_sha, definition, context))
             recognized_before = len(events)
             call_started = budget.clock()

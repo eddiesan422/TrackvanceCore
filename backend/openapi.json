@@ -17842,6 +17842,82 @@
         "x-required-permission": "documents:write"
       }
     },
+    "/api/v1/documents/originals/{identity}/verify": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Verify",
+        "operationId": "verify_api_v1_documents_originals__identity__verify_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:review"
+      }
+    },
     "/api/v1/documents/families/{identity}/batches": {
       "get": {
         "tags": [
@@ -22425,6 +22501,15 @@
             ],
             "title": "Extraction Strategy",
             "default": "LEGACY"
+          },
+          "automatic_verification": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "BOUNDED_LOCAL_V1"
+            ],
+            "title": "Automatic Verification",
+            "default": "OFF"
           }
         },
         "additionalProperties": false,
@@ -26211,6 +26296,35 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerificationBody": {
+        "properties": {
+          "expected_extraction_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Expected Extraction Id"
+          },
+          "expected_settings_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Settings Version"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_extraction_id",
+          "expected_settings_version",
+          "reason"
+        ],
+        "title": "VerificationBody"
       },
       "VersionInput": {
         "properties": {

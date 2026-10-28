@@ -84,6 +84,8 @@ export function issueDescription(issue: string): string {
     REVIEW_REQUIRED: 'Comprueba y confirma este valor contra el original', VALUE_INVALID: 'Completa o corrige este valor',
     TABLE_REQUIRED: 'No se encontró una tabla obligatoria', TABLE_ROWS_UNRECOGNIZED: 'Hay filas o regiones sin interpretar',
     QUALITY_ROW_COVERAGE: 'La cantidad de filas no está demostrada', QUALITY_DUPLICATE_KEY: 'Hay claves duplicadas en el detalle',
+    QUALITY_INDEPENDENT_SOURCE_REQUIRED: 'El valor necesita corroboración de un mecanismo distinto',
+    QUALITY_OBSERVATION_UNCERTAINTY: 'La fuente conserva incertidumbre o alternativas que requieren resolución',
     EXTRACTION_PENDING: 'La extracción sigue pendiente',
     QUALITY_INCOMPLETE_SOURCE: 'Faltan páginas o etapas de reconocimiento por resolver',
     QUALITY_CRITICAL_CORROBORATION: 'Un dato crítico necesita evidencia independiente de la fuente',
