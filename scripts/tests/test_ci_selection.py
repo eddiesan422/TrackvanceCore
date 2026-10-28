@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.ci.common import (
+    FUNCTIONAL_EXECUTION_POLICY,
     FUNCTIONAL_MODULES,
     EvidenceError,
     load_manifest,
@@ -65,13 +66,26 @@ def test_mixed_changes_and_explicit_functional_dispatch_cannot_become_docs_only(
 def test_functional_has_explicit_executable_evidence_for_every_required_module():
     manifest = load_manifest()
     functional = profile_manifest(manifest, 'functional')
-    assert len(functional['groups']) == 11
+    assert len(functional['groups']) == 9
     scenarios = {s['id'] for g in functional['groups'] for s in g['scenarios']}
-    assert len(scenarios) == 30
+    assert len(scenarios) == 28
     coverage = manifest['profiles']['functional']['module_coverage']
     assert set(coverage) == FUNCTIONAL_MODULES
     assert all(set(value['scenario_ids']) <= scenarios for value in coverage.values())
     assert not any(g['id'].startswith(('spark-', 'async-volume-')) for g in functional['groups'])
+
+
+@pytest.mark.parametrize('mode,message', [('auto', ''), ('functional', ''), ('fast', ''),
+                                         ('auto', '[ci functional]'), ('auto', '[ci full]')])
+def test_ordinary_selection_excludes_benchmarks_and_declares_all_deferred_work(mode, message):
+    manifest = load_manifest()
+    selected = select(mode, ['scripts/ci/scenarios.json'], source_sha=SHA, commit_message=message)
+    assert selected['execution_policy'] == FUNCTIONAL_EXECUTION_POLICY
+    assert set(selected['groups']).isdisjoint(selected['excluded_groups'])
+    assert set(selected['groups']) | set(selected['excluded_groups']) == {g['id'] for g in manifest['groups']}
+    assert {'benchmark-smoke', 'delivery-benchmark-smoke', 'spark-local', 'spark-standalone',
+            'catalog-reports', 'async-volume-100', 'async-volume-500', 'async-volume-1024'} <= set(selected['excluded_groups'])
+    assert not any('benchmark' in row['group'] for row in selected['matrix']['include'])
 
 
 def test_deep_preserves_all_historical_large_populations_xlsx_and_recovery():
@@ -98,6 +112,11 @@ def test_deep_preserves_all_historical_large_populations_xlsx_and_recovery():
 @pytest.mark.parametrize('change,code', [
     (lambda m: m.pop('profiles'), 'MISSING_EXPLICIT_PROFILES'),
     (lambda m: m['profiles']['functional']['groups'].append('backend'), 'INVALID_PROFILE_GROUPS'),
+    (lambda m: m['profiles']['functional'].pop('execution_policy'), 'MISSING_FUNCTIONAL_EXECUTION_POLICY'),
+    (lambda m: m['profiles']['functional']['groups'].append('benchmark-smoke'), 'NON_FUNCTIONAL_WORKLOAD_IN_FUNCTIONAL_PROFILE'),
+    (lambda m: m['profiles']['functional']['groups'].append('delivery-benchmark-smoke'), 'NON_FUNCTIONAL_WORKLOAD_IN_FUNCTIONAL_PROFILE'),
+    (lambda m: m['profiles']['functional']['groups'].append('spark-local'), 'NON_FUNCTIONAL_WORKLOAD_IN_FUNCTIONAL_PROFILE'),
+    (lambda m: m['profiles']['functional']['groups'].append('catalog-reports'), 'NON_FUNCTIONAL_WORKLOAD_IN_FUNCTIONAL_PROFILE'),
     (lambda m: m['profiles']['functional']['module_coverage'].pop('reports'), 'INCOMPLETE_FUNCTIONAL_MODULE_COVERAGE'),
     (lambda m: m['profiles']['functional']['module_coverage']['reports'].update(scenario_ids=['catalog-reports-1000000']), 'INVALID_FUNCTIONAL_MODULE_SCENARIOS')])
 def test_manifest_cannot_claim_unexecuted_or_incomplete_functional_coverage(tmp_path, change, code):
@@ -118,7 +137,7 @@ def test_cold_selection_never_reuses_a_previous_pass():
 def test_matrix_selects_browser_dependencies_only_where_browser_executes():
     result = select('functional', [], source_sha=SHA)
     matrix = {row['group']: row for row in result['matrix']['include']}
-    assert len(matrix) == 9
+    assert len(matrix) == 7
     assert matrix['connections-functional']['browser'] is True
     assert matrix['backup-basic']['browser'] is False
     assert matrix['corrections-functional']['browser'] is False

@@ -126,6 +126,8 @@ def select(mode: str, changed_files: list[str] | None, *, source_sha: str,
             "final_eligible": selected_mode == "deep", "cache_mode": cache_mode,
             "reason": sorted(set(reasons)) or ["documentation-only"],
             "changed_files": paths, "groups": groups, "matrix": matrix,
+            "excluded_groups": [g["id"] for g in manifest["groups"] if g["id"] not in groups],
+            "execution_policy": manifest["profiles"][profile].get("execution_policy"),
             "manifest_sha256": sha256(manifest_path),
             "functional_inheritance": verified_inheritance if selected_mode == "docs" else None}
 

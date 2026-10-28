@@ -141,6 +141,17 @@ def execute(command: list[str], directory: Path, phase: str, remaining: float,
     return record
 
 
+def suite_environment(group: str, profile: str, base: dict[str, str]) -> dict[str, str]:
+    environment = {**base, "PYTHONPATH": str(ROOT / "scripts") + os.pathsep + base.get("PYTHONPATH", "")}
+    if profile == "functional":
+        environment.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    if group == "backend":
+        environment["TRACKVANCE_SPARK_TEST_PROFILE"] = profile
+        if profile == "functional":
+            environment.update(TRACKVANCE_SPARK_TESTS="1", TRACKVANCE_SPARK_MASTER="local[2]")
+    return environment
+
+
 def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[tuple[str, list[str], Path]]:
     python = sys.executable
     tests = "scripts/tests/"
@@ -286,9 +297,7 @@ def main() -> None:
     directory = args.output_dir.resolve() / "diagnostics" / args.group
     directory.mkdir(parents=True, exist_ok=False)
     began, stamp, records = time.monotonic(), now(), []
-    environment = {**os.environ, "PYTHONPATH": str(ROOT / "scripts") + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    if args.group == "backend" and args.profile == "functional":
-        environment.update(TRACKVANCE_SPARK_TESTS="1", TRACKVANCE_SPARK_MASTER="local[2]")
+    environment = suite_environment(args.group, args.profile, dict(os.environ))
     before = {path.resolve() for path in (ROOT / ".codex-local").rglob("*.json")}
     from ci.owned_cleanup import cleanup, snapshot
     owned_before = snapshot() if environment.get("TRACKVANCE_CI_IMAGE_MANIFEST") or local else None

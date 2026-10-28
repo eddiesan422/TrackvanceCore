@@ -17,6 +17,12 @@ FUNCTIONAL_MODULES = frozenset({
     "delivery_audit", "automations", "catalog_governance", "joins", "reports",
     "dataset_generation", "basic_recovery", "documents_ocr", "exceptions_resolution",
 })
+FUNCTIONAL_EXECUTION_POLICY = "FUNCTIONAL_NO_BENCHMARKS_NO_VOLUME_V1"
+INTENSIVE_GROUPS = frozenset({
+    "benchmark-smoke", "delivery-benchmark-smoke", "spark-local", "spark-standalone", "catalog-reports",
+    "corrections-acquisition", "corrections-browser", "corrections-dispatch", "corrections-recovery",
+    "async-volume-100", "async-volume-500", "async-volume-1024",
+})
 
 
 class EvidenceError(ValueError):
@@ -93,6 +99,12 @@ def load_manifest(path: Path = MANIFEST) -> dict[str, Any]:
                 and len(set(selected)) == len(selected) and set(selected) <= ids, "INVALID_PROFILE_GROUPS")
     require(set().union(*(set(p["groups"]) for p in profiles.values())) == ids, "UNASSIGNED_MANIFEST_GROUP")
     functional = profile_manifest(data, "functional")
+    require(profiles["functional"].get("execution_policy") == FUNCTIONAL_EXECUTION_POLICY,
+            "MISSING_FUNCTIONAL_EXECUTION_POLICY")
+    require(not (set(profiles["functional"]["groups"]) & INTENSIVE_GROUPS)
+            and not any(s["validator"] in {"benchmark", "delivery-benchmark", "spark-million", "async-population"}
+                    for g in functional["groups"] for s in g["scenarios"]),
+            "NON_FUNCTIONAL_WORKLOAD_IN_FUNCTIONAL_PROFILE")
     functional_scenarios = {s["id"] for g in functional["groups"] for s in g["scenarios"]}
     coverage = profiles["functional"].get("module_coverage")
     require(isinstance(coverage, dict) and set(coverage) == FUNCTIONAL_MODULES, "INCOMPLETE_FUNCTIONAL_MODULE_COVERAGE")

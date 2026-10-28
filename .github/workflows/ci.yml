@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Complete functional regression. Intensive deep certification runs locally.
+        description: Functional regression without benchmarks, volume or Paddle/Qwen model downloads. Deep certification remains local.
         type: choice
         options: [functional]
         default: functional
@@ -26,6 +26,8 @@ concurrency:
 env:
   CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   CI_PROFILE: functional
+  HF_HUB_OFFLINE: '1'
+  TRANSFORMERS_OFFLINE: '1'
   CI_BRANCH: ${{ github.head_ref || github.ref_name }}
   CI_CACHE_MODE: ${{ inputs.cache_mode || (github.run_attempt == 1 && contains(github.event.head_commit.message, '[ci cold]') && 'cold' || 'warm') }}
 jobs:

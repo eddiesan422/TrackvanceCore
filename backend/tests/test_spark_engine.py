@@ -40,6 +40,19 @@ from trackvance.spark_thread_limits import SparkThreadLimitError, bound_local_dr
 NOW = datetime(2026, 10, 3, 12, tzinfo=UTC)
 
 
+def hot_key_fixture_limits():
+    # Functional CI exercises the same global duplicate/reference assertions
+    # across several batches; the original scale remains opt-in/default.
+    return (9, 2) if os.getenv("TRACKVANCE_SPARK_TEST_PROFILE") == "functional" else (20000, 1024)
+
+
+@pytest.mark.parametrize("profile,expected", [("functional", (9, 2)), ("deep", (20000, 1024)), ("", (20000, 1024))])
+def test_hot_key_fixture_profile_preserves_multiple_batches_and_original_scale(monkeypatch, profile, expected):
+    monkeypatch.setenv("TRACKVANCE_SPARK_TEST_PROFILE", profile)
+    rows, batch_rows = hot_key_fixture_limits()
+    assert (rows, batch_rows) == expected and rows > batch_rows * 2
+
+
 @pytest.mark.parametrize("field,value", [("driver_memory_mb", 0), ("batch_rows", 10001),
                                          ("executor_cores", 0), ("partitions", 257)])
 def test_spark_settings_reject_invalid_limits(field, value):
@@ -448,8 +461,8 @@ def test_real_local_spark_storage_callbacks_remain_live_with_bounded_pools(real_
 
 def test_real_spark_global_hot_key_uniqueness_and_reference(real_spark, tmp_path):
     engine, _ = real_spark
-    engine = PySparkProcessingEngine(engine.session, replace(engine.settings, batch_rows=1024))
-    rows = 20000
+    rows, batch_rows = hot_key_fixture_limits()
+    engine = PySparkProcessingEngine(engine.session, replace(engine.settings, batch_rows=batch_rows))
     path = tmp_path / "hot-key.parquet"
     pl.DataFrame({"id": ["hot"] * rows, RECORD_NUMBER_COLUMN: range(2, rows + 2)}).write_parquet(path)
     source = SparkDataset((str(path),), ("id",), rows, record_number_column=RECORD_NUMBER_COLUMN,

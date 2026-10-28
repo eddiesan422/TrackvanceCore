@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ci import run_suite
-from ci.common import load_manifest
+from ci.common import load_manifest, profile_groups
 
 
 def test_manifest_and_executable_groups_are_identical(tmp_path):
@@ -33,6 +33,23 @@ def test_full_volume_and_existing_recovery_matrix_are_preserved(tmp_path):
     backend = run_suite.commands_for("backend", tmp_path)
     pytest_command = next(command for phase, command, _ in backend if phase == "unit-tests")
     assert "tests" in pytest_command and "../scripts/tests" in pytest_command
+
+
+def test_functional_commands_exclude_benchmark_and_volume_entrypoints_without_omitting_backend(tmp_path):
+    groups = profile_groups(load_manifest(), "functional")
+    tokens = [token for group in groups for _, command, _ in run_suite.commands_for(group, tmp_path, profile="functional")
+              for token in command]
+    assert not any("benchmark_cycle.py" in token or "volume_cycle.py" in token or "spark_docker_cycle.py" in token
+                   or "spark_local_docker_cycle.py" in token for token in tokens)
+    assert not {"1000000", "400000", "--with-recovery"} & set(tokens)
+    unit = next(command for phase, command, _ in run_suite.commands_for("backend", tmp_path, profile="functional")
+                if phase == "unit-tests")
+    assert "tests" in unit and "../scripts/tests" in unit and "-k" not in unit and "--ignore" not in unit
+    environment = run_suite.suite_environment("backend", "functional", {"TRACKVANCE_SPARK_TEST_PROFILE": "deep"})
+    assert environment["TRACKVANCE_SPARK_TEST_PROFILE"] == "functional"
+    assert environment["TRACKVANCE_SPARK_TESTS"] == "1" and environment["TRACKVANCE_SPARK_MASTER"] == "local[2]"
+    assert environment["HF_HUB_OFFLINE"] == environment["TRANSFORMERS_OFFLINE"] == "1"
+    assert run_suite.suite_environment("backend", "deep", {})["TRACKVANCE_SPARK_TEST_PROFILE"] == "deep"
 
 
 def test_expired_deadline_cannot_start_a_process(tmp_path, monkeypatch):

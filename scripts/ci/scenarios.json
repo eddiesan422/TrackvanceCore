@@ -857,9 +857,7 @@
         "delivery",
         "backup-basic",
         "catalog-reports-functional",
-        "corrections-functional",
-        "benchmark-smoke",
-        "delivery-benchmark-smoke"
+        "corrections-functional"
       ],
       "module_coverage": {
         "identity_rbac": {
@@ -904,8 +902,7 @@
         },
         "delivery_audit": {
           "scenario_ids": [
-            "delivery-strategies-audit-browser",
-            "delivery-all-eight-smoke-cases"
+            "delivery-strategies-audit-browser"
           ]
         },
         "automations": {
@@ -941,8 +938,7 @@
         "dataset_generation": {
           "scenario_ids": [
             "functional-catalog-reports-120",
-            "functional-catalog-reports-browser",
-            "benchmark-real-smoke"
+            "functional-catalog-reports-browser"
           ]
         },
         "basic_recovery": {
@@ -975,7 +971,8 @@
       "target_wall_minutes": [
         15,
         20
-      ]
+      ],
+      "execution_policy": "FUNCTIONAL_NO_BENCHMARKS_NO_VOLUME_V1"
     },
     "deep": {
       "groups": [

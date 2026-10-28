@@ -195,6 +195,10 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
     require(selection.get("functional_inheritance") is None, "FUNCTIONAL_CANNOT_REUSE_ANCESTOR_RECEIPTS")
     groups = profile_groups(manifest, "functional")
     require(selection.get("groups") == groups, "INCOMPLETE_OR_DUPLICATE_SELECTION_GROUPS")
+    excluded_groups = [g["id"] for g in manifest["groups"] if g["id"] not in groups]
+    policy = manifest["profiles"]["functional"]["execution_policy"]
+    require(selection.get("excluded_groups") == excluded_groups, "SELECTION_EXCLUSIONS_MISMATCH")
+    require(selection.get("execution_policy") == policy, "SELECTION_EXECUTION_POLICY_MISMATCH")
     validate_jobs(load_json(jobs_path), source_sha, run_id, run_attempt)
     roles = validate_images(image_manifest_path, source_sha)
     image_hash = sha256(image_manifest_path)
@@ -267,6 +271,7 @@ def evaluate(*, manifest_path: Path, selection_path: Path, evidence_dir: Path,
                 and len({tuple(sorted(value.items())) for value in host_roles_by_group.values()}) == 1
                 else roles if not host_roles_by_group else None),
             "runtime_images_by_group": host_roles_by_group, "groups": groups,
+            "excluded_groups": excluded_groups, "execution_policy": policy,
             "scenario_count": len(found), "module_coverage": manifest["profiles"]["functional"]["module_coverage"], "receipts": receipts}
 
 

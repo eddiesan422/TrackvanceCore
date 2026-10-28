@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.ci.common import FUNCTIONAL_MODULES, EvidenceError, sha256
+from scripts.ci.common import FUNCTIONAL_EXECUTION_POLICY, FUNCTIONAL_MODULES, EvidenceError, sha256
 from scripts.ci.evidence import write_receipt
 from scripts.ci.final_gate import evaluate
 from scripts.ci.validators import SPARK_REAL_CASES, junit_document
@@ -27,13 +27,14 @@ def gate_case(tmp_path, monkeypatch):
     from scripts.ci import final_gate
     monkeypatch.setattr(final_gate, "executable_fingerprint", lambda *args, **kwargs: FINGERPRINT)
     manifest = save(tmp_path / "manifest.json", {"schema_version": 1, "profiles": {
-        "functional": {"groups": ["backend"], "module_coverage": {
+        "functional": {"groups": ["backend"], "execution_policy": FUNCTIONAL_EXECUTION_POLICY, "module_coverage": {
             name: {"scenario_ids": ["backend-lint"]} for name in FUNCTIONAL_MODULES}},
         "deep": {"groups": ["backend"]}},
         "groups": [{"id": "backend", "job_key": "backend", "required_sources": [],
                     "scenarios": [{"id": "backend-lint", "validator": "backend-check", "check": "lint"}]}]})
     selection = save(tmp_path / "selection.json", {"schema_version": 1, "source_sha": SHA, "manifest_sha256": sha256(manifest),
-        "mode": "functional", "profile": "functional", "groups": ["backend"], "executable_fingerprint": FINGERPRINT})
+        "mode": "functional", "profile": "functional", "groups": ["backend"], "excluded_groups": [],
+        "execution_policy": FUNCTIONAL_EXECUTION_POLICY, "executable_fingerprint": FINGERPRINT})
     jobs = save(tmp_path / "jobs.json", {"source_sha": SHA, "run_id": "123", "run_attempt": "1", "needs": {
         name: {"result": "success"} for name in ("select", "backend", "frontend", "images", "suites")}})
     images = save(tmp_path / "images.json", {"schema_version": 1, "source_sha": SHA, "status": "PASS",
@@ -61,6 +62,20 @@ def test_complete_same_commit_gate_passes_and_binds_every_receipt(gate_case):
     assert result["status"] == "PASS" and result["functional_approved"] is True
     assert result["scope"] == "CI_FUNCTIONAL_APPROVED" and not result["deep_approved"] and not result["certifies_final"]
     assert result["scenario_count"] == 1 and result["receipts"][0]["sha256"]
+    assert result["execution_policy"] == FUNCTIONAL_EXECUTION_POLICY and result["excluded_groups"] == []
+
+
+@pytest.mark.parametrize("field,value,code", [
+    ("excluded_groups", ["backend"], "SELECTION_EXCLUSIONS_MISMATCH"),
+    ("execution_policy", None, "SELECTION_EXECUTION_POLICY_MISMATCH"),
+])
+def test_gate_rejects_missing_or_drifted_functional_execution_boundary(gate_case, field, value, code):
+    args, _ = gate_case
+    selection = json.loads(args["selection_path"].read_text())
+    selection[field] = value
+    save(args["selection_path"], selection)
+    with pytest.raises(EvidenceError, match=code):
+        evaluate(**args)
 
 
 @pytest.mark.parametrize("damage,code", [(None, None), ("missing", "SPARK_FUNCTIONAL_COVERAGE_MISSING"),
