@@ -64,6 +64,27 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
         # later replay; the current replay actor/reason is recorded separately.
         data["engine"]["verification_request"] = copy.deepcopy(previous.engine["verification_request"])
     context = recognition_source_context(events, original.sha256)
+    # Journal progress describes the original attempt, not this replay's
+    # current assessment. Preserve it and refresh only the new revision.
+    retained_verification = previous.engine.get("verification") if previous is not None else None
+    if not isinstance(retained_verification, dict):
+        retained_verification = next((event["payload"]["verification"] for event in reversed(events)
+            if event.get("stage") == "AUTOMATIC_VERIFICATION"
+            and isinstance(event.get("payload", {}).get("verification"), dict)), None)
+    if retained_verification is not None:
+        from .document_automatic_verification import decision, report
+
+        current_decision = decision(data, template.definition, context)
+        prior_decision = {"reasons": copy.deepcopy(retained_verification.get("reasons_before", [])),
+            "scope": copy.deepcopy(current_decision["scope"])}
+        refreshed = report(prior_decision, current_decision,
+            status="REVIEW_REQUIRED" if current_decision["required"] else "CONTROLS_COMPLETED",
+            primary_reused=True, calls=copy.deepcopy(retained_verification.get("recognition_calls", [])))
+        refreshed.update(replay_recomputed=True, recognition_model_calls_new=0,
+            source_report="PREVIOUS_EXTRACTION_OR_IMMUTABLE_JOURNAL")
+        if retained_verification.get("requested_reason"):
+            refreshed["requested_reason"] = retained_verification["requested_reason"]
+        data["engine"]["verification"] = refreshed
     data["engine"]["validation"] = certify_lossless_candidate(data, template.definition, original.sha256,
         source_context=context)
     previous_id = original.extraction_id

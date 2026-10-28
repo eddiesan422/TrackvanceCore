@@ -42,6 +42,11 @@ def test_two_native_replays_after_verification_preserve_proof_and_never_read_mod
         assert current["quality"]["status"] == "AUTO_VERIFIED"
         assert current["extraction"]["engine"]["configuration"] == expected_configuration
         assert current["extraction"]["engine"]["replay"]["recognition_model_calls"] == 0
+        verification = current["extraction"]["engine"]["verification"]
+        assert verification["replay_recomputed"] is True
+        assert verification["recognition_model_calls_new"] == 0
+        assert verification["status"] == "CONTROLS_COMPLETED"
+        assert verification["remaining_reasons"] == []
         revisions.append(current["extraction"])
         previous = current["extraction"]
     # Check both POSTs before inspecting this inherited proof: the pre-fix
