@@ -61,7 +61,9 @@ def verification_action_dto(db, original, user):
             template = db.get(DocumentTemplate, original.template_id)
             if extraction is None or template is None:
                 raise OperationError(409, "DOCUMENT_VERIFICATION_SOURCE", "La extracción conservada requiere atención.")
-            if quality_report(extraction, template.definition)["status"] != "REVIEW_REQUIRED":
+            if template.definition.get("validation_policy") is None:
+                result["blocked_reason"] = "Declara la política de validación de esta plantilla antes de solicitar otra lectura."
+            elif quality_report(extraction, template.definition)["status"] != "REVIEW_REQUIRED":
                 result["blocked_reason"] = "Esta extracción ya tiene sus controles resueltos."
             elif (extraction.engine.get("route") == "PADDLE_STRUCTURED" and not configuration.get("use_llm")
                     and not extraction.payload.get("candidate_history")):

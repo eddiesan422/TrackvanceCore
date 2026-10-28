@@ -47,10 +47,12 @@ def fixtures(source, schema, frozen, context, family, *, released=True):
     return result
 
 
-def prepare(authenticated, database, tmp_path, monkeypatch, *, primary="PADDLE", released=True):
+def prepare(authenticated, database, tmp_path, monkeypatch, *, primary="PADDLE", released=True, policy=True):
     import trackvance.document_worker as worker
 
     schema = definition(critical=True)
+    if not policy:
+        schema.pop("validation_policy", None)
     response = authenticated.post("/api/v1/documents/families", json={"name": "Synthetic bounded verification"})
     assert response.status_code == 200, response.text
     family = response.json()
@@ -113,6 +115,22 @@ def verify(client, item, **changes):
     return client.post(f"/api/v1/documents/originals/{item['id']}/verify", json={
         "expected_extraction_id": item["first"], "expected_settings_version": 2,
         "reason": "Synthetic native verification; no human review", **changes})
+
+
+def test_verification_requires_declared_validation_policy_before_queue(authenticated, database, tmp_path, monkeypatch):
+    item = prepare(authenticated, database, tmp_path, monkeypatch, policy=False)
+    configure(authenticated, item)
+    current = authenticated.get(f"/api/v1/documents/originals/{item['id']}").json()
+    assert current["verification_action"]["available"] is False
+    assert "política de validación" in current["verification_action"]["blocked_reason"]
+    response = verify(authenticated, item)
+    assert response.status_code == 409, response.text
+    assert "política de validación" in response.text
+    assert_preserved(database, item)
+    with database() as db:
+        assert not any(row["event"].get("stage") == "VERIFICATION_REQUEST"
+            for row in recognition_journal(db, db.get(DocumentOriginal, item["id"])))
+        assert db.scalar(select(Job).where(Job.document_id == item["id"])).status == "SUCCESS"
 
 
 def assert_preserved(database, item, *, extraction_count=1):

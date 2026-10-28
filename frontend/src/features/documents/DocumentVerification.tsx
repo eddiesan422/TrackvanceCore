@@ -2,6 +2,7 @@ import type { RecordData } from '../../api/client'
 
 const statuses: Record<string, string> = { QUEUED: 'Verificación en cola', VERIFYING: 'Comprobando la extracción', CONTROLS_COMPLETED: 'Controles adicionales completados', REVIEW_REQUIRED: 'Verificación terminada con excepciones', BLOCKED: 'Verificación adicional detenida' }
 const reasons: Record<string, string> = {
+  VALIDATION_POLICY_REQUIRED: 'Falta declarar la política de validación de esta plantilla antes de solicitar otra lectura',
   INDEPENDENT_SOURCE_REQUIRED: 'Falta corroborar el valor con un mecanismo distinto',
   INDEPENDENT_ROW_STRUCTURE_REQUIRED: 'Falta comprobar la estructura y continuidad de la tabla',
   UNRESOLVED_VALUE: 'El valor todavía está ausente, es ambiguo o tiene un formato inválido',

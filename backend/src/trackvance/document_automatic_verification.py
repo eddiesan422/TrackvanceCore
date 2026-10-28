@@ -99,6 +99,8 @@ def decision(data, definition, context):
     native = any(control["stage"] == engine.get("route") and control["mechanism"] == "NATIVE"
                  for control in proof["controls"])
     policy = definition.get("validation_policy") or {}
+    if not policy:
+        reasons.append({"kind": "CONFIGURATION", "code": "VALIDATION_POLICY_REQUIRED"})
     arithmetic_fields = _arithmetic_fields(definition)
     reasons.extend({"kind": "INTEGRITY", "code": "RETAINED_SOURCE_INTEGRITY", "detail": issue}
                    for issue in proof["integrity_issues"])
@@ -135,7 +137,7 @@ def decision(data, definition, context):
     if any(item.get("status") != "VALID" for key in ("arithmetic", "cross_totals") for item in payload.get(key, [])):
         reasons.append({"kind": "INCIDENT", "code": "DECLARED_ARITHMETIC_CONSISTENCY"})
     return {"version": POLICY_VERSION, "required": bool(reasons),
-            "actionable": any(reason["kind"] in {"RISK_POLICY", "INCIDENT"} for reason in reasons), "reasons": reasons,
+            "actionable": bool(policy) and any(reason["kind"] in {"RISK_POLICY", "INCIDENT"} for reason in reasons), "reasons": reasons,
             "scope": {"kind": "WHOLE_DOCUMENT", "pages": list(payload.get("pages", [])),
                       "focal_reread": False,
                       "reason": "CURRENT_RECOGNITION_CONTRACT_REQUIRES_COMPLETE_DOCUMENT_FOR_SOURCE_AND_TABLE_ALIGNMENT"},

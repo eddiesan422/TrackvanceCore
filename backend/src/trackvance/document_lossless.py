@@ -153,6 +153,20 @@ def map_representation(representation, definition, *, stage=None):
                 raw = selection.get("fields", {}).get(field["name"], {})
                 evidence = stable_id(page["id"], "field", field["name"])
                 relation = selection_source_association(raw, field, ordinal, evidence)
+                if relation is None:
+                    # A declared visual page bounds candidate eligibility even
+                    # when literal anchor/section association is not opted in.
+                    # Unknown or partly unspecified scopes remain conservative.
+                    rules = [rule for rule in [field.get("visual"), *field.get("visual_alternatives", [])] if rule]
+                    declared_pages = sorted({rule["page"] for rule in rules
+                        if type(rule.get("page")) is int and rule["page"] >= 1})
+                    if (rules and all(type(rule.get("page")) is int and rule["page"] >= 1 for rule in rules)
+                            and ordinal not in declared_pages):
+                        relation = {"version": "DECLARED_HEADER_ASSOCIATION_V1",
+                            "policy": "DECLARED_VISUAL_PAGE_SCOPE_098_V3", "page": ordinal,
+                            "declared_pages": declared_pages, "eligible": False,
+                            "reason": "PAGE_OUTSIDE_DECLARED_SOURCE_CONTEXT", "label_refs": [],
+                            "value_refs": [evidence], "geometry_kind": "PAGE_LOCATOR_ONLY"}
                 if relation is not None:
                     if not relation["eligible"]:
                         if not empty_observation(raw.get("observed")) or null_uncertainty(

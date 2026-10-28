@@ -43,4 +43,13 @@ describe('Automatic document verification visibility', () => {
     expect(screen.getByText(/Esta comprobación no declara revisión humana/)).toBeVisible()
     expect(screen.queryByText(/Controles que siguen pendientes/)).not.toBeInTheDocument()
   })
+
+  it('explains the missing validation policy before another reading can be requested', () => {
+    renderApp(<DocumentVerification verification={{ ...verification, status: 'BLOCKED',
+      remaining_reasons: [{ kind: 'CONFIGURATION', code: 'VALIDATION_POLICY_REQUIRED' }],
+      blocked_reason: 'DECLARED_CONTROLS_OR_SOURCE_BINDING_REQUIRED' }}/>)
+    expect(screen.getByText(/Falta declarar la política de validación de esta plantilla antes de solicitar otra lectura/)).toBeVisible()
+    expect(screen.queryByText('VALIDATION_POLICY_REQUIRED')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
 })

@@ -98,6 +98,22 @@ def test_unreleased_primary_never_admits_secondary(tmp_path):
     assert result["engine"]["verification"]["blocked_reason"] == "PRIOR_RESOURCES_NOT_RELEASED"
 
 
+def test_missing_validation_policy_preserves_primary_and_blocks_unactionable_secondary(tmp_path):
+    _source, schema, calls, _persisted, run = harness(tmp_path, configuration())
+    schema.pop("validation_policy")
+    result = run()
+    assert calls == ["QWEN_VISUAL"]
+    assert result["payload"]["fields"]["reference"]["observed"] == "R-001"
+    decision = result["engine"]["evidence_requirements"]
+    assert decision["required"] is True and decision["actionable"] is False
+    assert {"kind": "CONFIGURATION", "code": "VALIDATION_POLICY_REQUIRED"} in decision["reasons"]
+    verification = result["engine"]["verification"]
+    assert verification["status"] == "BLOCKED"
+    assert verification["blocked_reason"] == "DECLARED_CONTROLS_OR_SOURCE_BINDING_REQUIRED"
+    assert verification["recognition_calls"][0]["kind"] == "PRIMARY"
+    assert verification["automatic_approval_granted"] is False
+
+
 def test_remaining_attempt_budget_blocks_control_without_resetting_deadline(tmp_path):
     _source, _schema, calls, _persisted, run = harness(tmp_path, configuration())
     result = run(budget=AttemptBudget(30, started=0, clock=lambda: 0))

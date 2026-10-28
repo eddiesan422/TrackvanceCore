@@ -475,10 +475,10 @@ def test_worker_validates_retained_partial_and_never_publishes(database, partial
     controls = []
     callback = {"armed": False}
     real_authority = document_worker._authority
-    def authority(*args):
+    def authority(*args, **kwargs):
         if callback["armed"]:
             raise OperationError(422, "DOCUMENT_TIMEOUT", "Synthetic mandatory callback timeout")
-        return real_authority(*args)
+        return real_authority(*args, **kwargs)
     def provider(source, spec, configuration, **kwargs):
         assert kwargs["budget"].extraction_deadline < kwargs["budget"].validation_deadline < kwargs["budget"].deadline
         data = candidate(spec)
