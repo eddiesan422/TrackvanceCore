@@ -59,6 +59,10 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
 
     data = adapt_saved_recognition(events, template.definition, configuration, source_sha256=original.sha256,
         attempt_context={"replay": True, "original_attempt_id": events[-1]["attempt_id"]})
+    if previous is not None and previous.engine.get("verification_request"):
+        # This immutable proof explains the per-attempt configuration on every
+        # later replay; the current replay actor/reason is recorded separately.
+        data["engine"]["verification_request"] = copy.deepcopy(previous.engine["verification_request"])
     context = recognition_source_context(events, original.sha256)
     data["engine"]["validation"] = certify_lossless_candidate(data, template.definition, original.sha256,
         source_context=context)
