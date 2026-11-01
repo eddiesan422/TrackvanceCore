@@ -68,16 +68,54 @@ def mounts(row):
     return values
 
 
-def changed_paths(before, after, prefix=""):
+def changes(before, after, prefix=()):
+    """Dictionary keys are indivisible path segments, including literal '/'."""
     if isinstance(before, dict) and isinstance(after, dict):
         result = []
         for key in sorted(set(before) | set(after)):
             if key not in before or key not in after:
-                result.append(prefix + "/" + key)
+                result.append({"segments": prefix + (key,), "before_present": key in before,
+                               "after_present": key in after, "before": before.get(key), "after": after.get(key)})
             else:
-                result.extend(changed_paths(before[key], after[key], prefix + "/" + key))
+                result.extend(changes(before[key], after[key], prefix + (key,)))
         return result
-    return [] if before == after else [prefix]
+    return [] if type(before) is type(after) and before == after else [
+        {"segments": prefix, "before_present": True, "after_present": True, "before": before, "after": after}]
+
+
+def validate_container(previous, row, runtime, running):
+    need(row["Id"] == previous["Id"] and row["Image"] == previous["Image"]
+         and row["Config"] == previous["Config"] and row["HostConfig"] == previous["HostConfig"]
+         and mounts(row) == mounts(previous), "PROTECTED_IMAGE_CONFIG_HOSTCONFIG_MOUNTS_CHANGED")
+    selected = {runtime["gateway_id"], runtime["ollama_id"]}
+    if row["Id"] not in selected:
+        need(row["State"] == previous["State"] and row["NetworkSettings"] == previous["NetworkSettings"],
+             "NON_GPU2_STATE_OR_NETWORK_CHANGED")
+        return None
+    role = "gateway" if row["Id"] == runtime["gateway_id"] else "ollama"
+    need(row["Image"] == runtime[role + "_image"] and row["State"]["Running"] is running
+         and (row["State"]["Pid"] > 0 if running else row["State"]["Pid"] == 0)
+         and not row["State"]["OOMKilled"] and not row["State"]["Dead"]
+         and row["HostConfig"].get("PortBindings") == {}, "SELECTED_RUNTIME_STATE_OR_EXCLUSION")
+    differences = changes(previous["NetworkSettings"], row["NetworkSettings"])
+    for item in differences:
+        path = item["segments"]
+        allowed = running and path in {("SandboxID",), ("SandboxKey",)}
+        allowed |= (running and len(path) == 3 and path[:1] == ("Networks",)
+                    and path[1] in previous["NetworkSettings"].get("Networks", {})
+                    and path[2] in {"EndpointID", "Gateway", "IPAddress", "MacAddress", "IPPrefixLen",
+                                    "IPv6Gateway", "GlobalIPv6Address", "GlobalIPv6PrefixLen"}
+                    and item["before_present"] and item["after_present"])
+        if path == ("Ports", "11434/tcp"):
+            allowed = (running and role == "ollama"
+                       and runtime.get("allowed_start_null_ports", {}).get(role) == ["11434/tcp"]
+                       and previous["Config"].get("ExposedPorts") == {"11434/tcp": {}}
+                       and row["Config"].get("ExposedPorts") == {"11434/tcp": {}}
+                       and previous["HostConfig"].get("PortBindings") == {}
+                       and row["HostConfig"].get("PortBindings") == {}
+                       and not item["before_present"] and item["after_present"] and item["after"] is None)
+        need(allowed, "UNEXPECTED_GPU_NETWORK_TRANSITION")
+    return {"state_changes": changes(previous["State"], row["State"]), "network_changes": differences}
 
 
 def inventory(entry, runtime, running):
@@ -90,28 +128,9 @@ def inventory(entry, runtime, running):
     selected = {runtime["gateway_id"], runtime["ollama_id"]}
     transitions = {}
     for row in actual:
-        previous = old[row["Id"]]
-        need(row["Image"] == previous["Image"] and row["Config"] == previous["Config"]
-             and row["HostConfig"] == previous["HostConfig"] and mounts(row) == mounts(previous),
-             "PROTECTED_IMAGE_CONFIG_HOSTCONFIG_MOUNTS_CHANGED")
-        if row["Id"] not in selected:
-            need(row["State"] == previous["State"] and row["NetworkSettings"] == previous["NetworkSettings"],
-                 "NON_GPU2_STATE_OR_NETWORK_CHANGED")
-        else:
-            role = "gateway" if row["Id"] == runtime["gateway_id"] else "ollama"
-            need(row["Image"] == runtime[role + "_image"] and row["State"]["Running"] is running
-                 and (row["State"]["Pid"] > 0 if running else row["State"]["Pid"] == 0)
-                 and not row["State"]["OOMKilled"] and not row["State"]["Dead"]
-                 and not row["HostConfig"].get("PortBindings"), "SELECTED_RUNTIME_STATE_OR_EXCLUSION")
-            paths = changed_paths(previous["NetworkSettings"], row["NetworkSettings"])
-            if running:
-                allowed = {"SandboxID", "SandboxKey", "Ports", "EndpointID", "Gateway", "IPAddress", "MacAddress",
-                           "IPPrefixLen", "IPv6Gateway", "GlobalIPv6Address", "GlobalIPv6PrefixLen"}
-                need(all(path.split("/")[-1] in allowed for path in paths), "UNEXPECTED_GPU_NETWORK_TRANSITION")
-            else:
-                need(not paths, "FINAL_GPU_NETWORK_NOT_BASELINE")
-            transitions[row["Id"]] = {"state_changed_paths": changed_paths(previous["State"], row["State"]),
-                                     "network_changed_paths": paths}
+        transition = validate_container(old[row["Id"]], row, runtime, running)
+        if transition is not None:
+            transitions[row["Id"]] = transition
     names = docker("volume", "ls", "-q").decode().split()
     need(set(names) == {row["Name"] for row in entry["volumes"]}, "VOLUME_SET_CHANGED")
     volumes = json.loads(docker("volume", "inspect", *names))
@@ -250,9 +269,9 @@ def main():
         need(args.root_authorized and freeze.get("authorized") is True
              and freeze.get("model_admission") == "ROOT_FROZEN", "EXPLICIT_ROOT_RELEASE_REQUIRED")
         if args.start:
-            need(0 <= time.monotonic() - freeze["campaign_started_monotonic"] < 3600
-                 and abs((time.time() - freeze["campaign_started_epoch"]) -
-                         (time.monotonic() - freeze["campaign_started_monotonic"])) < 30, "CAMPAIGN_CLOCK_INVALID")
+            need(0 <= time.monotonic() - freeze["preparation_started_monotonic"] < 3600
+                 and abs((time.time() - freeze["preparation_started_epoch"]) -
+                         (time.monotonic() - freeze["preparation_started_monotonic"])) < 30, "PREPARATION_CLOCK_INVALID")
             read(freeze["stopped_source_receipt"])
             result["before"] = save(args.out / "before.private.json", inventory(entry, runtime, False))
             result["manager_args"] = manager_args(plan, runtime, "start")

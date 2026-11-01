@@ -115,6 +115,31 @@ def step_guard(consecutive, result):
     return consecutive, closure_unknown or consecutive >= 2
 
 
+class InferenceClock:
+    """Persist once at first inference dispatch admission; never reuse setup time."""
+    def __init__(self, path):
+        self.path = Path(path)
+        self.value = read(self.path) if self.path.exists() else None
+        if self.value is not None:
+            self.elapsed()
+
+    def start(self):
+        need(self.value is None and not self.path.exists(), "INFERENCE_CLOCK_ALREADY_STARTED_NO_RESET")
+        self.value = {"started_epoch": time.time(), "started_monotonic": time.monotonic(),
+                      "trigger": "FIRST_HOST_INFERENCE_DISPATCH_ADMISSION_BEFORE_WORKER",
+                      "setup_time_excluded": True, "immutable_no_budget_refund": True}
+        save(self.path, self.value)
+        return ref(self.path)
+
+    def elapsed(self):
+        if self.value is None:
+            return 0.0
+        elapsed = time.monotonic() - self.value["started_monotonic"]
+        need(elapsed >= 0 and abs((time.time() - self.value["started_epoch"]) - elapsed) < 30,
+             "INFERENCE_CLOCK_CHANGED")
+        return elapsed
+
+
 def documents(freeze):
     sample = pinned(freeze["sample"])
     rows = sample["documents"]
@@ -129,7 +154,7 @@ def documents(freeze):
         for index, page in enumerate(doc["pages"], 1):
             need(page["page"] == index and sha(page["path"]) == page["sha256"], "IMAGE_CHANGED")
         docs[doc["document_id"]] = doc
-    need(sum(doc["page_count"] for doc in docs.values()) <= 12, "UNIQUE_PAGE_LIMIT")
+    need(sum(doc["page_count"] for doc in docs.values()) == 11, "EXACT_ELEVEN_UNIQUE_PAGES")
     return docs
 
 
@@ -262,8 +287,23 @@ def preflight(freeze):
     consecutive, stopped = step_guard(consecutive, second)
     need(consecutive == 2 and stopped, "SECOND_INFRA_STOP_ALL")
     need(step_guard(0, {"status": "COMPLETE", "resources_released": False})[1], "UNCERTAIN_CLOSE_STOP")
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="contract-clock-cpu-") as temporary:
+        path = Path(temporary) / "inference-clock.json"
+        first = InferenceClock(path)
+        need(first.value is None and not path.exists(), "NO_INFERENCE_CLOCK_DURING_PREPARATION")
+        original_pin = first.start()
+        second = InferenceClock(path)
+        need(ref(path) == original_pin and second.value == first.value, "PERSISTED_CLOCK_NOT_REUSED")
+        try:
+            second.start()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError("INFERENCE_CLOCK_RESET_ALLOWED")
     return {"status": "CPU_PREFLIGHT_PASS_NO_MODELS", "fixtures": cases, "body_equality_proofs": body_proofs,
             "two_consecutive_infra_stop": True, "uncertain_close_stop": True, "model_calls": 0,
+            "first_inference_clock_persisted_and_reset_denied": True, "hard_page_call_cap": 22,
             "reference_contents_read": 0, "same_unchanged_aggregator_both_arms": freeze["reused_runner"],
             "same_unchanged_worker_both_arms": freeze["reused_worker"]}
 
@@ -276,22 +316,25 @@ def run(freeze, freeze_pin):
     aggregator = load_module(freeze["reused_runner"], "contract_pinned_aggregator")
     worker_code = Path(freeze["reused_worker"]["path"]).read_bytes()
     need(hashlib.sha256(worker_code).hexdigest() == freeze["reused_worker"]["sha256"], "WORKER_CHANGED")
-    started = freeze["campaign_started_monotonic"]
-    need(0 <= time.monotonic() - started < 3600
-         and abs((time.time() - freeze["campaign_started_epoch"]) - (time.monotonic() - started)) < 30,
-         "CAMPAIGN_CLOCK_CHANGED_OR_EXHAUSTED")
+    need(0 <= time.monotonic() - freeze["preparation_started_monotonic"] < 3600
+         and abs((time.time() - freeze["preparation_started_epoch"])
+                 - (time.monotonic() - freeze["preparation_started_monotonic"])) < 30,
+         "PREPARATION_CLOCK_CHANGED_OR_EXHAUSTED")
     order = freeze["execution_order"]
     need(len(order) == 6 and {row["document_id"] for row in order} == set(docs), "EXACT_ORDER")
     output = Path(freeze["output_dir"])
     output.mkdir()
+    clock = InferenceClock(output / "inference-clock.private.json")
     ledger = (output / "ledger.ndjson").open("xb")
     def record(kind, **value):
         ledger.write(canonical({"kind": kind, "at_epoch": time.time(), "at_monotonic": time.monotonic(), **value}) + b"\n")
         ledger.flush()
         os.fsync(ledger.fileno())
     counts, reserved, consecutive, stop_reason, rows = {arm: 0 for arm in ARMS}, 0, 0, None, []
-    record("RUN_STARTED", freeze=freeze_pin, campaign_started_epoch=freeze["campaign_started_epoch"],
-           campaign_started_monotonic=started, corrective_cycles=0)
+    record("RUN_STARTED", freeze=freeze_pin, inference_clock_not_started=True,
+           preparation_started_epoch=freeze["preparation_started_epoch"],
+           preparation_started_monotonic=freeze["preparation_started_monotonic"],
+           correction_policy="BB29969F_AUXILIARY_REPAIRS_WITHIN_PREPARATION_BUDGET")
     boot = ("import base64,json,sys;v=json.load(sys.stdin);g={'__name__':'diagnostic_import'};"
             "exec(compile(base64.b64decode(v['code']),'contract_diagnostic_worker','exec'),g);g['main'](v['packet'])")
     try:
@@ -307,13 +350,17 @@ def run(freeze, freeze_pin):
                     "semantic": None, "pages": [], "metrics": {"call_count": 0}, "diagnostic_only": True,
                     "recognized_text": None, "recognition_text_scope": "SEMANTIC_EXTRACTION_NOT_FULL_TEXT",
                     "operational_approval_measured": False}
-                remaining = 3600 - (time.monotonic() - started)
+                remaining = 3600 - clock.elapsed()
                 if stop_reason:
                     result["reason"] = stop_reason
-                elif remaining <= 30 or sum(counts.values()) >= 12 or reserved + doc["page_count"] > 24:
+                elif remaining <= 30 or sum(counts.values()) >= 12 or reserved + doc["page_count"] > 22:
                     result["reason"] = "FROZEN_CAMPAIGN_OR_ATTEMPT_PAGE_BUDGET"
                 else:
                     controller_started = time.monotonic()
+                    if clock.value is None:
+                        need(time.monotonic() - freeze["preparation_started_monotonic"] < 3600,
+                             "PREPARATION_BUDGET_EXHAUSTED_BEFORE_FIRST_ADMISSION")
+                        record("INFERENCE_CLOCK_STARTED", clock=clock.start())
                     counts[arm] += 1
                     reserved += doc["page_count"]
                     packet = packet_for(doc, arm, config, prompts, freeze["runtime"], min(240, remaining - 30))
@@ -388,9 +435,10 @@ def run(freeze, freeze_pin):
                 rows.append({"document_id": doc["document_id"], "arm": arm, "status": result["status"],
                              "executed": result["executed"], "result": pin})
                 print(json.dumps({"phase": "DONE", "document_id": doc["document_id"], "arm": arm,
-                    "status": result["status"], "campaign_elapsed_seconds": round(time.monotonic() - started, 3)}), flush=True)
+                    "status": result["status"], "campaign_elapsed_seconds": round(clock.elapsed(), 3)}), flush=True)
         summary = {"rows": rows, "document_attempts": counts, "Qwen_page_slots_reserved": reserved,
-                   "global_GPU_stop_reason": stop_reason, "elapsed_campaign_seconds": time.monotonic() - started,
+                   "global_GPU_stop_reason": stop_reason, "elapsed_campaign_seconds": clock.elapsed(),
+                   "inference_clock": ref(clock.path) if clock.value is not None else None,
                    "Paddle_calls": 0, "retries": 0, "operational_writes": 0}
         save(output / "summary.json", summary)
         record("RUN_CLOSED", counts=counts, Qwen_page_slots_reserved=reserved, global_GPU_stop_reason=stop_reason)
