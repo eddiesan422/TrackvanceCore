@@ -1,0 +1,425 @@
+{
+  "version": "DOCUMENTARY_SEMANTIC_V1",
+  "one_schema_per_type": true,
+  "values_for_missing": "null",
+  "ambiguity": "Preserve uncertainty and alternatives; do not force required fields that are absent. Required is an evaluation expectation, not permission to invent.",
+  "normalization_contract": {
+    "string": "Unicode NFC; trim leading/trailing whitespace and collapse internal whitespace only, preserve case/content; no aliases or layout-specific regex.",
+    "decimal": "Parse an explicitly stated decimal number with comma/dot locale markers into exact decimal string; no arithmetic derivation to fill missing fields.",
+    "date": "ISO YYYY-MM-DD or the Spanish DD/MM/YYYY convention to ISO; reject invalid dates and leave other ambiguous formats unresolved.",
+    "currency": "Explicit COP, USD, EUR and named equivalents declared generically; a bare dollar sign without further evidence stays ambiguous."
+  },
+  "schemas": {
+    "invoice": {
+      "label": "Factura",
+      "fields": [
+        {
+          "name": "number",
+          "type": "string",
+          "required": true,
+          "description": "Invoice identifier explicitly shown."
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": true,
+          "description": "Issue date; return absent if not printed."
+        },
+        {
+          "name": "issuer",
+          "type": "string",
+          "required": true,
+          "description": "Legal or business name of the issuer."
+        },
+        {
+          "name": "buyer",
+          "type": "string",
+          "required": true,
+          "description": "Name of purchaser or customer, not issuer."
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "description": "Currency explicitly stated or unambiguously marked; do not infer from country alone."
+        },
+        {
+          "name": "subtotal",
+          "type": "decimal",
+          "required": true,
+          "description": "Subtotal before tax as explicitly labelled."
+        },
+        {
+          "name": "tax_total",
+          "type": "decimal",
+          "required": false,
+          "description": "Aggregate tax total only when explicitly printed; do not sum component taxes to fill a missing aggregate."
+        },
+        {
+          "name": "total",
+          "type": "decimal",
+          "required": true,
+          "description": "Final invoice total as explicitly labelled."
+        }
+      ],
+      "tables": [
+        {
+          "name": "lines",
+          "columns": [
+            {
+              "name": "description",
+              "type": "string",
+              "required": true,
+              "description": "Line description without inventing an item."
+            },
+            {
+              "name": "quantity",
+              "type": "decimal",
+              "required": true,
+              "description": "Quantity for this line."
+            },
+            {
+              "name": "unit_price",
+              "type": "decimal",
+              "required": true,
+              "description": "Price per unit for this line."
+            },
+            {
+              "name": "amount",
+              "type": "decimal",
+              "required": true,
+              "description": "Explicit net line amount after stated line discounts and before taxes, when printed; do not calculate from quantity and unit price."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        },
+        {
+          "name": "taxes",
+          "columns": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Explicit tax category name without its percentage, which belongs in rate."
+            },
+            {
+              "name": "rate",
+              "type": "decimal",
+              "required": false,
+              "description": "Explicit percentage rate, if printed."
+            },
+            {
+              "name": "amount",
+              "type": "decimal",
+              "required": true,
+              "description": "Explicit amount for this tax category."
+            }
+          ],
+          "multiplicity": "Preserve each explicitly itemized tax category. Do not invent categories from arithmetic."
+        }
+      ],
+      "schema_id": "DOCUMENTARY_SEMANTIC_V1_INVOICE"
+    },
+    "order": {
+      "label": "Pedido o remision",
+      "fields": [
+        {
+          "name": "number",
+          "type": "string",
+          "required": true,
+          "description": "Order or dispatch identifier."
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": true,
+          "description": "Date printed for this order or dispatch."
+        },
+        {
+          "name": "issuer",
+          "type": "string",
+          "required": true,
+          "description": "Entity issuing the order or dispatch."
+        },
+        {
+          "name": "receiver",
+          "type": "string",
+          "required": true,
+          "description": "Entity receiving the goods or order."
+        }
+      ],
+      "tables": [
+        {
+          "name": "lines",
+          "columns": [
+            {
+              "name": "reference",
+              "type": "string",
+              "required": true,
+              "description": "Product or service reference."
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "required": true,
+              "description": "Description of the ordered or dispatched item."
+            },
+            {
+              "name": "quantity",
+              "type": "decimal",
+              "required": true,
+              "description": "Explicit requested or delivered quantity."
+            },
+            {
+              "name": "unit",
+              "type": "string",
+              "required": true,
+              "description": "Unit of measure stated for the quantity."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        }
+      ],
+      "schema_id": "DOCUMENTARY_SEMANTIC_V1_ORDER"
+    },
+    "certificate": {
+      "label": "Formulario o certificado",
+      "fields": [
+        {
+          "name": "document_type",
+          "type": "string",
+          "required": true,
+          "description": "Explicit type/title of form or certificate."
+        },
+        {
+          "name": "issuer",
+          "type": "string",
+          "required": true,
+          "description": "Issuing entity."
+        },
+        {
+          "name": "holder",
+          "type": "string",
+          "required": true,
+          "description": "Person or entity to which the certificate or form applies."
+        },
+        {
+          "name": "identification",
+          "type": "string",
+          "required": true,
+          "description": "Identification of the holder, not issuer."
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": true,
+          "description": "Issuance or form date when printed."
+        },
+        {
+          "name": "reference",
+          "type": "string",
+          "required": true,
+          "description": "Document reference/registration number."
+        },
+        {
+          "name": "purpose",
+          "type": "string",
+          "required": false,
+          "description": "Purpose or activity expressly declared, if present."
+        },
+        {
+          "name": "valid_until",
+          "type": "date",
+          "required": false,
+          "description": "Explicit expiry date; absent when not stated."
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "required": false,
+          "description": "Site or location expressly covered by this document."
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": false,
+          "description": "Explicit status/result; do not infer approval from a signature."
+        }
+      ],
+      "tables": [],
+      "schema_id": "DOCUMENTARY_SEMANTIC_V1_CERTIFICATE"
+    },
+    "statement": {
+      "label": "Extracto o reporte de movimientos",
+      "fields": [
+        {
+          "name": "entity",
+          "type": "string",
+          "required": true,
+          "description": "Entity that issues the statement or report."
+        },
+        {
+          "name": "reference",
+          "type": "string",
+          "required": true,
+          "description": "Account or report reference."
+        },
+        {
+          "name": "period_start",
+          "type": "date",
+          "required": true,
+          "description": "Start of reporting period."
+        },
+        {
+          "name": "period_end",
+          "type": "date",
+          "required": true,
+          "description": "End of reporting period."
+        },
+        {
+          "name": "currency",
+          "type": "string",
+          "required": true,
+          "description": "Currency explicitly shown."
+        },
+        {
+          "name": "opening_balance",
+          "type": "decimal",
+          "required": false,
+          "description": "Opening balance only if present."
+        },
+        {
+          "name": "closing_balance",
+          "type": "decimal",
+          "required": false,
+          "description": "Closing balance only if present."
+        }
+      ],
+      "tables": [
+        {
+          "name": "movements",
+          "columns": [
+            {
+              "name": "date",
+              "type": "date",
+              "required": true,
+              "description": "Movement date."
+            },
+            {
+              "name": "reference",
+              "type": "string",
+              "required": false,
+              "description": "Movement reference if printed."
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "required": true,
+              "description": "Movement description."
+            },
+            {
+              "name": "debit",
+              "type": "decimal",
+              "required": false,
+              "description": "Debit/withdrawal amount; absent if not present, not automatically zero."
+            },
+            {
+              "name": "credit",
+              "type": "decimal",
+              "required": false,
+              "description": "Credit/deposit amount; absent if not present, not automatically zero."
+            },
+            {
+              "name": "balance",
+              "type": "decimal",
+              "required": false,
+              "description": "Running balance only when explicitly printed."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        }
+      ],
+      "schema_id": "DOCUMENTARY_SEMANTIC_V1_STATEMENT"
+    },
+    "narrative": {
+      "label": "Acta o informe narrativo",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Document title."
+        },
+        {
+          "name": "date",
+          "type": "date",
+          "required": false,
+          "description": "Document or meeting date only if explicit."
+        }
+      ],
+      "tables": [
+        {
+          "name": "sections",
+          "columns": [
+            {
+              "name": "heading",
+              "type": "string",
+              "required": true,
+              "description": "Section heading explicitly printed."
+            },
+            {
+              "name": "text",
+              "type": "string",
+              "required": true,
+              "description": "Complete text belonging to this section; preserve meaning and order."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        },
+        {
+          "name": "entities",
+          "columns": [
+            {
+              "name": "name",
+              "type": "string",
+              "required": true,
+              "description": "Named person or organisation explicitly mentioned."
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "required": false,
+              "description": "Use person or organization only when explicitly supported by context; otherwise null."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        },
+        {
+          "name": "actions",
+          "columns": [
+            {
+              "name": "text",
+              "type": "string",
+              "required": true,
+              "description": "Copy the explicit action or commitment clause faithfully and verbatim. Do not invent an agreed action from a recommendation."
+            },
+            {
+              "name": "responsible",
+              "type": "string",
+              "required": false,
+              "description": "Responsible party only when expressly assigned."
+            },
+            {
+              "name": "due_date",
+              "type": "date",
+              "required": false,
+              "description": "Deadline only when explicitly stated."
+            }
+          ],
+          "multiplicity": "Preserve every physical semantic occurrence, including legitimate identical rows; do not collapse repeated products."
+        }
+      ],
+      "schema_id": "DOCUMENTARY_SEMANTIC_V1_NARRATIVE"
+    }
+  }
+}
