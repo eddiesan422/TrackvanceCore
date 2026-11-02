@@ -54,6 +54,12 @@ print('STAGED_EXACT_SOURCE')
     r=subprocess.run(args,input=raw,capture_output=True,timeout=30,env={k:v for k,v in os.environ.items() if k not in control.OVERRIDES},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     return {'exit_code':r.returncode,'stdout':r.stdout.decode('utf-8','replace'),'stderr':r.stderr.decode('utf-8','replace'),'source_sha256':expected,'source_bytes':len(raw),'target':target}
 
+def linux_test_command(rt,target):
+    # Isolated Python intentionally omits the script directory from sys.path.
+    # Add only the already-owned/hash-verified diagnostic directory explicitly.
+    code='import runpy,sys;sys.path.insert(0,'+repr(target)+');runpy.run_path('+repr(target+'/test_paddle_service_worker.py')+',run_name="__main__")'
+    return ['docker','--context','default','exec',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',code]
+
 def run(freeze,control,out,clock):
     F=freeze;rt=F['runtime'];out.mkdir();ledger=out/'ledger.ndjson'
     policy=module('paddle_diagnostic_policy',F['policy']['path']);guard=policy.AdmissionGuard()
@@ -61,7 +67,7 @@ def run(freeze,control,out,clock):
     for d in docs:
         need(pin(d['source']['path'])==d['source'],'ORIGINAL_DOCUMENT_CHANGED')
     target=F['remote_worker_directory'];need(target.startswith('/tmp/trackvance-paddle-diag-') and len(target.rsplit('-',1)[-1])==32,'OWNED_TEMP_PATH')
-    linux_receipt=json.loads((Path(F['directory'])/'linux-cpu/receipt.private.json').read_bytes())
+    linux_receipt=json.loads((Path(F.get('linux_cpu_directory',str(Path(F['directory'])/'linux-cpu')))/'receipt.private.json').read_bytes())
     need(linux_receipt['status']=='PASS' and linux_receipt['tests']==17 and linux_receipt['skipped']==0,'LINUX_CPU_INSTRUMENTATION_REQUIRED')
     verify="from pathlib import Path;import hashlib;print(hashlib.sha256(Path("+repr(target+'/paddle_service_worker.py')+").read_bytes()).hexdigest())"
     need(control.docker('exec',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',verify).decode().strip()==F['worker']['sha256'],'REMOTE_WORKER_CHANGED')
@@ -189,13 +195,14 @@ def main():
         clock={'started_epoch':time.time(),'started_monotonic':time.monotonic(),'limit_seconds':900,'trigger':'BEFORE_FIRST_EXISTING_GPU_SERVICE_START','resets':0};save(D/'gpu-campaign-clock.private.json',clock)
         x['manager_args']=control.manager_args(plan,rt,'start');x['manager_output']=control.command(x['manager_args'],timeout=60).decode('utf-8','replace');x['after']=save(out/'after.private.json',control.inventory(entry,rt,True));x.update(status='EXISTING_GPU2_STARTED_NOT_DOCUMENT_ADMISSION',model_calls=0);save(out/'receipt.private.json',x)
     elif a.mode=='linux-cpu':
-        clock=json.loads((D/'gpu-campaign-clock.private.json').read_bytes());need(remaining(clock)>300,'GPU_CAMPAIGN_REMAINING_TOO_SMALL');out=D/'linux-cpu';out.mkdir(exist_ok=True);need(not (out/'receipt.private.json').exists(),'LINUX_CPU_ALREADY_EXECUTED');target=F['remote_worker_directory']
+        clock=json.loads((D/'gpu-campaign-clock.private.json').read_bytes());need(remaining(clock)>300,'GPU_CAMPAIGN_REMAINING_TOO_SMALL');out=Path(F.get('linux_cpu_directory',str(D/'linux-cpu')));out.mkdir(exist_ok=True);need(not (out/'receipt.private.json').exists(),'LINUX_CPU_ALREADY_EXECUTED');target=F['remote_worker_directory']
         need(target.startswith('/tmp/trackvance-paddle-diag-') and len(target.rsplit('-',1)[-1])==32,'OWNED_TEMP_PATH')
-        create="from pathlib import Path;import os; p=Path("+repr(target)+");p.mkdir(mode=0o700,exist_ok=True);assert not p.is_symlink() and p.lstat().st_uid==os.getuid() and not list(p.iterdir())"
-        control.docker('exec',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',create)
+        expected={'paddle_service_worker.py':F['worker']['sha256'],'test_paddle_service_worker.py':F['worker_tests']['sha256']}
+        create="from pathlib import Path;import os,hashlib,json; p=Path("+repr(target)+");p.mkdir(mode=0o700,exist_ok=True);assert not p.is_symlink() and p.lstat().st_uid==os.getuid();expected="+repr(expected)+";assert set(x.name for x in p.iterdir())<=set(expected);assert all(not x.is_symlink() and x.is_file() and x.lstat().st_uid==os.getuid() and hashlib.sha256(x.read_bytes()).hexdigest()==expected[x.name] for x in p.iterdir());print(json.dumps(sorted(x.name for x in p.iterdir())))"
+        present=json.loads(control.docker('exec',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',create))
         for name,x in [('paddle_service_worker.py',F['worker']),('test_paddle_service_worker.py',F['worker_tests'])]:
-            transfer=stage_file(control,rt,x['path'],target+'/'+name,x['sha256']);save(out/(name+'.transfer.private.json'),transfer);need(transfer['exit_code']==0,'OWNED_SOURCE_STAGING_FAILED')
-        argv=['docker','--context','default','exec',rt['gateway_id'],rt['worker_python'],'-I','-B',target+'/test_paddle_service_worker.py'];started=time.monotonic()
+            transfer=({'exit_code':0,'status':'EXISTING_EXACT_OWNED_SOURCE_REUSED_NOT_OVERWRITTEN','source_sha256':x['sha256'],'target':target+'/'+name} if name in present else stage_file(control,rt,x['path'],target+'/'+name,x['sha256']));save(out/(name+'.transfer.private.json'),transfer);need(transfer['exit_code']==0,'OWNED_SOURCE_STAGING_FAILED')
+        argv=linux_test_command(rt,target);started=time.monotonic()
         result=subprocess.run(argv,capture_output=True,timeout=45,env={k:v for k,v in os.environ.items() if k not in control.OVERRIDES},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         (out/'stdout.txt').write_bytes(result.stdout);(out/'stderr.txt').write_bytes(result.stderr);text=(result.stdout+result.stderr).decode('utf-8','replace')
         ok=result.returncode==0 and 'Ran 17 tests' in text and '\nOK' in text and 'skipped=' not in text

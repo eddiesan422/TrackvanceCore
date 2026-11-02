@@ -5,6 +5,13 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('paddle_host_control_tested',Path(__file__).with_name('paddle_diagnostic_control.py'))
 m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
 class HostAdmission(unittest.TestCase):
+    def test_isolated_test_bootstrap_imports_only_explicit_owned_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d=Path(tmp);(d/'paddle_service_worker.py').write_text('SYNTHETIC=42\n')
+            (d/'test_paddle_service_worker.py').write_text('import paddle_service_worker as w\nassert w.SYNTHETIC==42\nprint("CPU_ISOLATED_IMPORT_PASS")\n')
+            argv=m.linux_test_command({'gateway_id':'cpu-only','worker_python':sys.executable},str(d))
+            r=m.subprocess.run([sys.executable,*argv[6:]],capture_output=True,timeout=5)
+            self.assertEqual(r.returncode,0,r.stderr);self.assertIn(b'CPU_ISOLATED_IMPORT_PASS',r.stdout)
     def test_staging_uses_exact_stdin_bytes_and_retains_failure_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'worker.py';p.write_bytes(b'cpu-test-source')
