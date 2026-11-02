@@ -143,8 +143,25 @@ def map_representation(representation, definition, *, stage=None):
             candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []),
             observation_policy={"version": OBSERVATION_POLICY_VERSION})
         return mapped
-    documentary_headers, associations = header_observations(pages, definition["fields"])
+    semantic_v2 = ((definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"
+        and (definition.get("semantic_general") or {}).get("association_contract") == "SEMANTIC_SOURCE_ASSOCIATION_V2")
+    if semantic_v2:
+        from .document_header_association_v2 import header_observations_v2
+
+        documentary_headers, associations = header_observations_v2(pages, definition["fields"])
+    else:
+        documentary_headers, associations = header_observations(pages, definition["fields"])
     rejected_headers: dict[str, list[dict]] = {}
+    if semantic_v2:
+        # A proven other-role relation remains visible as a rejected proposal;
+        # insufficient relations and invalid literals stay in the strict resolver.
+        for name, relations in associations.items():
+            for relation in relations:
+                if relation.get("eligible_for_field") is False:
+                    rejected_headers.setdefault(name, []).append({
+                        "observed": relation.get("observed"), "page": relation.get("page"),
+                        "evidence_refs": list(relation.get("value_refs", [])),
+                        "eligible_for_field": False, "association": copy.deepcopy(relation)})
     for page in pages:
         ordinal = page["page_one_based"]
         if "selection" in page:
@@ -264,9 +281,15 @@ def map_representation(representation, definition, *, stage=None):
         cell = payload["fields"][field["name"]]
         if rejected_headers.get(field["name"]):
             cell["candidate_alternatives"].extend(copy.deepcopy(rejected_headers[field["name"]]))
-        bindings = [item for item in associations[field["name"]] if item["value_refs"][0] in cell["evidence_refs"]]
+        if semantic_v2:
+            bindings = [item for item in associations[field["name"]]
+                if item.get("value_refs") and item["value_refs"][0] in cell["evidence_refs"]
+                and item.get("eligible_for_field") is not False]
+        else:
+            bindings = [item for item in associations[field["name"]] if item["value_refs"][0] in cell["evidence_refs"]]
         if bindings:
-            cell["association"] = {"version": "DECLARED_HEADER_ASSOCIATION_V1", "bindings": copy.deepcopy(bindings)}
+            cell["association"] = {"version": "DECLARED_HEADER_ASSOCIATION_V2" if semantic_v2 else "DECLARED_HEADER_ASSOCIATION_V1",
+                "bindings": copy.deepcopy(bindings)}
             first = bindings[0]
             cell["geometry_kind"] = first["geometry_kind"]
             cell["origin"]["geometry_kind"] = first["geometry_kind"]
@@ -462,8 +485,10 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         accept(event)
 
     def evidence_context():
+        from .document_semantic_general import automatic_contract
+
         value = verification.source_context(events, source_sha)
-        if (definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V1":
+        if automatic_contract(definition):
             from .document_semantic_corroboration import semantic_source_context
 
             return semantic_source_context(events, value)

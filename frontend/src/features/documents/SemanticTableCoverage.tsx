@@ -1,6 +1,6 @@
 import type { RecordData } from '../../api/client'
 import { date } from '../../components/ui'
-import { evidenceReference } from './documentSemanticEvidence'
+import { evidenceMechanism, evidenceReference, semanticReasonDescription } from './documentSemanticEvidence'
 import type { DocumentaryEvidenceReference } from './documentSemanticEvidence'
 
 export default function SemanticTableCoverage({ definitions, tables, status, confirmed, onChange, canView, busy }: {
@@ -17,6 +17,8 @@ export default function SemanticTableCoverage({ definitions, tables, status, con
       return <div key={table.name}>
         <strong>{table.name}</strong><small>Filas conservadas: {tables[table.name]?.length || 0}</small>
         {typeof review?.review_required === 'boolean' && <small>Estado de cobertura guardado: {review.review_required ? 'requiere revisión' : automatic ? 'verificada automáticamente' : 'confirmado mediante revisión'}</small>}
+        {!!review?.reasons?.length && <ul aria-label={`Motivos de cobertura de ${table.name}`}>{review.reasons.map((reason: string, index: number) => <li key={index}>{semanticReasonDescription(reason)}</li>)}</ul>}
+        {!!review?.inventory_summary?.length && <details><summary>Inventario de fuente de {table.name}</summary><ul>{review.inventory_summary.map((item: RecordData, index: number) => <li key={index}>{evidenceMechanism(item.mechanism)} · encabezados: {item.header_count} · ocurrencias: {item.row_count} · {item.complete === true ? 'ámbito de inventario acreditado' : 'ámbito de inventario pendiente'}</li>)}</ul><p>El recuento de filas no sustituye la correspondencia de todas las ocurrencias de origen.</p></details>}
         {!!review?.proof_refs?.length && <small>Evidencia de cobertura: {review.proof_refs.map((reference: DocumentaryEvidenceReference) => evidenceReference(reference)).join(' · ')}</small>}
         {review?.latest_confirmation && <small>Última confirmación: {date(review.latest_confirmation.created_at)} · {review.latest_confirmation.reason}</small>}
         {!covered && <label><input type="checkbox" disabled={!canView || busy} checked={confirmed.includes(table.name)} onChange={event => onChange(event.target.checked ? [...confirmed, table.name] : confirmed.filter(name => name !== table.name))}/> Confirmé en el original la cobertura de {table.name}</label>}

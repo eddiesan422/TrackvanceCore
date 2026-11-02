@@ -20,13 +20,14 @@ export default function DocumentExecution({ document: item, compact = false }: {
   const pending = execution?.pending_pages
   const partial = item.incomplete_inference?.status === 'PARTIAL' || execution?.recognition_complete === false
   const verification = ['QUEUED', 'RUNNING'].includes(item.status) ? execution?.verification : item.extraction?.engine?.verification || execution?.verification
-  if (!snapshot && !semantic && !stage && !quality && !item.incomplete_inference && resources?.elapsed_seconds == null) return null
+  const semanticReview = ['QUEUED', 'RUNNING'].includes(item.status) ? undefined : item.semantic_review
+  if (!snapshot && !semantic && !stage && !quality && !item.incomplete_inference && resources?.elapsed_seconds == null && !semanticReview?.source_checks) return null
   return <div className={`document-execution${compact ? ' compact' : ''}`} aria-label="Ejecución documental">
     <IncompleteSourceNotice review={item.incomplete_inference} compact={compact}/>
     {semantic?.mode === 'SEMANTIC_GENERAL_V1' && <><span>Extracción general · {semantic.profile_name || semantic.profile_id} · revisión {semantic.profile_revision}</span>{!compact && <><small>Contrato semántico independiente de la disposición visual. La extracción, la revisión y la publicación conservan sus estados propios.</small><small>Perfil congelado: {semantic.profile_sha256}</small></>}</>}
     {stage && <span>Fase: {verificationPhases[stage] || phases[stage] || stage}</span>}
     {!compact && item.verification_configuration && <small>Configuración de esta verificación; el motor original conserva su snapshot anterior.</small>}
-    <DocumentVerification verification={verification} compact={compact}/>
+    <DocumentVerification verification={verification} semanticReview={semanticReview} compact={compact}/>
     {Array.isArray(expected) && Array.isArray(emitted) && <span>Páginas conservadas: {emitted.length}/{expected.length}{Array.isArray(pending) && pending.length > 0 ? ` · pendientes: ${pending.join(', ')}` : ''}</span>}
     {!compact && typeof execution?.resources_released === 'boolean' && <span>Recursos de ejecución: {execution.resources_released ? 'liberados' : 'pendientes de liberar'}</span>}
     {!compact && execution && <><span>Reconocimiento: {execution.recognition_complete === true ? 'terminado' : 'incompleto o pendiente'}</span><span>Validación: {execution.validation_complete === true ? 'terminada' : 'pendiente'}</span><span>Publicación: {execution.publication_complete === true ? 'realizada' : 'no realizada'}</span>{execution.attempt_id && <small>Intento: {execution.attempt_id}</small>}</>}

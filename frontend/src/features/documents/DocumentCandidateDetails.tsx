@@ -33,6 +33,7 @@ export default function DocumentCandidateDetails({ value, canReview = false, onC
   const evidence = [...new Set([...(semanticReview?.evidence_refs || []), ...(semanticReview?.corroboration?.source_refs || [])].map(evidenceReference))]
   const association = semanticReview?.corroboration?.association
   const associations = Array.isArray(association) ? association : association ? [association] : []
+  const associationTraces = semanticReview?.corroboration?.rejected_associations || []
   return <div className="document-candidate-details">
     {normalization && <dl aria-label="Normalización del valor">
       <div><dt>Texto observado</dt><dd>{text(normalization.observed !== undefined ? normalization.observed : value.observed)}</dd></div>
@@ -40,6 +41,21 @@ export default function DocumentCandidateDetails({ value, canReview = false, onC
       <div><dt>Regla aplicada</dt><dd>{normalizationRules[normalization.rule] || normalization.rule} · versión {normalization.version}</dd></div>
       {!!normalization.evidence_refs?.length && <div><dt>Evidencia de la normalización</dt><dd>{normalization.evidence_refs.map(evidenceReference).join(', ')}</dd></div>}
     </dl>}
+    {!!associationTraces.length && <details className="document-association-traces"><summary>Relaciones de origen conservadas ({associationTraces.length})</summary>
+      <p>La atribución demostrada a otro dato se distingue de una relación insuficiente, que mantiene la revisión pendiente. Las observaciones originales permanecen conservadas.</p>
+      <ul>{associationTraces.map((trace, index) => <li key={index}>
+        <strong>{trace.status === 'REJECTED' && trace.eligible_for_field === false ? 'Excluida como valor por su función documental demostrada' : 'Relación pendiente; conserva incertidumbre'}</strong>
+        <small>Observado: {text(Object.hasOwn(trace, 'observed') ? trace.observed : trace.raw_observed)}</small>
+        {trace.label_text && <small>Etiqueta de origen: {trace.label_text}</small>}
+        {trace.value_text && <small>Contenido relacionado: {trace.value_text}</small>}
+        {trace.page != null && <small>Página física: {trace.page}</small>}
+        {trace.reason && <small>{semanticReasonDescription(trace.reason)}</small>}
+        {trace.source_section && <small>Sección observada: {trace.source_section}</small>}
+        {trace.requested_section && <small>Sección solicitada por el contrato: {trace.requested_section}</small>}
+        {trace.mechanism && <small>{evidenceMechanism(trace.mechanism)}</small>}
+        {!![...(trace.label_refs || []), ...(trace.value_refs || []), ...(trace.source_refs || [])].length && <small>Referencias de la relación: {[...new Set([...(trace.label_refs || []), ...(trace.value_refs || []), ...(trace.source_refs || [])].map(evidenceReference))].join(' · ')}</small>}
+      </li>)}</ul>
+    </details>}
     {kind && <small>{kind === 'MEASURED' ? 'Localización medida en la fuente' : kind === 'QUERY_REGION' ? 'La región consultada no es una localización medida de este valor.' : 'La ubicación exacta de este valor no está demostrada.'}</small>}
     {semanticReview && <dl aria-label="Estado semántico del valor">
       <div><dt>Estado del valor</dt><dd>{semanticReview.state === 'VERIFIED_AUTOMATICALLY' && !automatic ? 'Pendiente de verificación' : semanticStates[semanticReview.state || ''] || semanticReview.state}</dd></div>

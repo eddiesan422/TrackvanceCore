@@ -338,7 +338,7 @@ def semantic_review_dto(extraction, definition):
         from .document_validation_policy import semantic_quality_report
 
         approved = semantic_quality_report(extraction, definition, automatic_verification=automatic)["status"] == "AUTO_VERIFIED"
-    return {"mode": "SEMANTIC_GENERAL_V1", "automatic_approval": approved, "values": states,
+    result = {"mode": "SEMANTIC_GENERAL_V1", "automatic_approval": approved, "values": states,
         "tables": [{"name": table["name"],
             "review_required": "SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + table["name"] in pending,
             "coverage_state": "PENDING" if "SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + table["name"] in pending else (
@@ -349,3 +349,51 @@ def semantic_review_dto(extraction, definition):
                 if automatic["table_coverage"].get(table["name"]) else [],
             "latest_confirmation": next((copy.deepcopy(item) for item in reversed(payload.get("semantic_table_reviews", []))
                 if item.get("table") == table["name"]), None)} for table in definition["tables"]]}
+    if definition["semantic_general"].get("automatic_verification") == "SEMANTIC_AUTO_V2":
+        _semantic_review_v2(result, extraction, definition, automatic)
+    return result
+
+
+def _semantic_review_v2(result, extraction, definition, automatic):
+    """Publish current factual checks, never original bodies or an old approval."""
+    from .document_validation_policy import semantic_quality_report
+
+    proof = automatic["proof"]
+    execution = extraction.engine.get("execution", {})
+    physical = list(range(1, (execution.get("expected_pages") or 0) + 1))
+    processed = execution.get("completed_pages", [])
+    total, verified = len(result["values"]), len(automatic["verified_cells"])
+    covered = [name for name, value in automatic["table_coverage"].items() if value]
+    pending = [table["name"] for table in definition["tables"] if table["name"] not in covered]
+    checks = copy.deepcopy(proof.get("source_checks")) or {
+        "version": "SEMANTIC_SOURCE_CHECKS_V2",
+        "integrity": {"status": "UNVERIFIED", "reasons": ["SOURCE_EVIDENCE_UNAVAILABLE"], "source_refs": []},
+        "text": {"status": "UNAVAILABLE", "available_pages": [], "missing_pages": physical, "source_refs": []},
+        "execution_pages": {"status": "INCOMPLETE", "physical_pages": physical,
+            "processed_pages": processed, "missing_pages": sorted(set(physical) - set(processed))},
+        "documentary_completeness": {"status": "PENDING", "scope": "DECLARED_EXTRACTION_CONTRACT",
+            "reasons": ["SOURCE_EVIDENCE_UNAVAILABLE"]}}
+    associations = sum(bool(item["corroboration"].get("association")) and item["path"] in automatic["verified_cells"]
+        for item in result["values"])
+    checks["associations"] = {"status": "VERIFIED" if associations == total else "PENDING",
+        "verified": associations, "pending": total - associations}
+    checks["cell_corroboration"] = {"status": "VERIFIED" if total == verified else "PENDING", "verified": verified, "pending": total - verified}
+    checks["table_coverage"] = {"status": "PENDING" if pending else "VERIFIED", "verified": covered, "pending": pending}
+    if any(proof.get("table_coverage", {}).get(name) for name in pending):
+        checks["documentary_completeness"] = {"status": "PENDING", "scope": "DECLARED_EXTRACTION_CONTRACT",
+            "reasons": ["CURRENT_TABLE_DIFFERS_FROM_ATTESTED_VALUE"]}
+    quality = semantic_quality_report(extraction, definition, automatic_verification=automatic)
+    checks["automatic_eligibility"] = {"status": "ELIGIBLE" if quality["status"] == "AUTO_VERIFIED" else "BLOCKED",
+        "reasons": quality["issues"] or (["HUMAN_REVIEW_APPLIED"] if quality["status"] == "HUMAN_VERIFIED" else [])}
+    result.update(verification_version="SEMANTIC_AUTO_V2", source_checks=checks,
+        printed_pagination=copy.deepcopy(proof.get("printed_pagination")) or {"status": "UNVERIFIED",
+            "physical_pages": physical, "processed_pages": processed, "missing_execution_pages": sorted(set(physical) - set(processed)),
+            "observations": [], "sequences": [], "reasons": ["SOURCE_EVIDENCE_UNAVAILABLE"], "documentary_complete": None, "blocking": True})
+    for table in result["tables"]:
+        details = proof.get("coverage_details", {}).get(table["name"], {})
+        table["reasons"] = [] if table["coverage_state"] == "AUTHORIZED_REVIEW" else copy.deepcopy(details.get("reasons", []))
+        table["inventory_summary"] = [{"mechanism": inventory["source"]["mechanism"],
+            "header_count": len(inventory["headers"]), "row_count": len(inventory["rows"]), "complete": inventory["complete"]}
+            for inventory in details.get("source_inventory", [])]
+        if not table["proof_refs"]:
+            table["proof_refs"] = [{**reference, "verified": False} for reference in details.get("proof_refs", [])]

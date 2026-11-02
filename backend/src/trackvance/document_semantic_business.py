@@ -82,7 +82,7 @@ def validate_business_metadata(definition):
     if controls is None:
         return
     value, arithmetic, totals = projection(controls)
-    if (metadata.get("automatic_verification") != "SEMANTIC_AUTO_V1"
+    if (metadata.get("automatic_verification") not in {"SEMANTIC_AUTO_V1", "SEMANTIC_AUTO_V2"}
             or metadata.get("contract", {}).get("document_type") != "INVOICE"
             or metadata.get("business_controls_sha256") != canonical_hash(value)):
         raise ValueError("Invoice business controls require their versioned semantic AUTO contract and hash.")
@@ -108,7 +108,7 @@ def business_report(payload, definition, *, verified_paths, table_coverage):
 
     metadata = definition.get("semantic_general") or {}
     invoice = metadata.get("contract", {}).get("document_type") == "INVOICE"
-    if metadata.get("automatic_verification") != "SEMANTIC_AUTO_V1" or not invoice:
+    if metadata.get("automatic_verification") not in {"SEMANTIC_AUTO_V1", "SEMANTIC_AUTO_V2"} or not invoice:
         return {"version": VERSION, "required": False, "applicable": True, "checks": [], "issues": []}
     controls = metadata.get("business_controls")
     if controls is None:

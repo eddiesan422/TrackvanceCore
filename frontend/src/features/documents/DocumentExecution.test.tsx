@@ -4,6 +4,17 @@ import { renderApp } from '../../test/render'
 import DocumentExecution from './DocumentExecution'
 
 describe('Observed document execution', () => {
+  it('shows the current V2 source checks without an extra reading but hides old checks while a new verification is queued', () => {
+    const semanticReview = { verification_version: 'SEMANTIC_AUTO_V2', source_checks: { version: 'SEMANTIC_SOURCE_CHECKS_V2', text: { status: 'AVAILABLE', available_pages: [1], missing_pages: [] }, automatic_eligibility: { status: 'BLOCKED', reasons: [] } } }
+    const { rerender } = renderApp(<DocumentExecution document={{ status: 'REVIEW_REQUIRED', semantic_review: semanticReview }}/>)
+    expect(screen.getByLabelText('Controles de fuente y completitud')).toBeVisible()
+    expect(screen.getByText('Texto de fuente').parentElement).toHaveTextContent('Disponible')
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+    rerender(<DocumentExecution document={{ status: 'QUEUED', semantic_review: semanticReview, execution: { stage: 'VERIFICATION_REQUEST', verification: { status: 'QUEUED', remaining_reasons: [] } } }}/>)
+    expect(screen.getByText('Verificación en cola')).toBeVisible()
+    expect(screen.queryByLabelText('Controles de fuente y completitud')).not.toBeInTheDocument()
+  })
+
   it('identifies the saved semantic contract without presenting it as an approval or measured geometry', () => {
     renderApp(<DocumentExecution document={{ semantic_general: { mode: 'SEMANTIC_GENERAL_V1', profile_id: 'narrative-v1', profile_name: 'Acciones solicitadas', profile_revision: 3, profile_sha256: 'immutable-semantic-sha' } }}/>)
     expect(screen.getByText('Extracción general · Acciones solicitadas · revisión 3')).toBeVisible()

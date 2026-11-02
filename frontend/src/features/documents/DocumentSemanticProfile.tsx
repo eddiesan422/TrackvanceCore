@@ -26,7 +26,8 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
   const [saved, setSaved] = useState<RecordData | null>(null)
   const [custom, setCustom] = useState<SemanticProfileDraft | null>(null)
   const profile = profiles.data?.profiles.find(item => profileKey(item) === selected)
-  const automatic = profiles.data?.automatic_verification_enabled === true && automaticVerification === 'SEMANTIC_AUTO_V1'
+  const automaticVersion = profiles.data?.automatic_verification_version === 'SEMANTIC_AUTO_V2' ? 'SEMANTIC_AUTO_V2' : 'SEMANTIC_AUTO_V1'
+  const automatic = profiles.data?.automatic_verification_enabled === true && automaticVerification === automaticVersion
   const businessProposal = !custom && profile?.automatic_business_controls?.profile_sha256 === profile?.sha256 && profile?.automatic_business_controls?.explicit_scope_confirmation_required === true ? profile.automatic_business_controls : null
   const businessConfirmationPending = automatic && !!businessProposal && !businessScopeConfirmed
   const disabled = !canConfigure || !profiles.data?.enabled || busy
@@ -36,7 +37,7 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
     <h2 id="document-semantic-profile-title">Extracción general</h2>
     <p>Define la información que necesitas sin marcar posiciones ni preparar una plantilla visual por proveedor.</p>
     {current && <p>Perfil vigente: <strong>{current.profile_name || current.profile_id}</strong> · revisión {current.profile_revision}. Los documentos anteriores conservan su contrato.</p>}
-    {current && <p>Política vigente: {current.automatic_verification === 'SEMANTIC_AUTO_V1' ? 'verificación automática documental optativa' : 'revisión autorizada'}. Cambiar el perfil sólo afecta a documentos nuevos.</p>}
+    {current && <p>Política vigente: {['SEMANTIC_AUTO_V1', 'SEMANTIC_AUTO_V2'].includes(current.automatic_verification) ? 'verificación automática documental optativa' : 'revisión autorizada'}. Cambiar el perfil sólo afecta a documentos nuevos.</p>}
     {profiles.isLoading && <Loading text="Consultando perfiles semánticos…"/>}
     {profiles.error && <ErrorState error={profiles.error} retry={() => void profiles.refetch()}/>}
     {profiles.data && <>
@@ -62,7 +63,7 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
           </select></Field>
           {profiles.data.automatic_verification_enabled && <Field label="Verificación automática documental" hint="Optativa para documentos nuevos; sólo aprueba cuando la evidencia y todos los controles sean suficientes."><select value={automaticVerification} disabled={disabled} onChange={event => { setAutomaticVerification(event.target.value); setSaved(null); setBusinessScopeConfirmed(false) }}>
             <option value="OFF">Deshabilitada: revisión autorizada</option>
-            <option value="SEMANTIC_AUTO_V1">Verificar evidencia automáticamente; revisar excepciones</option>
+            <option value={automaticVersion}>Verificar evidencia automáticamente; revisar excepciones</option>
           </select></Field>}
         </div>
         {profile && <><label className="document-semantic-customize"><input type="checkbox" disabled={disabled} checked={!!custom} onChange={event => {
@@ -85,7 +86,7 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
           <p>Si hay descuentos o ajustes no representados, conserva la revisión de esas facturas.</p>
         </section>}
         {automatic && (custom?.document_type || profile?.document_type) === 'INVOICE' && !businessProposal && <Notice>Este perfil no tiene una declaración completa de controles de factura. Sus facturas conservarán revisión; seleccionar la verificación automática no sustituye esos controles.</Notice>}
-        <Notice>Los resultados conservarán el texto observado, las alternativas y su origen. {profiles.data.automatic_verification_enabled && automaticVerification === 'SEMANTIC_AUTO_V1' ? 'El modo seleccionado verificará la evidencia y mantendrá en revisión las excepciones no resueltas;' : 'La extracción general requiere revisión;'} guardar este perfil no aprueba ni publica documentos.</Notice>
+        <Notice>Los resultados conservarán el texto observado, las alternativas y su origen. {automatic ? 'El modo seleccionado verificará la evidencia y mantendrá en revisión las excepciones no resueltas;' : 'La extracción general requiere revisión;'} guardar este perfil no aprueba ni publica documentos.</Notice>
         {canConfigure && <><Field label="Motivo del cambio de perfil"><textarea value={reason} required maxLength={2000} disabled={disabled} onChange={event => setReason(event.target.value)}/></Field><button className="button primary" type="submit" disabled={disabled || !profile || !reason.trim() || businessConfirmationPending}>Usar perfil para documentos nuevos</button></>}
       </form>
     </>}

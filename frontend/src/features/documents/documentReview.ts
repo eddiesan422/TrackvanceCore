@@ -1,4 +1,5 @@
 import type { RecordData } from '../../api/client'
+import { semanticReasonDescription } from './documentSemanticEvidence'
 
 export type ReviewCell = { path: string; name: string; value: RecordData }
 
@@ -83,7 +84,7 @@ export function issueDescription(issue: string): string {
   const description: Record<string, string> = {
     REVIEW_REQUIRED: 'Comprueba y confirma este valor contra el original', VALUE_INVALID: 'Completa o corrige este valor',
     TABLE_REQUIRED: 'No se encontró una tabla obligatoria', TABLE_ROWS_UNRECOGNIZED: 'Hay filas o regiones sin interpretar',
-    QUALITY_ROW_COVERAGE: 'La cantidad de filas no está demostrada', QUALITY_DUPLICATE_KEY: 'Hay claves duplicadas en el detalle',
+    QUALITY_ROW_COVERAGE: 'No está acreditada la cobertura de todas las ocurrencias de la colección', QUALITY_DUPLICATE_KEY: 'Hay claves duplicadas en el detalle',
     QUALITY_INDEPENDENT_SOURCE_REQUIRED: 'El valor necesita corroboración de un mecanismo distinto',
     QUALITY_OBSERVATION_UNCERTAINTY: 'La fuente conserva incertidumbre o alternativas que requieren resolución',
     EXTRACTION_PENDING: 'La extracción sigue pendiente',
@@ -94,7 +95,8 @@ export function issueDescription(issue: string): string {
     SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED: 'Comprueba todas las filas o la ausencia documental de la colección contra el original',
     SEMANTIC_INDEPENDENT_REVIEW_REQUIRED: 'La observación semántica necesita revisión contra el original',
   }
-  const message = description[code] || (code.startsWith('ARITHMETIC_') ? 'Revisa la coherencia de los importes' : 'El control independiente requiere atención')
+  const semantic = semanticReasonDescription(code)
+  const message = description[code] || (semantic !== code ? semantic : code.startsWith('ARITHMETIC_') ? 'Revisa la coherencia de los importes' : 'El control independiente requiere atención')
   return `${message}${target.length ? `: ${target.join(' · ')}` : ''}`
 }
 

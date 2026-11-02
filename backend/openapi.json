@@ -18745,7 +18745,8 @@
             "type": "string",
             "enum": [
               "OFF",
-              "SEMANTIC_AUTO_V1"
+              "SEMANTIC_AUTO_V1",
+              "SEMANTIC_AUTO_V2"
             ],
             "title": "Automatic Verification",
             "default": "OFF"
@@ -22543,7 +22544,8 @@
             "type": "string",
             "enum": [
               "EVIDENCE_V2",
-              "SEMANTIC_EVIDENCE_V1"
+              "SEMANTIC_EVIDENCE_V1",
+              "SEMANTIC_EVIDENCE_V2"
             ],
             "title": "Version",
             "default": "EVIDENCE_V2"

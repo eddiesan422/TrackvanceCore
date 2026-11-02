@@ -20,6 +20,23 @@ const controlledInvoice = { ...invoice, id: 'complete-invoice', sha256: '1'.repe
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(api).mockResolvedValue(available); vi.mocked(post).mockResolvedValue({ profile: { id: invoice.id, revision: 1 } }) })
 
 describe('General semantic profile configuration', () => {
+  it('selects the advertised V2 verifier explicitly without changing the acquisition profile revision or controls', async () => {
+    const user = userEvent.setup(), revisionThree = { ...controlledInvoice, revision: 3 }
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, automatic_verification_version: 'SEMANTIC_AUTO_V2', profiles: [revisionThree] })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([revisionThree.id, 3]))
+    const selector = screen.getByLabelText('Verificación automática documental')
+    expect(selector).toHaveValue('OFF')
+    await user.selectOptions(selector, 'SEMANTIC_AUTO_V2')
+    await user.click(screen.getByRole('checkbox', { name: /Confirmo que este perfil representa la factura completa/ }))
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Versioned verification with the original acquisition profile')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toEqual({ profile_id: revisionThree.id, profile_revision: 3, route: 'QWEN_VISUAL', reason: 'Versioned verification with the original acquisition profile', automatic_verification: 'SEMANTIC_AUTO_V2', business_controls: invoiceControls })
+    expect(revisionThree.sha256).toBe('1'.repeat(64))
+    expect(revisionThree.revision).toBe(3)
+  })
+
   it('sends catalogued invoice controls only after explicit AUTO and complete-invoice scope confirmation', async () => {
     const user = userEvent.setup()
     vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, profiles: [controlledInvoice] })

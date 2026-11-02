@@ -5,6 +5,28 @@ import { renderApp } from '../../test/render'
 import DocumentCandidateDetails from './DocumentCandidateDetails'
 
 describe('Source observations and candidate alternatives', () => {
+  it('preserves a positively excluded role trace and keeps a merely uncertain or invalid relation pending', async () => {
+    const user = userEvent.setup()
+    const { rerender } = renderApp(<DocumentCandidateDetails value={{ observed: '125.00', value: '125.00' }} semanticReview={{ state: 'VERIFIED_AUTOMATICALLY', observed: '125.00', normalized: '125.00', verified: '125.00', corroboration: {
+      status: 'VERIFIED', rejected_associations: [{ status: 'REJECTED', eligible_for_field: false, observed: 'Retención 5%', label_text: 'Subtotal', value_text: 'Retención 5%', page: 1, mechanism: 'PADDLE', reason: 'TARGET_IS_ROLE_CAPTION', label_refs: ['subtotal-label'], value_refs: ['other-caption'], source_refs: [{ id: 'table-proof', artifact_sha256: 'table-sha' }] }],
+    } }}/>)
+    await user.click(screen.getByText('Relaciones de origen conservadas (1)'))
+    expect(screen.getByText('Excluida como valor por su función documental demostrada')).toBeVisible()
+    expect(screen.getByText('Observado: Retención 5%')).toBeVisible()
+    expect(screen.getByText('El contenido relacionado es una etiqueta de otro dato, no el valor de este campo')).toBeVisible()
+    expect(screen.getByText(/Referencias de la relación: subtotal-label · other-caption · table-proof · SHA-256 table-sha/)).toBeVisible()
+    expect(screen.getByText('Verificado automáticamente con evidencia documental')).toBeVisible()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    rerender(<DocumentCandidateDetails value={{ observed: '??', value: null }} semanticReview={{ state: 'OBSERVED_PENDING_RESOLUTION', observed: '??', normalized: null, verified: null, review_required: true, corroboration: { status: 'REVIEW_REQUIRED', reasons: ['OBSERVATION_UNCERTAINTY'], rejected_associations: [] } }} observations={[{ observation_id: 'retained-invalid-value', source_page: 1, stage: 'PADDLE_STRUCTURED', observed: '??', alternatives: ['125.00'] }]}/>)
+    await user.click(screen.getByText('Observaciones de origen (1)'))
+    expect(screen.getByText('Literal: ??')).toBeVisible()
+    expect(screen.getByText('Las observaciones conservan incertidumbre o alternativas relevantes')).toBeVisible()
+    expect(screen.getByText(/retained-invalid-value/)).toBeVisible()
+    expect(screen.getByText('Pendiente de verificación', { exact: true })).toBeVisible()
+    expect(screen.queryByText('Excluida como valor por su función documental demostrada')).not.toBeInTheDocument()
+    expect(screen.queryByText('Verificado automáticamente con evidencia documental')).not.toBeInTheDocument()
+  })
+
   it('renders actual association arrays and event hash lists without deriving an observed section from the requested one', () => {
     renderApp(<DocumentCandidateDetails value={{ observed: 'USD', value: 'USD', geometry_kind: 'PAGE_LOCATOR_ONLY' }} semanticReview={{ state: 'VERIFIED_AUTOMATICALLY', observed: 'USD', normalized: 'USD', verified: 'USD', corroboration: {
       status: 'VERIFIED', mechanisms: ['PDF_NATIVE'], reasons: [],
@@ -80,12 +102,13 @@ describe('Source observations and candidate alternatives', () => {
 
   it('keeps a normalized semantic proposal pending while preserving the model context and literal alternatives', async () => {
     const user = userEvent.setup()
-    renderApp(<DocumentCandidateDetails value={{ observed: '125.00', value: '125.00', geometry_kind: 'PAGE_LOCATOR_ONLY' }} targetType="DECIMAL" semanticReview={{ state: 'NORMALIZED_PENDING_VERIFICATION', observed: '125.00', normalized: '125.00', verified: null }} observations={[
+    renderApp(<DocumentCandidateDetails value={{ observed: '125.00', value: '125.00', geometry_kind: 'PAGE_LOCATOR_ONLY' }} targetType="DECIMAL" semanticReview={{ state: 'NORMALIZED_PENDING_VERIFICATION', observed: '125.00', normalized: '125.00', verified: null, corroboration: { status: 'REVIEW_REQUIRED', source_refs: [{ id: 'unassociated-literal', page: 2, proof_scope: 'UNASSOCIATED_LITERAL_ONLY' }] } }} observations={[
       { observation_id: 'observation-1', source_page: 2, stage: 'QWEN_VISUAL', observed: '125.00', alternatives: ['150.00'], model_context: { literal_context: 'No se aprobó el pago de 125.00.', basis: 'PRINTED', polarity: 'NEGATED' } },
     ]}/> )
     expect(screen.getByText('Normalizado; pendiente de verificación')).toBeVisible()
     expect(screen.getByText('Pendiente de verificación', { exact: true })).toBeVisible()
     expect(screen.getByText('Decimal', { exact: true })).toBeVisible()
+    expect(screen.getByText(/unassociated-literal/)).toHaveTextContent('Literal sin asociación acreditada; no corrobora este campo')
     await user.click(screen.getByText('Observaciones de origen (1)'))
     expect(screen.getByText('No se aprobó el pago de 125.00.')).toBeVisible()
     expect(screen.getByText('Clasificación propuesta: PRINTED · NEGATED')).toBeVisible()

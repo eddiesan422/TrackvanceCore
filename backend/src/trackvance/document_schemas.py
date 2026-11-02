@@ -176,7 +176,7 @@ class DocumentPublication(BaseModel):
 
 class DocumentValidationPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    version: Literal["EVIDENCE_V2", "SEMANTIC_EVIDENCE_V1"] = "EVIDENCE_V2"
+    version: Literal["EVIDENCE_V2", "SEMANTIC_EVIDENCE_V1", "SEMANTIC_EVIDENCE_V2"] = "EVIDENCE_V2"
     allow_noncritical_source_bound: bool = False
     critical_corroboration: Literal["INDEPENDENT_SOURCE"] = "INDEPENDENT_SOURCE"
     require_table_structure: Literal[True] = True
@@ -210,8 +210,9 @@ class DocumentDefinition(BaseModel):
     @model_validator(mode="after")
     def names(self):
         validate_metadata(self)
-        if (self.validation_policy is not None and self.validation_policy.version == "SEMANTIC_EVIDENCE_V1"
-                and (self.semantic_general or {}).get("automatic_verification") != "SEMANTIC_AUTO_V1"):
+        semantic_policies = {"SEMANTIC_EVIDENCE_V1": "SEMANTIC_AUTO_V1", "SEMANTIC_EVIDENCE_V2": "SEMANTIC_AUTO_V2"}
+        if (self.validation_policy is not None and self.validation_policy.version in semantic_policies
+                and (self.semantic_general or {}).get("automatic_verification") != semantic_policies[self.validation_policy.version]):
             raise ValueError("The semantic evidence policy requires its versioned semantic opt-in contract.")
         names = [f.name.casefold() for f in self.fields]
         tables = [t.name.casefold() for t in self.tables]

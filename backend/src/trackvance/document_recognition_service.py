@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import uuid
 
 from sqlalchemy import func, select
 
@@ -22,6 +23,55 @@ def recognition_source_context(events, source_sha256):
            or not event["durable_refs"].get("event_sha256") for event in events):
         raise OperationError(422, "DOCUMENT_RECOGNITION_INTEGRITY", "Falta la procedencia durable del reconocimiento.")
     return source_context(events, source_sha256)
+
+
+def _semantic_verification_upgrade(db, original, events, before, template, configuration, job, user, reason):
+    """Append an authorized CPU reuse receipt; never relabel original acquisition.
+
+    The existing reuse factory checks the exact original request/schema/profile
+    and all event hashes. Only the mapping/verification contract changes.
+    """
+    from .document_recognition_compatibility import approve_recognition_reuse
+    from .document_recognition_store import persist_recognition_event
+    from .document_verification_service import _source_snapshots
+
+    if job is None:
+        raise OperationError(409, "DOCUMENT_REPLAY_JOB_BINDING", "Falta la identidad de la adquisición conservada.")
+    snapshots, definitions = _source_snapshots(db, original, configuration, template.definition)
+    try:
+        bindings = approve_recognition_reuse(events, source_sha256=original.sha256,
+            configuration=configuration, definition=template.definition,
+            configuration_snapshots=snapshots, definition_snapshots=definitions)
+    except (ValueError, TypeError, KeyError) as error:
+        raise OperationError(409, "DOCUMENT_SEMANTIC_REPLAY_ACQUISITION",
+            "La nueva comprobación requiere conservar exactamente las entradas de adquisición.",
+            {"reason": str(error)}) from None
+    prior = before.definition["semantic_general"]
+    current = template.definition["semantic_general"]
+    information = {"version": "TRACKVANCE_SEMANTIC_VERIFICATION_REPLAY_098_V2",
+        "acquisition_profile_sha256": prior["profile_sha256"],
+        "acquisition_definition_sha256_by_stage": {stage: binding["definition_sha256"] for stage, binding in bindings.items()},
+        "verification_contract_sha256": current["verification_contract_sha256"],
+        "verification_definition_sha256": template.definition_hash,
+        "previous_verification_version": prior["automatic_verification"],
+        "current_verification_version": current["automatic_verification"],
+        "source_template_id": before.id, "mapping_template_id": template.id,
+        "recognition_model_calls_new": 0, "actor_id": user.id, "reason": reason.strip()}
+    attempt = "verification-replay-" + uuid.uuid4().hex
+    event = {"version": 1, "kind": "PHASE", "sequence": 0, "request_id": uuid.uuid4().hex,
+        "attempt_id": attempt, "source_sha256": original.sha256,
+        "configuration_sha256": canonical_hash(configuration), "definition_sha256": template.definition_hash,
+        "stage": "RECOVERY_REUSE", "page_one_based": None,
+        "expected_pages": next((e.get("expected_pages") for e in events if e.get("stage") == "NATIVE_SOURCE_PROBE"), None),
+        "payload": {"version": information["version"], "semantic_verification_replay": information,
+            "reused_event_hashes": list(dict.fromkeys(e["event_sha256"] for e in events)),
+            "reused_attempt_ids": list(dict.fromkeys(e["attempt_id"] for e in events)),
+            "recognition_bindings": bindings, "artifacts": []}}
+    event["event_sha256"] = canonical_hash(event)
+    event["durable_refs"] = persist_recognition_event(db, original, event, attempt_id=attempt,
+        configuration_sha256=canonical_hash(configuration), job_id=job.id,
+        worker_attempt_number=job.attempts)
+    return [*events, event], bindings, information
 
 
 def replay_original(db, original, expected_extraction_id, reason, user, template_id=None):
@@ -58,11 +108,20 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
 
     current_template = owned(db, DocumentTemplate, original.template_id, user)
     assert_replay_binding(current_template.definition, template.definition, configuration)
+    attempt_context = {"replay": True, "original_attempt_id": events[-1]["attempt_id"]}
+    upgrade = None
+    if ((current_template.definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V1"
+            and (template.definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"):
+        events, bindings, upgrade = _semantic_verification_upgrade(db, original, events, current_template,
+            template, configuration, job, user, reason)
+        attempt_context["recognition_bindings"] = bindings
     from .document_lossless import adapt_saved_recognition
     from .document_validation_policy import certify_lossless_candidate
 
     data = adapt_saved_recognition(events, template.definition, configuration, source_sha256=original.sha256,
-        attempt_context={"replay": True, "original_attempt_id": events[-1]["attempt_id"]})
+        attempt_context=attempt_context)
+    if upgrade is not None:
+        data["engine"]["semantic_verification_replay"] = copy.deepcopy(upgrade)
     if previous is not None and previous.engine.get("verification_request"):
         # This immutable proof explains the per-attempt configuration on every
         # later replay; the current replay actor/reason is recorded separately.

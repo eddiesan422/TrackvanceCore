@@ -5,6 +5,18 @@ import { renderApp } from '../../test/render'
 import SemanticTableCoverage from './SemanticTableCoverage'
 
 describe('Explicit semantic collection source review', () => {
+  it('explains source-scope uncertainty and does not turn an inventory count into verified collection coverage', () => {
+    renderApp(<SemanticTableCoverage definitions={[{ name: 'movements' }]} tables={{ movements: [{ amount: '10.00' }, { amount: '10.00' }] }} status={{ tables: [{ name: 'movements', coverage_state: 'PENDING', review_required: true,
+      reasons: ['UNCLASSIFIED_SOURCE_SCOPE'], inventory_summary: [{ mechanism: 'PDF_NATIVE', header_count: 1, row_count: 2, complete: true }], proof_refs: [{ attestation_sha256: 'pending-inventory-proof' }],
+    }] }} confirmed={[]} onChange={vi.fn()} canView busy={false}/> )
+    expect(screen.getByText('Filas conservadas: 2')).toBeVisible()
+    expect(screen.getByText('Estado de cobertura guardado: requiere revisión')).toBeVisible()
+    expect(screen.getByText('El alcance de una parte de la fuente todavía no está demostrado')).toBeVisible()
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
+    expect(screen.getByText(/Evidencia de cobertura: SHA-256 pending-inventory-proof/)).toBeVisible()
+    expect(screen.queryByText(/verificada automáticamente|UNCLASSIFIED_SOURCE_SCOPE/)).not.toBeInTheDocument()
+  })
+
   it('shows automatic coverage with its evidence and only asks to confirm the pending collection', () => {
     renderApp(<SemanticTableCoverage definitions={[{ name: 'items' }, { name: 'actions' }]} tables={{ items: [{ amount: '10.00' }], actions: [] }} status={{ tables: [
       { name: 'items', coverage_state: 'AUTOMATICALLY_VERIFIED', review_required: false, proof_refs: [{ id: 'coverage-source', page: 1, stage: 'PDF_NATIVE' }] },

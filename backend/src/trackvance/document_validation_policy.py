@@ -374,6 +374,10 @@ def semantic_quality_report(extraction, definition, *, ignore_incomplete=False, 
     # Integrity exceptions cannot be waived by changing a review flag. Cell and
     # coverage exceptions are assessed below against the current revision.
     findings.extend(proof.get("global_issues", []))
+    if ((definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"
+            and (proof.get("source_checks", {}).get("text", {}).get("status") != "AVAILABLE"
+                or proof.get("source_checks", {}).get("text", {}).get("missing_pages"))):
+        findings.append("SOURCE_SCOPE_INCOMPLETE")
     for path, cell, field in cells(payload, definition):
         total += 1
         human = bool(extraction.reviewed and isinstance(cell, dict) and cell.get("reviewed") is True)
