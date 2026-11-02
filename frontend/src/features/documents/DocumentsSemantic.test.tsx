@@ -17,7 +17,7 @@ beforeEach(() => {
   vi.mocked(api).mockImplementation(async (path, options) => {
     if (path === '/documents/families/general-family') return family
     if (path === '/documents/semantic-profiles') return { enabled, default_enabled: false, mode: 'SEMANTIC_GENERAL_V1', profiles: [profile] }
-    if (path.startsWith('/documents/originals?') || path === '/documents/families/general-family/batches') return { items: [], total: 0 }
+    if (path.startsWith('/documents/originals?') || path === '/documents/families/general-family/batches' || path === '/documents/families/general-family/builder/drafts') return { items: [], total: 0 }
     if (path === '/documents/families/general-family/originals' && options?.method === 'POST') return { items: [{ id: 'uploaded', status: 'QUEUED' }] }
     throw new Error(`Unexpected API path ${path}`)
   })
@@ -29,6 +29,35 @@ beforeEach(() => {
 })
 
 describe('General extraction within the existing document module', () => {
+  it.each([false, true])('keeps legacy visual configuration and the native pipeline visible when semantic capability enabled=%s', async capability => {
+    enabled = capability
+    family = { ...family, active_template_id: 'legacy-template', output_datasets: { headers: 'legacy-output' }, templates: [{ id: 'legacy-template', revision: 1, sha256: 'legacy-hash', definition: { fields: profile.fields, tables: [] } }] }
+    const user = userEvent.setup()
+    renderApp(<Documents/>, { path: '/documents/families/general-family', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:write', 'documents:configure', 'documents:download'] })
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }))
+    await screen.findByLabelText('Perfil semántico')
+    expect(screen.getByRole('button', { name: 'Crear borrador' })).toBeVisible()
+    expect(screen.getByLabelText('Finalizar el flujo en')).toBeVisible()
+    expect(screen.queryByText('Configuración avanzada con plantilla visual', { exact: true })).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('collapses optional visual configuration only for an active semantic family with capability enabled=%s', async capability => {
+    enabled = capability
+    const metadata = { mode: 'SEMANTIC_GENERAL_V1', profile_id: profile.id, profile_name: profile.name, profile_revision: 1, profile_sha256: profile.sha256, route: 'QWEN_VISUAL' }
+    family = { ...family, active_template_id: 'semantic-template', semantic_general: metadata, output_datasets: { headers: 'semantic-output' }, templates: [{ id: 'semantic-template', revision: 1, sha256: 'semantic-hash', definition: { fields: profile.fields, tables: [], semantic_general: metadata } }] }
+    const user = userEvent.setup()
+    renderApp(<Documents/>, { path: '/documents/families/general-family', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:write', 'documents:configure', 'documents:download'] })
+    await user.click(await screen.findByRole('tab', { name: 'Configuración' }))
+    await screen.findByLabelText('Perfil semántico')
+    expect(screen.queryByRole('button', { name: 'Crear borrador' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Finalizar el flujo en')).not.toBeInTheDocument()
+    await user.click(screen.getByText('Configuración avanzada con plantilla visual', { exact: true }))
+    expect(screen.getByRole('button', { name: 'Crear borrador' })).toBeVisible()
+    expect(screen.getByLabelText('Finalizar el flujo en')).toBeVisible()
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('enables an existing family upload through an explicit semantic profile without a visual builder', async () => {
     const user = userEvent.setup()
     renderApp(<Documents/>, { path: '/documents/families/general-family', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:write', 'documents:configure'] })
