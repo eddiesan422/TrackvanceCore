@@ -263,7 +263,7 @@ def compile_profile(profile, route="QWEN_VISUAL", *, automatic_verification="OFF
     profile = SemanticProfile.model_validate(profile).model_dump(mode="json")
     def field(value):
         return {key: copy.deepcopy(item) for key, item in value.items() if key != "description"}
-    definition = {"fields": [field(item) for item in profile["fields"]],
+    definition: dict[str, Any] = {"fields": [field(item) for item in profile["fields"]],
         "tables": [{"name": table["name"], "fields": [field(item) for item in table["fields"]],
             "required": table["required"], "semantic_collection": True} for table in profile["tables"]],
         "publication": {"review_policy": "ALL"}, "semantic_general": {

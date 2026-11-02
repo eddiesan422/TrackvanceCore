@@ -16,6 +16,7 @@ import statistics
 from collections import Counter, defaultdict
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
+from typing import Any, cast
 
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
 from .document_representation import decode_artifact, representation_from_events, stable_id
@@ -117,7 +118,7 @@ def _comparison(value, field):
             parts = decimal.as_tuple()
         except (InvalidOperation, TypeError, ValueError):
             return ["UNRESOLVED_DECIMAL", canonical_hash(value)]
-        digits, exponent = list(parts.digits), parts.exponent
+        digits, exponent = list(parts.digits), cast(int, parts.exponent)
         while len(digits) > 1 and digits[-1] == 0:
             digits.pop()
             exponent += 1
@@ -262,7 +263,7 @@ def _qwen_independent(control, events, definition):
 
 
 def _bands(words):
-    bands = []
+    bands: list[dict[str, Any]] = []
     for word in sorted(words, key=lambda w: ((w["region"][1] + w["region"][3]) / 2, w["region"][0])):
         box = word["region"]
         center = (box[1] + box[3]) / 2
@@ -328,7 +329,7 @@ def _native_source(ir, events):
 
 
 def _column_header(texts, fields):
-    mapping = {}
+    mapping: dict[int, str] = {}
     for index, text in enumerate(texts):
         names = [field["name"] for field in fields if field["name"] not in EVIDENCE_ONLY_ROLES
             and _key(text) in {_key(value) for value in _aliases(field)}]
@@ -341,7 +342,7 @@ def _column_header(texts, fields):
 
 def _segments(band):
     height = statistics.median(word["region"][3] - word["region"][1] for word in band["words"])
-    segments = []
+    segments: list[list[dict[str, Any]]] = []
     for word in band["words"]:
         if not segments or word["region"][0] - segments[-1][-1]["region"][2] > max(.012, 1.5 * height):
             segments.append([])
@@ -530,7 +531,7 @@ def _paddle_inventory(ir, control, definition):
                     "ref": _ref(identity, page["page_one_based"], block["id"], geometry_kind="MEASURED_BLOCK" if normalized else "UNKNOWN")})
         for physical in page["tables"]:
             owners = {cell["id"]: cell for cell in physical["cells"]}
-            rows = [[owners.get(slot["cell_id"]) for slot in row["slots"]] for row in physical["rows"]]
+            rows: list[list[Any]] = [[owners.get(slot["cell_id"]) for slot in row["slots"]] for row in physical["rows"]]
             candidates = [(table, index, mapping) for table in definition["tables"] for index, row in enumerate(rows)
                 if all(cell is not None and cell["rowspan"] == cell["colspan"] == 1 for cell in row)
                 and (mapping := _column_header([cell["text"] for cell in row], table["fields"]))]
@@ -647,9 +648,9 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
         elif selected["identity"]["mechanism"] == "QWEN" and selected not in independent_qwen:
             reasons.append("INDEPENDENT_REQUEST_UNVERIFIED")
         if path.startswith("headers.") and not reasons:
-            candidates = []
+            candidates: list[Any] = []
             for identity, facts in source_headers:
-                if identity["mechanism"] == selected["identity"]["mechanism"]:
+                if identity["mechanism"] == cast(dict[str, Any], selected)["identity"]["mechanism"]:
                     continue
                 values = facts.get(field["name"], [])
                 # Null cannot be inferred from label absence or model-local
@@ -687,6 +688,7 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
     for table in definition["tables"]:
         name = table["name"]
         rows = payload.get("tables", {}).get(name, [])
+        references: list[dict[str, Any]]
         table_issues, alignments, references = [], [], []
         if narrative or next((value.get("kind") for value in definition["semantic_general"]["contract"]["tables"] if value["name"] == name), "TABLE") == "COLLECTION":
             table_issues.append("NARRATIVE_SEMANTICS_UNVERIFIED")

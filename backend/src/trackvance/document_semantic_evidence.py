@@ -214,7 +214,7 @@ def semantic_verification_state(extraction, definition):
     from .document_semantic_general import automatic_contract
     from .document_validation_policy import cell_hash, cells
 
-    empty = {"proof": {}, "verified_cells": {}, "table_coverage": {}}
+    empty: dict[str, Any] = {"proof": {}, "verified_cells": {}, "table_coverage": {}}
     if not automatic_contract(definition):
         return empty
     from .document_semantic_corroboration import trusted_semantic_proof
