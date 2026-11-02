@@ -25,6 +25,7 @@ from .document_models import (
 from .document_providers import EngineSettingsBody, save_settings, settings_dto
 from .document_queries import DocumentOrder, PublicationFilter, list_originals
 from .document_schemas import DocumentDefinition, IncompleteSourceConfirmation
+from .document_semantic_general import ActivateSemanticProfile
 from .document_service import (
     MAX_BYTES,
     activate_template,
@@ -73,6 +74,7 @@ class ReviewBody(BaseModel):
     table_rows: dict[str, list[dict[str, str | None]]] = Field(default_factory=dict, max_length=10)
     header_confirmations: list[HeaderConfirmation] = Field(default_factory=list, max_length=50)
     incomplete_source_confirmation: IncompleteSourceConfirmation | None = None
+    semantic_table_confirmations: list[str] = Field(default_factory=list, max_length=10)
 
 
 class ReplayBody(BaseModel):
@@ -126,6 +128,39 @@ def limits():
                 "references": MAX_REFERENCES, "process_memory_bytes": MEMORY_BYTES,
                 "arithmetic_precision_digits": ARITHMETIC_PRECISION_LIMIT},
             "formats": ["PDF", "PNG", "JPG"], "engine": "POPPLER_TESSERACT_CPU_V1"}
+
+
+@router.get("/semantic-profiles")
+def semantic_profiles():
+    from .document_semantic_general import catalog
+
+    return catalog()
+
+
+@router.post("/families/{identity}/semantic-profile")
+def select_semantic_profile(identity: str, body: ActivateSemanticProfile,
+                            db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .document_semantic_general import MODE, compile_profile, require_enabled, resolve_profile
+    from .document_service import activate_verified_template
+
+    require_enabled()
+    permission(db, user, "configure")
+    item = owned(db, DocumentFamily, identity, user)
+    lock_family(db, item)
+    profile = resolve_profile(body)
+    definition = compile_profile(profile, body.route)
+    template = create_template(db, item, definition, user)
+    # This activates a semantic schema, not a tested layout or an approval rule.
+    # All observations require native authorized review before publication.
+    activate_verified_template(db, item, template, user)
+    audit(db, "DOCUMENT_SEMANTIC_PROFILE_SELECTED", "document_family", item.id,
+        "Contrato semántico activado con revisión obligatoria", user.name, user.organization_id,
+        {"template_id": template.id, "mode": MODE, "profile_sha256": definition["semantic_general"]["profile_sha256"],
+         "profile_id": profile["id"], "profile_revision": profile["revision"], "route": body.route, "reason": body.reason.strip()})
+    db.commit()
+    return {"template": template_dto(template), "family": family_dto(db, item), "mode": MODE,
+        "profile": {"id": profile["id"], "revision": profile["revision"],
+            "sha256": definition["semantic_general"]["profile_sha256"]}}
 
 
 @router.get("/families")
@@ -214,6 +249,10 @@ async def upload(identity: str, files: list[UploadFile] = File(...), template_id
         raise OperationError(422, "DOCUMENT_UPLOAD_COUNT", "Recibe de 1 a 20 archivos por solicitud.")
     lock_family(db, item)
     selected = owned(db, DocumentTemplate, template_id or item.active_template_id or "", user)
+    if selected.definition.get("semantic_general"):
+        from .document_semantic_general import require_enabled
+
+        require_enabled()
     if selected.family_id != item.id or (not is_example and selected.id != item.active_template_id):
         raise OperationError(422, "DOCUMENT_TEMPLATE_ACTIVE", "Las recepciones usan la revisión activa de su familia.")
     if is_example:
@@ -325,7 +364,8 @@ def review_original(identity: str, body: ReviewBody, db: Session = Depends(get_d
     item = owned(db, DocumentOriginal, identity, user)
     review(db, item, body.expected_extraction_id, body.changes, body.confirmed, body.reason, user, body.table_rows,
            [value.model_dump() for value in body.header_confirmations],
-           body.incomplete_source_confirmation.model_dump() if body.incomplete_source_confirmation is not None else None)
+           body.incomplete_source_confirmation.model_dump() if body.incomplete_source_confirmation is not None else None,
+           body.semantic_table_confirmations)
     # A successful human review remains durable even if a separate publication is blocked.
     db.commit()
     try:

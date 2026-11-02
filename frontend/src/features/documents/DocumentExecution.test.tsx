@@ -4,6 +4,13 @@ import { renderApp } from '../../test/render'
 import DocumentExecution from './DocumentExecution'
 
 describe('Observed document execution', () => {
+  it('identifies the saved semantic contract without presenting it as an approval or measured geometry', () => {
+    renderApp(<DocumentExecution document={{ semantic_general: { mode: 'SEMANTIC_GENERAL_V1', profile_id: 'narrative-v1', profile_name: 'Acciones solicitadas', profile_revision: 3, profile_sha256: 'immutable-semantic-sha' } }}/>)
+    expect(screen.getByText('Extracción general · Acciones solicitadas · revisión 3')).toBeVisible()
+    expect(screen.getByText('Perfil congelado: immutable-semantic-sha')).toBeVisible()
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
   it('shows the pending verification snapshot and current journal instead of an old completed result', () => {
     renderApp(<DocumentExecution document={{ status: 'QUEUED',
       engine_snapshot: { provider: 'PADDLE_QWEN_LOCAL', configuration_version: 1, snapshot_sha256: 'original-snapshot' },

@@ -178,6 +178,12 @@ def freeze_configuration(db, subject):
         return copy.deepcopy(subject.engine_snapshot)
     item = settings_for(db, subject.organization_id, subject.family_id)
     configuration = EngineConfiguration.model_validate(item.configuration if item else {}).model_dump()
+    from .document_models import DocumentTemplate
+    from .document_semantic_general import configuration_for
+
+    template = db.get(DocumentTemplate, getattr(subject, "template_id", None)) if getattr(subject, "template_id", None) else None
+    if template is not None:
+        configuration = configuration_for(template.definition, configuration)
     snapshot = {**configuration, "configuration_version": item.version if item else 0,
         "scope": "FAMILY" if item and item.scope_key else "ORGANIZATION",
         "family_id": item.scope_key if item and item.scope_key else None}
@@ -190,6 +196,9 @@ def execute_provider(source, definition, configuration, *, legacy_runner, check,
     from .document_automatic_verification import enabled
     from .document_inference_completion import LocalCandidateResult, canonical_hash
     from .document_quality import validate_candidate_contract
+    from .document_semantic_general import assert_configuration
+
+    assert_configuration(definition, configuration)
     provider = configuration["provider"]
     if configuration.get("automatic_verification") not in {None, "OFF"} and not enabled(configuration):
         raise OperationError(422, "DOCUMENT_VERIFICATION_STRATEGY_REQUIRED",

@@ -16473,6 +16473,119 @@
         "x-required-permission": "documents:read"
       }
     },
+    "/api/v1/documents/semantic-profiles": {
+      "get": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Semantic Profiles",
+        "operationId": "semantic_profiles_api_v1_documents_semantic_profiles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:read"
+      }
+    },
+    "/api/v1/documents/families/{identity}/semantic-profile": {
+      "post": {
+        "tags": [
+          "Documentos"
+        ],
+        "summary": "Select Semantic Profile",
+        "operationId": "select_semantic_profile_api_v1_documents_families__identity__semantic_profile_post",
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Identity"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateSemanticProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesión ausente o vencida"
+          },
+          "403": {
+            "description": "Permiso u origen no autorizado / CSRF inválido"
+          },
+          "404": {
+            "description": "Recurso no disponible en la organización"
+          },
+          "409": {
+            "description": "Conflicto de versión, precondición o integridad"
+          }
+        },
+        "security": [
+          {
+            "LocalSession": []
+          }
+        ],
+        "x-required-permission": "documents:configure"
+      }
+    },
     "/api/v1/documents/families": {
       "get": {
         "tags": [
@@ -18580,6 +18693,54 @@
           "test_extraction_id"
         ],
         "title": "ActivateBody"
+      },
+      "ActivateSemanticProfile": {
+        "properties": {
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 63
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SemanticProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "type": "string",
+            "enum": [
+              "QWEN_VISUAL",
+              "NATIVE_FIRST",
+              "PADDLE_STRUCTURED"
+            ],
+            "title": "Route",
+            "default": "QWEN_VISUAL"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "ActivateSemanticProfile"
       },
       "AssociationBody": {
         "properties": {
@@ -21811,6 +21972,18 @@
                 "type": "null"
               }
             ]
+          },
+          "semantic_general": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic General"
           }
         },
         "additionalProperties": false,
@@ -21887,6 +22060,18 @@
                 "type": "null"
               }
             ]
+          },
+          "semantic_general": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic General"
           }
         },
         "additionalProperties": false,
@@ -22277,6 +22462,11 @@
               }
             ],
             "title": "Structured Header Labels"
+          },
+          "semantic_collection": {
+            "type": "boolean",
+            "title": "Semantic Collection",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -24815,6 +25005,14 @@
                 "type": "null"
               }
             ]
+          },
+          "semantic_table_confirmations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Semantic Table Confirmations"
           }
         },
         "type": "object",
@@ -25300,6 +25498,239 @@
           "requires_executor_assignment"
         ],
         "title": "ScheduleResponse"
+      },
+      "SemanticCollection": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "TABLE",
+              "COLLECTION"
+            ],
+            "title": "Kind",
+            "default": "TABLE"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticField"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "fields"
+        ],
+        "title": "SemanticCollection"
+      },
+      "SemanticField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Description",
+            "default": ""
+          },
+          "logical_type": {
+            "type": "string",
+            "enum": [
+              "STRING",
+              "DECIMAL",
+              "INT64",
+              "DATE",
+              "BOOLEAN"
+            ],
+            "title": "Logical Type",
+            "default": "STRING"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "critical": {
+            "type": "boolean",
+            "title": "Critical",
+            "default": false
+          },
+          "business_key": {
+            "type": "boolean",
+            "title": "Business Key",
+            "default": false
+          },
+          "date_format": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Date Format",
+            "default": "%Y-%m-%d"
+          },
+          "decimal_separator": {
+            "type": "string",
+            "enum": [
+              ".",
+              ","
+            ],
+            "title": "Decimal Separator",
+            "default": "."
+          },
+          "thousands_separator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ".",
+                  ",",
+                  " "
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thousands Separator"
+          },
+          "currency_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Currency Symbols"
+          },
+          "section": {
+            "type": "string",
+            "enum": [
+              "DOCUMENT",
+              "ISSUER",
+              "BUYER",
+              "TOTALS"
+            ],
+            "title": "Section",
+            "default": "DOCUMENT"
+          },
+          "normalization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentNormalization"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "label"
+        ],
+        "title": "SemanticField"
+      },
+      "SemanticProfile": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "SEMANTIC_GENERAL_V1",
+            "title": "Schema Version",
+            "default": "SEMANTIC_GENERAL_V1"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 140,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "revision": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "document_type": {
+            "type": "string",
+            "enum": [
+              "INVOICE",
+              "STATEMENT",
+              "NARRATIVE",
+              "CERTIFICATE",
+              "CUSTOM"
+            ],
+            "title": "Document Type"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticField"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Fields"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticCollection"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Tables"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "revision",
+          "document_type",
+          "description",
+          "fields"
+        ],
+        "title": "SemanticProfile"
       },
       "SourceAcquisitionBody": {
         "properties": {

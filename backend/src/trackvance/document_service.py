@@ -104,6 +104,11 @@ def issues(extraction, definition, *, source_binding=None, ignore_incomplete=Fal
         result.extend(completion_issues(extraction, definition))
     from .document_quality import cell_is_valid, semantic_issues
     result.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
+    if definition.get("semantic_general"):
+        from .document_semantic_evidence import semantic_review_issues
+
+        result.extend(semantic_review_issues(payload, definition, reviewed=getattr(extraction, "reviewed", False),
+            source_sha256=getattr(extraction, "engine", {}).get("source_sha256")))
     # The application validator recomputes checks; provider-authored arithmetic
     # statuses cannot authorize publication.
     for check in [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]:
@@ -217,6 +222,10 @@ def original_dto(db, original, *, detail=False, user=None):
                 result["incomplete_inference"]["resolution"] = {
                     key: resolution[key] for key in ("actor_id", "reason", "created_at")}
         if extraction:
+            if result["template"]["definition"].get("semantic_general"):
+                from .document_semantic_evidence import semantic_review_dto
+
+                result["semantic_review"] = semantic_review_dto(extraction, result["template"]["definition"])
             header_review = header_review_dto(extraction.payload, result["template"]["definition"], reviewed=extraction.reviewed)
             if header_review is not None:
                 result["header_review"] = header_review
@@ -259,6 +268,8 @@ def family_dto(db, family):
             "responsible_user_id": family.responsible_user_id, "active_template_id": family.active_template_id,
             "output_datasets": family.output_datasets, "next_cut_at": iso(family.next_cut_at),
             "publication": template.definition["publication"] if template else None,
+            **({"semantic_general": {key: copy.deepcopy(value) for key, value in template.definition["semantic_general"].items()
+                if key != "contract"}} if template and template.definition.get("semantic_general") else {}),
             "document_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id, DocumentOriginal.is_example.is_(False))),
             "pending_count": db.scalar(select(func.count()).select_from(DocumentOriginal).where(DocumentOriginal.family_id == family.id,
                                           DocumentOriginal.is_example.is_(False),
@@ -269,6 +280,10 @@ def create_template(db, family, definition, user):
     permission(db, user, "configure")
     lock_family(db, family)
     normalized = DocumentDefinition.model_validate(definition).model_dump(mode="json")
+    if normalized.get("semantic_general"):
+        from .document_semantic_general import guard_profile_revision
+
+        guard_profile_revision(db, family.organization_id, normalized)
     revision = (db.scalar(select(func.max(DocumentTemplate.revision)).where(DocumentTemplate.family_id == family.id)) or 0) + 1
     item = DocumentTemplate(organization_id=user.organization_id, family_id=family.id, revision=revision,
                             definition=normalized, definition_hash=digest(normalized), created_by_id=user.id)
@@ -375,7 +390,7 @@ def prepare_pipeline(db, family, user, stop_after, intake_bindings, delivery_bin
 
 
 def review(db, original, expected_extraction_id, changes, confirmed, reason, user, table_rows=None, header_confirmations=None,
-           incomplete_source_confirmation=None):
+           incomplete_source_confirmation=None, semantic_table_confirmations=None):
     permission(db, user, "review")
     if header_confirmations:
         permission(db, user, "download")
@@ -478,6 +493,12 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
             cell["reviewed"] = True
             if cell.get("alternatives"):
                 cell["alternatives"] = []
+    if semantic_table_confirmations:
+        from .document_semantic_evidence import record_table_reviews
+
+        permission(db, user, "download")
+        record_table_reviews(payload, definition, semantic_table_confirmations, source_sha256=original.sha256,
+            actor_id=user.id, reason=reason, created_at=iso(utcnow()))
     if definition.get("arithmetic") or definition.get("invoice_controls"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     if definition.get("cross_totals"):

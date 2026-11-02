@@ -29,6 +29,14 @@ def visual_semantic_projection(definition):
     Normalization/validation/publication rules are deliberately absent in that
     actual request builder. A contract test binds this projection to its source.
     """
+    metadata = definition.get("semantic_general")
+    if metadata and metadata.get("mode") == "SEMANTIC_GENERAL_V1":
+        profile = metadata["contract"]
+        return {"semantic_definition_version": "SEMANTIC_GENERAL_V1",
+            "reading_mode": "VERBATIM_OBSERVED_VALUES_NOT_NORMALIZED_OR_EXPECTED_ANSWERS",
+            "profile_id": profile["id"], "profile_revision": profile["revision"],
+            "profile_sha256": metadata["profile_sha256"], "document_type": profile["document_type"],
+            "description": profile["description"], "fields": profile["fields"], "tables": profile["tables"]}
     def field(value, extra_labels=()):
         result = {key: value[key] for key in ("name", "label", "logical_type", "required", "section",
             "date_format", "decimal_separator", "thousands_separator", "currency_symbols", "source_association") if key in value}

@@ -62,6 +62,8 @@ def validate_candidate_contract(data, definition, *, allow_worker_completion=Fal
                 or not isinstance(payload.get("tables"), dict) or "header_resolutions" in payload
                 or "inference_completion_resolution" in payload):
             raise ValueError()
+        if "semantic_table_reviews" in payload:
+            raise ValueError()
         if ("semantic_conflicts" in payload and (not isinstance(payload["semantic_conflicts"], list)
                 or any(not isinstance(value, str) or len(value) > 160 for value in payload["semantic_conflicts"]))):
             raise ValueError()
@@ -178,6 +180,10 @@ def _arithmetic_fields(definition):
 
 def semantic_issues(payload, *, reviewed=False):
     result = []
+    reviewed_tables = {item.get("table") for item in payload.get("semantic_table_reviews", [])
+        if reviewed and payload.get("semantic_evidence")
+        and item.get("scope") == "ALL_SOURCE_ROWS_OR_CONFIRMED_ABSENCE"
+        and item.get("rows_sha256") == _hash(payload.get("tables", {}).get(item.get("table"), []))}
     for conflict in payload.get("semantic_conflicts", []):
         kind, _, name = conflict.partition(":")
         if kind in {"FIELD", "REEXTRACTION_FIELD"}:
@@ -185,11 +191,13 @@ def semantic_issues(payload, *, reviewed=False):
         elif kind in {"TABLE", "REEXTRACTION_TABLE"}:
             rows = payload.get("tables", {}).get(name, [])
             resolved = reviewed and bool(rows) and all(cell.get("reviewed") for row in rows for cell in row.values())
+            resolved = resolved or name in reviewed_tables
         elif kind == "CELL":
             parts = name.split(".")
             rows = payload.get("tables", {}).get(parts[0], []) if len(parts) == 3 else []
             resolved = bool(reviewed and len(parts) == 3 and parts[1].isdigit()
                 and int(parts[1]) < len(rows) and rows[int(parts[1])].get(parts[2], {}).get("reviewed"))
+            resolved = resolved or len(parts) == 3 and parts[0] in reviewed_tables
         else:
             resolved = False
         if not resolved:

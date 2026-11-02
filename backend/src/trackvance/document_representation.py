@@ -14,6 +14,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from .document_normalization import canonical_hash
+from .document_semantic_evidence import validate_model_context
 
 VERSION = "TRACKVANCE_DOCUMENT_IR_V1"
 REUSED_VERSION = "TRACKVANCE_DOCUMENT_IR_V2_REUSED_INPUTS"
@@ -187,6 +188,8 @@ def _selection(value):
                         or any(item is not None and (not isinstance(item, str) or len(item) > 160)
                             for item in context.values())):
                     raise ValueError("VISUAL_SELECTION_CONTRACT")
+            if "semantic_context" in cell:
+                validate_model_context(cell["semantic_context"])
     return value
 
 

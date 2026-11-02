@@ -938,6 +938,11 @@
     },
     {
       "method": "GET",
+      "path": "/documents/semantic-profiles",
+      "permission": "documents:read"
+    },
+    {
+      "method": "GET",
       "path": "/exceptions",
       "permission": "exceptions:read"
     },
@@ -1549,6 +1554,11 @@
     {
       "method": "POST",
       "path": "/documents/families/{id}/pipeline-draft",
+      "permission": "documents:configure"
+    },
+    {
+      "method": "POST",
+      "path": "/documents/families/{id}/semantic-profile",
       "permission": "documents:configure"
     },
     {

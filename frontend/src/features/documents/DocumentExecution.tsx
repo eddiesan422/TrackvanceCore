@@ -10,6 +10,7 @@ const verificationPhases: Record<string, string> = { AUTOMATIC_VERIFICATION: 'Co
 
 export default function DocumentExecution({ document: item, compact = false }: { document: RecordData; compact?: boolean }) {
   const snapshot = item.verification_configuration || item.engine_snapshot
+  const semantic = item.template?.definition?.semantic_general || item.semantic_general
   const quality = item.quality
   const resources = item.extraction?.engine?.resources
   const execution = item.execution
@@ -19,9 +20,10 @@ export default function DocumentExecution({ document: item, compact = false }: {
   const pending = execution?.pending_pages
   const partial = item.incomplete_inference?.status === 'PARTIAL' || execution?.recognition_complete === false
   const verification = ['QUEUED', 'RUNNING'].includes(item.status) ? execution?.verification : item.extraction?.engine?.verification || execution?.verification
-  if (!snapshot && !stage && !quality && !item.incomplete_inference && resources?.elapsed_seconds == null) return null
+  if (!snapshot && !semantic && !stage && !quality && !item.incomplete_inference && resources?.elapsed_seconds == null) return null
   return <div className={`document-execution${compact ? ' compact' : ''}`} aria-label="Ejecución documental">
     <IncompleteSourceNotice review={item.incomplete_inference} compact={compact}/>
+    {semantic?.mode === 'SEMANTIC_GENERAL_V1' && <><span>Extracción general · {semantic.profile_name || semantic.profile_id} · revisión {semantic.profile_revision}</span>{!compact && <><small>Contrato semántico independiente de la disposición visual. La extracción, la revisión y la publicación conservan sus estados propios.</small><small>Perfil congelado: {semantic.profile_sha256}</small></>}</>}
     {stage && <span>Fase: {verificationPhases[stage] || phases[stage] || stage}</span>}
     {!compact && item.verification_configuration && <small>Configuración de esta verificación; el motor original conserva su snapshot anterior.</small>}
     <DocumentVerification verification={verification} compact={compact}/>

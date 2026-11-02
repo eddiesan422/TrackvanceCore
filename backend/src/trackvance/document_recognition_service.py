@@ -54,6 +54,10 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
         configuration = copy.deepcopy(previous.engine.get("configuration") or {})
         if (not configuration or canonical_hash(configuration) != previous.engine.get("configuration_sha256")):
             raise OperationError(409, "DOCUMENT_ENGINE_SNAPSHOT_INTEGRITY", "La configuración de verificación conservada perdió integridad.")
+    from .document_semantic_general import assert_replay_binding
+
+    current_template = owned(db, DocumentTemplate, original.template_id, user)
+    assert_replay_binding(current_template.definition, template.definition, configuration)
     from .document_lossless import adapt_saved_recognition
     from .document_validation_policy import certify_lossless_candidate
 

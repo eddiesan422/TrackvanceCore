@@ -2,7 +2,7 @@
 
 Generada por `scripts/export_contracts.py` desde la autoridad del runtime. Base `/api/v1`; organización, propietario, CSRF, primer acceso, estado y autorización de estrategia se aplican además del permiso de ruta.
 
-El catálogo contiene 66 códigos; la matriz tiene 242 entradas protegidas.
+El catálogo contiene 66 códigos; la matriz tiene 244 entradas protegidas.
 
 Administrator resuelve el catálogo completo, conserva protección y no puede consultar bandejas/preflights personales ajenos. Los defaults ampliados de organizaciones nuevas no reescriben roles personalizados existentes.
 
@@ -151,6 +151,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | GET | `/documents/originals/{id}/file` | `documents:download` |
 | GET | `/documents/originals/{id}/pages/{page}` | `documents:download` |
 | GET | `/documents/originals/{id}/recognition-artifacts/{artifact_id}/content` | `documents:download` |
+| GET | `/documents/semantic-profiles` | `documents:read` |
 | GET | `/exceptions` | `exceptions:read` |
 | GET | `/exceptions/assignees` | `exceptions:read` |
 | GET | `/exceptions/{id}` | `exceptions:read` |
@@ -274,6 +275,7 @@ Administrator resuelve el catálogo completo, conserva protección y no puede co
 | POST | `/documents/families/{id}/originals` | `documents:write` |
 | POST | `/documents/families/{id}/pipeline` | `documents:configure` |
 | POST | `/documents/families/{id}/pipeline-draft` | `documents:configure` |
+| POST | `/documents/families/{id}/semantic-profile` | `documents:configure` |
 | POST | `/documents/families/{id}/templates` | `documents:configure` |
 | POST | `/documents/families/{id}/templates/{template_id}/activate` | `documents:configure` |
 | POST | `/documents/originals/{id}/builder/propose` | `documents:configure` |

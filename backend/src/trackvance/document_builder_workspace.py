@@ -50,6 +50,7 @@ def processor_identity():
             ("document_engine.py", "document_template_builder_rules.py", "document_invoice_controls.py", "document_invoice_schemas.py", "document_schemas.py", "document_template_builder_schemas.py", "document_discovery.py", "document_builder_workspace.py", "document_builder_executor.py", "document_header_review.py", "document_local_inference.py", "document_semantic_fragments.py", "document_literal_tables.py", "document_quality.py", "document_providers.py", "document_worker.py", "document_inference_completion.py", "document_candidate_arbitration.py",
              "document_representation.py", "document_normalization.py", "document_lossless.py",
              "document_header_association.py", "document_candidate_selection.py",
+             "document_semantic_general.py", "document_semantic_evidence.py",
              "document_validation_policy.py", "document_recognition_transport.py", "document_recognition_store.py",
              "document_recognition_service.py")}
 

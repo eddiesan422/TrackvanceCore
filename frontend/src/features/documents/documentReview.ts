@@ -60,7 +60,7 @@ export function extractionCells(payload?: RecordData): ReviewCell[] {
 // Only the server validator decides which valid candidates need human review.
 // A missing issue list is treated conservatively for historical API payloads.
 export function needsReview(path: string, value: RecordData, issues?: string[]): boolean {
-  if (value.recognition_status === 'NOT_APPLICABLE') return false
+  if (value.recognition_status === 'NOT_APPLICABLE') return !!issues?.some(issue => issue === `REVIEW_REQUIRED:${path}` || issue === `VALUE_INVALID:${path}`)
   if (value.validity !== 'VALID') return true
   return issues ? issues.some(issue => issue === `REVIEW_REQUIRED:${path}` || issue === `VALUE_INVALID:${path}`) : !value.reviewed
 }
@@ -68,7 +68,7 @@ export function needsReview(path: string, value: RecordData, issues?: string[]):
 export function cellSummary(cells: ReviewCell[], issues?: string[]) {
   const result = { valid: 0, ambiguous: 0, missing: 0, invalid: 0, pending: 0 }
   for (const { path, value } of cells) {
-    if (value.recognition_status === 'NOT_APPLICABLE') continue
+    if (value.recognition_status === 'NOT_APPLICABLE' && !needsReview(path, value, issues)) continue
     if (value.validity === 'AMBIGUOUS') result.ambiguous++
     else if (value.validity === 'MISSING') result.missing++
     else if (value.validity !== 'VALID') result.invalid++
@@ -91,6 +91,8 @@ export function issueDescription(issue: string): string {
     QUALITY_CRITICAL_CORROBORATION: 'Un dato crítico necesita evidencia independiente de la fuente',
     QUALITY_TABLE_STRUCTURE: 'La estructura de la tabla necesita revisión',
     NORMALIZATION_INVALID: 'La normalización declarada no pudo aplicarse de forma segura',
+    SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED: 'Comprueba todas las filas o la ausencia documental de la colección contra el original',
+    SEMANTIC_INDEPENDENT_REVIEW_REQUIRED: 'La observación semántica necesita revisión contra el original',
   }
   const message = description[code] || (code.startsWith('ARITHMETIC_') ? 'Revisa la coherencia de los importes' : 'El control independiente requiere atención')
   return `${message}${target.length ? `: ${target.join(' · ')}` : ''}`

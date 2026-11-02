@@ -7,6 +7,7 @@ import json
 import shutil
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -409,7 +410,9 @@ def test_extract_preserves_child_phases_and_provenance(gateway, monkeypatch):
             "configuration": {"paddle_model": "PaddleOCR-VL-1.6", "llm_model": gateway.LOCK["qwen"]["model"],
                               "prompt_version": "trackvance-idp-098-v1"}}
     gateway.BUDGETS[body["request_id"]] = gateway.MEMORY.Budget(300)
-    engine = gateway.Handler.extract(None, body)["engine"]
+    handler = SimpleNamespace(paddle_attempted=False)
+    engine = gateway.Handler.extract(handler, body)["engine"]
+    assert handler.paddle_attempted is True
     assert engine["phases"] == {"paddle_seconds": 1.25}
     assert engine["runtime_provenance"] == {"paddle_runner": child_proof, "gateway": gateway.startup_provenance()}
 

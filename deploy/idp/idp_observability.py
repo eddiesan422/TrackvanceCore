@@ -1,4 +1,4 @@
-"""Private proposal: bounded metadata and operator-only ephemeral diagnostics."""
+"""Bounded operator-only diagnostics and conservative Paddle admission."""
 from __future__ import annotations
 
 import faulthandler
@@ -11,18 +11,80 @@ import stat
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 from pathlib import Path
 
 PHASE_LIMIT = 32768
 STDERR_LIMIT = 262144
 RECORD_LIMIT = 65536
+PARENT_TRACE_LIMIT = 32768
 MAX_RECORDS = 4
 MAX_TOTAL_BYTES = MAX_RECORDS * (STDERR_LIMIT + RECORD_LIMIT)
 STAGES = frozenset({"IMPORT_PADDLE", "IMPORT_PADDLEOCR", "CREATE_PIPELINE", "PREDICT_NEXT",
     "POSTPROCESS_PAGE", "SERIALIZE_OBSERVATIONS", "HASH_MODEL", "WRITE_RESULT", "DONE",
     "OPEN_SOURCE", "RENDER_PAGE", "PERSIST_ORIGINAL_PAGE"})
-SAFE_ERRORS = frozenset({"INFERENCE_TIMEOUT", "PADDLE_FAILURE", "CANCELLED"})
+SAFE_ERRORS = frozenset({"INFERENCE_TIMEOUT", "PADDLE_FAILURE", "CANCELLED", "INFERENCE_FAILED",
+    "PADDLE_RESULT_LIMIT", "GPU_OWNER_QUIESCENCE_UNVERIFIED"})
+
+
+class PaddleAdmission:
+    """Sticky serial-service circuit; an opaque failure is never an OOM claim.
+
+    The gateway calls this only under its heavy-work gate, after an actual
+    Paddle child spawn. Cancellation and invalid input do not prove recovery.
+    Only completed work with confirmed closure clears the consecutive failures.
+    Recovery requires an operator-controlled service restart, not an HTTP reset.
+    """
+    def __init__(self):
+        self.consecutive_failures, self.reason, self.last_category = 0, None, None
+
+    def snapshot(self):
+        return {"status": "SUSPENDED" if self.reason else "AVAILABLE", "reason": self.reason,
+            "consecutive_failures": self.consecutive_failures, "last_category": self.last_category}
+
+    def observe(self, code, *, resources_released):
+        if self.reason is not None:
+            return self.snapshot()
+        if resources_released is not True:
+            self.reason, self.last_category = "GPU_CLOSURE_UNCONFIRMED", "CLOSURE_UNCONFIRMED"
+        elif code is None:
+            self.consecutive_failures, self.last_category = 0, "SUCCESS"
+        elif code == "CANCELLED":
+            self.last_category = "CANCELLATION"
+        else:
+            self.last_category = "TIMEOUT" if code == "INFERENCE_TIMEOUT" else "UNKNOWN"
+            self.consecutive_failures += 1
+            if self.consecutive_failures >= 3:
+                self.reason = "THREE_UNRECOVERED_PADDLE_FAILURES_CAUSE_UNPROVEN"
+        return self.snapshot()
+
+
+def valid_child_request(request, source_sha256):
+    """Accept the two declared child request shapes without accepting extras."""
+    if (not isinstance(request, dict) or request.get("source_sha256") != source_sha256
+            or not isinstance(request.get("filename"), str)
+            or request["filename"] not in {"document.pdf", "document.png", "document.jpg", "document.jpeg"}):
+        return False
+    if set(request) == {"filename", "source_sha256", "regions"}:
+        return isinstance(request["regions"], list) and len(request["regions"]) <= 4
+    if set(request) == {"filename", "source_sha256", "operation", "remaining_work_seconds"}:
+        duration = request["remaining_work_seconds"]
+        return (isinstance(request["operation"], str) and request["operation"] in {"STRUCTURED", "RENDER"}
+            and type(duration) in (int, float)
+            and math.isfinite(duration) and 0 < duration <= 1800)
+    return False
+
+
+def parent_trace(error):
+    """Private exception chain, never locals; explicitly bounded and hashed."""
+    if error is None:
+        return b"", 0
+    raw = "".join(traceback.format_exception(type(error), error, error.__traceback__)).encode("utf-8", errors="replace")
+    original_size = len(raw)
+    if original_size > PARENT_TRACE_LIMIT:
+        raw = raw[:PARENT_TRACE_LIMIT // 2] + raw[-PARENT_TRACE_LIMIT // 2:]
+    return raw, original_size
 
 
 def checked_hashes(value):
@@ -298,11 +360,12 @@ class FailureRing:
                 created[:] = [(entry, file_identity(info) if expected[:3] == identity(info) else expected)
                     for entry, expected in created]
 
-    def retain(self, folder, expected_job_identity, request_id, source_sha256, code, process):
+    def retain(self, folder, expected_job_identity, request_id, source_sha256, code, process, *, error=None):
         created, job, registered = [], None, None
         try:
+            returncode = process.poll()
             if (not re.fullmatch(r"[a-f0-9]{32}", request_id) or not re.fullmatch(r"[a-f0-9]{64}", source_sha256)
-                    or code not in SAFE_ERRORS or process.poll() is None):
+                    or code not in SAFE_ERRORS or type(returncode) is not int):
                 return None
             folder = Path(folder)
             if folder.parent != self.base or not folder.name.startswith("idp-"):
@@ -312,23 +375,28 @@ class FailureRing:
                 return None
             request_raw, _ = read_at(job, "request.json", 16384)
             request = json.loads(request_raw)
-            if (not isinstance(request, dict) or set(request) != {"filename", "source_sha256", "regions"}
-                    or request["source_sha256"] != source_sha256
-                    or request["filename"] not in {"document.pdf", "document.png", "document.jpg", "document.jpeg"}):
+            if not valid_child_request(request, source_sha256):
                 return None
             stderr, original_size = read_at(job, "error.log", STDERR_LIMIT, tail=True)
+            trace, trace_original_size = parent_trace(error)
             phase = None
             try:
                 phase = validate_phase(read_at(job, "phase.json", PHASE_LIMIT)[0], self.hashes, source_sha256)
             except (OSError, ValueError, TypeError, KeyError):
                 pass
-            record = {"version": 1, "request_id": request_id, "source_sha256": source_sha256,
+            record = {"version": 2, "request_id": request_id, "source_sha256": source_sha256,
                 "error": code, "source_hashes": self.hashes, "child_metadata": phase,
+                "request_contract": "LEGACY" if "regions" in request else request["operation"],
+                "child_returncode": returncode, "child_exit_status": returncode if returncode >= 0 else None,
+                "child_termination_signal": -returncode if returncode < 0 else None,
                 "stderr_original_bytes": original_size, "stderr_captured_bytes": len(stderr),
                 "stderr_truncated": original_size > len(stderr), "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+                "parent_trace_original_bytes": trace_original_size, "parent_trace_captured_bytes": len(trace),
+                "parent_trace_truncated": trace_original_size > len(trace),
+                "parent_trace_sha256": hashlib.sha256(trace).hexdigest(),
                 "source_binding": "PARENT_VERIFIED_REQUEST; actual container/image binding is external"}
             raw = json.dumps(record, allow_nan=False, separators=(",", ":")).encode()
-            if len(raw) > RECORD_LIMIT or len(stderr) + len(raw) > MAX_TOTAL_BYTES // MAX_RECORDS:
+            if len(raw) + len(trace) > RECORD_LIMIT or len(stderr) + len(trace) + len(raw) > MAX_TOTAL_BYTES // MAX_RECORDS:
                 return None
             with self.lock:
                 if self.quarantined or self.stop.is_set():
@@ -340,8 +408,10 @@ class FailureRing:
                 token = uuid.uuid4().hex
                 try:
                     self._publish(token + ".stderr", stderr, created)
+                    if trace:
+                        self._publish(token + ".parenttrace", trace, created)
                     self._publish(token + ".json", raw, created)
-                    registered = {"created": time.monotonic(), "files": list(created), "bytes": len(stderr) + len(raw)}
+                    registered = {"created": time.monotonic(), "files": list(created), "bytes": len(stderr) + len(trace) + len(raw)}
                     self.records.append(registered)
                     if self.thread is None:
                         candidate_thread = threading.Thread(target=self._sweep, name="idp-diagnostic-retention", daemon=True)

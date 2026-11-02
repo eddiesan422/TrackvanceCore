@@ -80,6 +80,7 @@ MEMORY = frozen_module("idp_memory_lifecycle.py")
 RECOGNITION = frozen_module("recognition.py")
 CHILD_SOURCE_HASHES = {name: STARTUP_HASHES[name] for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
 FAILURE_DIAGNOSTICS = DIAGNOSTICS.FailureRing(CHILD_SOURCE_HASHES)
+PADDLE_ADMISSION = DIAGNOSTICS.PaddleAdmission()
 GATE = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
@@ -110,6 +111,7 @@ ERROR_STATUS = {
     "GPU_RESIDENCY_UNVERIFIED": 503, "GPU_FOREIGN_RESIDENCY": 503,
     "GPU_PIN_UNVERIFIED": 503, "GPU_UNLOAD_UNVERIFIED": 503, "CACHE_OWNERSHIP_UNVERIFIED": 503,
     "REQUEST_ID": 422, "ADMISSION_CONFIGURATION": 422, "DUPLICATE_REQUEST": 422,
+    "PADDLE_SERVICE_SUSPENDED": 503,
 }
 
 
@@ -432,6 +434,7 @@ def health():
             "recognition": {"contract": "TRACKVANCE_RECOGNITION_V1",
                 "strategies": ["QWEN_VISUAL", "PADDLE_STRUCTURED"], "incremental_originals": True},
             "runtime_provenance": {"gateway": startup_provenance()},
+            "paddle_service": PADDLE_ADMISSION.snapshot(),
             "memory_lifecycle": dict(MEMORY_STATE), "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
 
 
@@ -463,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         arrived = time.monotonic()
+        self.paddle_attempted = False
         slot = False
         control_slot = False
         admitted = False
@@ -544,26 +548,32 @@ class Handler(BaseHTTPRequestHandler):
             acquired = time.monotonic()
             result, failure, released, recognition = None, None, None, None
             quarantined_on_entry = MEMORY_STATE["status"] != "AVAILABLE"
+            paddle_requested = (self.path in {"/extract", "/refine"}
+                or self.path == "/recognize" and body.get("strategy") == "PADDLE_STRUCTURED")
+            paddle_suspended_on_entry = paddle_requested and PADDLE_ADMISSION.reason is not None
             try:
                 if quarantined_on_entry:
                     raise MEMORY.UnsafeLifecycle("GPU_MEMORY_UNAVAILABLE")
                 if identity in CANCELLED:
                     raise ValueError("CANCELLED")
+                if paddle_suspended_on_entry:
+                    raise ValueError("PADDLE_SERVICE_SUSPENDED")
                 if self.path == "/recognize":
                     recognition = RECOGNITION.Session(globals(), self, body)
                     result = recognition.execute()
                 else:
                     result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
-            except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
-                    urllib.error.URLError, http.client.HTTPException) as error:
+            except Exception as error:
                 failure = error
             finally:
-                if not quarantined_on_entry:
+                if not quarantined_on_entry and not paddle_suspended_on_entry:
                     try:
                         released = memory_barrier(identity, budget, cleanup=True)
                         released["cache_advice"] = cache_hygiene(budget)
-                    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
-                            urllib.error.URLError, http.client.HTTPException) as cleanup_error:
+                    except Exception as cleanup_error:
+                        # A partial barrier result cannot certify the whole
+                        # closure if the owned advisory child/cleanup is unknown.
+                        released = None
                         global MEMORY_FAILURE
                         code = str(cleanup_error) if isinstance(cleanup_error, MEMORY.UnsafeLifecycle) else "GPU_RESIDENCY_UNVERIFIED"
                         # Latch the first original candidate/failure. Rejected requests cannot erase evidence.
@@ -582,6 +592,9 @@ class Handler(BaseHTTPRequestHandler):
                     admitted = False  # No later cleanup may erase a subsequent admission with the same ID.
                 if was_cancelled and not isinstance(failure, MEMORY.UnsafeLifecycle):
                     failure = ValueError("CANCELLED")
+                if self.paddle_attempted:
+                    PADDLE_ADMISSION.observe(safe_error(failure, identity)[1] if failure is not None else None,
+                        resources_released=released is not None)
                 GATE.release()
             if failure is not None:
                 if recognition is not None:
@@ -597,8 +610,7 @@ class Handler(BaseHTTPRequestHandler):
                 recognition.finish("COMPLETE", released)
                 return
             self.send(200, result)
-        except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError,
-                urllib.error.URLError, http.client.HTTPException) as error:
+        except Exception as error:
             status, code = safe_error(error, identity)
             if not getattr(self, "recognition_stream_started", False):
                 self.send(status, {"error": code})
@@ -649,8 +661,9 @@ class Handler(BaseHTTPRequestHandler):
                 process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", temporary],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_stream,
                     start_new_session=True, close_fds=True)
+            self.paddle_attempted = True
             ACTIVE[body["request_id"]] = process
-            failure_code = None
+            failure_code, original_failure = None, None
             try:
                 deadline = budget.work_deadline
                 while process.poll() is None:
@@ -674,8 +687,9 @@ class Handler(BaseHTTPRequestHandler):
                 child_phase = DIAGNOSTICS.phase_from_job(folder, owned_job_identity, CHILD_SOURCE_HASHES, body["source_sha256"])
                 if child_phase is not None:
                     result["engine"]["child_diagnostics"] = child_phase
-            except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+            except Exception as error:
                 failure_code = safe_error(error, body["request_id"])[1]
+                original_failure = error
                 raise
             finally:
                 if process.poll() is None:
@@ -688,10 +702,12 @@ class Handler(BaseHTTPRequestHandler):
                     except subprocess.TimeoutExpired:
                         raise MEMORY.UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
                 ACTIVE.pop(body["request_id"], None)
-                if failure_code in {"INFERENCE_TIMEOUT", "PADDLE_FAILURE", "CANCELLED"}:
+                if failure_code is not None:
                     try:
-                        FAILURE_DIAGNOSTICS.retain(folder, owned_job_identity, body["request_id"],
-                            body["source_sha256"], failure_code, process)
+                        token = FAILURE_DIAGNOSTICS.retain(folder, owned_job_identity, body["request_id"],
+                            body["source_sha256"], failure_code, process, error=original_failure)
+                        if token is None:
+                            RUNTIME["diagnostic_retention_available"] = False
                     except (OSError, ValueError, KeyError, TypeError, RuntimeError):
                         RUNTIME["diagnostic_retention_available"] = False
         # The coordinator runs confined template validation before deciding

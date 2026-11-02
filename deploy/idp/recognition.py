@@ -22,6 +22,29 @@ MAX_EVENT = 24 * 1024**2
 MAX_STREAM = 64 * 1024**2
 TERMINALS = {}
 VISUAL_PROMPT_VERSION = "trackvance-idp-098-visual-v2"
+SEMANTIC_GENERAL_VERSION = "SEMANTIC_GENERAL_V1"
+SEMANTIC_GENERAL_LITERAL_INSTRUCTIONS = (
+    "The logical types in the semantic schema describe the destination types that Trackvance will use later. "
+    "The string/null cells of this response transport the literal observed in the document. "
+    "For a legible amount, quantity or date, transcribe the observed literal as a string, preserving its printed signs and separators. "
+    "Do not emit a JSON number, normalize or convert the literal now, or reject it merely because its printed representation "
+    "is not an already-normalized decimal or date. Trackvance will subsequently convert and validate it against the destination type. "
+    "If the value is absent or illegible, retain null; if it is genuinely ambiguous or contradictory, retain null and the actual "
+    "uncertainty instead of choosing an alternative. Do not calculate missing values or choose between contradictions for convenience. "
+    "Do not reformulate descriptions or repair identifiers. The field meaning and correct association remain necessary: "
+    "finding a number is not sufficient to assign it to a field."
+)
+SEMANTIC_GENERAL_GUARD_INSTRUCTIONS = (
+    "Read this page independently using only the declared semantic contract, without assuming a provider layout. "
+    "Preserve the shortest literal context identifying each proposal in semantic_context.literal_context. "
+    "This context and your basis/polarity labels are unverified model observations, not independent proof or approval. "
+    "An absent value on this page is NOT_ON_PAGE, not a claim of absence from the whole document. "
+    "Never fill an unprinted subtotal from arithmetic. Preserve conflicting printed candidates as alternatives, observed=null and ambiguous=true. "
+    "Keep each printed table row occurrence, even when values repeat. Do not duplicate a continuation row or invent missing rows. "
+    "For requested narrative collections include only the requested entities or affirmative explicit commitments; preserve negation "
+    "and conditional context and do not turn rejected, hypothetical or negated actions into commitments. "
+    "Return empty collections when no eligible occurrence is visible; retain the original page context through literal quotes."
+)
 SOURCE_ASSOCIATION = "DECLARED_LABEL_CONTEXT_V1"
 ASSOCIATION_PROMPT_VERSION = "trackvance-idp-098-visual-v4-source-association-roles"
 ASSOCIATION_SEMANTIC_VERSION = "trackvance-visual-semantic-098-v4-source-association-roles"
@@ -100,6 +123,13 @@ def visual_contract(definition):
                             "logical section grouping do not supply this heading."}},
                 "required": ["anchor_label", "section_label"]}
             result["required"].append("source_context")
+        if definition.get("semantic_general", {}).get("mode") == SEMANTIC_GENERAL_VERSION:
+            result["properties"]["semantic_context"] = {"type": "object", "additionalProperties": False,
+                "properties": {"literal_context": {"type": ["string", "null"], "maxLength": 16000},
+                    "basis": {"type": "string", "enum": ["PRINTED", "CALCULATED", "INFERRED", "NOT_ON_PAGE", "UNREADABLE", "UNCERTAIN"]},
+                    "polarity": {"type": "string", "enum": ["AFFIRMATIVE", "NEGATED", "CONDITIONAL", "UNKNOWN", "NOT_APPLICABLE"]}},
+                "required": ["literal_context", "basis", "polarity"]}
+            result["required"].append("semantic_context")
         return result
     def fields(items):
         names = [item["name"] for item in items]
@@ -131,6 +161,8 @@ def validate_selection(selection, definition):
             required = {"observed", "ambiguous", "alternatives"}
             if field.get("source_association") == SOURCE_ASSOCIATION:
                 required.add("source_context")
+            if definition.get("semantic_general", {}).get("mode") == SEMANTIC_GENERAL_VERSION:
+                required.add("semantic_context")
             if (not isinstance(value, dict) or set(value) != required
                     or value["observed"] is not None and not isinstance(value["observed"], str)
                     or type(value["ambiguous"]) is not bool or not isinstance(value["alternatives"], list)
@@ -143,6 +175,16 @@ def validate_selection(selection, definition):
                 if (not isinstance(witness, dict) or set(witness) != {"anchor_label", "section_label"}
                         or any(text is not None and (not isinstance(text, str) or len(text) > 160)
                             for text in witness.values())):
+                    raise ValueError("LLM_SELECTION_INVALID")
+            if "semantic_context" in required:
+                context = value["semantic_context"]
+                if (not isinstance(context, dict) or set(context) != {"literal_context", "basis", "polarity"}
+                        or not isinstance(context["basis"], str)
+                        or context["basis"] not in {"PRINTED", "CALCULATED", "INFERRED", "NOT_ON_PAGE", "UNREADABLE", "UNCERTAIN"}
+                        or not isinstance(context["polarity"], str)
+                        or context["polarity"] not in {"AFFIRMATIVE", "NEGATED", "CONDITIONAL", "UNKNOWN", "NOT_APPLICABLE"}
+                        or context["literal_context"] is not None and (not isinstance(context["literal_context"], str)
+                            or len(context["literal_context"]) > 16000)):
                     raise ValueError("LLM_SELECTION_INVALID")
     if not isinstance(selection, dict) or set(selection) != {"fields", "tables"}:
         raise ValueError("LLM_SELECTION_INVALID")
@@ -159,6 +201,14 @@ def validate_selection(selection, definition):
 
 def semantic_definition(definition):
     """Declared semantic context, not parser samples, expected values or authority."""
+    metadata = definition.get("semantic_general")
+    if metadata and metadata.get("mode") == SEMANTIC_GENERAL_VERSION:
+        profile = metadata["contract"]
+        return {"semantic_definition_version": SEMANTIC_GENERAL_VERSION,
+            "reading_mode": "VERBATIM_OBSERVED_VALUES_NOT_NORMALIZED_OR_EXPECTED_ANSWERS",
+            "profile_id": profile["id"], "profile_revision": profile["revision"],
+            "profile_sha256": metadata["profile_sha256"], "document_type": profile["document_type"],
+            "description": profile["description"], "fields": profile["fields"], "tables": profile["tables"]}
     def field(value, extra_labels=()):
         result = {key: value[key] for key in ("name", "label", "logical_type", "required", "section",
             "date_format", "decimal_separator", "thousands_separator", "currency_symbols", "source_association") if key in value}
@@ -296,7 +346,7 @@ class Session:
         (folder / "request.json").write_bytes(canonical(request))
         process = None
         consumed = 0
-        failed = False
+        failure = None
         observed_phase = None
         folder_identity = self.api["DIAGNOSTICS"].identity(folder.lstat())
         try:
@@ -304,6 +354,8 @@ class Session:
                 process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", str(folder)],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
                     start_new_session=True, close_fds=True)
+            if operation == "STRUCTURED":
+                self.handler.paddle_attempted = True
             self.api["ACTIVE"][self.identity] = process
             while True:
                 if self.identity in self.api["CANCELLED"]:
@@ -338,8 +390,8 @@ class Session:
                         raise ValueError("PADDLE_FAILURE")
                     return json.loads((folder / "result.json").read_bytes())
                 time.sleep(min(.1, self.budget.remaining()))
-        except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
-            failed = True
+        except Exception as error:
+            failure = error
             raise
         finally:
             if process is not None:
@@ -353,10 +405,13 @@ class Session:
                 except subprocess.TimeoutExpired:
                     raise self.api["MEMORY"].UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
                 self.api["ACTIVE"].pop(self.identity, None)
-                if failed:
+                if failure is not None:
                     try:
-                        self.api["FAILURE_DIAGNOSTICS"].retain(folder, self.api["DIAGNOSTICS"].identity(folder.lstat()),
-                            self.identity, self.source_sha, "PADDLE_FAILURE", process)
+                        token = self.api["FAILURE_DIAGNOSTICS"].retain(folder, folder_identity,
+                            self.identity, self.source_sha, self.api["safe_error"](failure, self.identity)[1], process,
+                            error=failure)
+                        if token is None:
+                            self.api["RUNTIME"]["diagnostic_retention_available"] = False
                     except (OSError, ValueError, KeyError, TypeError, RuntimeError):
                         self.api["RUNTIME"]["diagnostic_retention_available"] = False
 
@@ -417,6 +472,9 @@ class Session:
         if source_association:
             prompt += "\n" + SOURCE_ASSOCIATION_INSTRUCTIONS
         prompt_version = ASSOCIATION_PROMPT_VERSION if source_association else VISUAL_PROMPT_VERSION
+        if definition.get("semantic_general", {}).get("mode") == SEMANTIC_GENERAL_VERSION:
+            prompt += "\n" + SEMANTIC_GENERAL_LITERAL_INSTRUCTIONS + "\n" + SEMANTIC_GENERAL_GUARD_INSTRUCTIONS
+            prompt_version = SEMANTIC_GENERAL_VERSION
         semantics = semantic_definition(definition)
         for page in rendered:
             number = page["page"]

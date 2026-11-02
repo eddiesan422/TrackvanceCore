@@ -23,6 +23,7 @@ from types import SimpleNamespace
 sys.path.insert(0, sys.argv[1])
 from trackvance.document_discovery import discover, extract_reference
 from trackvance.document_representation import VERSION, parse_table_html
+from trackvance.document_semantic_general import compile_profile, profiles
 
 html = '<table><tr><th>Code</th><th>Description</th></tr><tr><td>0017</td><td>Item<br>detail</td></tr></table>'
 table = parse_table_html(html, identity='source-table')[0]
@@ -61,6 +62,11 @@ assert header['origin']['geometry_kind'] == 'UNKNOWN'
 assert header['origin']['region_semantics'] == 'PAGE_LOCATOR_ONLY'
 assert all(item['geometry'] is None for item in mapped['document_representation']['pages'][0]['tables'][0]['cells'])
 assert reference.payload == original
+# New semantic metadata must also validate from already loaded dependencies;
+# the application-source boundary stays active for both contract modalities.
+semantic = compile_profile(next(item for item in profiles() if item['id'] == 'certificate-v1'))
+assert semantic['semantic_general']['mode'] == 'SEMANTIC_GENERAL_V1'
+assert semantic['publication']['review_policy'] == 'ALL'
 print(json.dumps({'discovery':True, 'extraction':True, 'application_read_boundary':True, 'cell_geometry':'UNKNOWN'}))
 '''
     source = Path(__file__).resolve().parents[1] / "src"
@@ -71,7 +77,8 @@ print(json.dumps({'discovery':True, 'extraction':True, 'application_read_boundar
         "application_read_boundary": True, "cell_geometry": "UNKNOWN"}
 
 
-@pytest.mark.parametrize("helper", ["document_header_association.py", "document_candidate_selection.py"])
+@pytest.mark.parametrize("helper", ["document_header_association.py", "document_candidate_selection.py",
+    "document_semantic_general.py", "document_semantic_evidence.py"])
 def test_builder_processor_identity_changes_when_semantic_helper_changes(monkeypatch, helper):
     from trackvance import document_builder_workspace as workspace
 

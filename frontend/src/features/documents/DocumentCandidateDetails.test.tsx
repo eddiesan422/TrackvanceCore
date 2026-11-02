@@ -27,4 +27,27 @@ describe('Source observations and candidate alternatives', () => {
     renderApp(<DocumentCandidateDetails value={{ alternatives: ['000012'] }}/>)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
+
+  it('keeps a normalized semantic proposal pending while preserving the model context and literal alternatives', async () => {
+    const user = userEvent.setup()
+    renderApp(<DocumentCandidateDetails value={{ observed: '125.00', value: '125.00', geometry_kind: 'PAGE_LOCATOR_ONLY' }} targetType="DECIMAL" semanticReview={{ state: 'NORMALIZED_PENDING_VERIFICATION', observed: '125.00', normalized: '125.00', verified: null }} observations={[
+      { observation_id: 'observation-1', source_page: 2, stage: 'QWEN_VISUAL', observed: '125.00', alternatives: ['150.00'], model_context: { literal_context: 'No se aprobó el pago de 125.00.', basis: 'PRINTED', polarity: 'NEGATED' } },
+    ]}/> )
+    expect(screen.getByText('Normalizado; pendiente de verificación')).toBeVisible()
+    expect(screen.getByText('Pendiente de verificación', { exact: true })).toBeVisible()
+    expect(screen.getByText('Decimal', { exact: true })).toBeVisible()
+    await user.click(screen.getByText('Observaciones de origen (1)'))
+    expect(screen.getByText('No se aprobó el pago de 125.00.')).toBeVisible()
+    expect(screen.getByText('Clasificación propuesta: PRINTED · NEGATED')).toBeVisible()
+    expect(screen.getByText('Alternativas observadas: 150.00')).toBeVisible()
+    expect(screen.queryByText(/Aprobación automática/)).not.toBeInTheDocument()
+    expect(screen.getByText(/ubicación exacta de este valor no está demostrada/)).toBeVisible()
+  })
+
+  it('identifies an authorized correction and a confirmed optional absence without inferring automatic approval', () => {
+    renderApp(<DocumentCandidateDetails value={{}} semanticReview={{ state: 'AUTHORIZED_CORRECTION', observed: 'unsupported', normalized: null, verified: null }}/> )
+    expect(screen.getByText('Corregido mediante revisión autorizada')).toBeVisible()
+    expect(screen.getByText('Ausencia confirmada mediante revisión')).toBeVisible()
+    expect(screen.queryByText('Pendiente de verificación')).not.toBeInTheDocument()
+  })
 })

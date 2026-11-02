@@ -506,11 +506,16 @@ def extract(lines, definition, page_geometry=None):
             "confidence": origin["confidence"] if origin else None,
             "origin": {k: origin[k] for k in ("page", "region", "method", "resolution") if k in origin} if origin else None,
             "reviewed": False, "alternatives": sorted(distinct)[:20] if ambiguous else []}
-    tables = {}
-    table_unparsed = {}
+    tables: dict[str, list[dict[str, Any]]] = {}
+    table_unparsed: dict[str, list[dict[str, Any]]] = {}
     for table in definition["tables"]:
         rows = []
         rejected = []
+        if table.get("semantic_collection"):
+            # Native text is retained as source. A collection has no regex row
+            # grammar and must not be fabricated from empty/default patterns.
+            tables[table["name"]], table_unparsed[table["name"]] = [], []
+            continue
         if table.get("visual"):
             header_values = [fields[field["name"]]["value"] for field in definition["fields"]
                              if field.get("logical_type", "STRING") == "STRING" and fields[field["name"]]["validity"] == "VALID"

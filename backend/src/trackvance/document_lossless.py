@@ -330,6 +330,10 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
         _retain_alternatives(payload, alternatives, definition, stage)
         payload["arithmetic"] = arithmetic_checks(payload, definition)
         payload["cross_totals"] = cross_table_checks(payload, definition)
+    if definition.get("semantic_general"):
+        from .document_semantic_evidence import annotate_semantic_payload
+
+        annotate_semantic_payload(payload, definition)
     result = {"payload": payload, "engine": {"key": "TRACKVANCE_LOSSLESS_098_V1", "lossless_contract_version": 1,
         "route": stage, "configuration": copy.deepcopy(configuration), "configuration_sha256": canonical_hash(configuration),
         "recognition_configuration_sha256": configuration_sha, "source_sha256": source_sha256,
@@ -421,6 +425,9 @@ def _native_events(native, source_sha, configuration_sha, context, *, definition
 def run_lossless(source, definition, configuration, *, legacy_runner, check, budget, on_event=None,
                  attempt_context=None, recognize=None, saved_events=None):
     from . import document_automatic_verification as verification
+    from .document_semantic_general import assert_configuration
+
+    assert_configuration(definition, configuration)
 
     budget = budget or AttemptBudget(configuration.get("timeout_seconds", 300))
     context = dict(attempt_context or {})
@@ -485,6 +492,14 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         accept(probe)
         native_ready = bool(type(count) is int and 1 <= count <= 50
             and native["payload"].get("pages") == list(range(1, count + 1)) and _sufficient(native["payload"], definition))
+        # Qwen visual is an independent semantic route. Native text is retained
+        # as a probe, but is only selected when NATIVE_FIRST was requested.
+        if definition.get("semantic_general") and configuration.get("extraction_strategy") != "NATIVE_FIRST":
+            native_ready = False
+        elif definition.get("semantic_general"):
+            from .document_semantic_general import native_semantic_sufficient
+
+            native_ready = native_ready and native_semantic_sufficient(native, definition)
         if native_ready:
             for event in _native_events(native, source_sha, configuration_sha, context, definition_sha256=canonical_hash(definition)):
                 accept(event)

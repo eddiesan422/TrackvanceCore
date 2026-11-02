@@ -16,6 +16,7 @@ from pydantic import (
 from .document_invoice_controls import validated_invoice_controls
 from .document_invoice_schemas import InvoiceControls
 from .document_normalization import DocumentNormalization
+from .document_semantic_general import validate_metadata
 from .document_template_builder_schemas import VisualFieldRule, VisualTableRule
 
 
@@ -89,16 +90,24 @@ class DocumentTable(BaseModel):
     row_label: str = Field(default="", max_length=160)
     visual: VisualTableRule | None = None
     structured_header_labels: list[str] | None = Field(default=None, min_length=1, max_length=40)
+    semantic_collection: bool = False
 
     @model_serializer(mode="wrap")
     def preserve_legacy_table(self, handler):
         result = handler(self)
         if self.structured_header_labels is None:
             result.pop("structured_header_labels", None)
+        if not self.semantic_collection:
+            result.pop("semantic_collection", None)
         return result
 
     @model_validator(mode="after")
     def row_groups(self):
+        if self.semantic_collection:
+            if (self.visual or self.row_pattern or self.structured_header_labels
+                    or len({field.name.casefold() for field in self.fields}) != len(self.fields)):
+                raise ValueError("Una colección semántica no declara ubicaciones ni patrones de filas.")
+            return self
         if any(field.source_association for field in self.fields):
             raise ValueError("La asociación literal de contexto se declara sólo en cabeceras.")
         if self.structured_header_labels is not None:
@@ -179,6 +188,7 @@ class DocumentDefinition(BaseModel):
     cross_totals: list["DocumentCrossTotal"] = Field(default_factory=list, max_length=30)
     invoice_controls: InvoiceControls | None = None
     validation_policy: DocumentValidationPolicy | None = None
+    semantic_general: dict | None = None
 
     @model_serializer(mode="wrap")
     def preserve_historical_definition(self, handler):
@@ -189,10 +199,13 @@ class DocumentDefinition(BaseModel):
             result.pop("invoice_controls", None)
         if self.validation_policy is None:
             result.pop("validation_policy", None)
+        if self.semantic_general is None:
+            result.pop("semantic_general", None)
         return result
 
     @model_validator(mode="after")
     def names(self):
+        validate_metadata(self)
         names = [f.name.casefold() for f in self.fields]
         tables = [t.name.casefold() for t in self.tables]
         reserved = {"document_id", "extraction_id", "batch_id", "row_number", "__tv_record_number"}

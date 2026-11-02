@@ -370,12 +370,12 @@ class HTTPFailureFixture(unittest.TestCase):
 
         original = ring.retain
 
-        def retain(*args):
+        def retain(*args, **kwargs):
             self.assertTrue(state["reaped"])
             state["retained"] = True
             if retention_failure:
                 raise OSError("synthetic diagnostic failure with SECRET_DOCUMENT_VALUE")
-            return original(*args)
+            return original(*args, **kwargs)
 
         # Admission and Budget share one controlled clock. Time stays zero
         # until the already-created synthetic child waits; then only work time
