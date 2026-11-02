@@ -8,6 +8,7 @@ import type { SemanticProfileDraft } from './SemanticProfileEditor'
 
 type SemanticProfile = SemanticProfileDraft & { sha256: string }
 type ProfileAvailability = { enabled: boolean; mode: string; default_enabled: boolean; profiles: SemanticProfile[] }
+const profileKey = (profile: Pick<SemanticProfile, 'id' | 'revision'>) => JSON.stringify([profile.id, profile.revision])
 
 export default function DocumentSemanticProfile({ familyId, current, canConfigure, refresh }: {
   familyId: string; current?: RecordData; canConfigure: boolean; refresh: () => void
@@ -20,7 +21,7 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
   const [error, setError] = useState<unknown>(null)
   const [saved, setSaved] = useState<RecordData | null>(null)
   const [custom, setCustom] = useState<SemanticProfileDraft | null>(null)
-  const profile = profiles.data?.profiles.find(item => item.id === selected)
+  const profile = profiles.data?.profiles.find(item => profileKey(item) === selected)
   const disabled = !canConfigure || !profiles.data?.enabled || busy
   const revisionConflict = !!error && typeof error === 'object' && 'code' in error && error.code === 'DOCUMENT_SEMANTIC_PROFILE_REVISION_CONFLICT'
 
@@ -38,13 +39,13 @@ export default function DocumentSemanticProfile({ familyId, current, canConfigur
         if (disabled || !profile || !reason.trim()) return
         setBusy(true); setError(null); setSaved(null)
         try {
-          const result = await post(`/documents/families/${encodeURIComponent(familyId)}/semantic-profile`, { ...(custom ? { profile: custom } : { profile_id: profile.id }), route, reason: reason.trim() })
+          const result = await post(`/documents/families/${encodeURIComponent(familyId)}/semantic-profile`, { ...(custom ? { profile: custom } : { profile_id: profile.id, profile_revision: profile.revision }), route, reason: reason.trim() })
           setSaved(result.profile || { id: custom?.id || profile.id, revision: custom?.revision || profile.revision }); setReason(''); refresh()
         } catch (failure) { setError(failure) } finally { setBusy(false) }
       }}>
         <div className="document-engine-fields">
           <Field label="Perfil semántico"><select value={selected} disabled={disabled} required onChange={event => { setSelected(event.target.value); setCustom(null); setSaved(null) }}>
-            <option value="">Selecciona la información que necesitas</option>{profiles.data.profiles.map(item => <option key={item.id} value={item.id}>{item.name} · revisión {item.revision}</option>)}
+            <option value="">Selecciona la información que necesitas</option>{profiles.data.profiles.map(item => <option key={profileKey(item)} value={profileKey(item)}>{item.name} · revisión {item.revision}</option>)}
           </select></Field>
           <Field label="Lectura del documento" hint="Se ejecuta la ruta seleccionada; no se exige ejecutar ambos motores."><select value={route} disabled={disabled} onChange={event => { setRoute(event.target.value); setSaved(null) }}>
             <option value="QWEN_VISUAL">Qwen visual independiente</option>

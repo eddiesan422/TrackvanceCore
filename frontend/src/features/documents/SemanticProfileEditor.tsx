@@ -7,6 +7,13 @@ export type SemanticProfileDraft = {
 }
 export const semanticFieldTypes: Record<string, string> = { STRING: 'Texto', INT64: 'Entero', DECIMAL: 'Decimal', DATE: 'Fecha', BOOLEAN: 'Sí o no' }
 const newField = (number: number): RecordData => ({ name: `field_${number}`, label: `Campo ${number}`, description: '', logical_type: 'STRING', required: true, critical: false, business_key: false })
+const commonDateFormats = ['%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%m-%d-%Y', '%d.%m.%Y', '%m.%d.%Y']
+const dateFormatLabels: Record<string, string> = { '%Y-%m-%d': 'AAAA-MM-DD', '%Y/%m/%d': 'AAAA/MM/DD', '%Y.%m.%d': 'AAAA.MM.DD', '%d/%m/%Y': 'DD/MM/AAAA', '%m/%d/%Y': 'MM/DD/AAAA', '%d-%m-%Y': 'DD-MM-AAAA', '%m-%d-%Y': 'MM-DD-AAAA', '%d.%m.%Y': 'DD.MM.AAAA', '%m.%d.%Y': 'MM.DD.AAAA' }
+const withoutNormalizationRule = (field: RecordData, rule: string) => {
+  const normalization = { ...(field.normalization || {}) }
+  delete normalization[rule]
+  return Object.keys(normalization).length ? normalization : null
+}
 
 function Fields({ values, onChange, disabled, scope, maximum }: { values: RecordData[]; onChange: (values: RecordData[]) => void; disabled: boolean; scope: string; maximum: number }) {
   const change = (index: number, patch: RecordData) => onChange(values.map((field, position) => position === index ? { ...field, ...patch } : field))
@@ -16,19 +23,29 @@ function Fields({ values, onChange, disabled, scope, maximum }: { values: Record
       <div className="document-engine-fields">
         <Field label={`Nombre de columna ${scope} ${index + 1}`} hint="Letra inicial; después letras, números o guion bajo."><input value={field.name} required pattern="[A-Za-z][A-Za-z0-9_]{0,62}" maxLength={63} onChange={event => change(index, { name: event.target.value })}/></Field>
         <Field label={`Información a extraer ${scope} ${index + 1}`}><input value={field.label} required maxLength={160} onChange={event => change(index, { label: event.target.value })}/></Field>
-        <Field label={`Tipo de dato ${scope} ${index + 1}`}><select value={field.logical_type} onChange={event => change(index, { logical_type: event.target.value })}>{Object.entries(semanticFieldTypes).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></Field>
+        <Field label={`Tipo de dato ${scope} ${index + 1}`}><select value={field.logical_type} onChange={event => change(index, { logical_type: event.target.value, normalization: null })}>{Object.entries(semanticFieldTypes).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></Field>
       </div>
       <Field label={`Descripción del campo ${scope} ${index + 1}`} hint="Describe su significado y el contexto que lo identifica."><textarea value={field.description || ''} maxLength={1000} onChange={event => change(index, { description: event.target.value })}/></Field>
       <div className="document-semantic-field-options">
         <label><input type="checkbox" checked={!!field.required} onChange={event => change(index, { required: event.target.checked })}/> Obligatorio · {scope} {index + 1}</label>
         <label><input type="checkbox" checked={!!field.critical} onChange={event => change(index, { critical: event.target.checked })}/> Dato crítico · {scope} {index + 1}</label>
-        <label><input type="checkbox" checked={!!field.business_key} onChange={event => change(index, { business_key: event.target.checked })}/> Clave de negocio · {scope} {index + 1}</label>
+        <label><input type="checkbox" checked={!!field.business_key} onChange={event => change(index, { business_key: event.target.checked, ...(event.target.checked ? { normalization: withoutNormalizationRule(field, 'text_linebreaks') } : {}) })}/> Clave de negocio · {scope} {index + 1}</label>
       </div>
-      {field.logical_type === 'DECIMAL' && <div className="document-engine-fields">
+      {field.logical_type === 'DECIMAL' && <>
+        <label><input type="checkbox" checked={!!field.normalization?.decimal_formats} onChange={event => change(index, { normalization: event.target.checked ? { ...(field.normalization || {}), decimal_formats: 'UNAMBIGUOUS_LOCALE_V1' } : withoutNormalizationRule(field, 'decimal_formats') })}/> Reconocer formatos numéricos comunes · {scope} {index + 1}</label>
+        {field.normalization?.decimal_formats ? <p>Admite punto o coma decimal y separadores de miles. Si el texto permite dos valores distintos, permanece pendiente de resolución.</p> : <div className="document-engine-fields">
         <Field label={`Separador decimal ${scope} ${index + 1}`}><select value={field.decimal_separator || '.'} onChange={event => change(index, { decimal_separator: event.target.value })}><option value=".">Punto</option><option value=",">Coma</option></select></Field>
         <Field label={`Separador de miles ${scope} ${index + 1}`}><select value={field.thousands_separator ?? ''} onChange={event => change(index, { thousands_separator: event.target.value || null })}><option value="">Sin separador</option><option value=".">Punto</option><option value=",">Coma</option><option value=" ">Espacio</option></select></Field>
-      </div>}
-      {field.logical_type === 'DATE' && <Field label={`Formato de fecha ${scope} ${index + 1}`} hint="Por ejemplo, %Y-%m-%d o %d/%m/%Y."><input value={field.date_format || '%Y-%m-%d'} maxLength={40} required onChange={event => change(index, { date_format: event.target.value })}/></Field>}
+        </div>}
+      </>}
+      {field.logical_type === 'DATE' && <>
+        <label><input type="checkbox" checked={!!field.normalization?.date_formats?.length} onChange={event => change(index, { normalization: event.target.checked ? { ...(field.normalization || {}), date_formats: [...commonDateFormats] } : withoutNormalizationRule(field, 'date_formats') })}/> Admitir varios formatos de fecha · {scope} {index + 1}</label>
+        {field.normalization?.date_formats?.length ? <p>Formatos admitidos: {(field.normalization.date_formats as string[]).map(format => dateFormatLabels[format] || format).join(', ')}. Si hay dos interpretaciones válidas, la fecha queda pendiente.</p> : <Field label={`Formato de fecha ${scope} ${index + 1}`} hint="Por ejemplo, %Y-%m-%d o %d/%m/%Y."><input value={field.date_format ?? '%Y-%m-%d'} maxLength={40} required onChange={event => change(index, { date_format: event.target.value })}/></Field>}
+      </>}
+      {field.logical_type === 'STRING' && <>
+        {!!Object.keys(field.normalization?.currency_equivalences || {}).length && <div><p>Equivalencias de moneda declaradas: {Object.keys(field.normalization.currency_equivalences).join(', ')}.</p><button type="button" className="button secondary small" onClick={() => change(index, { normalization: withoutNormalizationRule(field, 'currency_equivalences') })}>Usar texto sin equivalencias de moneda · {scope} {index + 1}</button></div>}
+        <label><input type="checkbox" checked={!!field.normalization?.text_linebreaks} disabled={disabled || !!field.business_key || !!Object.keys(field.normalization?.currency_equivalences || {}).length} onChange={event => change(index, { normalization: event.target.checked ? { ...(field.normalization || {}), text_linebreaks: 'DECLARED_MULTILINE_V1' } : withoutNormalizationRule(field, 'text_linebreaks') })}/> Unificar saltos de línea · {scope} {index + 1}</label>
+      </>}
       <button type="button" className="button secondary small" disabled={values.length <= 1} onClick={() => onChange(values.filter((_, position) => position !== index))}>Quitar campo {scope} {index + 1}</button>
     </fieldset>)}
     <button type="button" className="button secondary small" disabled={disabled || values.length >= maximum} onClick={() => {

@@ -88,13 +88,23 @@ def test_loading_keeps_historical_filename_and_exact_bytes(generator, monkeypatc
 
 
 @pytest.mark.parametrize("name", ["model_contract", "permission_contract"])
-def test_runtime_contract_uses_current_versioned_path(generator, monkeypatch, tmp_path, name):
-    monkeypatch.setattr(generator, "REPO", tmp_path, raising=False)
-    path = tmp_path / "docs/specification" / f"{name}_0.9.8.json"
+def test_runtime_contract_uses_explicit_docs_root_without_product_fallback(generator, monkeypatch, tmp_path, name):
+    product = tmp_path / "product"
+    docs = tmp_path / "official-docs"
+    monkeypatch.setattr(generator, "REPO", product, raising=False)
+    monkeypatch.setattr(generator, "DOCS_ROOT", docs, raising=False)
+    product_contract = product / "docs/specification" / f"{name}_0.9.8.json"
+    product_contract.parent.mkdir(parents=True)
+    product_contract.write_text(json.dumps({"version": "0.8.0"}), encoding="utf-8")
+    path = docs / "specification" / f"{name}_0.9.8.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps({"version": generator.VERSION}), encoding="utf-8")
     (path.parent / f"{name}_0.8.0.json").write_text('{"version": "0.8.0"}', encoding="utf-8")
     assert generator.input_document(name)["version"] == generator.VERSION
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        generator.input_document(name)
+    assert json.loads(product_contract.read_text(encoding="utf-8"))["version"] == "0.8.0"
 
 
 def test_model_labels_follow_product_authority(generator, monkeypatch):

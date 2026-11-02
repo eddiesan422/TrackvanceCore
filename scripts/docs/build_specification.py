@@ -560,7 +560,7 @@ def model_evolution_label(evolution):
 
 def input_document(name):
     if name in {"model_contract", "permission_contract"}:
-        path = REPO / "docs/specification" / f"{name}_{VERSION}.json"
+        path = DOCS_ROOT / "specification" / f"{name}_{VERSION}.json"
     else:
         path = DOCS_ROOT / "specification/inputs" / {
             "parameters": "parameters.json", "volume_results": "volume-results.json",

@@ -163,10 +163,9 @@ def commands_for(group: str, directory: Path, *, profile: str = "deep") -> list[
                              "--junitxml=" + str(directory / "pytest-junit.xml")], ROOT / "backend"),
             ("lint", [*uv, "ruff", "check", "src", "tests", "../scripts"], ROOT / "backend"),
             ("types", [*uv, "mypy", "src/trackvance", "--check-untyped-defs", "--ignore-missing-imports"], ROOT / "backend"),
-            ("contracts", [*uv, "python", "../scripts/export_contracts.py"], ROOT / "backend"),
-            ("contracts-diff", ["git", "diff", "--exit-code", "--", "backend/openapi.json",
-                "docs/specification/model_contract_0.9.8.json", "docs/specification/permission_contract_0.9.8.json",
-                "docs/development/permission-matrix.md"], ROOT),
+            ("contracts", [*uv, "python", "../scripts/export_contracts.py", "--docs-root",
+                str(directory / "generated-contracts/docs"), "--check-baselines", "tests/fixtures/contracts"], ROOT / "backend"),
+            ("contracts-diff", ["git", "diff", "--exit-code", "--", "backend/openapi.json"], ROOT),
             *[("migration-" + name, [*uv, "alembic", *args], ROOT / "backend")
               for name, args in (("upgrade", ["upgrade", "head"]), ("check", ["check"]),
                                 ("downgrade", ["downgrade", "base"]), ("reupgrade", ["upgrade", "head"]))],
@@ -346,7 +345,9 @@ def main() -> None:
         wrap_group(args.group, sources, args.output_dir / "evidence", source_sha=sha,
             ci=ci,
             started_at=stamp, completed_at=now(), duration_seconds=round(time.monotonic() - began, 3),
-            resources=resources)
+            resources=resources,
+            raw_attachments=[directory / "generated-contracts/docs/development/permission-matrix.md"]
+                if args.group == "backend" else None)
     except Exception as error:
         if isinstance(error, PhaseFailed):
             records.append(error.record)
@@ -397,7 +398,10 @@ def collect_sources(group: str, directory: Path, before: set[Path]) -> dict[str,
             raise ValueError("The actual confined runtime probe did not pass.")
         target = directory / "runtime-probe.json"
         target.write_text(json.dumps(probe, indent=2) + "\n", encoding="utf-8")
-        return {"junit": directory / "pytest-junit.xml", "runtime-probe": target}
+        contracts = directory / "generated-contracts/docs"
+        return {"junit": directory / "pytest-junit.xml", "runtime-probe": target,
+                "model-contract": contracts / "specification/model_contract_0.9.8.json",
+                "permission-contract": contracts / "specification/permission_contract_0.9.8.json"}
     if group == "frontend":
         return {"unit-results": directory / "vitest-results.json"}
     # Discovery is restricted to newly-created documents in this clean job.

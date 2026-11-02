@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 import os
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -70,13 +70,15 @@ class SemanticProfile(BaseModel):
 class ActivateSemanticProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profile_id: str | None = Field(default=None, max_length=63)
+    profile_revision: int | None = Field(default=None, ge=1, le=100000)
     profile: SemanticProfile | None = None
     route: Route = "QWEN_VISUAL"
     reason: str = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
     def one_profile(self):
-        if (self.profile_id is None) == (self.profile is None) or not self.reason.strip():
+        if ((self.profile_id is None) == (self.profile is None) or not self.reason.strip()
+                or self.profile is not None and self.profile_revision is not None):
             raise ValueError("Select exactly one versioned profile and give a reason.")
         return self
 
@@ -144,7 +146,67 @@ def profiles():
 
 def catalog():
     return {"enabled": enabled(), "mode": MODE, "default_enabled": False,
-        "profiles": [{**value, "sha256": canonical_hash(value)} for value in profiles()]}
+        "profiles": [{**value, "sha256": canonical_hash(value)} for value in profile_versions()]}
+
+
+def profile_versions():
+    """Keep original catalog revisions available; new policies require a new hash."""
+    original = profiles()
+    current = copy.deepcopy(original)
+    for profile in current:
+        profile["revision"] = 2
+        fields = [*profile["fields"], *(field for table in profile["tables"] for field in table["fields"])]
+        for field in fields:
+            policy: dict[str, Any] = {}
+            if field["logical_type"] == "DECIMAL":
+                policy["decimal_formats"] = "UNAMBIGUOUS_LOCALE_V1"
+                if field["name"] in {"subtotal", "tax", "total", "unit_price", "amount", "opening_balance", "closing_balance", "balance"}:
+                    field["currency_symbols"] = ["US$", "$", "€", "£", "COP", "USD", "EUR", "GBP", "CHF"]
+            elif field["logical_type"] == "DATE":
+                policy["date_formats"] = ["%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y",
+                    "%d-%m-%Y", "%m-%d-%Y", "%d.%m.%Y", "%m.%d.%Y"]
+            elif field["logical_type"] == "STRING" and not field["business_key"]:
+                policy["text_linebreaks"] = "DECLARED_MULTILINE_V1"
+            if field["name"] == "currency":
+                policy = {"currency_equivalences": {
+                    "COP": ["peso colombiano", "pesos colombianos", "COP - peso colombiano", "COP - pesos colombianos"],
+                    "USD": ["US dollar", "US dollars", "dólar estadounidense", "dólares estadounidenses"],
+                    "EUR": ["euro", "euros"], "GBP": ["pound sterling", "libra esterlina"],
+                    "CHF": ["Swiss franc", "franco suizo"]}}
+            if policy:
+                field["normalization"] = policy
+        if profile["document_type"] == "NARRATIVE":
+            profile["tables"][0]["description"] += (
+                " Revisar todas las páginas y secciones. Incluir cada compromiso explícito, también de organizaciones;"
+                " no limitarse a personas ni a una sección titulada compromisos. Conservar cada ocurrencia y su cita;"
+                " una fecha ausente permanece null, sin eliminar la acción afirmativa.")
+        profile.update(SemanticProfile.model_validate(profile).model_dump(mode="json"))
+    # A projection with an additional semantic column is a new contract. Keep
+    # revision2 available, including the hashes used by saved CPU projections.
+    invoice = copy.deepcopy(next(value for value in current if value["document_type"] == "INVOICE"))
+    invoice["revision"] = 3
+    items = invoice["tables"][0]
+    description = next(field for field in items["fields"] if field["name"] == "description")
+    description["description"] = (
+        "Texto literal que describe el bien o servicio. Si el original distingue claramente un código"
+        " de artículo de su descripción, transcribir el código por separado en item_code y sólo el texto"
+        " descriptivo aquí. No recortar prefijos por su aspecto ni inferir una separación; si no es"
+        " demostrable, conservar el fragmento completo y declarar la incertidumbre.")
+    items["fields"].insert(0, _field("item_code", "Código o identificador del artículo", required=False,
+        description="Sólo un identificador de artículo explícito y separable en la fila."
+            " Preservar ceros iniciales, puntuación y caracteres; no usar referencias de factura, pago, contrato"
+            " o proveedor. Si no existe o no se puede distinguir, dejar null y conservar la incertidumbre."
+            " El mismo artículo puede aparecer en varias filas legítimas; el código no identifica de forma única la fila."))
+    items["fields"].append(_field("source_quote", "Fragmento literal completo de la fila", required=False,
+        description="Transcribir el fragmento impreso completo que contiene la fila o su bloque, incluido el"
+            " identificador si existe. Conservar el texto y los saltos; no agregar etiquetas, separadores"
+            " de tabla, cálculos ni texto reconstruido. Si no es legible, dejar null y declarar incertidumbre.",
+        normalization={"text_linebreaks": "DECLARED_MULTILINE_V1"}))
+    items["description"] += (
+        " Separar identificador y texto descriptivo sólo si la evidencia impresa permite distinguirlos;"
+        " conservar además el fragmento literal completo. No inventar ni eliminar códigos, ni deduplicar filas.")
+    invoice = SemanticProfile.model_validate(invoice).model_dump(mode="json")
+    return [*original, *current, invoice]
 
 
 def resolve_profile(body):
@@ -152,7 +214,10 @@ def resolve_profile(body):
 
     if body.profile is not None:
         return body.profile.model_dump(mode="json")
-    selected = next((value for value in profiles() if value["id"] == body.profile_id), None)
+    revision = body.profile_revision
+    matches = [value for value in profile_versions() if value["id"] == body.profile_id
+        and (revision is None or value["revision"] == revision)]
+    selected = max(matches, key=lambda value: value["revision"]) if matches else None
     if selected is None:
         raise OperationError(422, "DOCUMENT_SEMANTIC_PROFILE_UNKNOWN", "Selecciona un perfil semántico disponible.")
     return selected
@@ -262,8 +327,9 @@ def guard_profile_revision(db, organization_id, definition):
     from .document_models import DocumentTemplate
     from .operations_common import OperationError
 
-    builtin = next((item for item in profiles() if item["id"] == metadata["profile_id"]), None)
-    if builtin is not None and metadata["profile_sha256"] != canonical_hash(builtin):
+    versions = [item for item in profile_versions() if item["id"] == metadata["profile_id"]]
+    builtin = next((item for item in versions if item["revision"] == metadata["profile_revision"]), None)
+    if versions and (builtin is None or metadata["profile_sha256"] != canonical_hash(builtin)):
         raise OperationError(409, "DOCUMENT_SEMANTIC_PROFILE_REVISION_CONFLICT",
             "Los identificadores del catálogo están reservados; crea un identificador de perfil propio.")
     if db.bind.dialect.name == "postgresql":

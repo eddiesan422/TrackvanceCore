@@ -14,6 +14,37 @@ const available = { enabled: true, mode: 'SEMANTIC_GENERAL_V1', default_enabled:
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(api).mockResolvedValue(available); vi.mocked(post).mockResolvedValue({ profile: { id: invoice.id, revision: 1 } }) })
 
 describe('General semantic profile configuration', () => {
+  it('selects the exact catalog revision when the same profile id has historical and current contracts', async () => {
+    const user = userEvent.setup()
+    const newer = { ...invoice, revision: 2, sha256: 'revision-two-sha', description: 'Contrato nuevo con formatos declarados.',
+      fields: [{ ...invoice.fields[0], label: 'Identificador de la revisión dos' }, invoice.fields[1]] }
+    vi.mocked(api).mockResolvedValue({ ...available, profiles: [invoice, newer] })
+    vi.mocked(post).mockImplementation(async (_path, body) => {
+      const request = body as { profile_id: string; profile_revision: number }
+      return { profile: { id: request.profile_id, revision: request.profile_revision } }
+    })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
+    const selector = await screen.findByLabelText('Perfil semántico')
+    expect(screen.getByRole('option', { name: 'Factura general · revisión 1' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Factura general · revisión 2' })).toBeInTheDocument()
+    await user.selectOptions(selector, JSON.stringify([invoice.id, 2]))
+    expect(screen.getByText('Identificador de la revisión dos')).toBeVisible()
+    expect(screen.getByText('Contrato nuevo con formatos declarados.')).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Usar la revisión nueva explícita')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toMatchObject({ profile_id: invoice.id, profile_revision: 2 })
+    await user.selectOptions(selector, JSON.stringify([invoice.id, 1]))
+    expect(screen.getByText('Número de factura')).toBeVisible()
+    expect(screen.queryByText('Identificador de la revisión dos')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Conservar explícitamente el contrato anterior')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(post).mock.calls[1][1]).toMatchObject({ profile_id: invoice.id, profile_revision: 1 })
+    expect(invoice.revision).toBe(1)
+    expect(invoice.fields[0].label).toBe('Número de factura')
+  })
+
   it('keeps the disabled experimental mode unavailable and does not infer activation from existing profiles', async () => {
     vi.mocked(api).mockResolvedValue({ ...available, enabled: false })
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
@@ -28,7 +59,7 @@ describe('General semantic profile configuration', () => {
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={refresh}/> )
     expect(await screen.findByLabelText('Perfil semántico')).toHaveValue('')
     expect(screen.getByLabelText('Lectura del documento')).toHaveValue('QWEN_VISUAL')
-    await user.selectOptions(screen.getByLabelText('Perfil semántico'), invoice.id)
+    await user.selectOptions(screen.getByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
     expect(screen.getByText('Número de factura')).toBeVisible()
     expect(screen.getByText(/Referencia/).parentElement).toHaveTextContent('Opcional')
     expect(screen.getByText('lines')).toBeVisible()
@@ -38,7 +69,7 @@ describe('General semantic profile configuration', () => {
     await user.selectOptions(screen.getByLabelText('Lectura del documento'), 'NATIVE_FIRST')
     await user.type(screen.getByLabelText('Motivo del cambio de perfil'), ' Información común sin depender del diseño ')
     await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
-    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/families/family/semantic-profile', { profile_id: invoice.id, route: 'NATIVE_FIRST', reason: 'Información común sin depender del diseño' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/families/family/semantic-profile', { profile_id: invoice.id, profile_revision: invoice.revision, route: 'NATIVE_FIRST', reason: 'Información común sin depender del diseño' }))
     expect(await screen.findByText(/Ya puedes cargar documentos en esta familia/)).toBeVisible()
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText('Motivo del cambio de perfil')).toHaveValue('')
@@ -57,7 +88,7 @@ describe('General semantic profile configuration', () => {
     const user = userEvent.setup(), refresh = vi.fn()
     vi.mocked(post).mockRejectedValue(new Error('El servicio general está deshabilitado.'))
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={refresh}/> )
-    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), invoice.id)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
     await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Nueva prueba controlada')
     await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('El servicio general está deshabilitado.')
@@ -76,7 +107,7 @@ describe('General semantic profile configuration', () => {
   it('submits a custom declared field and collection contract without copying a visual layout or expected values', async () => {
     const user = userEvent.setup()
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
-    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), invoice.id)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
     await user.click(screen.getByRole('checkbox', { name: 'Personalizar información solicitada' }))
     await user.clear(screen.getByLabelText('Nombre del perfil personalizado'))
     await user.type(screen.getByLabelText('Nombre del perfil personalizado'), 'Orden documental')
@@ -110,7 +141,7 @@ describe('General semantic profile configuration', () => {
       return { profile: { id: profile.id, revision: profile.revision } }
     })
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
-    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), invoice.id)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
     await user.click(screen.getByRole('checkbox', { name: 'Personalizar información solicitada' }))
     await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Primer contrato personalizado')
     await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
@@ -135,7 +166,7 @@ describe('General semantic profile configuration', () => {
     const user = userEvent.setup()
     vi.mocked(post).mockRejectedValueOnce(new ApiError('La revisión ya existe con otro contrato.', 409, undefined, 'DOCUMENT_SEMANTIC_PROFILE_REVISION_CONFLICT'))
     renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/> )
-    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), invoice.id)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
     await user.click(screen.getByRole('checkbox', { name: 'Personalizar información solicitada' }))
     await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Cambio solicitado')
     await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))

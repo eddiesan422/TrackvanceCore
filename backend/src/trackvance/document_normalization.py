@@ -23,16 +23,24 @@ class DocumentNormalization(BaseModel):
     rounding: Literal["EXACT", "HALF_UP", "HALF_EVEN"] = "EXACT"
     currency_equivalences: dict[str, list[str]] = Field(default_factory=dict, max_length=30)
     text_linebreaks: Literal["DECLARED_MULTILINE_V1"] | None = None
+    decimal_formats: Literal["UNAMBIGUOUS_LOCALE_V1"] | None = None
+    date_formats: list[str] | None = Field(default=None, min_length=1, max_length=12)
 
     @model_serializer(mode="wrap")
     def preserve_existing_contract(self, handler):
         result = handler(self)
-        if self.text_linebreaks is None:
-            result.pop("text_linebreaks", None)
+        for key in ("text_linebreaks", "decimal_formats", "date_formats"):
+            if getattr(self, key) is None:
+                result.pop(key, None)
         return result
 
     @model_validator(mode="after")
     def unambiguous_aliases(self):
+        if self.date_formats is not None:
+            supported = {"%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%d/%m/%Y", "%m/%d/%Y",
+                "%d-%m-%Y", "%m-%d-%Y", "%d.%m.%Y", "%m.%d.%Y"}
+            if len(set(self.date_formats)) != len(self.date_formats) or set(self.date_formats) - supported:
+                raise ValueError("Declara formatos de fecha completos, compatibles y sin duplicados.")
         seen: dict[str, str] = {}
         for code, aliases in self.currency_equivalences.items():
             if len(code) != 3 or not code.isascii() or not code.isalpha() or code != code.upper():
@@ -49,6 +57,52 @@ class DocumentNormalization(BaseModel):
                     raise ValueError("Una representación no puede identificar dos monedas.")
                 seen[key] = code
         return self
+
+
+def _declared_scalar_formats(observed, field, policy, validate_value):
+    """Enumerate declared grammars; accept only a single distinct scalar meaning.
+
+    Format order is never a preference. A lexical 1,234 or 01/02/2026 can retain
+    two meanings and must not be resolved from document identity or an oracle.
+    """
+    candidates = []
+    if field["logical_type"] == "DECIMAL" and policy.get("decimal_formats"):
+        lexical = observed.replace("\u00a0", " ").replace("\u202f", " ").strip()
+        sign = ""
+        if lexical.startswith(("-", "+")):
+            sign, lexical = lexical[0], lexical[1:].strip()
+        symbols = sorted(field.get("currency_symbols", []), key=len, reverse=True)
+        prefix = next((symbol for symbol in symbols if lexical.startswith(symbol)), None)
+        suffix = next((symbol for symbol in symbols if lexical.endswith(symbol)), None)
+        affix = None
+        if prefix and not suffix:
+            lexical = lexical[len(prefix):].strip()
+            affix = {"position": "PREFIX", "literal": prefix}
+        elif suffix and not prefix:
+            lexical = lexical[:-len(suffix)].strip()
+            affix = {"position": "SUFFIX", "literal": suffix}
+        lexical = sign + lexical
+        formats = [{"decimal_separator": decimal, "thousands_separator": thousands}
+            for decimal, thousands in [(".", None), (",", None), (".", ","), (",", "."), (".", " "), (",", " ")]]
+        for grammar in formats:
+            value, status = validate_value(lexical, {**field, **grammar, "currency_symbols": [], "decimal_format_explicit": True,
+                "numeric_fragments": False})
+            if status == "VALID":
+                candidates.append({"value": value, "format": {**grammar,
+                    **({"currency_affix": affix} if affix else {})}})
+        meanings = {Decimal(item["value"]) for item in candidates}
+    elif field["logical_type"] == "DATE" and policy.get("date_formats"):
+        for grammar in policy["date_formats"]:
+            value, status = validate_value(observed, {**field, "date_format": grammar})
+            if status == "VALID":
+                candidates.append({"value": value, "format": {"date_format": grammar}})
+        meanings = {item["value"] for item in candidates}
+    else:
+        return None
+    if len(meanings) == 1:
+        value = format(next(iter(meanings)), "f") if field["logical_type"] == "DECIMAL" else next(iter(meanings))
+        return value, "VALID", candidates
+    return observed, "AMBIGUOUS" if meanings else "INVALID", candidates
 
 
 def normalize_observation(observed, field, *, evidence_refs=None):
@@ -68,6 +122,15 @@ def normalize_observation(observed, field, *, evidence_refs=None):
     if observed is None or not policy:
         trace["normalized"] = value
         return value, validity, trace
+    scalar_formats = _declared_scalar_formats(observed, field, policy, validate_value)
+    if scalar_formats is not None:
+        value, validity, candidates = scalar_formats
+        trace["format_candidates"] = candidates
+        rules.append("DECLARED_DECIMAL_FORMAT_CONSENSUS_V1" if field["logical_type"] == "DECIMAL"
+            else "DECLARED_DATE_FORMAT_CONSENSUS_V1")
+        if validity != "VALID":
+            trace.update(rule=rules[0], normalized=value)
+            return value, validity, trace
     if policy.get("text_linebreaks"):
         if field["logical_type"] != "STRING" or field.get("business_key") or policy["currency_equivalences"]:
             return observed, "INVALID", trace

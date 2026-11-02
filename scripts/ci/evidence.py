@@ -132,7 +132,8 @@ def copy_attachment(path: Path, output_dir: Path, kind: str) -> dict[str, str]:
 def wrap_group(group: str, sources: dict[str, Path], output_dir: Path, *, source_sha: str,
                ci: dict[str, Any], started_at: str, completed_at: str,
                duration_seconds: float, resources: dict[str, Any] | None = None,
-               manifest: dict[str, Any] | None = None) -> list[Path]:
+               manifest: dict[str, Any] | None = None,
+               raw_attachments: list[Path] | None = None) -> list[Path]:
     """Validate explicit current outputs, then snapshot mandatory scenarios.
 
     Parent runners select outputs created by their own invocation. Baseline
@@ -146,6 +147,10 @@ def wrap_group(group: str, sources: dict[str, Path], output_dir: Path, *, source
                  for name, path in sources.items()}
     original = documents.get("result", {})
     refs = [copy_attachment(path, output_dir, "source-" + name) for name, path in sources.items()]
+    # Supplementary bytes are retained and hashed, never parsed as a result or
+    # counted as validated scenario/contract evidence. Keep source parsing strict.
+    refs.extend(copy_attachment(path, output_dir, "raw-supplement")
+                for path in raw_attachments or [])
     results: dict[str, dict[str, Any]] = {}
     original_meta: dict[str, dict[str, Any]] = {}
     if isinstance(original, dict) and original.get("kind") == "XLSX_GROUP":

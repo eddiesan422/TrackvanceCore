@@ -18708,6 +18708,19 @@
             ],
             "title": "Profile Id"
           },
+          "profile_revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Revision"
+          },
           "profile": {
             "anyOf": [
               {
@@ -22296,6 +22309,34 @@
               }
             ],
             "title": "Text Linebreaks"
+          },
+          "decimal_formats": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "UNAMBIGUOUS_LOCALE_V1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decimal Formats"
+          },
+          "date_formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 12,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Formats"
           }
         },
         "additionalProperties": false,

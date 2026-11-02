@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -11,6 +12,59 @@ VERSION = "SEMANTIC_OBSERVATIONS_V1"
 CONTEXT_KEYS = {"literal_context", "basis", "polarity"}
 BASES = {"PRINTED", "CALCULATED", "INFERRED", "NOT_ON_PAGE", "UNREADABLE", "UNCERTAIN"}
 POLARITIES = {"AFFIRMATIVE", "NEGATED", "CONDITIONAL", "UNKNOWN", "NOT_APPLICABLE"}
+
+
+def _standalone_placeholder(observed):
+    if not isinstance(observed, str):
+        return False
+    match = re.fullmatch(r"\[([^\[\]\r\n]+)\]", observed.strip())
+    return bool(match and " ".join(match[1].casefold().split()) in {
+        "not provided", "not supplied", "not available", "no proporcionado", "no suministrado",
+        "sin informar", "sin proporcionar", "no disponible"})
+
+
+def _placeholder_context(observation):
+    """Disqualify an explicit empty-form proposal; never delete marker text.
+
+    A marker embedded in a sentence, identifier or name is ordinary source text.
+    The self-reported label/marker context can block acceptance, never attest
+    documentary absence or authorize publication.
+    """
+    observed = observation["observed"]
+    context = observation.get("model_context") or {}
+    if (not _standalone_placeholder(observed) or context.get("basis") != "PRINTED"
+            or context.get("polarity") != "NEGATED" or observation.get("ambiguous")
+            or observation.get("alternatives")):
+        return False
+    quote = context.get("literal_context")
+    return bool(quote and re.fullmatch(r"[^:\r\n]{1,160}:\s*" + re.escape(observed.strip()), quote.strip()))
+
+
+def _possible_placeholder_context(observation):
+    """A short marker-only quote cannot establish a substantive field value.
+
+    The model's polarity is not authority to accept it or prove document-wide
+    absence. A legitimate name or identifier can be resolved by source review.
+    """
+    context = observation.get("model_context") or {}
+    observed = observation["observed"]
+    quote = context.get("literal_context")
+    return bool(_standalone_placeholder(observed) and context.get("basis") == "PRINTED"
+        and isinstance(quote, str) and (quote.strip() == observed.strip()
+            or re.fullmatch(r"[^:\r\n]{1,160}:\s*" + re.escape(observed.strip()), quote.strip())))
+
+
+def _context_contains_literal(observed, quote, field):
+    if observed in quote:
+        return True
+    policy = field.get("normalization") or {}
+    if field["logical_type"] != "STRING" or policy.get("text_linebreaks") != "DECLARED_MULTILINE_V1":
+        return False
+    # Use only the text equivalence declared in this contract, on both sides.
+    # This sanity check still grants no independent authority to a model quote.
+    literal, status, _ = normalize_observation(observed, field)
+    context, context_status, _ = normalize_observation(quote, field)
+    return bool(status == context_status == "VALID" and literal and literal in context)
 
 
 def _comparable(raw, specification):
@@ -97,20 +151,37 @@ def annotate_semantic_payload(payload, definition):
                     if context.get("basis") == "NOT_ON_PAGE" and observation["observed"] is not None:
                         reasons.append("VALUE_CONTRADICTS_REPORTED_LOCAL_ABSENCE")
                     if (name in collections and collections[name]["kind"] == "COLLECTION"
+                            and observation["observed"] is not None
                             and context.get("polarity") in {"NEGATED", "CONDITIONAL"}):
                         reasons.append("NONAFFIRMATIVE_NARRATIVE_PROPOSAL")
                     quote = context.get("literal_context")
-                    if quote and observation["observed"] and observation["observed"] not in quote:
+                    if (quote and observation["observed"] and not _context_contains_literal(
+                            observation["observed"], quote, specifications[(name, field)])):
                         reasons.append("MODEL_CONTEXT_DOES_NOT_CONTAIN_LITERAL")
                     if observation["observed"] is not None and observation["alternatives"]:
                         specification = specifications[(name, field)]
                         selected = _comparable(observation["observed"], specification)
                         if any(_comparable(alternative, specification) != selected for alternative in observation["alternatives"]):
                             reasons.append("CONTRADICTORY_SOURCE_ALTERNATIVES")
+                    if _placeholder_context(observation):
+                        reasons.append("EXPLICIT_ABSENCE_MARKER_REQUIRES_SOURCE_REVIEW")
+                    elif _possible_placeholder_context(observation):
+                        reasons.append("POSSIBLE_ABSENCE_MARKER_REQUIRES_SOURCE_REVIEW")
                 cell["semantic_observation_refs"] = [item["observation_id"] for item in occurrences]
                 cell["semantic_value_state"] = "OBSERVED_PENDING_VERIFICATION" if cell.get("observed") is not None else "PENDING_OR_ABSENT"
                 if reasons:
                     cell["value"], cell["validity"] = None, "AMBIGUOUS"
+                    markers = [item for item in occurrences if _placeholder_context(item)]
+                    possible = [item for item in occurrences if not _placeholder_context(item)
+                        and _possible_placeholder_context(item)]
+                    if markers or possible:
+                        cell["semantic_absence"] = {"reason": "CONTEXTUAL_PLACEHOLDER_V1" if markers else "POSSIBLE_PLACEHOLDER_V1",
+                            "observed_preserved": True, "documentary_absence_verified": False,
+                            "observation_refs": [item["observation_id"] for item in [*markers, *possible]]}
+                        if (specifications[(name, field)].get("required", True)
+                                and all(item["observed"] is None or _placeholder_context(item) for item in occurrences)
+                                and set(reasons) == {"EXPLICIT_ABSENCE_MARKER_REQUIRES_SOURCE_REVIEW"}):
+                            cell["validity"] = "MISSING"
                     conflict = f"FIELD:{field}" if name == "headers" else f"CELL:{name}.{index}.{field}"
                     payload.setdefault("semantic_conflicts", []).append(conflict)
                     guards.append({"path": path, "reasons": list(dict.fromkeys(reasons)),

@@ -59,6 +59,10 @@ class DocumentField(BaseModel):
         if self.thousands_separator == self.decimal_separator:
             raise ValueError("Los separadores decimal y de millares deben ser distintos.")
         if self.normalization:
+            if self.normalization.decimal_formats and self.logical_type != "DECIMAL":
+                raise ValueError("Los formatos decimales declarados requieren un campo decimal.")
+            if self.normalization.date_formats and self.logical_type != "DATE":
+                raise ValueError("Los formatos de fecha declarados requieren un campo de fecha.")
             if self.normalization.numeric_semantics == "DEDUCTION_MAGNITUDE" and self.logical_type != "DECIMAL":
                 raise ValueError("La magnitud de deducción requiere un campo decimal explícito.")
             if self.normalization.decimal_scale is not None and self.logical_type != "DECIMAL":

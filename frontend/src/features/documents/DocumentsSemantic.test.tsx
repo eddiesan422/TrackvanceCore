@@ -64,7 +64,7 @@ describe('General extraction within the existing document module', () => {
     expect(await screen.findByRole('button', { name: 'Cargar documentos' })).toBeDisabled()
     expect(vi.mocked(api).mock.calls.some(([path]) => path === '/documents/semantic-profiles')).toBe(false)
     await user.click(screen.getByRole('button', { name: 'Configurar extracción general' }))
-    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), profile.id)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([profile.id, profile.revision]))
     await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Información independiente del diseño')
     await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cargar documentos' })).toBeEnabled())
