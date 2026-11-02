@@ -42,7 +42,7 @@ SECTION_CAPTIONS = {"TOTALS": ["totals", "totales", "amount summary", "resumen d
 V2_SHA256 = canonical_hash({"version": V2_VERSION, "roles": ROLE_CAPTIONS,
     "sections": SECTION_CAPTIONS,
     "decorators": {"tax": "EXPLICIT_PERCENTAGE_CAPTION_V1"},
-    "association": "WHOLE_CAPTION_OWNER_TYPED_INVALID_RETAINED_V2"})
+    "association": "WHOLE_CAPTION_OWNER_TYPED_INVALID_RETAINED_ALIAS_SPAN_OWNERSHIP_V2"})
 
 
 def role_captions(field: dict[str, Any]) -> list[str]:

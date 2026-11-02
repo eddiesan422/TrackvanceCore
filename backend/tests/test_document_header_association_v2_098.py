@@ -217,3 +217,63 @@ def test_bare_td_order_does_not_prove_section_and_does_not_drop_invalid_literal(
     assert cells["ref"]["validity"] == "AMBIGUOUS"
     assert traces["ref"][0]["observed"] == "??" and traces["ref"][0]["eligible_for_field"]
     assert traces["ref"][0]["reason"] == "DECLARED_SOURCE_SCOPE_UNPROVEN"
+
+
+def alias_span_balance():
+    return decimal("closing_balance", "Saldo final", currency_symbols=["EUR"],
+        normalization={"decimal_formats": "UNAMBIGUOUS_LOCALE_V1"})
+
+
+def test_alias_span_complete_spanish_caption_owns_value_not_short_label_fragment():
+    config = alias_span_balance()
+    cells, traces = resolved([config], page(html="<table><tr><td colspan='4'>SALDO FINAL DEL PERÍODO 3.100,00 EUR</td></tr></table>", number=2))
+    assert cells["closing_balance"]["validity"] == "VALID"
+    assert cells["closing_balance"]["value"] == "3100.00"
+    assert any(item["raw_observed"] == "DEL PERÍODO 3.100,00 EUR"
+        and item["reason"] == "SHORT_ALIAS_CAPTION_FRAGMENT" and not item["eligible_for_field"]
+        for item in traces["closing_balance"])
+
+
+def test_alias_span_english_certificate_caption_owns_its_declared_nested_label():
+    config = field("certificate_id", "Certificate", aliases=["Certificate reference"])
+    cells, traces = resolved([config], page(block("Certificate number: CERT-042")))
+    assert cells["certificate_id"]["value"] == "CERT-042"
+    assert cells["certificate_id"]["validity"] == "VALID"
+    assert any(item["raw_observed"] == "number: CERT-042" and not item["eligible_for_field"]
+        and item["reason"] == "SHORT_ALIAS_CAPTION_FRAGMENT" for item in traces["certificate_id"])
+
+
+def test_alias_span_invalid_literal_under_full_caption_remains_uncertain():
+    cells, traces = resolved([alias_span_balance()], page(block("SALDO FINAL DEL PERÍODO ??")))
+    assert cells["closing_balance"]["validity"] == "AMBIGUOUS"
+    assert any(item["observed"] == "??" and item["status"] == "UNCERTAIN"
+        and item["eligible_for_field"] for item in traces["closing_balance"])
+
+
+def test_alias_span_genuine_two_full_caption_values_remain_contradictory():
+    cells, traces = resolved([alias_span_balance()], page(block("SALDO FINAL DEL PERÍODO 3.100,00 EUR")),
+        page(block("SALDO FINAL DEL PERÍODO 3.200,00 EUR"), number=2))
+    assert cells["closing_balance"]["validity"] == "AMBIGUOUS"
+    assert {item["observed"] for item in traces["closing_balance"] if item["status"] == "PROVEN"} == {"3.100,00 EUR", "3.200,00 EUR"}
+
+
+def test_alias_span_unregistered_longer_prose_is_not_silently_discarded():
+    cells, traces = resolved([alias_span_balance()], page(block("Saldo final durante discusión: ??")))
+    assert cells["closing_balance"]["validity"] == "AMBIGUOUS"
+    assert any(item["eligible_for_field"] and item["status"] == "UNCERTAIN" for item in traces["closing_balance"])
+
+
+def test_alias_span_two_explicit_pairs_in_one_cell_preserve_both_real_observations():
+    cells, traces = resolved([alias_span_balance()], page(html="<table><tr><td>"
+        "SALDO FINAL DEL PERÍODO: 3.100,00 EUR<br>SALDO FINAL: 3.200,00 EUR</td></tr></table>"))
+    assert cells["closing_balance"]["validity"] == "AMBIGUOUS"
+    assert {item["observed"] for item in traces["closing_balance"] if item["status"] == "PROVEN"} == {"3.100,00 EUR", "3.200,00 EUR"}
+
+
+def test_alias_span_does_not_reinterpret_v1_associations():
+    fields = [alias_span_balance()]
+    source = page(block("SALDO FINAL DEL PERÍODO 3.100,00 EUR"))
+    before = header_observations([source], fields)
+    header_observations_v2([source], fields)
+    assert header_observations([source], fields) == before
+    assert before[0]["closing_balance"][0][0] == "DEL PERÍODO 3.100,00 EUR"

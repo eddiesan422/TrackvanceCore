@@ -169,8 +169,49 @@ def _suffix_observations(page, rule, labels, headings):
             yield raw, anchor, anchor, "DECLARED_ROLE_VALUE_SUFFIX"
 
 
+def _short_alias_caption_fragment(text: str, raw: str, field: dict[str, Any]) -> bool:
+    """Reject only a captured span that starts inside this same field's caption.
+
+    The original literal and cell reference remain in the audit trace. Neither
+    normalization failure nor a different nearby value establishes this fact.
+    A real value under another explicit pair in the same cell stays relevant.
+    """
+    captions = role_captions(field)
+    lines = text.splitlines()
+    for line in lines:
+        if any(value == raw and status != "REJECTED" for value, status, _ in _suffix_candidates(line, field)):
+            return False
+        for label in captions:
+            for value, start, _finished in _inline_values(line, label, captions):
+                boundary = max(line.rfind(char, 0, start) for char in "|;") + 1
+                if value == raw and not line[boundary:start].strip():
+                    return False
+    for line in lines:
+        for full_start, full_end, full_label in v1._matches(line, captions):
+            boundary = max(line.rfind(char, 0, full_start) for char in "|;") + 1
+            if line[boundary:full_start].strip():
+                continue
+            finished, declared = v1._label_ending(line, full_end, full_label)
+            delimiter = re.match(r"\s*[:=]\s*", line[finished:])
+            if delimiter is None and not declared and not _suffix_candidates(line, field):
+                continue
+            for short_label in captions:
+                for short_start, short_end, _ in v1._matches(line, [short_label]):
+                    if short_start != full_start or short_end >= full_end:
+                        continue
+                    short_finished, _separator = v1._label_ending(line, short_end, short_label)
+                    rest = line[short_finished:]
+                    short_delimiter = re.match(r"\s*[:=]\s*", rest)
+                    begin = short_finished + (short_delimiter.end() if short_delimiter else len(rest) - len(rest.lstrip()))
+                    if begin < full_end and raw and line[begin:].startswith(raw):
+                        return True
+    return False
+
+
 def _inline_status(text: str, raw: str, labels: list[str], field: dict[str, Any]) -> tuple[str, str]:
     """A delimiter belongs to the complete caption, not a word within it."""
+    if _short_alias_caption_fragment(text, raw, field):
+        return "REJECTED", "SHORT_ALIAS_CAPTION_FRAGMENT"
     if caption_role(text) is not None and not re.search(r"[:=]", text):
         return "REJECTED", "ANCHOR_IS_ROLE_CAPTION_WITHOUT_VALUE"
     suffix = [item for item in _suffix_candidates(text, field) if item[0] == raw]

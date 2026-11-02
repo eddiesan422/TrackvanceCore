@@ -124,6 +124,7 @@ const reasons: Record<string, string> = {
   CAPTION_OWNED_BY_DIFFERENT_ROLE: 'La etiqueta completa corresponde a otra función documental',
   TARGET_IS_ROLE_CAPTION: 'El contenido relacionado es una etiqueta de otro dato, no el valor de este campo',
   TARGET_CAPTION_ROLE_UNPROVEN: 'La función de la etiqueta relacionada todavía no está demostrada',
+  SHORT_ALIAS_CAPTION_FRAGMENT: 'La etiqueta completa ya identifica esta ocurrencia del campo; el alias corto no es otra observación',
   OBSERVED_SECTION_OWNS_DIFFERENT_ROLE: 'La sección observada corresponde a otra función documental',
   ANCHOR_IS_ROLE_CAPTION_WITHOUT_VALUE: 'La etiqueta de origen no aporta un valor independiente para este campo',
   DECLARED_MONETARY_ROLE_VALUE_SUFFIX: 'Valor monetario vinculado a su etiqueta mediante el formato declarado',

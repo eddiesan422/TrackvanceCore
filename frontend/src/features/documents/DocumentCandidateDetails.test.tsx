@@ -5,6 +5,20 @@ import { renderApp } from '../../test/render'
 import DocumentCandidateDetails from './DocumentCandidateDetails'
 
 describe('Source observations and candidate alternatives', () => {
+  it('explains a short alias fragment as the same field occurrence while retaining its literal and source reference', async () => {
+    const user = userEvent.setup()
+    renderApp(<DocumentCandidateDetails value={{ observed: '45.00', value: '45.00' }} semanticReview={{ state: 'VERIFIED_AUTOMATICALLY', observed: '45.00', normalized: '45.00', verified: '45.00', review_required: false, corroboration: {
+      status: 'VERIFIED', rejected_associations: [{ status: 'REJECTED', eligible_for_field: false, observed: 'FOR THIS REPORTING PERIOD 45.00', label_text: 'FINAL AMOUNT FOR THIS REPORTING PERIOD', value_text: 'FOR THIS REPORTING PERIOD 45.00', page: 1, reason: 'SHORT_ALIAS_CAPTION_FRAGMENT', label_refs: ['same-source-cell'], value_refs: ['same-source-cell'], source_refs: [{ id: 'same-source-cell', artifact_sha256: 'original-cell-sha' }] }],
+    } }}/>)
+    await user.click(screen.getByText('Relaciones de origen conservadas (1)'))
+    expect(screen.getByText('La etiqueta completa ya identifica esta ocurrencia del campo; el alias corto no es otra observación')).toBeVisible()
+    expect(screen.getByText('Observado: FOR THIS REPORTING PERIOD 45.00')).toBeVisible()
+    expect(screen.getByText(/Referencias de la relación: same-source-cell · same-source-cell · SHA-256 original-cell-sha/)).toBeVisible()
+    expect(screen.getByText('Verificado automáticamente con evidencia documental')).toBeVisible()
+    expect(screen.queryByText(/valores contradictorios|SHORT_ALIAS_CAPTION_FRAGMENT/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
   it('preserves a positively excluded role trace and keeps a merely uncertain or invalid relation pending', async () => {
     const user = userEvent.setup()
     const { rerender } = renderApp(<DocumentCandidateDetails value={{ observed: '125.00', value: '125.00' }} semanticReview={{ state: 'VERIFIED_AUTOMATICALLY', observed: '125.00', normalized: '125.00', verified: '125.00', corroboration: {
