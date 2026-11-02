@@ -18741,6 +18741,25 @@
             "title": "Route",
             "default": "QWEN_VISUAL"
           },
+          "automatic_verification": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "SEMANTIC_AUTO_V1"
+            ],
+            "title": "Automatic Verification",
+            "default": "OFF"
+          },
+          "business_controls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SemanticInvoiceControls"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "type": "string",
             "maxLength": 2000,
@@ -22522,7 +22541,10 @@
         "properties": {
           "version": {
             "type": "string",
-            "const": "EVIDENCE_V2",
+            "enum": [
+              "EVIDENCE_V2",
+              "SEMANTIC_EVIDENCE_V1"
+            ],
             "title": "Version",
             "default": "EVIDENCE_V2"
           },
@@ -25700,6 +25722,102 @@
           "label"
         ],
         "title": "SemanticField"
+      },
+      "SemanticInvoiceControls": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "SEMANTIC_INVOICE_CONTROLS_V1",
+            "title": "Version",
+            "default": "SEMANTIC_INVOICE_CONTROLS_V1"
+          },
+          "scope": {
+            "type": "string",
+            "const": "FULL_INVOICE_NO_UNREPRESENTED_ADJUSTMENTS",
+            "title": "Scope"
+          },
+          "applicability": {
+            "type": "string",
+            "const": "ALL_DECLARED_ROLES_PRINTED",
+            "title": "Applicability"
+          },
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Table"
+          },
+          "line_amount": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Line Amount"
+          },
+          "subtotal": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Subtotal"
+          },
+          "tax": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Tax"
+          },
+          "total": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$",
+            "title": "Total"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          },
+          "scale": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 0.0,
+            "title": "Scale",
+            "default": 2
+          },
+          "tolerance": {
+            "type": "string",
+            "maxLength": 96,
+            "minLength": 1,
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,12})?$",
+            "title": "Tolerance",
+            "default": "0.01"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scope",
+          "applicability",
+          "table",
+          "line_amount",
+          "subtotal",
+          "tax",
+          "total"
+        ],
+        "title": "SemanticInvoiceControls"
       },
       "SemanticProfile": {
         "properties": {
