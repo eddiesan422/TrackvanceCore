@@ -209,10 +209,54 @@ def annotate_semantic_payload(payload, definition):
     return payload
 
 
-def semantic_review_issues(payload, definition, *, reviewed=False, source_sha256=None):
+def semantic_verification_state(extraction, definition):
+    """Read only a recomputed worker proof; review flags never manufacture it."""
+    from .document_semantic_general import automatic_contract
+    from .document_validation_policy import cell_hash, cells
+
+    empty = {"proof": {}, "verified_cells": {}, "table_coverage": {}}
+    if not automatic_contract(definition):
+        return empty
+    from .document_semantic_corroboration import trusted_semantic_proof
+
+    proof = trusted_semantic_proof(extraction, definition)
+    if not proof:
+        return empty
+    verified = {path: expected for path, cell, _ in cells(extraction.payload, definition)
+        if isinstance(cell, dict) and cell.get("validity") == "VALID"
+        and (expected := proof.get("verified_cells", {}).get(path)) is not None and expected == cell_hash(cell)}
+    coverage = {}
+    for table in definition["tables"]:
+        name = table["name"]
+        rows = [{key: {k: v for k, v in cell.items() if k != "reviewed"} for key, cell in row.items()}
+            for row in extraction.payload["tables"].get(name, [])]
+        coverage[name] = bool(proof.get("table_coverage", {}).get(name)
+            and proof.get("table_hashes", {}).get(name) == canonical_hash(rows))
+    return {"proof": proof, "verified_cells": verified, "table_coverage": coverage}
+
+
+def semantic_conflict_issues(extraction, definition, *, automatic_verification=None):
+    from .document_quality import semantic_issues
+
+    result = semantic_issues(extraction.payload, reviewed=extraction.reviewed)
+    state = automatic_verification or semantic_verification_state(extraction, definition)
+    resolved = set()
+    for table in definition["tables"]:
+        name = table["name"]
+        rows = extraction.payload["tables"].get(name, [])
+        if state["table_coverage"].get(name) and all(
+                cell.get("reviewed") and extraction.reviewed
+                or f"{name}.{index}.{column}" in state["verified_cells"]
+                for index, row in enumerate(rows) for column, cell in row.items()):
+            resolved.add("SEMANTIC_CONFLICT:TABLE:" + name)
+    return [issue for issue in result if issue not in resolved]
+
+
+def semantic_review_issues(payload, definition, *, reviewed=False, source_sha256=None, automatic_verification=None):
     if not definition.get("semantic_general"):
         return []
     result = []
+    state = automatic_verification or {"verified_cells": {}, "table_coverage": {}}
     for table in definition["tables"]:
         name = table["name"]
         rows = payload["tables"].get(name, [])
@@ -223,23 +267,28 @@ def semantic_review_issues(payload, definition, *, reviewed=False, source_sha256
             and receipt.get("definition_sha256") == canonical_hash(definition)
             and receipt.get("source_sha256") == source_sha256
             and isinstance(receipt.get("actor_id"), str) and receipt.get("actor_id")
-            and all(cell.get("reviewed") for row in rows for cell in row.values()))
-        if not confirmed:
+            and all(cell.get("reviewed") or f"{name}.{index}.{column}" in state["verified_cells"]
+                for index, row in enumerate(rows) for column, cell in row.items()))
+        if not confirmed and not state["table_coverage"].get(name):
             result.append("SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + name)
     return result
 
 
-def record_table_reviews(payload, definition, names, *, source_sha256, actor_id, reason, created_at):
+def record_table_reviews(payload, definition, names, *, source_sha256, actor_id, reason, created_at,
+                         automatic_verification=None):
     if not names:
         return
     from .operations_common import OperationError
 
     declared = {table["name"] for table in definition["tables"]}
+    state = automatic_verification or {"verified_cells": {}, "table_coverage": {}}
     if not definition.get("semantic_general") or len(names) != len(set(names)) or set(names) - declared:
         raise OperationError(422, "DOCUMENT_SEMANTIC_TABLE_REVIEW", "Confirma sólo colecciones semánticas declaradas y sin duplicados.")
     for name in names:
         rows = payload["tables"].get(name, [])
-        if any(cell.get("reviewed") is not True or cell.get("validity") != "VALID" for row in rows for cell in row.values()):
+        if any(cell.get("validity") != "VALID" or not (cell.get("reviewed") is True
+                or f"{name}.{index}.{column}" in state["verified_cells"])
+                for index, row in enumerate(rows) for column, cell in row.items()):
             raise OperationError(422, "DOCUMENT_SEMANTIC_TABLE_REVIEW", "Revisa y confirma todos los valores antes de acreditar la cobertura de la colección.")
         payload.setdefault("semantic_table_reviews", []).append({"table": name,
             "scope": "ALL_SOURCE_ROWS_OR_CONFIRMED_ABSENCE", "rows_sha256": canonical_hash(rows),
@@ -251,21 +300,52 @@ def semantic_review_dto(extraction, definition):
     if not definition.get("semantic_general"):
         return None
     payload = extraction.payload
+    automatic = semantic_verification_state(extraction, definition)
+    proof = automatic["proof"]
     pending = semantic_review_issues(payload, definition, reviewed=extraction.reviewed,
-        source_sha256=extraction.engine.get("source_sha256"))
+        source_sha256=extraction.engine.get("source_sha256"), automatic_verification=automatic)
     states = []
     for name, rows in [("headers", [payload["fields"]]), *payload["tables"].items()]:
         for index, row in enumerate(rows):
             for field, cell in row.items():
+                path = f"{name}.{index}.{field}"
+                auto = path in automatic["verified_cells"]
+                corroboration = copy.deepcopy(proof.get("corroboration", {}).get(path, {
+                    "status": "PENDING", "reasons": ["INDEPENDENT_SOURCE_REQUIRED"], "mechanisms": [], "source_refs": []}))
+                if not auto and corroboration.get("status") == "VERIFIED":
+                    # A human correction creates a new current value. Preserve
+                    # its old source proof as history, not current verification.
+                    prior = {"proof_scope": "PRIOR_ATTESTED_CANDIDATE",
+                        "candidate_sha256": proof.get("candidate_sha256"),
+                        "cell_sha256": proof.get("verified_cells", {}).get(path),
+                        "attestation_sha256": proof.get("attestation_sha256")}
+                    corroboration.update(status="INVALIDATED",
+                        reasons=[*corroboration.get("reasons", []), "CURRENT_CELL_DIFFERS_FROM_ATTESTED_VALUE"],
+                        prior_proof=prior,
+                        source_refs=[{**ref, **prior} for ref in corroboration.get("source_refs", [])])
                 state = ("AUTHORIZED_CORRECTION" if cell.get("corrected") else "VERIFIED_BY_AUTHORIZED_REVIEW") if cell.get("reviewed") else (
-                    "NORMALIZED_PENDING_VERIFICATION" if cell.get("validity") == "VALID" and cell.get("value") is not None
+                    "VERIFIED_AUTOMATICALLY" if auto else "NORMALIZED_PENDING_VERIFICATION" if cell.get("validity") == "VALID" and cell.get("value") is not None
                     else "OBSERVED_PENDING_RESOLUTION" if cell.get("observed") is not None else "PENDING_OR_ABSENT")
-                states.append({"path": f"{name}.{index}.{field}", "state": state,
+                states.append({"path": path, "state": state,
                     "observed": cell.get("observed"), "normalized": cell.get("value"),
-                    "verified": cell.get("value") if cell.get("reviewed") else None,
+                    "verified": cell.get("value") if cell.get("reviewed") or auto else None,
+                    "review_required": not (cell.get("reviewed") or auto),
+                    "corroboration": corroboration,
                     "evidence_refs": list(cell.get("evidence_refs", []))})
-    return {"mode": "SEMANTIC_GENERAL_V1", "automatic_approval": False, "values": states,
+    from .document_semantic_general import automatic_contract
+    approved = False
+    if automatic_contract(definition):
+        from .document_validation_policy import semantic_quality_report
+
+        approved = semantic_quality_report(extraction, definition, automatic_verification=automatic)["status"] == "AUTO_VERIFIED"
+    return {"mode": "SEMANTIC_GENERAL_V1", "automatic_approval": approved, "values": states,
         "tables": [{"name": table["name"],
             "review_required": "SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + table["name"] in pending,
+            "coverage_state": "PENDING" if "SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + table["name"] in pending else (
+                "AUTOMATICALLY_VERIFIED" if automatic["table_coverage"].get(table["name"]) else "AUTHORIZED_REVIEW"),
+            "proof_refs": [{"attestation_sha256": proof.get("attestation_sha256"),
+                "source_sha256": proof.get("source_sha256"), "definition_sha256": proof.get("definition_sha256"),
+                "table_sha256": proof.get("table_hashes", {}).get(table["name"])}]
+                if automatic["table_coverage"].get(table["name"]) else [],
             "latest_confirmation": next((copy.deepcopy(item) for item in reversed(payload.get("semantic_table_reviews", []))
                 if item.get("table") == table["name"]), None)} for table in definition["tables"]]}

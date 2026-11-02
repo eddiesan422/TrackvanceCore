@@ -951,6 +951,8 @@
         },
         "documents_ocr": {
           "scenario_ids": [
+            "backend-unit",
+            "frontend-unit",
             "functional-compose-browser-persistence"
           ],
           "browser_specs": [

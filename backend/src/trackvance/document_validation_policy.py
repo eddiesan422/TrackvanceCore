@@ -180,6 +180,12 @@ def _corroborated(payload, definition, controls, *, primary_stage=None):
 def certify_lossless_candidate(data, definition, source_sha256, *, source_context, independent=None,
                                check=lambda: None):
     """Coordinator-only attestation after immutable source/event persistence."""
+    from .document_semantic_general import automatic_contract
+
+    if automatic_contract(definition):
+        from .document_semantic_corroboration import certify_semantic_candidate
+
+        return certify_semantic_candidate(data, definition, source_sha256, source_context=source_context, check=check)
     check()
     payload, engine = data["payload"], data["engine"]
     representation = validate_representation(payload["document_representation"])
@@ -283,6 +289,10 @@ def certify_lossless_candidate(data, definition, source_sha256, *, source_contex
 
 
 def lossless_quality_report(extraction, definition, *, ignore_incomplete=False):
+    from .document_semantic_general import automatic_contract
+
+    if automatic_contract(definition):
+        return semantic_quality_report(extraction, definition, ignore_incomplete=ignore_incomplete)
     payload, engine = extraction.payload, extraction.engine
     proof = engine.get("validation") or {}
     signed = {key: value for key, value in proof.items() if key != "attestation_sha256"}
@@ -336,4 +346,79 @@ def lossless_quality_report(extraction, definition, *, ignore_incomplete=False):
         "checks": {"durable_source_bound": trusted, "recognition_complete": bool(execution.get("recognition_complete")),
             "scalar_and_evidence": verified == total, "arithmetic": arithmetic, "row_coverage": coverage,
             "independent_extraction": bool(trusted and proof.get("independent_extraction")), "duplicate_keys": True},
+        "cells": {"total": total, "verified": verified, "pending": total - verified}}
+
+
+def semantic_quality_report(extraction, definition, *, ignore_incomplete=False, automatic_verification=None):
+    """Combine source-proven cells with explicitly reviewed exceptions, never flags."""
+    from .document_inference_completion import completion_issues
+    from .document_semantic_evidence import (
+        semantic_conflict_issues,
+        semantic_review_issues,
+        semantic_verification_state,
+    )
+
+    state = automatic_verification or semantic_verification_state(extraction, definition)
+    proof, payload = state["proof"], extraction.payload
+    execution = extraction.engine.get("execution", {})
+    findings, total, verified = [], 0, 0
+    if not proof or proof.get("durable_source_bound") is not True:
+        findings.append("QUALITY_DURABLE_SOURCE_EVIDENCE")
+    if (not execution.get("recognition_complete") or not execution.get("resources_released")
+            or execution.get("pending_pages")):
+        findings.append("RECOGNITION_INCOMPLETE_OR_RESOURCES_UNVERIFIED")
+    if not ignore_incomplete:
+        findings.extend(completion_issues(extraction, definition))
+    if payload.get("structural_issues"):
+        findings.append("QUALITY_DOCUMENT_STRUCTURE")
+    # Integrity exceptions cannot be waived by changing a review flag. Cell and
+    # coverage exceptions are assessed below against the current revision.
+    findings.extend(proof.get("global_issues", []))
+    for path, cell, field in cells(payload, definition):
+        total += 1
+        human = bool(extraction.reviewed and isinstance(cell, dict) and cell.get("reviewed") is True)
+        if not isinstance(cell, dict) or cell.get("validity") != "VALID":
+            findings.append("QUALITY_VALUE:" + path)
+        elif human or path in state["verified_cells"]:
+            verified += 1
+        else:
+            # Existing review clients use this exact per-path reason, including
+            # VALID values whose source association is still unverified.
+            findings.append("REVIEW_REQUIRED:" + path)
+    coverage_findings = semantic_review_issues(payload, definition, reviewed=extraction.reviewed,
+        source_sha256=extraction.engine.get("source_sha256"), automatic_verification=state)
+    findings.extend(coverage_findings)
+    findings.extend(semantic_conflict_issues(extraction, definition, automatic_verification=state))
+    checks = [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]
+    from .document_semantic_business import business_report
+
+    verified_paths = set(state["verified_cells"]) | {path for path, cell, _ in cells(payload, definition)
+        if extraction.reviewed and isinstance(cell, dict) and cell.get("reviewed") is True and cell.get("validity") == "VALID"}
+    coverage = {table["name"]: "SEMANTIC_TABLE_COVERAGE_REVIEW_REQUIRED:" + table["name"] not in coverage_findings
+        for table in definition["tables"]}
+    business = business_report(payload, definition, verified_paths=verified_paths, table_coverage=coverage)
+    if business["required"]:
+        all_human = bool(extraction.reviewed and all(isinstance(cell, dict) and cell.get("reviewed") is True
+            and cell.get("validity") == "VALID" for _, cell, _ in cells(payload, definition)))
+        manual_coverage = semantic_review_issues(payload, definition, reviewed=extraction.reviewed,
+            source_sha256=extraction.engine.get("source_sha256"))
+        complete_authorized_review = bool(all_human and not manual_coverage and proof.get("durable_source_bound") is True)
+        if business["issues"] == ["QUALITY_BUSINESS_SCOPE_REQUIRED"] and complete_authorized_review:
+            business = {**business, "issues": [], "status": "AUTHORIZED_FULL_DOCUMENT_REVIEW"}
+        arithmetic = not business["issues"]
+        findings.extend(business["issues"])
+    else:
+        arithmetic = all(item["status"] == "VALID" for item in checks)
+        if not arithmetic:
+            findings.append("QUALITY_ARITHMETIC")
+    findings = list(dict.fromkeys(findings))
+    human = bool(extraction.reviewed and any(isinstance(cell, dict) and cell.get("reviewed")
+        for _, cell, _ in cells(payload, definition)))
+    return {"validator_version": proof.get("validator_version", "TRACKVANCE_SEMANTIC_EVIDENCE_098_V1"),
+        "status": "REVIEW_REQUIRED" if findings else "HUMAN_VERIFIED" if human else "AUTO_VERIFIED",
+        "issues": findings, "checks": {"durable_source_bound": bool(proof.get("durable_source_bound")),
+            "recognition_complete": bool(execution.get("recognition_complete")),
+            "scalar_and_evidence": verified == total, "arithmetic": arithmetic,
+            "row_coverage": not coverage_findings, "independent_extraction": bool(proof.get("independent_extraction")),
+            "duplicate_keys": True}, "business_validation": business,
         "cells": {"total": total, "verified": verified, "pending": total - verified}}

@@ -12,8 +12,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .document_normalization import DocumentNormalization, canonical_hash
+from .document_semantic_business import SemanticInvoiceControls
 
 MODE: Literal["SEMANTIC_GENERAL_V1"] = "SEMANTIC_GENERAL_V1"
+AUTO_VERSION = "SEMANTIC_AUTO_V1"
+AUTO_POLICY = "SEMANTIC_EVIDENCE_V1"
 Route = Literal["QWEN_VISUAL", "NATIVE_FIRST", "PADDLE_STRUCTURED"]
 
 
@@ -73,18 +76,38 @@ class ActivateSemanticProfile(BaseModel):
     profile_revision: int | None = Field(default=None, ge=1, le=100000)
     profile: SemanticProfile | None = None
     route: Route = "QWEN_VISUAL"
+    automatic_verification: Literal["OFF", "SEMANTIC_AUTO_V1"] = "OFF"
+    business_controls: SemanticInvoiceControls | None = None
     reason: str = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
     def one_profile(self):
         if ((self.profile_id is None) == (self.profile is None) or not self.reason.strip()
-                or self.profile is not None and self.profile_revision is not None):
+                or self.profile is not None and self.profile_revision is not None
+                or self.business_controls is not None and self.automatic_verification == "OFF"):
             raise ValueError("Select exactly one versioned profile and give a reason.")
         return self
 
 
 def enabled():
     return os.getenv("TRACKVANCE_SEMANTIC_GENERAL_ENABLED", "false").lower() == "true"
+
+
+def automatic_enabled():
+    return enabled() and os.getenv("TRACKVANCE_SEMANTIC_AUTO_ENABLED", "false").lower() == "true"
+
+
+def automatic_contract(definition):
+    return (definition.get("semantic_general") or {}).get("automatic_verification") == AUTO_VERSION
+
+
+def require_automatic_enabled():
+    from .operations_common import OperationError
+
+    require_enabled()
+    if not automatic_enabled():
+        raise OperationError(409, "DOCUMENT_SEMANTIC_AUTO_DISABLED",
+            "La verificación semántica automática requiere activación explícita en este entorno.")
 
 
 def require_enabled():
@@ -145,8 +168,13 @@ def profiles():
 
 
 def catalog():
+    from .document_semantic_business import proposal
+
     return {"enabled": enabled(), "mode": MODE, "default_enabled": False,
-        "profiles": [{**value, "sha256": canonical_hash(value)} for value in profile_versions()]}
+        "automatic_verification_enabled": automatic_enabled(), "automatic_verification_default": "OFF",
+        "automatic_verification_version": AUTO_VERSION,
+        "profiles": [{**value, "sha256": canonical_hash(value), "automatic_business_controls": proposal(value)}
+            for value in profile_versions()]}
 
 
 def profile_versions():
@@ -223,9 +251,15 @@ def resolve_profile(body):
     return selected
 
 
-def compile_profile(profile, route="QWEN_VISUAL"):
+def compile_profile(profile, route="QWEN_VISUAL", *, automatic_verification="OFF", business_controls=None):
     from .document_schemas import DocumentDefinition
 
+    if automatic_verification not in {"OFF", AUTO_VERSION}:
+        raise ValueError("Unknown semantic automatic verification contract.")
+    if business_controls is not None and automatic_verification == "OFF":
+        raise ValueError("Invoice automatic business controls require explicit semantic AUTO activation.")
+    if automatic_verification == AUTO_VERSION:
+        require_automatic_enabled()
     profile = SemanticProfile.model_validate(profile).model_dump(mode="json")
     def field(value):
         return {key: copy.deepcopy(item) for key, item in value.items() if key != "description"}
@@ -236,6 +270,18 @@ def compile_profile(profile, route="QWEN_VISUAL"):
             "mode": MODE, "profile_id": profile["id"], "profile_name": profile["name"],
             "profile_revision": profile["revision"], "profile_sha256": canonical_hash(profile),
             "route": route, "contract": profile}}
+    if automatic_verification == AUTO_VERSION:
+        definition["semantic_general"].update(automatic_verification=AUTO_VERSION,
+            association_contract="SEMANTIC_SOURCE_ASSOCIATION_V1")
+        definition["publication"]["review_policy"] = "AUTO_VERIFIED"
+        definition["validation_policy"] = {"version": AUTO_POLICY}
+        if business_controls is not None:
+            from .document_semantic_business import projection
+
+            value, arithmetic, totals = projection(business_controls)
+            definition["semantic_general"].update(business_controls=value,
+                business_controls_sha256=canonical_hash(value))
+            definition["arithmetic"], definition["cross_totals"] = arithmetic, totals
     return DocumentDefinition.model_validate(definition).model_dump(mode="json")
 
 
@@ -247,13 +293,25 @@ def validate_metadata(definition):
             raise ValueError("Semantic collections require the semantic general contract.")
         return
     keys = {"mode", "profile_id", "profile_name", "profile_revision", "profile_sha256", "route", "contract"}
+    automatic = isinstance(metadata, dict) and metadata.get("automatic_verification") == AUTO_VERSION
+    if automatic:
+        keys |= {"automatic_verification", "association_contract"}
+        if "business_controls" in metadata or "business_controls_sha256" in metadata:
+            keys |= {"business_controls", "business_controls_sha256"}
     if not isinstance(metadata, dict) or set(metadata) != keys or metadata["mode"] != MODE:
         raise ValueError("Invalid semantic general metadata.")
+    if automatic and (metadata.get("association_contract") != "SEMANTIC_SOURCE_ASSOCIATION_V1"
+            or definition.validation_policy is None or definition.validation_policy.version != AUTO_POLICY
+            or definition.validation_policy.allow_noncritical_source_bound):
+        raise ValueError("Automatic semantic verification requires its complete independent evidence policy.")
+    from .document_semantic_business import validate_business_metadata
+
+    validate_business_metadata(definition)
     profile = SemanticProfile.model_validate(metadata["contract"]).model_dump(mode="json")
     if (metadata["profile_sha256"] != canonical_hash(profile) or metadata["profile_id"] != profile["id"]
             or metadata["profile_revision"] != profile["revision"] or metadata["profile_name"] != profile["name"]
             or not isinstance(metadata["route"], str) or metadata["route"] not in {"QWEN_VISUAL", "NATIVE_FIRST", "PADDLE_STRUCTURED"}
-            or definition.publication.review_policy != "ALL"):
+            or definition.publication.review_policy != ("AUTO_VERIFIED" if automatic else "ALL")):
         raise ValueError("Semantic profile integrity or mandatory review policy failed.")
     from .document_schemas import DocumentField
 
@@ -278,8 +336,12 @@ def configuration_for(definition, configuration):
     if not metadata:
         return configuration
     require_enabled()
+    automatic = automatic_contract(definition)
+    if automatic:
+        require_automatic_enabled()
     return {**configuration, "provider": "PADDLE_QWEN_LOCAL", "extraction_mode": MODE,
-        "extraction_strategy": metadata["route"], "automatic_verification": "OFF", "max_retries": 0,
+        "extraction_strategy": metadata["route"],
+        "automatic_verification": "BOUNDED_LOCAL_V1" if automatic else "OFF", "max_retries": 0,
         "semantic_profile_sha256": metadata["profile_sha256"]}
 
 
@@ -290,10 +352,13 @@ def assert_configuration(definition, configuration):
     if not metadata:
         return
     require_enabled()
+    automatic = automatic_contract(definition)
+    if automatic:
+        require_automatic_enabled()
     if (configuration.get("provider") != "PADDLE_QWEN_LOCAL" or configuration.get("extraction_mode") != MODE
             or configuration.get("extraction_strategy") != metadata["route"]
             or configuration.get("semantic_profile_sha256") != metadata["profile_sha256"]
-            or configuration.get("automatic_verification", "OFF") != "OFF"):
+            or configuration.get("automatic_verification", "OFF") != ("BOUNDED_LOCAL_V1" if automatic else "OFF")):
         raise OperationError(409, "DOCUMENT_SEMANTIC_CONFIGURATION", "El contrato semántico y su configuración congelada no coinciden.")
 
 
@@ -304,7 +369,9 @@ def assert_replay_binding(previous_definition, definition, configuration):
     if not before and not after:
         return
     if (not before or not after or before.get("profile_sha256") != after.get("profile_sha256")
-            or before.get("route") != after.get("route")):
+            or before.get("route") != after.get("route")
+            or before.get("automatic_verification", "OFF") != after.get("automatic_verification", "OFF")
+            or before.get("business_controls_sha256") != after.get("business_controls_sha256")):
         raise OperationError(409, "DOCUMENT_SEMANTIC_REPLAY_CONTRACT",
             "El reconocimiento conservado pertenece a otro contrato o ruta semántica. Una nueva definición requiere un nuevo documento/intento autorizado.")
     assert_configuration(previous_definition, configuration)

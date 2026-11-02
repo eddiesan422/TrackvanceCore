@@ -351,7 +351,7 @@ class Session:
         folder_identity = self.api["DIAGNOSTICS"].identity(folder.lstat())
         try:
             with (folder / "error.log").open("wb") as errors:
-                process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", str(folder)],
+                process = subprocess.Popen([sys.executable, "-I", "-B", str(Path(__file__).resolve().with_name("paddle_runner.py")), str(folder)],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
                     start_new_session=True, close_fds=True)
             if operation == "STRUCTURED":

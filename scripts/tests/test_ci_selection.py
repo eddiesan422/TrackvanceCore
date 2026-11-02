@@ -72,6 +72,10 @@ def test_functional_has_explicit_executable_evidence_for_every_required_module()
     coverage = manifest['profiles']['functional']['module_coverage']
     assert set(coverage) == FUNCTIONAL_MODULES
     assert all(set(value['scenario_ids']) <= scenarios for value in coverage.values())
+    assert set(coverage['documents_ocr']['scenario_ids']) == {
+        'backend-unit', 'frontend-unit', 'functional-compose-browser-persistence'}
+    assert set(coverage['documents_ocr']['browser_specs']) == {
+        'tests-e2e/document-visual-builder-095.spec.ts', 'tests-e2e/documents-095.spec.ts'}
     assert not any(g['id'].startswith(('spark-', 'async-volume-')) for g in functional['groups'])
 
 

@@ -68,6 +68,12 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
         # later replay; the current replay actor/reason is recorded separately.
         data["engine"]["verification_request"] = copy.deepcopy(previous.engine["verification_request"])
     context = recognition_source_context(events, original.sha256)
+    from .document_semantic_general import automatic_contract
+
+    if automatic_contract(template.definition):
+        from .document_semantic_corroboration import semantic_source_context
+
+        context = semantic_source_context(events, context)
     # Journal progress describes the original attempt, not this replay's
     # current assessment. Preserve it and refresh only the new revision.
     retained_verification = previous.engine.get("verification") if previous is not None else None

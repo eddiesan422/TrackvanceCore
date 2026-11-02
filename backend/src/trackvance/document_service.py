@@ -103,20 +103,39 @@ def issues(extraction, definition, *, source_binding=None, ignore_incomplete=Fal
     if not ignore_incomplete:
         result.extend(completion_issues(extraction, definition))
     from .document_quality import cell_is_valid, semantic_issues
-    result.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
+    from .document_semantic_general import automatic_contract
+
+    automatic = None
+    if automatic_contract(definition):
+        from .document_semantic_evidence import (
+            semantic_conflict_issues,
+            semantic_verification_state,
+        )
+
+        automatic = semantic_verification_state(extraction, definition)
+        result.extend(semantic_conflict_issues(extraction, definition, automatic_verification=automatic))
+    else:
+        result.extend(semantic_issues(payload, reviewed=getattr(extraction, "reviewed", False)))
     if definition.get("semantic_general"):
         from .document_semantic_evidence import semantic_review_issues
 
         result.extend(semantic_review_issues(payload, definition, reviewed=getattr(extraction, "reviewed", False),
-            source_sha256=getattr(extraction, "engine", {}).get("source_sha256")))
+            source_sha256=getattr(extraction, "engine", {}).get("source_sha256"), automatic_verification=automatic))
     # The application validator recomputes checks; provider-authored arithmetic
     # statuses cannot authorize publication.
-    for check in [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]:
+    invoice_business = automatic is not None and definition["semantic_general"]["contract"]["document_type"] == "INVOICE"
+    for check in ([] if invoice_business else [*arithmetic_checks(payload, definition), *cross_table_checks(payload, definition)]):
         if check["status"] != "VALID":
             result.append(f"ARITHMETIC_{check['status']}:{check['name']}:{check.get('row', 'ALL')}")
     if policy["review_policy"] == "AUTO_VERIFIED":
         from .document_quality import quality_report
-        result.extend(quality_report(extraction, definition, ignore_incomplete=ignore_incomplete)["issues"])
+        if automatic is not None:
+            from .document_validation_policy import semantic_quality_report
+
+            result.extend(semantic_quality_report(extraction, definition, ignore_incomplete=ignore_incomplete,
+                automatic_verification=automatic)["issues"])
+        else:
+            result.extend(quality_report(extraction, definition, ignore_incomplete=ignore_incomplete)["issues"])
     resolved = (resolved_observations(payload, definition, reviewed=getattr(extraction, "reviewed", False),
                 source_binding=source_binding) if payload.get("header_resolutions") else set())
     for name, fields in structures(definition).items():
@@ -240,8 +259,24 @@ def original_dto(db, original, *, detail=False, user=None):
 
 
 def extraction_dto(item):
+    engine = item.engine
+    proof = engine.get("validation") or {}
+    if "automatic_candidate" in proof:
+        # The complete journal/snapshot remains in the immutable extraction
+        # artifact. Its native download permission applies; a detail response
+        # needs proof identifiers, not another copy of all source contents.
+        engine = dict(engine)
+        public_proof = dict(proof)
+        public_proof.pop("automatic_candidate", None)
+        context = dict(public_proof.get("source_context") or {})
+        events = context.pop("recognition_events", [])
+        public_proof["source_context"] = context
+        public_proof["proof_material"] = {"preserved_in_extraction_artifact": True,
+            "extraction_artifact_id": item.artifact_id, "recognition_event_count": len(events),
+            "recognition_event_hashes": [event.get("event_sha256") for event in events]}
+        engine["validation"] = public_proof
     return {"id": item.id, "revision": item.revision, "previous_id": item.previous_id,
-            "payload": item.payload, "sha256": item.payload_hash, "engine": item.engine,
+            "payload": item.payload, "sha256": item.payload_hash, "engine": engine,
             "reviewed": item.reviewed, "actor_id": item.actor_id, "reason": item.reason,
             "created_at": iso(item.created_at), "artifact_id": item.artifact_id}
 
@@ -403,6 +438,15 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
     if not reason.strip():
         raise OperationError(422, "DOCUMENT_REVIEW_REASON", "Registra el motivo de la revisión.")
     definition = definition_for(db, original).definition
+    from .document_semantic_general import automatic_contract
+
+    if automatic_contract(definition):
+        from .models import Job
+
+        active = db.scalar(select(Job).where(Job.document_id == original.id,
+            Job.status.in_(["QUEUED", "RUNNING"])))
+        if original.status in {"QUEUED", "RUNNING"} or active is not None:
+            raise OperationError(409, "DOCUMENT_REVIEW_RUNNING", "Espera el cierre del intento activo antes de revisar.")
     payload = copy.deepcopy(previous.payload)
     if incomplete_source_confirmation is not None:
         if (changes or confirmed or table_rows or header_confirmations or not previous.reviewed
@@ -494,11 +538,13 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
             if cell.get("alternatives"):
                 cell["alternatives"] = []
     if semantic_table_confirmations:
-        from .document_semantic_evidence import record_table_reviews
+        from .document_semantic_evidence import record_table_reviews, semantic_verification_state
 
         permission(db, user, "download")
         record_table_reviews(payload, definition, semantic_table_confirmations, source_sha256=original.sha256,
-            actor_id=user.id, reason=reason, created_at=iso(utcnow()))
+            actor_id=user.id, reason=reason, created_at=iso(utcnow()),
+            automatic_verification=semantic_verification_state(
+                SimpleNamespace(payload=payload, engine=previous.engine, reviewed=True), definition))
     if definition.get("arithmetic") or definition.get("invoice_controls"):
         payload["arithmetic"] = arithmetic_checks(payload, definition)
     if definition.get("cross_totals"):
@@ -538,9 +584,21 @@ def review(db, original, expected_extraction_id, changes, confirmed, reason, use
     preserve_extraction(db, item)
     original.extraction_id = item.id
     original.status = "REVIEW_REQUIRED" if issues(item, definition) else "REVIEWED"
+    automatic_audit = {}
+    if automatic_contract(definition):
+        from .document_semantic_evidence import semantic_verification_state
+
+        before = semantic_verification_state(previous, definition)
+        after = semantic_verification_state(item, definition)
+        automatic_audit = {"automatic_verification": {
+            "source_attestation_sha256": before["proof"].get("attestation_sha256"),
+            "preserved_paths": sorted(after["verified_cells"]),
+            "invalidated_paths": sorted(set(before["verified_cells"]) - set(after["verified_cells"])),
+            "semantic_table_confirmations": list(semantic_table_confirmations or [])}}
     audit(db, "DOCUMENT_REVIEW_RECORDED", "document_extraction", item.id, "Revisión humana inmutable registrada", user.name,
           user.organization_id, {"document_id": original.id, "previous_id": previous.id,
                                  "changed_paths": sorted(changes), "confirmed_paths": confirmed, "reason": reason,
+                                 **automatic_audit,
                                  **({"header_confirmations": payload["header_resolutions"][-len(header_confirmations):]} if header_confirmations else {})})
     if incomplete_source_confirmation is not None:
         audit(db, "DOCUMENT_INCOMPLETE_SOURCE_CONFIRMED", "document_extraction", item.id,

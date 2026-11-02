@@ -9,6 +9,20 @@ const verification = { policy_version: 'TRACKVANCE_AUTOMATIC_VERIFICATION_098_V1
   scope: { kind: 'WHOLE_DOCUMENT', pages: [1, 2] }, primary_reused: true, human_reviewed: false }
 
 describe('Automatic document verification visibility', () => {
+  it('distinguishes missing source or coverage from an arithmetic discrepancy over corroborated inputs', () => {
+    const { rerender } = renderApp(<DocumentVerification verification={{ ...verification, status: 'REVIEW_REQUIRED', reasons_before: [],
+      remaining_reasons: [{ code: 'QUALITY_BUSINESS_UNVERIFIED', table: 'items' }] }}/>)
+    expect(screen.getByText(/Falta comprobar la fuente o la cobertura necesaria para evaluar la coherencia de los importes: items/)).toBeVisible()
+    expect(screen.queryByText(/discrepancia|contradicción/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/QUALITY_BUSINESS_UNVERIFIED/)).not.toBeInTheDocument()
+    rerender(<DocumentVerification verification={{ ...verification, status: 'REVIEW_REQUIRED', reasons_before: [],
+      remaining_reasons: [{ code: 'QUALITY_BUSINESS_DISCREPANCY', table: 'items' }] }}/>)
+    expect(screen.getByText(/Los importes acreditados en la fuente presentan una discrepancia en el cálculo declarado: items/)).toBeVisible()
+    expect(screen.queryByText(/Falta comprobar la fuente o la cobertura/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/QUALITY_BUSINESS_DISCREPANCY/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
   it('shows the additional reading reason, scope and reuse without demanding confirmation', () => {
     renderApp(<DocumentVerification verification={verification}/>)
     expect(screen.getByRole('region', { name: 'Verificación automática de la extracción' })).toBeVisible()

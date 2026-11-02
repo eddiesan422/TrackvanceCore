@@ -109,6 +109,20 @@ def test_health_requires_exact_model_tag_and_digest(gateway, monkeypatch):
     assert not gateway.qwen_verified()
 
 
+def test_runtime_probe_uses_the_loaded_gateway_source_directory(gateway, monkeypatch):
+    calls = []
+
+    def run(arguments, **options):
+        calls.append((arguments, options))
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"kernel_probe": "PASS", "ready": True}))
+
+    monkeypatch.setattr(gateway.subprocess, "run", run)
+    gateway.probe_runtime()
+    assert gateway.RUNTIME["kernel_probe"] == "PASS"
+    assert calls[0][0][-1] == str(gateway.APP_ROOT / "runtime_probe.py")
+    assert calls[0][1]["timeout"] == 75
+
+
 def test_gateway_health_keeps_process_startup_hashes_after_files_change(gateway, tmp_path, monkeypatch, request):
     names = tuple(gateway.STARTUP_FILES)
     for name in names:

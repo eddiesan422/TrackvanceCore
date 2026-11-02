@@ -148,15 +148,17 @@ def select_semantic_profile(identity: str, body: ActivateSemanticProfile,
     item = owned(db, DocumentFamily, identity, user)
     lock_family(db, item)
     profile = resolve_profile(body)
-    definition = compile_profile(profile, body.route)
+    definition = compile_profile(profile, body.route, automatic_verification=body.automatic_verification,
+        business_controls=body.business_controls.model_dump(mode="json") if body.business_controls is not None else None)
     template = create_template(db, item, definition, user)
-    # This activates a semantic schema, not a tested layout or an approval rule.
-    # All observations require native authorized review before publication.
+    # Schema activation does not verify any observation. Only worker-authored
+    # source evidence or an explicit human review can authorize publication.
     activate_verified_template(db, item, template, user)
     audit(db, "DOCUMENT_SEMANTIC_PROFILE_SELECTED", "document_family", item.id,
-        "Contrato semántico activado con revisión obligatoria", user.name, user.organization_id,
+        "Contrato semántico versionado activado", user.name, user.organization_id,
         {"template_id": template.id, "mode": MODE, "profile_sha256": definition["semantic_general"]["profile_sha256"],
-         "profile_id": profile["id"], "profile_revision": profile["revision"], "route": body.route, "reason": body.reason.strip()})
+         "profile_id": profile["id"], "profile_revision": profile["revision"], "route": body.route,
+         "automatic_verification": body.automatic_verification, "reason": body.reason.strip()})
     db.commit()
     return {"template": template_dto(template), "family": family_dto(db, item), "mode": MODE,
         "profile": {"id": profile["id"], "revision": profile["revision"],

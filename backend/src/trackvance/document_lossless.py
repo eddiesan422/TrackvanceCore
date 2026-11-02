@@ -461,6 +461,14 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         event["event_sha256"] = canonical_hash(event)
         accept(event)
 
+    def evidence_context():
+        value = verification.source_context(events, source_sha)
+        if (definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V1":
+            from .document_semantic_corroboration import semantic_source_context
+
+            return semantic_source_context(events, value)
+        return value
+
     native_ready = False
     if events:
         probes = [e for e in events if e.get("stage") == "NATIVE_SOURCE_PROBE"]
@@ -525,7 +533,7 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         call_history.append(_recognition_call(first, events[recognized_before:], budget.clock() - call_started, kind="PRIMARY"))
     result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
     if verification.enabled(configuration) and not reference_discovery:
-        before = verification.decision(result, definition, verification.source_context(events, source_sha))
+        before = verification.decision(result, definition, evidence_context())
         blocked = None
         if before["required"]:
             budget.require()  # A control cannot extend the frozen total attempt.
@@ -559,7 +567,7 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
                 call_history.append(_recognition_call(target, events[recognized_before:],
                     budget.clock() - call_started, kind="SECONDARY", decision=before))
                 result = adapt_saved_recognition(events, definition, configuration, source_sha256=source_sha, attempt_context=context)
-        after = verification.decision(result, definition, verification.source_context(events, source_sha))
+        after = verification.decision(result, definition, evidence_context())
         status = "BLOCKED" if blocked else "REVIEW_REQUIRED" if after["required"] else "CONTROLS_COMPLETED"
         report = verification.report(before, after, status=status, primary_reused=bool(saved_events),
             calls=call_history, blocked_reason=blocked)

@@ -345,6 +345,12 @@ def process_once(owner=None, active=None):
             from .document_validation_policy import certify_lossless_candidate
 
             context = recognition_source_context(saved_events, artifact.sha256)
+            from .document_semantic_general import automatic_contract
+
+            if automatic_contract(definition):
+                from .document_semantic_corroboration import semantic_source_context
+
+                context = semantic_source_context(saved_events, context)
             data["engine"]["validation"] = certify_lossless_candidate(data, definition, artifact.sha256,
                 source_context=context, check=lambda: checkpoint(95))
         if not lossless and definition["publication"]["review_policy"] == "AUTO_VERIFIED":

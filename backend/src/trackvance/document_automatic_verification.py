@@ -88,6 +88,12 @@ def source_context(events, source_sha256):
 
 def decision(data, definition, context):
     """Plan only remaining controls using the same V3 corroboration boundaries."""
+    from .document_semantic_general import automatic_contract
+
+    if automatic_contract(definition):
+        from .document_semantic_corroboration import semantic_verification_decision
+
+        return semantic_verification_decision(data, definition, context)
     from .document_evidence_v3 import corroboration_v3
     from .document_quality import _arithmetic_fields
     from .document_validation_policy import cells

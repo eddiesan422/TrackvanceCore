@@ -11,9 +11,108 @@ const invoice = { id: 'invoice-v1', name: 'Factura general', revision: 1, sha256
   tables: [{ name: 'lines', description: 'Una fila por concepto impreso.', kind: 'TABLE', required: true, fields: [{ name: 'quantity', logical_type: 'DECIMAL', label: 'Cantidad' }, { name: 'concept', logical_type: 'STRING', label: 'Concepto' }] }],
 }
 const available = { enabled: true, mode: 'SEMANTIC_GENERAL_V1', default_enabled: false, profiles: [invoice] }
+const invoiceControls = { version: 'SEMANTIC_INVOICE_CONTROLS_V1', scope: 'FULL_INVOICE_NO_UNREPRESENTED_ADJUSTMENTS', applicability: 'ALL_DECLARED_ROLES_PRINTED', table: 'items', line_amount: 'amount', subtotal: 'subtotal', tax: 'tax', total: 'total', quantity: 'quantity', unit_price: 'unit_price', scale: 2, tolerance: '0.01' }
+const controlledInvoice = { ...invoice, id: 'complete-invoice', sha256: '1'.repeat(64),
+  fields: [invoice.fields[0], ...['subtotal', 'tax', 'total'].map(name => ({ name, label: name, logical_type: 'DECIMAL', required: true }))],
+  tables: [{ name: 'items', description: 'Una fila por concepto impreso.', kind: 'TABLE', required: true, fields: ['quantity', 'unit_price', 'amount'].map(name => ({ name, label: name, logical_type: 'DECIMAL', required: true })) }],
+  automatic_business_controls: { profile_sha256: '1'.repeat(64), controls: invoiceControls, controls_sha256: '2'.repeat(64), explicit_scope_confirmation_required: true },
+}
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(api).mockResolvedValue(available); vi.mocked(post).mockResolvedValue({ profile: { id: invoice.id, revision: 1 } }) })
 
 describe('General semantic profile configuration', () => {
+  it('sends catalogued invoice controls only after explicit AUTO and complete-invoice scope confirmation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, profiles: [controlledInvoice] })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([controlledInvoice.id, controlledInvoice.revision]))
+    await user.selectOptions(screen.getByLabelText('Verificación automática documental'), 'SEMANTIC_AUTO_V1')
+    expect(screen.getByText(/los conceptos del detalle coincidan con el subtotal/)).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Check complete invoice detail and header totals')
+    expect(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' })).toBeDisabled()
+    expect(post).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('checkbox', { name: /Confirmo que este perfil representa la factura completa/ }))
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toEqual({ profile_id: controlledInvoice.id, profile_revision: controlledInvoice.revision, route: 'QWEN_VISUAL', reason: 'Check complete invoice detail and header totals', automatic_verification: 'SEMANTIC_AUTO_V1', business_controls: invoiceControls })
+    expect(controlledInvoice.automatic_business_controls.controls).toEqual(invoiceControls)
+    expect(screen.queryByRole('textbox', { name: /tolerancia|escala|line_amount/i })).not.toBeInTheDocument()
+  })
+
+  it('keeps the existing OFF request unchanged even when catalogued invoice controls are available', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, profiles: [controlledInvoice] })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([controlledInvoice.id, controlledInvoice.revision]))
+    expect(screen.getByLabelText('Verificación automática documental')).toHaveValue('OFF')
+    expect(screen.queryByRole('checkbox', { name: /factura completa/ })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Keep manual review unchanged')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toEqual({ profile_id: controlledInvoice.id, profile_revision: controlledInvoice.revision, route: 'QWEN_VISUAL', reason: 'Keep manual review unchanged', automatic_verification: 'OFF' })
+  })
+
+  it('does not borrow invoice controls from a different profile hash', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, profiles: [{ ...controlledInvoice, automatic_business_controls: { ...controlledInvoice.automatic_business_controls, profile_sha256: 'different-profile-hash' } }] })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([controlledInvoice.id, controlledInvoice.revision]))
+    await user.selectOptions(screen.getByLabelText('Verificación automática documental'), 'SEMANTIC_AUTO_V1')
+    expect(screen.getByText(/Sus facturas conservarán revisión/)).toBeVisible()
+    expect(screen.queryByRole('checkbox', { name: /factura completa/ })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Keep insufficient controls pending')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).not.toHaveProperty('business_controls')
+  })
+
+  it('does not reuse the catalogued declaration after customizing the invoice profile', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, profiles: [controlledInvoice] })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([controlledInvoice.id, controlledInvoice.revision]))
+    await user.selectOptions(screen.getByLabelText('Verificación automática documental'), 'SEMANTIC_AUTO_V1')
+    await user.click(screen.getByRole('checkbox', { name: /Confirmo que este perfil representa la factura completa/ }))
+    await user.click(screen.getByRole('checkbox', { name: 'Personalizar información solicitada' }))
+    expect(screen.getByText(/Sus facturas conservarán revisión/)).toBeVisible()
+    expect(screen.queryByRole('checkbox', { name: /factura completa/ })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Custom invoices still require applicable controls')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toHaveProperty('profile')
+    expect(vi.mocked(post).mock.calls[0][1]).not.toHaveProperty('business_controls')
+  })
+
+  it('keeps automatic verification OFF until explicitly selected under backend availability', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true, automatic_verification_default: 'OFF', automatic_verification_version: 'SEMANTIC_AUTO_V1' })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await user.selectOptions(await screen.findByLabelText('Perfil semántico'), JSON.stringify([invoice.id, invoice.revision]))
+    const selector = screen.getByLabelText('Verificación automática documental')
+    expect(selector).toHaveValue('OFF')
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Keep the existing review policy')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(post).mock.calls[0][1]).toMatchObject({ automatic_verification: 'OFF' })
+    await user.selectOptions(selector, 'SEMANTIC_AUTO_V1')
+    expect(screen.getByText(/mantendrá en revisión las excepciones no resueltas/)).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo del cambio de perfil'), 'Explicit evidence verification for new documents')
+    await user.click(screen.getByRole('button', { name: 'Usar perfil para documentos nuevos' }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(post).mock.calls[1][1]).toMatchObject({ automatic_verification: 'SEMANTIC_AUTO_V1' })
+  })
+
+  it('does not expose the AUTO selector without backend availability or configurator permission', async () => {
+    const { unmount } = renderApp(<DocumentSemanticProfile familyId="family" canConfigure refresh={vi.fn()}/>)
+    await screen.findByLabelText('Perfil semántico')
+    expect(screen.queryByLabelText('Verificación automática documental')).not.toBeInTheDocument()
+    unmount()
+    vi.mocked(api).mockResolvedValue({ ...available, automatic_verification_enabled: true })
+    renderApp(<DocumentSemanticProfile familyId="family" canConfigure={false} refresh={vi.fn()}/>)
+    expect(await screen.findByLabelText('Verificación automática documental')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Usar perfil para documentos nuevos' })).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('selects the exact catalog revision when the same profile id has historical and current contracts', async () => {
     const user = userEvent.setup()
     const newer = { ...invoice, revision: 2, sha256: 'revision-two-sha', description: 'Contrato nuevo con formatos declarados.',

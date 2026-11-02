@@ -236,7 +236,7 @@ def ollama_metrics(reply):
 def probe_runtime():
     global RUNTIME
     try:
-        completed = subprocess.run([sys.executable, "-I", "-B", "/app/runtime_probe.py"],
+        completed = subprocess.run([sys.executable, "-I", "-B", str(APP_ROOT / "runtime_probe.py")],
             capture_output=True, text=True, timeout=75, check=False)
         if len(completed.stdout) > 1024 * 1024 or not completed.stdout.splitlines() or completed.returncode:
             raise ValueError("RUNTIME_PROBE_FAILED")
@@ -658,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("CANCELLED")
             budget.remaining()
             with (folder / "error.log").open("wb") as error_stream:
-                process = subprocess.Popen([sys.executable, "-I", "-B", "/app/paddle_runner.py", temporary],
+                process = subprocess.Popen([sys.executable, "-I", "-B", str(APP_ROOT / "paddle_runner.py"), temporary],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=error_stream,
                     start_new_session=True, close_fds=True)
             self.paddle_attempted = True

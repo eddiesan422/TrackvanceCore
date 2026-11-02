@@ -1,4 +1,5 @@
 import type { RecordData } from '../../api/client'
+import { semanticReasonDescription } from './documentSemanticEvidence'
 
 const statuses: Record<string, string> = { QUEUED: 'Verificación en cola', VERIFYING: 'Comprobando la extracción', CONTROLS_COMPLETED: 'Controles adicionales completados', REVIEW_REQUIRED: 'Verificación terminada con excepciones', BLOCKED: 'Verificación adicional detenida' }
 const reasons: Record<string, string> = {
@@ -36,10 +37,10 @@ export default function DocumentVerification({ verification, compact = false }: 
     {!compact && <>
       {verification.primary_reused && <p>Se reutilizó el reconocimiento original conservado.</p>}
       {verification.requested_reason && <p>Motivo registrado: {verification.requested_reason}</p>}
-      {!!verification.reasons_before?.length && <details><summary>Motivo de la comprobación adicional</summary><ul>{verification.reasons_before.map((reason: RecordData, index: number) => <li key={index}>{reasons[reason.code] || reason.code}{reason.path ? `: ${target(reason.path)}` : reason.table ? `: ${reason.table}` : ''}</li>)}</ul></details>}
+      {!!verification.reasons_before?.length && <details><summary>Motivo de la comprobación adicional</summary><ul>{verification.reasons_before.map((reason: RecordData, index: number) => <li key={index}>{reasons[reason.code] || semanticReasonDescription(reason.code)}{reason.path ? `: ${target(reason.path)}` : reason.table ? `: ${reason.table}` : ''}</li>)}</ul></details>}
       {verification.scope?.kind === 'WHOLE_DOCUMENT' && <p>Alcance: documento completo ({verification.scope.pages?.length || 0} páginas), necesario para comparar las ocurrencias y continuaciones de las tablas.</p>}
       {!!verification.resolved_paths?.length && <details><summary>Controles resueltos ({verification.resolved_paths.length})</summary><ul>{verification.resolved_paths.map((path: string) => <li key={path}>{target(path)}</li>)}</ul></details>}
-      {!!pending.length && <details open><summary>Controles que siguen pendientes ({pending.length})</summary><ul>{pending.map((reason, index) => <li key={index}>{reasons[reason.code] || reason.code}{reason.path ? `: ${target(reason.path)}` : reason.table ? `: ${reason.table}` : ''}</li>)}</ul></details>}
+      {!!pending.length && <details open><summary>Controles que siguen pendientes ({pending.length})</summary><ul>{pending.map((reason, index) => <li key={index}>{reasons[reason.code] || semanticReasonDescription(reason.code)}{reason.path ? `: ${target(reason.path)}` : reason.table ? `: ${reason.table}` : ''}</li>)}</ul></details>}
       {verification.blocked_reason ? <p>{actions[verification.blocked_reason] || 'Comprueba las incidencias y el original antes de continuar.'}</p> : ['QUEUED', 'VERIFYING'].includes(verification.status) ? <p>No necesitas confirmar campos mientras se completan estos controles.</p> : pending.length ? <p>Revisa únicamente las excepciones indicadas contra el original. Los campos ya verificados no necesitan confirmación.</p> : <p>El validador conserva los controles de fuente, estructura y reglas de negocio antes de aprobar. Esta comprobación no declara revisión humana.</p>}
     </>}
   </section>

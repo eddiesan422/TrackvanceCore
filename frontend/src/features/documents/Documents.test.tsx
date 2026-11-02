@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, post } from '../../api/client'
@@ -28,6 +28,65 @@ beforeEach(() => {
 })
 
 describe('Documentos guided operations', () => {
+  it.each(['QUEUED', 'RUNNING'])('keeps review mutations unavailable while verification is %s', async status => {
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? { ...original, status } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    expect(await screen.findByLabelText('Valor headers.0.invoice')).toHaveAttribute('readonly')
+    expect(screen.getByRole('checkbox', { name: 'Confirmar valor' })).toBeDisabled()
+    expect(screen.getByLabelText('Motivo de la revisión')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Guardar revisión y comprobar publicación' })).toBeDisabled()
+    expect(screen.getByText(/Espera a que termine y libere sus recursos/)).toBeVisible()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('discards a draft and its confirmations when refetch replaces the extraction revision', async () => {
+    const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
+    let current: RecordData = original
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? current : baseApi(path))
+    const { client } = renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    await user.clear(await screen.findByLabelText('Valor headers.0.invoice'))
+    await user.type(screen.getByLabelText('Valor headers.0.invoice'), 'old-draft-value')
+    await user.click(screen.getByRole('checkbox', { name: 'Confirmar valor' }))
+    await user.type(screen.getByLabelText('Motivo de la revisión'), 'Reason for the old source revision')
+    current = { ...original, extraction: { ...original.extraction, id: 'extraction-2', revision: 2, payload: { ...original.extraction.payload, fields: { invoice: { ...original.extraction.payload.fields.invoice, value: 'new-source-value' } } } } }
+    await act(async () => { await client.invalidateQueries({ queryKey: ['document', 'original'] }) })
+    await screen.findByText('Extracción: revisión 2')
+    expect(screen.getByLabelText('Valor headers.0.invoice')).toHaveValue('new-source-value')
+    expect(screen.getByRole('checkbox', { name: 'Confirmar valor' })).not.toBeChecked()
+    expect(screen.getByLabelText('Motivo de la revisión')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Guardar revisión y comprobar publicación' })).toBeDisabled()
+    expect(post).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('checkbox', { name: 'Confirmar valor' }))
+    await user.type(screen.getByLabelText('Motivo de la revisión'), 'Checked the new source revision')
+    await user.click(screen.getByRole('button', { name: 'Guardar revisión y comprobar publicación' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/documents/originals/original/review', { expected_extraction_id: 'extraction-2', changes: {}, confirmed: ['headers.0.invoice'], reason: 'Checked the new source revision', table_rows: {} }))
+  })
+
+  it('requests only the pending semantic exception while showing automatic corroboration distinctly', async () => {
+    const user = userEvent.setup(), baseApi = vi.mocked(api).getMockImplementation()!
+    const cell = original.extraction.payload.fields.invoice
+    const semanticDefinition = { ...definition, semantic_general: { mode: 'SEMANTIC_GENERAL_V1', automatic_verification: 'SEMANTIC_AUTO_V1' }, fields: [...definition.fields, { name: 'total', logical_type: 'DECIMAL', required: true }] }
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? {
+      ...original, template: { definition: semanticDefinition }, issues: ['REVIEW_REQUIRED:headers.0.total'],
+      semantic_review: { values: [
+        { path: 'headers.0.invoice', state: 'VERIFIED_AUTOMATICALLY', observed: '000001', normalized: '000001', verified: '000001', review_required: false, evidence_refs: [{ observation_id: 'native-line-1', stage: 'NATIVE', page: 1 }], corroboration: { status: 'VERIFIED', mechanisms: ['NATIVE'], reasons: [] } },
+        { path: 'headers.0.total', state: 'NORMALIZED_PENDING_VERIFICATION', observed: '10.00', normalized: '10.00', verified: null, review_required: true },
+      ], tables: [] },
+      extraction: { ...original.extraction, payload: { fields: { invoice: cell, total: { ...cell, observed: '10.00', value: '10.00' } }, tables: {} } },
+    } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    await screen.findByLabelText('Valor headers.0.invoice')
+    expect(screen.getByText('Verificado automáticamente con evidencia documental')).toBeVisible()
+    expect(screen.getAllByRole('checkbox', { name: 'Confirmar valor' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Siguiente incidencia (1)' })).toBeEnabled()
+    expect(cell.reviewed).toBe(false)
+    await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
+    expect(screen.queryByLabelText('Valor headers.0.invoice')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Valor headers.0.total')).toBeVisible()
+    expect(screen.queryByText('Verificado mediante revisión autorizada')).not.toBeInTheDocument()
+  })
+
   it('shows family scope and exposes creation only to the document configurator', async () => {
     renderApp(<Documents/>, { permissions: ['documents:read'] })
     expect(await screen.findByRole('link', { name: /Invoices/ })).toHaveAttribute('href', '/documents/families/family')
