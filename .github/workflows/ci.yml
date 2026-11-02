@@ -153,6 +153,7 @@ jobs:
           path: |
             .codex-local/ci/evidence/**/*.json
             .codex-local/ci/evidence/**/*.xml
+            .codex-local/ci/evidence/**/attachments/*.md
             .codex-local/ci/diagnostics/**/*.json
             .codex-local/ci/diagnostics/**/*.xml
             .codex-local/ci/image-load.json
