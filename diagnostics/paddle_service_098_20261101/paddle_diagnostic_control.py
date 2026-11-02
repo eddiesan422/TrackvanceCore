@@ -35,6 +35,25 @@ def control_necessity(result,actual_child_spawns):
     if not actual_child_spawns:return False,'F02_PARENT_FAILURE_BEFORE_PADDLE_CHILD_CONTROL_NOT_NEEDED'
     return True,'F02_CHILD_FAILURE_OR_TIMEOUT_CLOSED_ONE_COMPARATIVE_CONTROL'
 
+def stage_file(control,rt,source,target,expected):
+    """Write under the container's own uid on /tmp; keep transfer errors private."""
+    raw=Path(source).read_bytes();need(hashlib.sha256(raw).hexdigest()==expected,'STAGING_SOURCE_CHANGED')
+    code="""from pathlib import Path
+import os,sys,hashlib
+p=Path(TARGET)
+assert p.parent.name.startswith('trackvance-paddle-diag-') and p.parent.parent==Path('/tmp')
+assert not p.parent.is_symlink() and p.parent.lstat().st_uid==os.getuid()
+raw=sys.stdin.buffer.read(1048577)
+assert len(raw)<=1048576 and hashlib.sha256(raw).hexdigest()==EXPECTED
+fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+with os.fdopen(fd,'wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
+assert hashlib.sha256(p.read_bytes()).hexdigest()==EXPECTED
+print('STAGED_EXACT_SOURCE')
+""".replace('TARGET',repr(target)).replace('EXPECTED',repr(expected))
+    args=['docker','--context','default','exec','-i',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',code]
+    r=subprocess.run(args,input=raw,capture_output=True,timeout=30,env={k:v for k,v in os.environ.items() if k not in control.OVERRIDES},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    return {'exit_code':r.returncode,'stdout':r.stdout.decode('utf-8','replace'),'stderr':r.stderr.decode('utf-8','replace'),'source_sha256':expected,'source_bytes':len(raw),'target':target}
+
 def run(freeze,control,out,clock):
     F=freeze;rt=F['runtime'];out.mkdir();ledger=out/'ledger.ndjson'
     policy=module('paddle_diagnostic_policy',F['policy']['path']);guard=policy.AdmissionGuard()
@@ -92,7 +111,11 @@ def run(freeze,control,out,clock):
                 if not necessary:
                     record(ledger,'CONTROL_NOT_RUN',document_id=d['document_id'],reason=reason)
                     summary['rows'].append({'document_id':d['document_id'],'executed':False,'status':'NOT_RUN_NOT_NECESSARY','reason':reason});break
-            need(guard.can_admit,'DIAGNOSTIC_GUARD_SUSPENDED');need(remaining(clock)>225,'CAMPAIGN_INSUFFICIENT_BUDGET_NO_DISPATCH')
+            need(guard.can_admit,'DIAGNOSTIC_GUARD_SUSPENDED')
+            if remaining(clock)<=225 and index:
+                record(ledger,'CONTROL_NOT_RUN',document_id=d['document_id'],reason='CAMPAIGN_BUDGET_RETAINED_NO_NEW_DISPATCH')
+                summary['rows'].append({'document_id':d['document_id'],'executed':False,'status':'NOT_RUN_BUDGET','reason':'CAMPAIGN_BUDGET_RETAINED_NO_NEW_DISPATCH'});break
+            need(remaining(clock)>225,'CAMPAIGN_INSUFFICIENT_BUDGET_NO_DISPATCH')
             source=Path(d['source']['path']).read_bytes();need(hashlib.sha256(source).hexdigest()==d['source']['sha256'],'SOURCE_CHANGED_BEFORE_ADMISSION')
             request={'request_id':d['request_id'],'attempt_id':d['attempt_id'],'filename':'document.pdf','source':base64.b64encode(source).decode(),
                 'source_sha256':d['source']['sha256'],'strategy':'PADDLE_STRUCTURED','configuration':d['configuration'],
@@ -166,11 +189,12 @@ def main():
         clock={'started_epoch':time.time(),'started_monotonic':time.monotonic(),'limit_seconds':900,'trigger':'BEFORE_FIRST_EXISTING_GPU_SERVICE_START','resets':0};save(D/'gpu-campaign-clock.private.json',clock)
         x['manager_args']=control.manager_args(plan,rt,'start');x['manager_output']=control.command(x['manager_args'],timeout=60).decode('utf-8','replace');x['after']=save(out/'after.private.json',control.inventory(entry,rt,True));x.update(status='EXISTING_GPU2_STARTED_NOT_DOCUMENT_ADMISSION',model_calls=0);save(out/'receipt.private.json',x)
     elif a.mode=='linux-cpu':
-        clock=json.loads((D/'gpu-campaign-clock.private.json').read_bytes());need(remaining(clock)>300,'GPU_CAMPAIGN_REMAINING_TOO_SMALL');out=D/'linux-cpu';out.mkdir();target=F['remote_worker_directory']
+        clock=json.loads((D/'gpu-campaign-clock.private.json').read_bytes());need(remaining(clock)>300,'GPU_CAMPAIGN_REMAINING_TOO_SMALL');out=D/'linux-cpu';out.mkdir(exist_ok=True);need(not (out/'receipt.private.json').exists(),'LINUX_CPU_ALREADY_EXECUTED');target=F['remote_worker_directory']
         need(target.startswith('/tmp/trackvance-paddle-diag-') and len(target.rsplit('-',1)[-1])==32,'OWNED_TEMP_PATH')
-        create="from pathlib import Path;import os; p=Path("+repr(target)+");p.mkdir(mode=0o700,exist_ok=False);assert p.lstat().st_uid==os.getuid()"
+        create="from pathlib import Path;import os; p=Path("+repr(target)+");p.mkdir(mode=0o700,exist_ok=True);assert not p.is_symlink() and p.lstat().st_uid==os.getuid() and not list(p.iterdir())"
         control.docker('exec',rt['gateway_id'],rt['worker_python'],'-I','-B','-c',create)
-        for name,x in [('paddle_service_worker.py',F['worker']),('test_paddle_service_worker.py',F['worker_tests'])]:control.docker('cp',x['path'],rt['gateway_id']+':'+target+'/'+name)
+        for name,x in [('paddle_service_worker.py',F['worker']),('test_paddle_service_worker.py',F['worker_tests'])]:
+            transfer=stage_file(control,rt,x['path'],target+'/'+name,x['sha256']);save(out/(name+'.transfer.private.json'),transfer);need(transfer['exit_code']==0,'OWNED_SOURCE_STAGING_FAILED')
         argv=['docker','--context','default','exec',rt['gateway_id'],rt['worker_python'],'-I','-B',target+'/test_paddle_service_worker.py'];started=time.monotonic()
         result=subprocess.run(argv,capture_output=True,timeout=45,env={k:v for k,v in os.environ.items() if k not in control.OVERRIDES},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         (out/'stdout.txt').write_bytes(result.stdout);(out/'stderr.txt').write_bytes(result.stderr);text=(result.stdout+result.stderr).decode('utf-8','replace')

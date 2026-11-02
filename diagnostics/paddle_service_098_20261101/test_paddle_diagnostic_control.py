@@ -5,6 +5,16 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('paddle_host_control_tested',Path(__file__).with_name('paddle_diagnostic_control.py'))
 m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
 class HostAdmission(unittest.TestCase):
+    def test_staging_uses_exact_stdin_bytes_and_retains_failure_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'worker.py';p.write_bytes(b'cpu-test-source')
+            completed=m.subprocess.CompletedProcess([],1,b'',b'controlled-transfer-error')
+            class Control:OVERRIDES=set()
+            with patch.object(m.subprocess,'run',return_value=completed) as call:
+                result=m.stage_file(Control(),{'gateway_id':'cpu-only','worker_python':'python'},p,'/tmp/trackvance-paddle-diag-'+'a'*32+'/worker.py',m.pin(p)['sha256'])
+            self.assertEqual(call.call_args.kwargs['input'],b'cpu-test-source')
+            compile(call.call_args.args[0][-1],'staging-source-checked','exec')
+            self.assertEqual(result['exit_code'],1);self.assertEqual(result['stderr'],'controlled-transfer-error')
     def test_host_worker_protocol_and_cleanup_compile_without_dispatching_GPU(self):
         # Exercise the actual host parser/handshake against synthetic transport,
         # including WORKER_CLOSED and the exact generated cleanup Python source.
