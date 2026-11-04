@@ -681,7 +681,8 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
                     continue
                 values = facts.get(field["name"], [])
                 if version2:
-                    rejected_associations.extend(fact["trace"] for fact in values if fact.get("eligible_for_field") is False)
+                    rejected_associations.extend(fact["trace"] for fact in values if fact.get("eligible_for_field") is False
+                        or fact.get("source_uncertain") and fact["trace"]["reason"] == "DECLARED_SOURCE_SCOPE_UNPROVEN")
                     values = [fact for fact in values if fact.get("eligible_for_field") is not False]
                     if any(fact.get("source_uncertain") for fact in values):
                         reasons.append("OBSERVATION_UNCERTAINTY")
@@ -781,6 +782,8 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
             complete = bool(not local and len(matches) == len(rows) == len(source_rows))
             references.extend(header["ref"] for header in inventory["headers"])
             for index, source in matches:
+                if version2 and source.get("association_proven") is False:
+                    continue
                 row = rows[index]
                 supported = []
                 for field in table["fields"]:
@@ -796,6 +799,9 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
                             reasons.append("ASSOCIATION_NOT_PROVEN")
                     elif field["name"] not in source["columns"] and (field.get("required", True) or cell.get("value") is not None):
                         reasons.append("MISSING_REQUIRED_COLUMN")
+                    elif (version2 and not field.get("required", True) and cell.get("value") is None
+                            and not inventory["complete"]):
+                        reasons.append("OPTIONAL_ABSENCE_UNVERIFIED")
                     if narrative:
                         reasons.append("NARRATIVE_SEMANTICS_UNVERIFIED")
                     if not reasons and not global_issues:
@@ -984,6 +990,7 @@ def _native_source_v2(ir, events):
 def _native_facts_v2(source):
     return [{"text": band["text"], "page": page["page"], "region": band["region"],
         "geometry_kind": "MEASURED_SOURCE", "source_independent": True,
+        **({"measured_segments": _segments(band)} if band["region"][1] >= .85 else {}),
         "ref": _ref(source["identity"], page["page"], band["id"], geometry_kind="MEASURED_SOURCE",
             artifact_sha256=source["artifact_sha256"])}
         for page in source["pages"] for band in page["bands"]]
@@ -1121,6 +1128,28 @@ def _unclassified_scope_v2(facts, accounted, definition, expected_pages):
     return result
 
 
+def _positive_header_refs_v2(observations, definition):
+    fields = {field["name"]: field for field in definition["fields"]}
+    return {reference for name, facts in observations.items() for fact in facts
+        if fact.get("eligible_for_field") and not fact.get("source_uncertain")
+        and _normalized(fact["observed"], fields[name])[1] == "VALID"
+        for reference in [*fact["trace"]["label_refs"], *fact["trace"]["value_refs"]]}
+
+
+def _scope_table_associations_v2(observations, consumed, uncertain):
+    """A label or value owned by detail cannot also attest a global field."""
+    for facts in observations.values():
+        for fact in facts:
+            trace = fact["trace"]
+            participants = set(trace["label_refs"]) | set(trace["value_refs"])
+            if fact.get("eligible_for_field") and participants & consumed:
+                unresolved = bool(participants & uncertain)
+                fact.update(eligible_for_field=unresolved, source_uncertain=unresolved,
+                    trace={**trace, "eligible": unresolved, "eligible_for_field": unresolved,
+                        "status": "UNCERTAIN" if unresolved else "REJECTED",
+                        "reason": "DECLARED_SOURCE_SCOPE_UNPROVEN" if unresolved else "DECLARED_SOURCE_SCOPE_MISMATCH"})
+
+
 def _native_inventory_v2(source, definition):
     inventories: dict[str, Any] = {table["name"]: {"rows": [], "headers": [], "issues": [], "source": source["identity"],
         "scope_refs": [], "complete": False} for table in definition["tables"]}
@@ -1128,16 +1157,9 @@ def _native_inventory_v2(source, definition):
     references = {fact["ref"]["id"]: fact["ref"] for fact in source_facts}
     pages = [_source_page_v2(source, page) for page in source["pages"]]
     observations = _source_headers_v2(pages, definition, source["identity"], references)
-    fields_by_name = {field["name"]: field for field in definition["fields"]}
-    positive = {reference for name, facts in observations.items() for fact in facts
-        if fact.get("eligible_for_field") and not fact.get("source_uncertain")
-        and _normalized(fact["observed"], fields_by_name[name])[1] == "VALID"
-        for reference in [*fact["trace"]["label_refs"], *fact["trace"]["value_refs"]]}
-    closing_roles = {"subtotal", "tax", "total", "closing_balance"}
-    closing = {fact["ref"]["id"] for name, facts in observations.items() if name in closing_roles
-        for fact in facts if fact.get("eligible_for_field") and not fact.get("source_uncertain")
-        and _normalized(fact["observed"], fields_by_name[name])[1] == "VALID"}
+    positive = _positive_header_refs_v2(observations, definition)
     consumed: set[str] = set()
+    uncertain: set[str] = set()
     carry: Any = None
     previous_page = None
     for page in source["pages"]:
@@ -1148,7 +1170,7 @@ def _native_inventory_v2(source, definition):
             headers = [(table, mapping) for table in definition["tables"]
                 if (mapping := _column_header_v2([segment["text"] for segment in segments], table["fields"]))]
             ref = references[band["id"]]
-            if len(headers) == 1:
+            if len(headers) == 1 and (current is None or continued or current[0]["name"] != headers[0][0]["name"]):
                 table, mapping = headers[0]
                 current = (table, mapping, segments)
                 inventories[table["name"]]["headers"].append({"page": page["page"], "ref": ref,
@@ -1162,14 +1184,9 @@ def _native_inventory_v2(source, definition):
                     inventories[table["name"]]["issues"].append("ASSOCIATION_AMBIGUOUS")
                 current = None
                 continue
-            if band["id"] in closing:
-                if current is not None:
-                    inventories[current[0]["name"]]["scope_refs"].append(ref)
-                current = None
-                continue
-            if band["id"] in positive or _page_marker(band["text"], page["page"], len(source["expected_pages"])):
-                continue
             if current is None:
+                if band["id"] in positive:
+                    continue
                 # Unaccounted separated numeric cells can be an omitted table.
                 if len(segments) >= 2 and any(re.search(r"\d", segment["text"]) for segment in segments):
                     for inventory in inventories.values():
@@ -1177,45 +1194,62 @@ def _native_inventory_v2(source, definition):
                 continue
             table, mapping, header = current
             inventory = inventories[table["name"]]
+            # Within active measured columns, caption text cannot prove the end
+            # of the body. Even a partial or unreadable occurrence stays in scope.
             centers = [(segment["region"][0] + segment["region"][2]) / 2 for segment in header]
             bounds = [0, *[(left + right) / 2 for left, right in pairwise(centers)], 1]
             columns: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            row_issues = []
             for word in band["words"]:
                 center = (word["region"][0] + word["region"][2]) / 2
                 located = [index for index in mapping if bounds[index] <= center < bounds[index + 1]]
                 if len(located) != 1:
-                    inventory["issues"].append("ROW_IDENTITY_AMBIGUOUS")
+                    row_issues.append("ROW_IDENTITY_AMBIGUOUS")
                     continue
                 columns[mapping[located[0]]].append(word)
             values = {name: " ".join(word["text"] for word in words) for name, words in columns.items()}
+            if len(columns) < 2 and len(segments) == 1 and band["region"][1] >= .85 and _page_marker(
+                    band["text"], page["page"], len(source["expected_pages"])):
+                continue
+            if len(columns) < 2:
+                inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
+                inventory["scope_refs"].append(ref)
+                consumed.add(band["id"])
+                uncertain.add(band["id"])
+                continue
             fields = [field for field in table["fields"] if field["name"] not in EVIDENCE_ONLY_ROLES]
             required = [field for field in fields if field.get("required", True)]
             numeric_roles = [field for field in fields if field["logical_type"] in {"DECIMAL", "INT64", "DATE"}]
-            # A continuation needs measured role-aligned row anchors, never just
-            # the next page or a repeated code. Unknown prose terminates it.
             anchored = any(field["name"] in values and _normalized(values[field["name"]], field)[1] == "VALID"
                 for field in numeric_roles)
-            if not anchored or sum(field["name"] in values for field in required) < min(2, len(required)):
-                inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
-                current = None
-                continue
-            if continued:
-                inventory["headers"].append({"page": page["page"], "ref": ref, "columns": mapping,
-                    "basis": "MEASURED_CONTINUATION_OF_PREVIOUS_ROLE_COLUMNS"})
-                continued = False
+            if headers or not anchored:
+                row_issues.append("ROW_ASSOCIATION_NOT_PROVEN")
             if any(field["name"] not in values for field in required):
-                inventory["issues"].append("MISSING_REQUIRED_COLUMN")
+                row_issues.append("MISSING_REQUIRED_COLUMN")
+            if continued:
+                aligned = all(any(word["region"][0] <= header[index]["region"][2]
+                    and header[index]["region"][0] <= word["region"][2] for word in columns[name])
+                    for index, name in mapping.items() if name in columns)
+                if anchored and aligned and not row_issues:
+                    inventory["headers"].append({"page": page["page"], "ref": ref, "columns": mapping,
+                        "basis": "MEASURED_CONTINUATION_OF_PREVIOUS_ROLE_COLUMNS"})
+                else:
+                    row_issues.append("ROW_ASSOCIATION_NOT_PROVEN")
+                continued = False
+            if row_issues:
+                inventory["issues"].extend(row_issues)
+                uncertain.add(band["id"])
             inventory["rows"].append({"id": band["id"], "page": page["page"], "values": values,
                 "quote": band["text"], "ref": ref, "source_refs": [word["id"] for word in band["words"]],
                 "cell_refs": {name: [_ref(source["identity"], page["page"], word["id"],
                     geometry_kind="MEASURED_SOURCE", artifact_sha256=source["artifact_sha256"]) for word in words]
-                    for name, words in columns.items()}, "columns": list(mapping.values())})
+                    for name, words in columns.items()}, "columns": list(mapping.values()),
+                **({"association_proven": False} if row_issues else {})})
             consumed.add(band["id"])
         carry, previous_page = current, page["page"]
-    # A field caption inside a detail row is not a document-header assertion.
-    observations = {name: [fact for fact in facts if fact["ref"]["id"] not in consumed]
-        for name, facts in observations.items()}
-    unclassified = _unclassified_scope_v2(source_facts, consumed | positive, definition, len(source["expected_pages"]))
+    _scope_table_associations_v2(observations, consumed, uncertain)
+    unclassified = _unclassified_scope_v2(source_facts, consumed | _positive_header_refs_v2(observations, definition),
+        definition, len(source["expected_pages"]))
     for inventory in inventories.values():
         if not source["complete"]:
             inventory["issues"].append("SOURCE_SCOPE_INCOMPLETE")
@@ -1233,14 +1267,11 @@ def _paddle_inventory_v2(ir, control, definition):
     facts = _paddle_facts_v2(ir, control)
     references = {fact["ref"]["id"]: fact["ref"] for fact in facts}
     observations = _source_headers_v2(pages, definition, identity, references)
-    fields_by_name = {field["name"]: field for field in definition["fields"]}
-    positive = {reference for name, values in observations.items() for fact in values
-        if fact.get("eligible_for_field") and not fact.get("source_uncertain")
-        and _normalized(fact["observed"], fields_by_name[name])[1] == "VALID"
-        for reference in [*fact["trace"]["label_refs"], *fact["trace"]["value_refs"]]}
+    positive = _positive_header_refs_v2(observations, definition)
     inventories: dict[str, Any] = {table["name"]: {"rows": [], "headers": [], "issues": [], "source": identity,
         "scope_refs": [], "complete": False} for table in definition["tables"]}
     consumed: set[str] = set()
+    uncertain: set[str] = set()
     carry: Any = None
     previous_page = None
     for page in pages:
@@ -1257,61 +1288,67 @@ def _paddle_inventory_v2(ir, control, definition):
                     inventory["issues"].append("ASSOCIATION_AMBIGUOUS")
                 carry = None
                 continue
-            # Complete key/value header tables are document fields, not omitted
-            # detail tables. Every nonempty cell must have a proven role.
-            if not candidates and all(cell["id"] in positive or not cell["text"].strip() for cell in physical["cells"]):
-                continue
             if not candidates and carry is not None and previous_page is not None and page_number == previous_page + 1 and len(inventories) == 1:
                 table, mapping = carry
-                if all(len(row) == len(mapping) for row in rows):
-                    candidates = [(table, -1, mapping)]
-                    names = {table["name"]}
+                # The previous width alone cannot prove column roles on a new
+                # page. Preserve a possible continuation before any KV skip.
+                candidates = [(table, -1, mapping)]
             if not candidates:
+                if not physical["errors"] and physical["cells"] and all(
+                        cell["id"] in positive or not cell["text"].strip() for cell in physical["cells"]):
+                    continue
                 for inventory in inventories.values():
-                    inventory["issues"].append("UNASSOCIATED_SOURCE_TABLE")
+                    inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE" if physical["errors"] else "UNASSOCIATED_SOURCE_TABLE")
                 continue
             table, first, mapping = candidates[0]
             inventory = inventories[table["name"]]
             if physical["errors"]:
                 inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
+            if first == -1:
+                inventory["issues"].append("ROW_ASSOCIATION_NOT_PROVEN")
             headers = {index: header_mapping for _table, index, header_mapping in candidates}
             for index, row in enumerate(rows):
                 unique = {cell["id"]: cell for cell in row if cell is not None}
-                if index in headers:
+                if index in headers and (index == first or all(cell["tag"] == "th" for cell in unique.values())):
                     mapping = headers[index]
                     reference = _ref(identity, page_number, physical["rows"][index]["id"])
                     inventory["headers"].append({"page": page_number, "ref": reference,
                         "columns": mapping, "basis": "LOGICAL_ROLE_COLUMNS"})
                     consumed.update(unique)
                     continue
-                if unique and all(cell["id"] in positive or not cell["text"].strip() for cell in unique.values()):
+                before_header = first >= 0 and index < first
+                if before_header and not any(cell["text"].strip() for cell in unique.values()):
+                    continue
+                if (before_header or len(row) != len(mapping)
+                        or any(cell is None or cell["rowspan"] != 1 or cell["colspan"] != 1 for cell in row)):
+                    # A nonempty row in this physical table lacks an established
+                    # column scope. Its caption alone cannot establish a global field.
+                    inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
                     inventory["scope_refs"].extend(references[cell_id] for cell_id in unique if cell_id in references)
-                    continue
-                if first >= 0 and index < first:
-                    inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
-                    continue
-                if any(cell is None or cell["rowspan"] != 1 or cell["colspan"] != 1 for cell in row) or len(row) != len(mapping):
-                    inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")
+                    consumed.update(unique)
+                    uncertain.update(unique)
                     continue
                 values = {name: row[column]["text"] for column, name in mapping.items()}
                 fields = [field for field in table["fields"] if field["name"] not in EVIDENCE_ONLY_ROLES]
-                if not any(field["logical_type"] in {"DECIMAL", "INT64", "DATE"} and field["name"] in values
-                        and _normalized(values[field["name"]], field)[1] == "VALID" for field in fields):
+                anchored = any(field["logical_type"] in {"DECIMAL", "INT64", "DATE"} and field["name"] in values
+                    and _normalized(values[field["name"]], field)[1] == "VALID" for field in fields)
+                if not anchored or index in headers:
                     inventory["issues"].append("ROW_ASSOCIATION_NOT_PROVEN")
                 reference = _ref(identity, page_number, physical["rows"][index]["id"])
-                if first == -1 and not inventory["headers"] or first == -1 and not any(header["page"] == page_number for header in inventory["headers"]):
-                    inventory["headers"].append({"page": page_number, "ref": reference,
-                        "columns": mapping, "basis": "LOGICAL_CONTINUATION_OF_PREVIOUS_ROLE_COLUMNS"})
+                association_unproven = bool(not anchored or first == -1 or index in headers or physical["errors"])
+                if association_unproven:
+                    uncertain.update(unique)
                 inventory["rows"].append({"id": physical["rows"][index]["id"], "page": page_number,
                     "values": values, "quote": " ".join(cast(dict[str, Any], cell)["text"] for cell in row), "ref": reference,
                     "source_refs": list(unique), "columns": list(mapping.values()),
-                    "cell_refs": {name: [references[row[column]["id"]]] for column, name in mapping.items()}})
+                    "cell_refs": {name: [references[row[column]["id"]]] for column, name in mapping.items()},
+                    **({"association_proven": False} if association_unproven else {})})
                 consumed.update(unique)
             carry = (table, mapping)
         previous_page = page_number
-    observations = {name: [fact for fact in values if fact["ref"]["id"] not in consumed]
-        for name, values in observations.items()}
-    unclassified = _unclassified_scope_v2(facts, consumed | positive, definition, ir["expected_pages"])
+    _scope_table_associations_v2(observations, consumed, uncertain)
+    unclassified = _unclassified_scope_v2(facts, consumed | _positive_header_refs_v2(observations, definition),
+        definition, ir["expected_pages"])
     for inventory in inventories.values():
         if unclassified:
             inventory["issues"].append("UNCLASSIFIED_SOURCE_SCOPE")

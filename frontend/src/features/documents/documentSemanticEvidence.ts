@@ -32,6 +32,17 @@ export interface PrintedPagination {
   missing_execution_pages?: number[]
   observations?: { literal?: string; physical_page?: number; number?: number; total?: number; scope?: string; scope_label?: string | null; source_refs?: DocumentaryEvidenceReference[]; independent?: boolean; geometry_kind?: string; mechanism?: string; status?: string; reason?: string }[]
   sequences?: { scope?: string; scope_label?: string | null; expected_total?: number; observed_numbers?: number[]; missing_logical_numbers?: number[]; physical_pages?: number[]; status?: string; source_refs?: DocumentaryEvidenceReference[] }[]
+  continuations?: {
+    literal?: string
+    physical_page?: number
+    target_printed_page?: number
+    scope?: string
+    independent?: boolean
+    status?: string
+    reason?: string
+    source_refs?: DocumentaryEvidenceReference[]
+    counter_refs?: DocumentaryEvidenceReference[]
+  }[]
   ignored_mentions?: unknown[]
   reasons?: string[]
   documentary_complete?: boolean | null

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { renderApp } from '../../test/render'
 import DocumentVerification from './DocumentVerification'
@@ -41,6 +41,27 @@ describe('Automatic document verification visibility', () => {
     expect(screen.getByText('La numeración impresa acreditada es coherente dentro de su ámbito.')).toBeVisible()
     expect(screen.getByText(/Ámbito: Sección: Anexo A · números observados: 1, 2 · total declarado: 2 · números impresos no observados: ninguna/)).toBeVisible()
     expect(screen.queryByText(/páginas documentales ausentes|mantiene bloqueada|Secuencia impresa acreditada completa/)).not.toBeInTheDocument()
+  })
+
+  it('shows which printed continuation conflicts with the document counter and preserves its sources', () => {
+    renderApp(<DocumentVerification semanticReview={{ verification_version: 'SEMANTIC_AUTO_V2', printed_pagination: {
+      version: 'DOCUMENT_PRINTED_PAGINATION_V2', status: 'CONFLICT', physical_pages: [1], processed_pages: [1], missing_execution_pages: [],
+      continuations: [
+        { literal: 'Continúa en la hoja 4 de esta factura.', physical_page: 1, target_printed_page: 4, scope: 'DOCUMENT',
+          independent: true, status: 'CONFLICT', reason: 'PRINTED_PAGINATION_CONFLICT',
+          source_refs: [{ id: 'continuation-clause' }], counter_refs: [{ id: 'document-counter' }] },
+      ],
+      reasons: ['PRINTED_PAGINATION_CONFLICT'], documentary_complete: null, blocking: true,
+    } }}/>)
+    const details = screen.getByText('Continuaciones impresas y procedencia (1)').parentElement!
+    const continuation = within(details).getByRole('listitem', { hidden: true })
+    expect(continuation).toHaveTextContent('Continúa en la hoja 4 de esta factura.')
+    expect(continuation).toHaveTextContent('página física: 1 · destino impreso: 4')
+    expect(continuation).toHaveTextContent('En conflicto con la numeración impresa · ámbito registrado: Documento')
+    expect(continuation).toHaveTextContent('Evidencia de la continuación: continuation-clause')
+    expect(continuation).toHaveTextContent('Numeración relacionada: document-counter')
+    expect(screen.getByText('Este control mantiene bloqueada la aprobación automática.')).toBeVisible()
+    expect(screen.queryByText(/Secuencia impresa acreditada completa|PRINTED_PAGINATION_CONFLICT/)).not.toBeInTheDocument()
   })
 
   it('does not label partially observed section counters as missing pages and translates current proof invalidation reasons', () => {

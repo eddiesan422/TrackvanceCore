@@ -81,6 +81,13 @@ function PrintedPages({ pagination }: { pagination: PrintedPagination }) {
       {observation.reason && <small>{semanticReasonDescription(observation.reason)}</small>}
       {!!observation.source_refs?.length && <small>Evidencia de numeración: {observation.source_refs.map(evidenceReference).join(' · ')}</small>}
     </li>)}</ul></details>}
+    {!!pagination.continuations?.length && <details><summary>Continuaciones impresas y procedencia ({pagination.continuations.length})</summary><ul>{pagination.continuations.map((continuation, index) => <li key={index}>
+      <span>Literal: {continuation.literal ?? 'sin dato'} · página física: {continuation.physical_page ?? 'sin dato'} · destino impreso: {continuation.target_printed_page ?? 'sin dato'}</span>
+      <small>{continuation.status === 'CONFLICT' ? 'En conflicto con la numeración impresa' : continuation.status === 'SUPPORTED' && continuation.independent === true ? 'Continuación respaldada por fuente independiente' : 'Continuación pendiente de acreditar'} · ámbito registrado: {scope(continuation.scope)}</small>
+      {continuation.reason && <small>{semanticReasonDescription(continuation.reason)}</small>}
+      {!!continuation.source_refs?.length && <small>Evidencia de la continuación: {continuation.source_refs.map(evidenceReference).join(' · ')}</small>}
+      {!!continuation.counter_refs?.length && <small>Numeración relacionada: {continuation.counter_refs.map(evidenceReference).join(' · ')}</small>}
+    </li>)}</ul></details>}
     {!!pagination.ignored_mentions?.length && <small>Menciones conservadas que no acreditan una secuencia: {pagination.ignored_mentions.length}</small>}
     {pagination.documentary_complete === true && <p>Secuencia impresa acreditada completa; los demás controles documentales siguen vigentes.</p>}
     {pagination.blocking === true && <p>Este control mantiene bloqueada la aprobación automática.</p>}

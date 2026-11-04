@@ -25,12 +25,20 @@ def explicit_synthetic_activation(monkeypatch):
     monkeypatch.setenv("TRACKVANCE_SEMANTIC_AUTO_ENABLED", "true")
 
 
-def v2_fixture(monkeypatch, **kwargs):
+def v2_fixture(monkeypatch, *, scalar_before_detail=True, **kwargs):
     # Generate an actual new request contract. Do not relabel a saved request.
     with monkeypatch.context() as context:
         context.setattr(fixtures, "compile_profile",
             lambda profile, **_options: compile_profile(profile, automatic_verification="SEMANTIC_AUTO_V2"))
-        return fixtures.corroboration_fixture(**kwargs)
+        definition, configuration, events = fixtures.corroboration_fixture(**kwargs)
+    if scalar_before_detail:
+        # A native scalar above the detail header has independent scope. The
+        # old fixture's footer without a boundary is tested separately below.
+        def scalar_scope(body):
+            body["payload"]["lines"] = [fixtures._line(line["text"], .16, page=line["page"])
+                if line["text"].startswith("Total due:") else line for line in body["payload"]["lines"]]
+        mutate(events, "NATIVE_SOURCE_PROBE_JSON", scalar_scope)
+    return definition, configuration, events
 
 
 def mutate(events, kind, change, *, page=None):
@@ -101,6 +109,17 @@ def test_partial_native_page_text_does_not_claim_full_source_scope(monkeypatch):
     assert proof["source_checks"]["text"]["missing_pages"] == [1]
     assert not proof["native_scope_complete"]
     assert not proof["table_coverage"]["items"]
+    assert "items.0.item_code" not in proof["verified_cells"]
+    assert "OPTIONAL_ABSENCE_UNVERIFIED" in proof["corroboration"]["items.0.item_code"]["reasons"]
+
+
+def test_complete_local_source_can_prove_optional_column_absence_despite_missing_output_row(monkeypatch):
+    definition, configuration, events = v2_fixture(monkeypatch)
+    mutate(events, "NATIVE_SOURCE_PROBE_JSON", lambda body: body["payload"]["lines"].append(
+        fixtures._physical_line(["Nuts", "1", "2.00", "2.00"], .31)))
+    _data, _context, proof = assess(definition, configuration, events)
+    assert not proof["table_coverage"]["items"] and "UNMATCHED_SOURCE_ROW:items" in proof["issues"]
+    assert "items.0.item_code" in proof["verified_cells"]
 
 
 def test_existing_second_mechanism_is_not_repeated_for_quality(monkeypatch):
@@ -131,8 +150,7 @@ def test_headerless_measured_continuation_keeps_every_occurrence(monkeypatch):
     definition, configuration, events = v2_fixture(monkeypatch, count=2)
     def continuation(body):
         body["payload"]["lines"] = [line for line in body["payload"]["lines"]
-            if not (line["page"] == 1 and line["text"].startswith("Total due:"))
-            and not (line["page"] == 2 and line["text"] == "Description Quantity Unit price Amount")]
+            if line["page"] != 2 or line["region"][1] > .2]
     mutate(events, "NATIVE_SOURCE_PROBE_JSON", continuation)
     _data, _context, proof = assess(definition, configuration, events)
     assert proof["table_coverage"]["items"]
@@ -145,8 +163,7 @@ def test_unproved_new_section_does_not_inherit_headerless_table(monkeypatch):
     definition, configuration, events = v2_fixture(monkeypatch, count=2)
     def changed_scope(body):
         body["payload"]["lines"] = [line for line in body["payload"]["lines"]
-            if not (line["page"] == 1 and line["text"].startswith("Total due:"))
-            and not (line["page"] == 2 and line["text"] == "Description Quantity Unit price Amount")]
+            if line["page"] != 2 or line["region"][1] > .2]
         body["payload"]["lines"].append(fixtures._line("Separate schedule", .17, page=2))
     mutate(events, "NATIVE_SOURCE_PROBE_JSON", changed_scope)
     _data, _context, proof = assess(definition, configuration, events)
@@ -191,12 +208,11 @@ def test_unscoped_printed_counter_is_uncertainty_not_proved_missing_page(monkeyp
 
 
 def test_two_actual_source_values_stay_blocked_after_confirmation_flags(monkeypatch):
-    definition, configuration, events = v2_fixture(monkeypatch, count=2)
-    def real_source_disagreement(body):
-        body["payload"]["lines"] = [fixtures._line("Total due: 20.00", .8, page=2)
-            if line["page"] == 2 and line["text"].startswith("Total due:") else line
-            for line in body["payload"]["lines"]]
-    mutate(events, "NATIVE_SOURCE_PROBE_JSON", real_source_disagreement)
+    definition, configuration, events = v2_fixture(monkeypatch)
+    # Both values precede the start of the physical detail columns and thus
+    # have the same proven scalar role. No uncertain footer is needed.
+    mutate(events, "NATIVE_SOURCE_PROBE_JSON", lambda body: body["payload"]["lines"].append(
+        fixtures._line("Total due: 20.00", .18)))
     data, _context, proof = assess(definition, configuration, events)
     assert "DOCUMENTARY_SOURCE_CONTRADICTION:headers.0.total" in proof["global_issues"]
     for row in [data["payload"]["fields"], *data["payload"]["tables"]["items"]]:
@@ -204,6 +220,21 @@ def test_two_actual_source_values_stay_blocked_after_confirmation_flags(monkeypa
             cell["reviewed"] = True
     extraction = SimpleNamespace(payload=data["payload"], engine=data["engine"], reviewed=True)
     assert not semantic_review_dto(extraction, definition)["automatic_approval"]
+
+
+def test_native_scope_uncertainty_on_next_page_does_not_become_a_proved_contradiction(monkeypatch):
+    definition, configuration, events = v2_fixture(monkeypatch, count=2)
+    def uncertain_second_page_scope(body):
+        body["payload"]["lines"] = [fixtures._line("Total due: 20.00", .16, page=2)
+            if line["page"] == 2 and line["text"].startswith("Total due:") else line
+            for line in body["payload"]["lines"]]
+    mutate(events, "NATIVE_SOURCE_PROBE_JSON", uncertain_second_page_scope)
+    data, _, proof = assess(definition, configuration, events)
+    assert "DOCUMENTARY_SOURCE_CONTRADICTION:headers.0.total" not in proof["global_issues"]
+    assert "OBSERVATION_UNCERTAINTY:headers.0.total" in proof["issues"]
+    trace = proof["corroboration"]["headers.0.total"]["rejected_associations"]
+    assert any(item["status"] == "UNCERTAIN" and item["raw_observed"] == "20.00" for item in trace)
+    assert not _ownership_dto(data, definition)["automatic_approval"]
 
 
 def test_verification_upgrade_preserves_acquisition_profile_and_rejects_downgrade(monkeypatch):
@@ -363,3 +394,181 @@ def test_final_scope_paddle_text_occurrence_outside_html_table_is_not_silently_o
     inventory = proof["coverage_details"]["items"]["source_inventory"][0]
     assert inventory["unclassified_source_refs"]
     assert "UNCLASSIFIED_SOURCE_SCOPE" in inventory["issues"]
+
+
+def _detail_ownership_fixture(monkeypatch, mechanism, *, proposed, source_rows, scalar_separate=False,
+                              scalar_name="closing_balance", scalar_label="Closing balance", scalar_value="100.00",
+                              scalar_type="DECIMAL", partial=False):
+    numeric = {"logical_type": "DECIMAL", "normalization": {"decimal_formats": "UNAMBIGUOUS_LOCALE_V1"}}
+    columns = [{"name": "description", "label": "Description"}]
+    if partial:
+        columns.append({"name": "quantity", "label": "Quantity", **numeric})
+    columns.append({"name": "amount", "label": "Amount", **numeric})
+    field = {"name": scalar_name, "label": scalar_label, "logical_type": scalar_type, "critical": True}
+    if scalar_type == "DECIMAL":
+        field.update(numeric)
+    profile = {"id": "detail-ownership-discriminant", "revision": 1, "name": "Detail ownership discriminant",
+        "document_type": "CUSTOM", "description": "Keep every detail occurrence independently of caption text",
+        "fields": [field], "tables": [{"name": "items", "kind": "TABLE",
+            "description": "Every measured detail occurrence", "fields": columns}]}
+    with monkeypatch.context() as context:
+        context.setattr(fixtures, "compile_profile", lambda _profile, **_options:
+            compile_profile(profile, automatic_verification="SEMANTIC_AUTO_V2"))
+        definition, configuration, events = fixtures.corroboration_fixture(
+            native=mechanism == "native", paddle=mechanism == "paddle")
+
+    def proposals(body):
+        def cell(value):
+            return {"observed": value, "ambiguous": False, "alternatives": []}
+        body.update(fields={scalar_name: cell(scalar_value)}, tables={"items": [
+            {field["name"]: cell(value) for field, value in zip(columns, row, strict=True)} for row in proposed]})
+    mutate(events, "QWEN_SELECTION_JSON", proposals)
+
+    if mechanism == "native":
+        def measured(row, top):
+            words = []
+            positions = [.08, .52, .72] if partial else [.08, .72]
+            for value, left in zip(row, positions, strict=True):
+                for token in (value or "").split():
+                    word = fixtures._word(token, left, top)
+                    words.append(word)
+                    left = word["region"][2] + .004
+            return {"text": " ".join(word["text"] for word in words), "page": 1, "method": "DIGITAL",
+                "region": [words[0]["region"][0], top, words[-1]["region"][2], top + .012], "words": words}
+
+        def native_source(body):
+            body["payload"]["lines"] = [
+                *([fixtures._line(f"{scalar_label}: {scalar_value}", .1)] if scalar_separate else []),
+                measured([field["label"] for field in columns], .2),
+                *(measured(row, .25 + index * .04) for index, row in enumerate(source_rows))]
+        mutate(events, "NATIVE_SOURCE_PROBE_JSON", native_source)
+    else:
+        def paddle_source(body):
+            html = "<table><tr>" + "".join(f"<th>{field['label']}</th>" for field in columns) + "</tr>"
+            for row in source_rows:
+                html += "<tr>" + "".join(f"<td>{value or ''}</td>" for value in row) + "</tr>"
+            body["parsing_res_list"] = [{"block_label": "table", "block_content": html + "</table>",
+                "block_bbox": [80, 200, 950, 500]}]
+            if scalar_separate:
+                body["parsing_res_list"].append({"block_label": "table", "block_bbox": [80, 800, 500, 850],
+                    "block_content": f"<table><tr><th>{scalar_label}</th><td>{scalar_value}</td></tr></table>"})
+        mutate(events, "PADDLE_PAGE_JSON", paddle_source)
+    return definition, configuration, events
+
+
+def _ownership_dto(data, definition):
+    return semantic_review_dto(SimpleNamespace(payload=data["payload"], engine=data["engine"], reviewed=False), definition)
+
+
+@pytest.mark.parametrize("mechanism", ["native", "paddle"])
+def test_detail_row_matching_a_scalar_caption_remains_in_source_inventory(monkeypatch, mechanism):
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, mechanism,
+        proposed=[["Charge", "10.00"]], source_rows=[["Charge", "10.00"], ["Closing balance", "100.00"]])
+    data, _, proof = assess(definition, configuration, events)
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert [row["values"]["description"] for row in inventory["rows"]] == ["Charge", "Closing balance"]
+    assert inventory["rows"][1]["source_refs"] and "UNMATCHED_SOURCE_ROW:items" in proof["issues"]
+    assert not proof["table_coverage"]["items"] and "headers.0.closing_balance" not in proof["verified_cells"]
+    rejected = proof["corroboration"]["headers.0.closing_balance"]["rejected_associations"]
+    assert any(trace["status"] == "REJECTED" and trace["reason"] == "DECLARED_SOURCE_SCOPE_MISMATCH"
+        and trace["raw_observed"] == "100.00" and trace["label_refs"] and trace["value_refs"] for trace in rejected)
+    assert not _ownership_dto(data, definition)["automatic_approval"]
+
+
+@pytest.mark.parametrize("mechanism", ["native", "paddle"])
+def test_separate_scalar_and_all_detail_occurrences_can_still_verify(monkeypatch, mechanism):
+    rows = [["Charge", "10.00"], ["Charge", "10.00"], ["Closing balance", "100.00"]]
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, mechanism,
+        proposed=rows, source_rows=rows, scalar_separate=True)
+    data, _, proof = assess(definition, configuration, events)
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert len({row["id"] for row in inventory["rows"]}) == 3
+    assert proof["table_coverage"]["items"] and "headers.0.closing_balance" in proof["verified_cells"]
+    assert _ownership_dto(data, definition)["automatic_approval"]
+
+
+def test_paddle_unresolved_neighbour_alternative_stays_pending_with_covered_detail(monkeypatch):
+    rows = [["Charge", "10.00"], ["Closing balance", "100.00"], ["Charge", "10.00"]]
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, "paddle",
+        proposed=rows, source_rows=rows, scalar_separate=True)
+    data, _, proof = assess(definition, configuration, events)
+    field = data["payload"]["fields"]["closing_balance"]
+    paddle = next(item["candidate"] for item in field["candidate_alternatives"] if item.get("stage") == "PADDLE_STRUCTURED")
+    bindings = paddle["association"]["bindings"]
+    assert any(trace["rule"] == "DECLARED_TABLE_BELOW" and trace["raw_observed"] == "Charge"
+        and trace["label_refs"] and trace["value_refs"] for trace in bindings)
+    assert field["validity"] == "AMBIGUOUS" and field["value"] is None
+    assert proof["table_coverage"]["items"] and "VALUE_UNRESOLVED:headers.0.closing_balance" in proof["issues"]
+    assert not _ownership_dto(data, definition)["automatic_approval"]
+
+
+def test_paddle_nonempty_row_before_first_header_in_same_table_requires_review(monkeypatch):
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, "paddle",
+        proposed=[["Charge", "10.00"]], source_rows=[["Closing balance", "100.00"], ["Charge", "10.00"]])
+
+    def before_header(body):
+        block = body["parsing_res_list"][0]
+        row = "<tr><td>Closing balance</td><td>100.00</td></tr>"
+        block["block_content"] = block["block_content"].replace(row, "", 1).replace("<table>", "<table>" + row, 1)
+
+    mutate(events, "PADDLE_PAGE_JSON", before_header)
+    data, _, proof = assess(definition, configuration, events)
+    assert data["payload"]["fields"]["closing_balance"]["validity"] == "VALID"
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert len(inventory["rows"]) == 1 and len(inventory["scope_refs"]) == 2
+    assert "UNPARSED_SOURCE_STRUCTURE" in inventory["issues"] and not proof["table_coverage"]["items"]
+    field = proof["corroboration"]["headers.0.closing_balance"]
+    assert any(trace["status"] == "UNCERTAIN" and trace["eligible_for_field"]
+        and trace["raw_observed"] == "100.00" and trace["label_refs"] and trace["value_refs"]
+        for trace in field["rejected_associations"])
+    assert "headers.0.closing_balance" not in proof["verified_cells"]
+    assert not _ownership_dto(data, definition)["automatic_approval"]
+
+
+@pytest.mark.parametrize("mechanism", ["native", "paddle"])
+def test_incomplete_row_and_invalid_body_text_are_not_promoted_to_scalar(monkeypatch, mechanism):
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, mechanism,
+        proposed=[["Charge", "2", "10.00"]], source_rows=[["Charge", "2", "10.00"], ["Reference:", None, "invalid"]],
+        scalar_name="reference", scalar_label="Reference", scalar_type="STRING", scalar_value="invalid", partial=True)
+    data, _, proof = assess(definition, configuration, events)
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert inventory["rows"][1]["values"]["amount"] == "invalid"
+    assert inventory["rows"][1]["association_proven"] is False and inventory["rows"][1]["source_refs"]
+    assert "headers.0.reference" not in proof["verified_cells"] and not proof["table_coverage"]["items"]
+    assert not _ownership_dto(data, definition)["automatic_approval"]
+
+
+def test_native_footer_caption_without_independent_scope_stays_pending(monkeypatch):
+    definition, configuration, events = v2_fixture(monkeypatch, scalar_before_detail=False)
+    data, _, proof = assess(definition, configuration, events)
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert "UNPARSED_SOURCE_STRUCTURE" in inventory["issues"] and inventory["scope_refs"]
+    assert "headers.0.total" not in proof["verified_cells"] and not proof["table_coverage"]["items"]
+    assert not _ownership_dto(data, definition)["automatic_approval"]
+
+
+@pytest.mark.parametrize("mechanism", ["native", "paddle"])
+def test_body_text_resembling_column_captions_is_not_a_proved_repeated_header(monkeypatch, mechanism):
+    definition, configuration, events = _detail_ownership_fixture(monkeypatch, mechanism, scalar_separate=True,
+        proposed=[["Charge", "10.00"]], source_rows=[["Charge", "10.00"], ["Description", "Amount"]])
+    data, _, proof = assess(definition, configuration, events)
+    inventory = proof["coverage_details"]["items"]["source_inventory"][0]
+    assert len(inventory["headers"]) == 1 and len(inventory["rows"]) == 2
+    assert inventory["rows"][1]["values"] == {"description": "Description", "amount": "Amount"}
+    assert not proof["table_coverage"]["items"] and not _ownership_dto(data, definition)["automatic_approval"]
+
+
+@pytest.mark.parametrize("headerless", [False, True])
+def test_paddle_following_page_needs_column_roles_not_only_width(monkeypatch, headerless):
+    definition, configuration, events = v2_fixture(monkeypatch, count=2, native=False, paddle=True)
+    if headerless:
+        def remove_header(body):
+            for block in body["parsing_res_list"]:
+                if block["block_label"] == "table":
+                    block["block_content"] = block["block_content"].replace(
+                        "<tr><th>Description</th><th>Quantity</th><th>Unit price</th><th>Amount</th></tr>", "", 1)
+        mutate(events, "PADDLE_PAGE_JSON", remove_header, page=2)
+    data, _, proof = assess(definition, configuration, events)
+    assert proof["table_coverage"]["items"] is not headerless
+    assert _ownership_dto(data, definition)["automatic_approval"] is not headerless
+    assert ("items.1.amount" in proof["verified_cells"]) is not headerless

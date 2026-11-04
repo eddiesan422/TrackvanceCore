@@ -1,4 +1,6 @@
 """Synthetic source counters; no fixture claims independent OCR quality."""
+import pytest
+
 from trackvance.document_printed_pagination import assess_documentary_pagination
 
 
@@ -65,7 +67,7 @@ def test_qwen_only_pagination_and_continuation_cannot_prove_source_scope():
 def test_model_continuation_cannot_lend_authority_to_independent_unscoped_footer():
     result = report([fact("Page 1 of 2"), fact("Continued on page 2 of this invoice", mechanism="QWEN")])
     assert result["observations"][0]["scope"] == "UNKNOWN"
-    assert result["reasons"] == ["PRINTED_SCOPE_UNPROVEN"]
+    assert result["reasons"] == ["PRINTED_PAGINATION_UNCORROBORATED", "PRINTED_SCOPE_UNPROVEN"]
 
 
 def test_dates_fractions_item_counts_and_citations_do_not_become_global_counters():
@@ -117,3 +119,103 @@ def test_dependent_paddle_counter_cannot_be_treated_as_independent():
     result = report([value])
     assert result["status"] == "UNVERIFIED"
     assert result["reasons"] == ["PRINTED_PAGINATION_UNCORROBORATED"]
+
+
+def test_continuation_scope_target_beyond_proved_global_total_is_conflict():
+    continuation = fact("Continúa en la hoja 2 de esta factura.")
+    result = report([fact("Document | Page 1 of 1"), continuation])
+    assert result["status"] == "CONFLICT" and result["blocking"]
+    assert result["reasons"] == ["PRINTED_PAGINATION_CONFLICT"]
+    assert result["missing_execution_pages"] == []
+    assert result["continuations"][0]["target_printed_page"] == 2
+    assert result["continuations"][0]["source_refs"] == [continuation["ref"]]
+
+
+def test_continuation_scope_without_global_counter_is_uncertainty_without_invented_total():
+    continuation = fact("This statement continues on page 2.", mechanism="PADDLE")
+    result = report([continuation])
+    assert result["status"] == "UNVERIFIED" and result["blocking"]
+    assert result["reasons"] == ["PRINTED_SEQUENCE_UNVERIFIED"]
+    assert result["observations"] == result["sequences"] == []
+    assert result["documentary_complete"] is None
+    assert result["continuations"][0]["target_printed_page"] == 2
+    assert result["continuations"][0]["source_refs"] == [continuation["ref"]]
+
+
+@pytest.mark.parametrize("mention", [
+    "No continúa en la hoja 2 de esta factura.",
+    "Si esta factura continúa en la hoja 2, consulte el anexo.",
+    "Véase la nota: «Continúa en la hoja 2 de esta factura».",
+])
+def test_continuation_scope_nonaffirmative_text_cannot_prove_document_scope(mention):
+    result = report([fact("Page 1 of 1"), fact(mention)])
+    assert result["observations"][0]["scope"] == "UNKNOWN"
+    assert result["reasons"] == ["PRINTED_SCOPE_UNPROVEN"]
+    assert result["continuations"] == []
+
+
+def test_continuation_scope_never_compares_document_destination_to_annex_total():
+    result = report([fact("Annex A | Page 1 of 1"), fact("Continued on page 2 of this invoice.")])
+    assert result["status"] == "UNVERIFIED"
+    assert result["sequences"][0]["scope"] == "SECTION"
+    assert result["sequences"][0]["status"] == "CONSISTENT"
+    assert result["reasons"] == ["PRINTED_SEQUENCE_UNVERIFIED"]
+
+
+def test_document_caption_prefix_requires_complete_owner_not_prose_suffix():
+    result = report([fact("Copia de otro documento Página 1 de 1")])
+    assert result["observations"][0]["scope"] == "UNKNOWN"
+    assert result["reasons"] == ["PRINTED_SCOPE_UNPROVEN"]
+    assert result["documentary_complete"] is None
+
+
+@pytest.mark.parametrize("caption", ["Anexo | Página 1 de 2", "Annex-A | Page 1 of 2"])
+def test_section_footer_cannot_supply_missing_global_counter(caption):
+    result = report([fact(caption), fact("Continúa en la hoja 2 de esta factura."),
+        fact("Documento | Página 2 de 2", 2)], physical=(1, 2))
+    assert result["observations"][0]["scope"] == "SECTION"
+    assert result["documentary_complete"] is None and result["blocking"]
+    assert result["reasons"] == ["PRINTED_SEQUENCE_UNVERIFIED"]
+
+
+def test_continuation_does_not_promote_competing_footer_over_explicit_document_counter():
+    explicit = fact("Document | Page 1 of 2")
+    other = fact("Copy | Page 2 of 2")
+    second = fact("Document | Page 2 of 2", 2)
+    result = report([other, explicit, fact("Continued on page 2 of this invoice."), second], physical=(1, 2))
+    assert result["observations"][0]["scope"] == "UNKNOWN"
+    assert result["observations"][0]["source_refs"] == [other["ref"]]
+    assert result["status"] == "UNVERIFIED" and result["blocking"]
+    assert result["reasons"] == ["PRINTED_SCOPE_UNPROVEN"]
+    assert result["continuations"][0]["counter_refs"] == [explicit["ref"], second["ref"]]
+
+
+def test_continuation_cannot_choose_between_distinct_unscoped_footers():
+    result = report([fact("Copy | Page 2 of 2"), fact("Example | Page 1 of 2"),
+        fact("Continued on page 2 of this invoice.")], physical=(1, 2))
+    assert [item["scope"] for item in result["observations"]] == ["UNKNOWN", "UNKNOWN"]
+    assert result["status"] == "UNVERIFIED" and result["blocking"]
+    assert result["reasons"] == ["PRINTED_SCOPE_UNPROVEN", "PRINTED_SEQUENCE_UNVERIFIED"]
+
+
+@pytest.mark.parametrize(("adjacent", "separated", "expected"), [
+    ("Internal working copy", True, "INCOMPLETE"),
+    ("Internal working copy", False, "UNVERIFIED"),
+    ("Annex A |", True, "UNVERIFIED"),
+    ("See terms", True, "UNVERIFIED"),
+])
+def test_measured_footer_fragments_preserve_separation_and_declared_context(adjacent, separated, expected):
+    label = "Q17 | Page 1 of 2"
+    footer = fact(f"{adjacent} {label}")
+    footer["geometry_kind"] = "MEASURED_SOURCE"
+    if separated:
+        footer["measured_segments"] = [{"text": adjacent, "region": [.1, .94, .3, .96]},
+            {"text": label, "region": [.6, .94, .8, .96]}]
+    continuation = fact("Continued on page 2 of this statement.")
+    result = report([footer, continuation])
+    assert result["status"] == expected and result["blocking"]
+    if expected == "INCOMPLETE":
+        assert result["observations"][0]["source_refs"] == [footer["ref"], continuation["ref"]]
+        assert result["reasons"] == ["DOCUMENT_SOURCE_INCOMPLETE"]
+    else:
+        assert "DOCUMENT_SOURCE_INCOMPLETE" not in result["reasons"]
