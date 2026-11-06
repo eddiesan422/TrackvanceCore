@@ -29,6 +29,34 @@ def test_adjacent_tax_caption_does_not_become_subtotal_but_is_retained():
     assert all(item["value_refs"] and item["region"] is None for item in rejected)
 
 
+def test_currency_qualified_monetary_caption_uses_its_adjacent_amount():
+    configs = [decimal("tax", "Impuestos"), decimal("total", "Total", currency_symbols=["USD"])]
+    source = page(html="<table><tr><td>Impuestos</td><td>8,00</td></tr>"
+        "<tr><td>TOTAL USD</td><td>168,00</td></tr></table>")
+    cells, traces = resolved(configs, source)
+    assert cells["tax"]["value"] == "8.00"
+    assert cells["total"]["value"] == "168.00"
+    assert any(item["raw_observed"] == "TOTAL USD" and item["reason"] == "TARGET_IS_ROLE_CAPTION"
+        and item["value_refs"] for item in traces["tax"])
+    assert any(item["label_text"] == "TOTAL USD" and item["observed"] == "168,00"
+        and item["rule"] == "DECLARED_TABLE_RIGHT" for item in traces["total"])
+
+
+def test_currency_qualified_amounts_in_different_currencies_stay_uncertain():
+    config = decimal("total", "Total", currency_symbols=["USD", "EUR"])
+    first = page(html="<table><tr><td>Total USD</td><td>20,00</td></tr></table>")
+    second = page(html="<table><tr><td>Total EUR</td><td>20,00</td></tr></table>", number=2)
+    cells, _ = resolved([config], first, second)
+    assert cells["total"]["validity"] == "AMBIGUOUS"
+
+
+def test_explicit_invalid_amount_after_delimiter_is_retained():
+    config = decimal("total", "Total", currency_symbols=["USD"])
+    cells, traces = resolved([config], page(block("Total: USD")))
+    assert cells["total"]["validity"] != "VALID"
+    assert any(item["raw_observed"] == "USD" and item["eligible_for_field"] for item in traces["total"])
+
+
 def test_transposed_certificate_table_still_uses_below_relationship():
     configs = [field("duration", "Validity duration"), field("authority", "Issuing authority")]
     cells, traces = resolved(configs, page(html="<table><tr><th>Validity duration</th><th>Issuing authority</th></tr>"

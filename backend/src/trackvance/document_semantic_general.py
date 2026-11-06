@@ -387,15 +387,34 @@ def assert_configuration(definition, configuration):
         raise OperationError(409, "DOCUMENT_SEMANTIC_CONFIGURATION", "El contrato semántico y su configuración congelada no coinciden.")
 
 
+def _matches_verification_contract(metadata, contract):
+    return (metadata.get("association_contract") == contract["association_contract"]
+        and metadata.get("verification_contract") == contract
+        and metadata.get("verification_contract_sha256") == canonical_hash(contract))
+
+
 def assert_replay_binding(previous_definition, definition, configuration):
     from .operations_common import OperationError
 
     before, after = previous_definition.get("semantic_general"), definition.get("semantic_general")
     if not before and not after:
-        return
-    verification_upgrade = bool(before and after and before.get("automatic_verification") == AUTO_VERSION
-        and after.get("automatic_verification") == AUTO_VERSION_V2)
-    if (not before or not after or before.get("profile_sha256") != after.get("profile_sha256")
+        return False
+    verification_upgrade, valid_verification_target = False, True
+    if before and after and after.get("automatic_verification") == AUTO_VERSION_V2:
+        from .document_semantic_vocabulary import V2_ENTRY_SHA256
+
+        current = verification_contract_v2()
+        valid_verification_target = _matches_verification_contract(after, current)
+        verification_upgrade = before.get("automatic_verification") == AUTO_VERSION
+        if before.get("automatic_verification") == AUTO_VERSION_V2:
+            entry = {**current, "vocabulary_sha256": V2_ENTRY_SHA256}
+            verification_upgrade = (entry != current and _matches_verification_contract(before, entry)
+                and before.get("contract") == after.get("contract")
+                and before.get("business_controls") == after.get("business_controls")
+                and all(previous_definition.get(key) == definition.get(key) for key in ("fields", "tables")))
+            valid_verification_target &= verification_upgrade or _matches_verification_contract(before, current)
+    if (not before or not after or not valid_verification_target
+            or before.get("profile_sha256") != after.get("profile_sha256")
             or before.get("route") != after.get("route")
             or not verification_upgrade and before.get("automatic_verification", "OFF") != after.get("automatic_verification", "OFF")
             or not verification_upgrade and before.get("verification_contract_sha256") != after.get("verification_contract_sha256")
@@ -404,6 +423,7 @@ def assert_replay_binding(previous_definition, definition, configuration):
             "El reconocimiento conservado pertenece a otro contrato o ruta semántica. Una nueva definición requiere un nuevo documento/intento autorizado.")
     assert_configuration(previous_definition, configuration)
     assert_configuration(definition, configuration)
+    return verification_upgrade
 
 
 def guard_profile_revision(db, organization_id, definition):

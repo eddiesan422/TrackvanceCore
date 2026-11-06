@@ -8,6 +8,7 @@ import hashlib
 import json
 from collections import Counter
 
+import pytest
 from sqlalchemy import func, select
 from test_document_semantic_auto_lifecycle_098 import activate, digital_reader
 from test_document_semantic_general_098 import profile
@@ -35,8 +36,8 @@ def activate_v2(client, monkeypatch, family=None, *, acquisition_profile=None):
     return family, result.json()["template"]
 
 
-def v1_original(client, monkeypatch, label):
-    family, template = activate(client, monkeypatch)
+def v1_original(client, monkeypatch, label, *, activation=activate):
+    family, template = activation(client, monkeypatch)
     import test_document_semantic_auto_lifecycle_098 as fixture
 
     original_events = fixture.independent_qwen_events
@@ -136,6 +137,94 @@ def test_upgrade_rejects_a_changed_acquisition_profile_without_registering_reuse
         "reason": "A different recognizer input cannot be passed off as verification-only replay"})
     assert response.status_code == 409 and response.json()["error"]["code"] == "DOCUMENT_SEMANTIC_REPLAY_CONTRACT"
     assert counts(database) == sizes and calls == ["QWEN_VISUAL"]
+
+
+def test_entry_v2_replay_uses_saved_acquisition_under_current_v2(authenticated, database, monkeypatch):
+    from trackvance import document_semantic_general as semantic
+    from trackvance.document_semantic_corroboration import trusted_semantic_proof
+    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256
+
+    current_descriptor = semantic.verification_contract_v2()
+    entry_descriptor = {**current_descriptor, "vocabulary_sha256": V2_ENTRY_SHA256}
+    assert entry_descriptor != current_descriptor
+    with monkeypatch.context() as entry:
+        entry.setattr(semantic, "verification_contract_v2", lambda: entry_descriptor)
+        family, source_template, original, before, calls = v1_original(
+            authenticated, monkeypatch, "saved-entry-v2-replay", activation=activate_v2)
+    with database() as db:
+        source = db.get(DocumentOriginal, original["id"])
+        old_events = [copy.deepcopy(row["event"]) for row in recognition_journal(db, source, hydrate=True)]
+        old_extraction = db.get(DocumentExtraction, before["extraction"]["id"])
+        old_payload, old_engine = copy.deepcopy(old_extraction.payload), copy.deepcopy(old_extraction.engine)
+        assert trusted_semantic_proof(old_extraction, source_template["definition"]) is None
+        old_attempts = db.scalar(select(Job).where(Job.document_id == source.id)).attempts
+    _, target = activate_v2(authenticated, monkeypatch, family)
+    target_metadata = target["definition"]["semantic_general"]
+    old_metadata = source_template["definition"]["semantic_general"]
+    assert old_metadata["profile_sha256"] == target_metadata["profile_sha256"]
+    assert old_metadata["verification_contract_sha256"] != target_metadata["verification_contract_sha256"]
+    result = authenticated.post(f"/api/v1/documents/originals/{original['id']}/replay", json={
+        "expected_extraction_id": before["extraction"]["id"], "template_id": target["id"],
+        "reason": "Assess under current V2 using the unchanged persisted reader request"})
+    assert result.status_code == 200, result.text
+    after = result.json()
+    assert after["extraction"]["previous_id"] == before["extraction"]["id"]
+    assert after["publications"] == before["publications"] and calls == ["QWEN_VISUAL"]
+    with database() as db:
+        current = db.get(DocumentExtraction, after["extraction"]["id"])
+        retained = db.get(DocumentExtraction, before["extraction"]["id"])
+        assert retained.payload == old_payload and retained.engine == old_engine
+        assert current.engine["validation"]["association_contract_sha256"] == target_metadata["verification_contract_sha256"]
+        assert not current.engine["validation"]["global_issues"]
+        assert trusted_semantic_proof(current, target["definition"]) is not None
+        receipt = current.engine["semantic_verification_replay"]
+        assert receipt["recognition_model_calls_new"] == 0
+        assert receipt["acquisition_profile_sha256"] == old_metadata["profile_sha256"]
+        assert receipt["verification_contract_sha256"] == target_metadata["verification_contract_sha256"]
+        events = [row["event"] for row in recognition_journal(db, db.get(DocumentOriginal, original["id"]), hydrate=True)]
+        assert len(events) == len(old_events) + 1 and events[-1]["stage"] == "RECOVERY_REUSE"
+        by_hash = {event["event_sha256"]: event for event in events}
+        assert all(by_hash[event["event_sha256"]] == event for event in old_events)
+        assert db.scalar(select(Job).where(Job.document_id == original["id"])).attempts == old_attempts
+
+
+@pytest.mark.parametrize("changed", ["old_hash", "old_descriptor", "new_hash", "new_descriptor",
+    "profile", "fields", "tables", "route", "business", "configuration", "downgrade"])
+def test_entry_v2_replay_rejects_an_unbound_transition(monkeypatch, changed):
+    from trackvance import document_semantic_general as semantic
+    from trackvance.document_normalization import canonical_hash
+    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256
+    from trackvance.operations_common import OperationError
+
+    monkeypatch.setenv("TRACKVANCE_SEMANTIC_GENERAL_ENABLED", "true")
+    monkeypatch.setenv("TRACKVANCE_SEMANTIC_AUTO_ENABLED", "true")
+    target = semantic.compile_profile(profile(), automatic_verification=semantic.AUTO_VERSION_V2)
+    original = copy.deepcopy(target)
+    before, after = original["semantic_general"], target["semantic_general"]
+    before["verification_contract"]["vocabulary_sha256"] = V2_ENTRY_SHA256
+    before["verification_contract_sha256"] = canonical_hash(before["verification_contract"])
+    configuration = semantic.configuration_for(target, {})
+    if changed == "old_hash":
+        before["verification_contract_sha256"] = after["verification_contract_sha256"]
+    elif changed == "new_hash":
+        after["verification_contract_sha256"] = before["verification_contract_sha256"]
+    elif changed in {"old_descriptor", "new_descriptor"}:
+        meta = before if changed == "old_descriptor" else after
+        meta["verification_contract"]["vocabulary_sha256"] = "b" * 64
+        meta["verification_contract_sha256"] = canonical_hash(meta["verification_contract"])
+    elif changed in {"profile", "route", "business"}:
+        key = {"profile": "profile_sha256", "route": "route", "business": "business_controls_sha256"}[changed]
+        after[key] = "b" * 64
+    elif changed == "fields":
+        target["fields"].clear()
+    elif changed == "tables":
+        target["tables"].append({"name": "new_table"})
+    elif changed == "configuration":
+        configuration["semantic_profile_sha256"] = "b" * 64
+    elif changed == "downgrade":
+        original, target = target, original
+    with pytest.raises(OperationError, match="contrato|configuración"):
+        semantic.assert_replay_binding(original, target, configuration)
 
 
 def test_upgrade_requires_configuration_permission_and_preserves_all_prior_records(authenticated, database, monkeypatch):

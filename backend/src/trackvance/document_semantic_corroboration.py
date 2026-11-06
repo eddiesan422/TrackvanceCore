@@ -655,7 +655,8 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
     narrative = definition.get("semantic_general", {}).get("contract", {}).get("document_type") == "NARRATIVE"
     for path, cell, field in _all_cells(payload, definition):
         check()
-        reasons, mechanisms, associations = [], [], []
+        reasons, mechanisms = [], []
+        associations: list[dict[str, Any]] = []
         refs: list[dict[str, Any]] = []
         rejected_associations: list[dict[str, Any]] = []
         selected = _selected_source(cell, path, data, controls) if isinstance(cell, dict) else None
@@ -674,6 +675,11 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
             if len(distinct_source) > 1:
                 reasons.append("DOCUMENTARY_SOURCE_CONTRADICTION")
                 refs.extend(fact["ref"] for _identity, fact, _value, status in actual_source_values if status == "VALID")
+                associations.extend({"basis": "PDF_NATIVE_MEASURED_MONETARY_PAIR", "label": fact["label"],
+                    "observed": fact["observed"], "value": value, "source_ref": fact["ref"],
+                    "section": fact["source_section"], "requested_section": field.get("section", "DOCUMENT"),
+                    "relation": fact["association"]} for _identity, fact, value, status in actual_source_values
+                    if status == "VALID" and fact["association"] == "MEASURED_COMPOUND_MONETARY_CAPTION")
         if path.startswith("headers.") and not reasons:
             candidates: list[Any] = []
             for identity, facts in source_headers:
@@ -1150,6 +1156,68 @@ def _scope_table_associations_v2(observations, consumed, uncertain):
                         "reason": "DECLARED_SOURCE_SCOPE_UNPROVEN" if unresolved else "DECLARED_SOURCE_SCOPE_MISMATCH"})
 
 
+def _compound_native_monetary_conflicts_v2(band, page, field, original):
+    from .document_header_association_v2 import _field_role, _section
+    from .document_semantic_vocabulary import (
+        MONETARY_ROLES,
+        caption_currency_qualifier,
+        caption_role,
+        role_captions,
+    )
+
+    role = _field_role(field)
+    if (role not in MONETARY_ROLES or field["logical_type"] != "DECIMAL" or not field.get("decimal_format_explicit")
+            or field.get("visual") or field.get("visual_alternatives") or field.get("source_association")):
+        return []
+    segments = _segments(band)
+    if len(segments) < 4 or len(segments) % 2:
+        return []
+    captions = {_key(text) for text in role_captions(field)}
+    pairs = []
+    scopes = set()
+    distinct = set()
+    requested = field.get("section", "DOCUMENT")
+    # Each complete role caption delimits its own measured following scalar.
+    # Relative gap size cannot distinguish within-pair from between-pair gaps.
+    for label, literal in zip(segments[::2], segments[1::2], strict=True):
+        caption, raw = label["text"], literal["text"]
+        base, currency = caption_currency_qualifier(caption) or (caption, None)
+        section = _section(page, {"region": label["region"]})
+        if (_key(base) not in captions or caption_role(caption) != role or section == "AMBIGUOUS"
+                or requested in {"ISSUER", "BUYER", "TOTALS"} and section not in {None, requested}
+                or currency is not None and currency not in field.get("currency_symbols", [])
+                or not re.fullmatch(r"[+-]?\d[\d.,]*(?:\s+\d[\d.,]*)*", raw)):
+            return []
+        value, status = _normalized(raw, field)
+        if status != "VALID" or value is None:
+            return []
+        scopes.add((section, currency))
+        distinct.add(canonical_hash(_comparison(value, field)))
+        reference = {**original["ref"], "occurrence_id": stable_id("measured-monetary-pair", band["id"], label["ids"], literal["ids"]),
+            "label_word_ids": label["ids"], "value_word_ids": literal["ids"],
+            "label_region": label["region"], "value_region": literal["region"]}
+        association = "MEASURED_COMPOUND_MONETARY_CAPTION"
+        pairs.append({**original, "observed": raw, "label": caption, "association": association, "source_section": section,
+            "source_uncertain": False, "ref": reference,
+            "trace": {**original["trace"], "rule": association, "status": "PROVEN", "reason": "MEASURED_DISTINCT_CAPTION_VALUE_PAIR",
+                "observed": raw, "raw_observed": raw, "label_text": caption, "value_text": raw, "region": literal["region"],
+                "source_section": section, "source_refs": [reference]}})
+    return pairs if len(scopes) == 1 and len(distinct) > 1 else []
+
+
+def _retain_native_header_conflicts_v2(source, pages, definition, observations, consumed):
+    locations = {band["id"]: (band, page) for measured, page in zip(source["pages"], pages, strict=True)
+        for band in measured["bands"] if band["id"] not in consumed}
+    for field in definition["fields"]:
+        facts = observations[field["name"]]
+        unresolved = {fact["ref"]["id"]: fact for fact in facts if fact.get("eligible_for_field")
+            and fact["association"] == "DECLARED_ROLE_VALUE_SUFFIX" and fact["trace"]["reason"] == "MONETARY_SUFFIX_UNRESOLVED"}
+        for band_id, fact in unresolved.items():
+            if band_id in locations:
+                band, page = locations[band_id]
+                facts.extend(_compound_native_monetary_conflicts_v2(band, page, field, fact))
+
+
 def _native_inventory_v2(source, definition):
     inventories: dict[str, Any] = {table["name"]: {"rows": [], "headers": [], "issues": [], "source": source["identity"],
         "scope_refs": [], "complete": False} for table in definition["tables"]}
@@ -1258,6 +1326,9 @@ def _native_inventory_v2(source, definition):
         inventory["issues"] = sorted(set(inventory["issues"]))
         inventory["complete"] = bool(inventory["headers"] and inventory["rows"] and not inventory["issues"])
         inventory["unclassified_source_refs"] = copy.deepcopy(unclassified)
+    # Retain new contradiction evidence without excluding any occurrence from
+    # the independently measured table inventory or completing source scope.
+    _retain_native_header_conflicts_v2(source, pages, definition, observations, consumed)
     return inventories, observations
 
 
@@ -1420,6 +1491,24 @@ def _complete_source_checks_v2(proof, data, definition, native, inventories, fac
     proof["source_inventory_version"] = "MEASURED_SOURCE_TABLE_OCCURRENCES_V2"
 
 
+def _printed_scope_can_request_structure(data, definition, proof, pending_controls):
+    """An unread scope can justify a second reader without granting approval."""
+    if proof["global_issues"] != ["PRINTED_SCOPE_UNPROVEN"]:
+        return False
+    tables = {table["name"] for table in definition["semantic_general"]["contract"]["tables"] if table["kind"] == "TABLE"}
+    if not any(reason.get("table") in tables for reason in pending_controls):
+        return False
+    checks, pagination = proof["source_checks"], proof["printed_pagination"]
+    if (checks["integrity"]["status"] != "VERIFIED" or checks["execution_pages"]["status"] != "COMPLETE"
+            or data["engine"]["execution"].get("resources_released") is not True or pagination["status"] != "UNVERIFIED"):
+        return False
+    counters = [item for item in pagination["observations"] if item.get("reason") == "PRINTED_SCOPE_UNPROVEN"]
+    physical_count = len(pagination["physical_pages"])
+    # A counter that needs more pages than the file could describe missing
+    # material. Keep review and avoid spending a second read on that ambiguity.
+    return bool(counters and all(item["independent"] and item["total"] <= physical_count for item in counters))
+
+
 def _verification_decision_v2(data, definition, proof):
     structural_codes = {"ASSOCIATION_NOT_PROVEN", "SOURCE_DATA_NOT_OBSERVED", "ROW_ASSOCIATION_NOT_PROVEN",
         "ROW_COVERAGE_UNPROVEN", "UNPARSED_SOURCE_STRUCTURE", "UNASSOCIATED_SOURCE_TABLE",
@@ -1436,9 +1525,13 @@ def _verification_decision_v2(data, definition, proof):
             pending_controls.append(reason)
     families = {source["mechanism"] for source in proof["recognition_sources"]}
     narrative = definition["semantic_general"]["contract"]["document_type"] == "NARRATIVE"
-    actionable = bool(pending_controls and not proof["global_issues"] and families == {"QWEN"} and not narrative)
+    independent_reader_available = families == {"QWEN"} and not narrative
+    clarify_printed_scope = independent_reader_available and _printed_scope_can_request_structure(
+        data, definition, proof, pending_controls)
+    actionable = bool(pending_controls and independent_reader_available and (not proof["global_issues"] or clarify_printed_scope))
     scope = {"kind": "WHOLE_DOCUMENT", "pages": list(data["payload"].get("pages", [])),
-        "focal_reread": False, "reason": "UNPROVEN_SOURCE_ASSOCIATIONS_OR_COLLECTION_STRUCTURE"}
+        "focal_reread": False, "reason": "INDEPENDENT_STRUCTURE_UNDER_UNPROVEN_PRINTED_SCOPE" if clarify_printed_scope
+        else "UNPROVEN_SOURCE_ASSOCIATIONS_OR_COLLECTION_STRUCTURE"}
     return {"version": VALIDATOR_VERSION_V2, "required": bool(reasons), "actionable": actionable,
         "reasons": reasons, "pending_controls": pending_controls, "scope": scope,
         "decision_sha256": canonical_hash({"reasons": reasons, "scope": scope,

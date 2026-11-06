@@ -39,16 +39,35 @@ ROLE_CAPTIONS: dict[str, list[str]] = {
     "statement": ["statement", "certification", "certifica", "afirmación certificada"],
 }
 SECTION_CAPTIONS = {"TOTALS": ["totals", "totales", "amount summary", "resumen de importes"]}
-V2_SHA256 = canonical_hash({"version": V2_VERSION, "roles": ROLE_CAPTIONS,
+MONETARY_ROLES = ("subtotal", "tax", "total", "opening_balance", "closing_balance", "balance", "amount", "unit_price")
+CAPTION_CURRENCY_CODES = ("USD", "COP", "EUR", "GBP", "CHF")
+_V2_ENTRY_DESCRIPTOR: dict[str, Any] = {"version": V2_VERSION, "roles": ROLE_CAPTIONS,
     "sections": SECTION_CAPTIONS,
     "decorators": {"tax": "EXPLICIT_PERCENTAGE_CAPTION_V1"},
-    "association": "WHOLE_CAPTION_OWNER_TYPED_INVALID_RETAINED_ALIAS_SPAN_OWNERSHIP_V2"})
+    "association": "WHOLE_CAPTION_OWNER_TYPED_INVALID_RETAINED_ALIAS_SPAN_OWNERSHIP_V2"}
+V2_ENTRY_SHA256 = canonical_hash(_V2_ENTRY_DESCRIPTOR)
+V2_SHA256 = canonical_hash({**_V2_ENTRY_DESCRIPTOR,
+    "decorators": {**_V2_ENTRY_DESCRIPTOR["decorators"], "monetary_roles": MONETARY_ROLES,
+        "currency_codes": CAPTION_CURRENCY_CODES, "currency_table_policy": "DECLARED_RIGHT_VALUE_SAME_CURRENCY_SCOPE"},
+    "native_monetary_pairs": "MEASURED_COMPOUND_SAME_ROLE_CONTRADICTION",
+    "structural_escalation": "UNPROVEN_PRINTED_SCOPE_WITHIN_PHYSICAL_CAPACITY"})
 
 
 def role_captions(field: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(str(value) for value in [field.get("label"),
         str(field.get("name", "")).replace("_", " "),
         *ROLE_CAPTIONS.get(field.get("name", ""), []), *field.get("aliases", [])] if value))
+
+
+def caption_currency_qualifier(text: str) -> tuple[str, str] | None:
+    """Split a declared currency code from a caption with no value delimiter."""
+    match = re.fullmatch(r"(.+?)(?:\s+([A-Za-z]{3})|\s*\(\s*([A-Za-z]{3})\s*\))", text.strip())
+    if match is None:
+        return None
+    caption, code = match[1].rstrip(), (match[2] or match[3]).upper()
+    if caption.endswith((":", "=")) or code not in CAPTION_CURRENCY_CODES:
+        return None
+    return caption, code
 
 
 def caption_role(text: str) -> str | None:
@@ -58,6 +77,11 @@ def caption_role(text: str) -> str | None:
     key = label_key(text.rstrip(" :="))
     roles = {role for role, labels in ROLE_CAPTIONS.items()
         if key in {label_key(label) for label in labels}}
+    qualifier = caption_currency_qualifier(text)
+    if qualifier:
+        base, _ = qualifier
+        roles.update(role for role in MONETARY_ROLES
+            if label_key(base) in {label_key(label) for label in ROLE_CAPTIONS[role]})
     # A percentage printed with a tax caption describes that caption, not money.
     tax = re.fullmatch(r"(.+?)\s*\(?\s*\d+(?:[.,]\d+)?\s*%\s*\)?", text.strip().rstrip(":="))
     if tax and label_key(tax[1]) in {label_key(label) for label in ROLE_CAPTIONS["tax"]}:

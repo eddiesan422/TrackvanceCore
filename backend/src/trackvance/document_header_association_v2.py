@@ -12,7 +12,14 @@ from typing import Any
 
 from . import document_header_association as v1
 from .document_normalization import normalize_observation
-from .document_semantic_vocabulary import ROLE_CAPTIONS, caption_role, role_captions, section_role
+from .document_semantic_vocabulary import (
+    MONETARY_ROLES,
+    ROLE_CAPTIONS,
+    caption_currency_qualifier,
+    caption_role,
+    role_captions,
+    section_role,
+)
 
 VERSION = "DECLARED_HEADER_ASSOCIATION_V2"
 
@@ -135,7 +142,7 @@ def _suffix_candidates(text: str, field: dict[str, Any]) -> list[tuple[str, str,
     if field.get("logical_type") != "DECIMAL":
         return []
     wanted = _field_role(field)
-    if wanted not in {"subtotal", "tax", "total", "opening_balance", "closing_balance", "balance", "amount", "unit_price"}:
+    if wanted not in MONETARY_ROLES:
         return []
     all_roles = [label for labels in ROLE_CAPTIONS.values() for label in labels]
     result = []
@@ -260,6 +267,38 @@ def _target_owns_value(page: dict[str, Any], anchor: dict[str, Any], value: dict
     return False
 
 
+def _roles_with_competing_table_currencies(pages: list[dict[str, Any]]) -> set[str]:
+    currencies: dict[str, set[str]] = {}
+    for page in pages:
+        if "selection" in page:
+            continue
+        for table in page["tables"]:
+            if table.get("errors"):
+                continue
+            for cell in table["cells"]:
+                qualifier = caption_currency_qualifier(cell["text"])
+                role = caption_role(cell["text"]) if qualifier else None
+                if qualifier and role is not None and role in MONETARY_ROLES:
+                    currencies.setdefault(role, set()).add(qualifier[1])
+    return {role for role, codes in currencies.items() if len(codes) > 1}
+
+
+def _table_observations(page, rule, labels, headings):
+    yield from v1._table_observations(page, rule, labels, headings)
+    field = rule["field"]
+    role = _field_role(field)
+    if field["logical_type"] != "DECIMAL" or role not in MONETARY_ROLES or rule.get("direction") == "BELOW":
+        return
+    keys = {v1.label_key(label) for label in rule["labels"]}
+    codes = {str(symbol).upper() for symbol in field.get("currency_symbols", [])}
+    qualified = sorted({cell["text"] for table in page["tables"] if not table.get("errors") for cell in table["cells"]
+        if (item := caption_currency_qualifier(cell["text"])) and item[1] in codes
+        and v1.label_key(item[0]) in keys and caption_role(cell["text"]) == role})
+    if qualified:
+        observations = v1._table_observations(page, {**rule, "labels": qualified, "direction": "RIGHT"}, labels, headings)
+        yield from (item for item in observations if item[3] == "DECLARED_TABLE_RIGHT")
+
+
 def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, Any]]) -> tuple[dict[str, list[tuple]], dict[str, list[dict[str, Any]]]]:
     """Return mapper tuples plus source-bound positive/rejected relation traces.
 
@@ -269,6 +308,7 @@ def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, A
     """
     observations: dict[str, list[tuple]] = {field["name"]: [] for field in fields}
     associations: dict[str, list[dict[str, Any]]] = {field["name"]: [] for field in fields}
+    competing_currencies = _roles_with_competing_table_currencies(pages)
     for page in pages:
         if "selection" in page:
             continue  # Model-reported anchors are not independent source facts.
@@ -293,7 +333,7 @@ def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, A
                         continue
                     structural_rule = {key: value for key, value in rule.items() if key != "value_pattern"}
                     structural_rule["field"] = field
-                    for source in (_explicit_inline_observations, _suffix_observations, v1._block_observations, v1._table_observations):
+                    for source in (_explicit_inline_observations, _suffix_observations, v1._block_observations, _table_observations):
                         for raw, anchor, value, mechanism in source(page, structural_rule, labels, headings):
                             identity = (name, raw, anchor["id"], value["id"], mechanism)
                             if identity in seen:
@@ -312,6 +352,9 @@ def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, A
                                 _, status, reason = next(item for item in _suffix_candidates(anchor["text"], field) if item[0] == raw)
                             elif "INLINE" in mechanism:
                                 status, reason = _inline_status(anchor["text"], raw, rule["labels"], field)
+                            elif (mechanism == "DECLARED_TABLE_RIGHT" and _field_role(field) in competing_currencies
+                                    and caption_currency_qualifier(anchor["text"])):
+                                status, reason = "UNCERTAIN", "DECLARED_SOURCE_SCOPE_UNPROVEN"
                             elif caption_role(value["text"]) is not None:
                                 if _target_owns_value(page, anchor, value, field, mechanism):
                                     status, reason = "REJECTED", "TARGET_IS_ROLE_CAPTION"

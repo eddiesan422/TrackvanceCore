@@ -107,11 +107,10 @@ def replay_original(db, original, expected_extraction_id, reason, user, template
     from .document_semantic_general import assert_replay_binding
 
     current_template = owned(db, DocumentTemplate, original.template_id, user)
-    assert_replay_binding(current_template.definition, template.definition, configuration)
+    verification_upgrade = assert_replay_binding(current_template.definition, template.definition, configuration)
     attempt_context = {"replay": True, "original_attempt_id": events[-1]["attempt_id"]}
     upgrade = None
-    if ((current_template.definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V1"
-            and (template.definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"):
+    if verification_upgrade:
         events, bindings, upgrade = _semantic_verification_upgrade(db, original, events, current_template,
             template, configuration, job, user, reason)
         attempt_context["recognition_bindings"] = bindings
