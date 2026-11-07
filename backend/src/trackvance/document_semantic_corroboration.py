@@ -631,12 +631,14 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
     details, source_inventories, source_headers = {}, [], []
     native = None
     source_facts: list[dict[str, Any]] = []
+    unclassified_scope: list[dict[str, Any]] = []
     independent_qwen = [control for control in controls if _qwen_independent(control, context.get("recognition_events", []), definition)] if ir is not None else []
     if ir is not None and not global_issues:
         try:
             native = (_native_source_v2 if version2 else _native_source)(ir, context["recognition_events"])
             if native is not None:
-                inventories, facts = (_native_inventory_v2 if version2 else _native_inventory)(native, definition)
+                inventories, facts = (_native_inventory_v2(native, definition, unclassified_scope=unclassified_scope)
+                    if version2 else _native_inventory(native, definition))
                 source_inventories.append(inventories)
                 source_headers.append((native["identity"], facts))
                 if version2:
@@ -645,7 +647,8 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
             # contract contains source/configuration, never Qwen proposals.
             for control in controls:
                 if control["identity"]["mechanism"] == "PADDLE":
-                    inventories, facts = (_paddle_inventory_v2 if version2 else _paddle_inventory)(ir, control, definition)
+                    inventories, facts = (_paddle_inventory_v2(ir, control, definition, unclassified_scope=unclassified_scope)
+                        if version2 else _paddle_inventory(ir, control, definition))
                     source_inventories.append(inventories)
                     source_headers.append((control["identity"], facts))
                     if version2:
@@ -882,7 +885,8 @@ def certify_semantic_candidate(data, definition, source_sha256, *, source_contex
         "recognition_sources": [control["identity"] for control in controls], "source_context": context,
         "automatic_candidate": {"payload": copy.deepcopy(payload), "engine": _baseline_engine(engine)}}
     if version2:
-        _complete_source_checks_v2(proof, data, definition, native, source_inventories, source_facts, ir)
+        _complete_source_checks_v2(proof, data, definition, native, source_inventories, source_facts, ir,
+            unclassified_scope=unclassified_scope)
     proof["attestation_sha256"] = canonical_hash(proof)
     check()
     return proof
@@ -1219,7 +1223,7 @@ def _retain_native_header_conflicts_v2(source, pages, definition, observations, 
                 facts.extend(_compound_native_monetary_conflicts_v2(band, page, field, fact))
 
 
-def _native_inventory_v2(source, definition):
+def _native_inventory_v2(source, definition, *, unclassified_scope=None):
     inventories: dict[str, Any] = {table["name"]: {"rows": [], "headers": [], "issues": [], "source": source["identity"],
         "scope_refs": [], "complete": False} for table in definition["tables"]}
     source_facts = _native_facts_v2(source)
@@ -1277,7 +1281,7 @@ def _native_inventory_v2(source, definition):
                     continue
                 columns[mapping[located[0]]].append(word)
             values = {name: " ".join(word["text"] for word in words) for name, words in columns.items()}
-            if len(columns) < 2 and len(segments) == 1 and band["region"][1] >= .85 and is_physical_page_counter(
+            if len(segments) == 1 and band["region"][1] >= .85 and is_physical_page_counter(
                     band["text"], page["page"], len(source["expected_pages"])):
                 inventory.setdefault("ignored_page_counters", []).append({"source_ref": ref,
                     "literal": band["text"], "basis": "MEASURED_FOOTER_EXACT_RECEIVED_PAGE_COUNTER_V1"})
@@ -1322,6 +1326,8 @@ def _native_inventory_v2(source, definition):
     _scope_table_associations_v2(observations, consumed, uncertain)
     unclassified = _unclassified_scope_v2(source_facts, consumed | _positive_header_refs_v2(observations, definition),
         definition, len(source["expected_pages"]))
+    if unclassified_scope is not None:
+        unclassified_scope.extend(copy.deepcopy(unclassified))
     for inventory in inventories.values():
         if not source["complete"]:
             inventory["issues"].append("SOURCE_SCOPE_INCOMPLETE")
@@ -1336,7 +1342,7 @@ def _native_inventory_v2(source, definition):
     return inventories, observations
 
 
-def _paddle_inventory_v2(ir, control, definition):
+def _paddle_inventory_v2(ir, control, definition, *, unclassified_scope=None):
     identity = control["identity"]
     pages = [page for page in ir["pages"] if page["stage"] == identity["stage"]]
     facts = _paddle_facts_v2(ir, control)
@@ -1424,6 +1430,8 @@ def _paddle_inventory_v2(ir, control, definition):
     _scope_table_associations_v2(observations, consumed, uncertain)
     unclassified = _unclassified_scope_v2(facts, consumed | _positive_header_refs_v2(observations, definition),
         definition, ir["expected_pages"])
+    if unclassified_scope is not None:
+        unclassified_scope.extend(copy.deepcopy(unclassified))
     for inventory in inventories.values():
         if unclassified:
             inventory["issues"].append("UNCLASSIFIED_SOURCE_SCOPE")
@@ -1433,7 +1441,7 @@ def _paddle_inventory_v2(ir, control, definition):
     return inventories, observations
 
 
-def _complete_source_checks_v2(proof, data, definition, native, inventories, facts, ir):
+def _complete_source_checks_v2(proof, data, definition, native, inventories, facts, ir, *, unclassified_scope=None):
     from .document_printed_pagination import assess_documentary_pagination
 
     physical = list(range(1, (ir or {}).get("expected_pages", 0) + 1))
@@ -1441,11 +1449,15 @@ def _complete_source_checks_v2(proof, data, definition, native, inventories, fac
     integrity_issues = list(proof["global_issues"])
     pagination = assess_documentary_pagination(facts, physical_pages=physical, processed_pages=processed)
     documentary_issues = list(pagination["reasons"]) if pagination.get("blocking") else []
+    unclassified = list({canonical_hash(reference): reference for reference in unclassified_scope or []}.values())
+    # An unexplained region is a remaining source control, not corrupt source
+    # evidence. Keep it actionable for the existing independent-reader planner.
+    scope_issues = ["UNCLASSIFIED_SOURCE_SCOPE"] if unclassified else []
     contradictions = [issue for issue in proof["issues"] if issue.startswith(("DOCUMENTARY_SOURCE_CONTRADICTION:", "SOURCE_INVENTORY_CONTRADICTION:"))]
     # A confirmation flag cannot repair a missing documentary page or a proved
     # disagreement in the source. Integrity remains a separate factual check.
     proof["global_issues"] = sorted({*integrity_issues, *documentary_issues, *contradictions})
-    proof["issues"] = sorted({*proof["issues"], *documentary_issues, *contradictions})
+    proof["issues"] = sorted({*proof["issues"], *documentary_issues, *contradictions, *scope_issues})
     available = {fact["page"] for fact in facts}
     incomplete = set(native.get("incomplete_scope_pages", [])) if native is not None else set()
     paddle_pages = {fact["page"] for fact in facts if fact["ref"].get("mechanism") == "PADDLE"}
@@ -1469,10 +1481,11 @@ def _complete_source_checks_v2(proof, data, definition, native, inventories, fac
         for field in definition["fields"] if field.get("required", True))
     unproved_scope = any(reason in {"TEXT_SCOPE_UNVERIFIED", "NARRATIVE_SEMANTICS_UNVERIFIED"}
         for value in proof["corroboration"].values() for reason in value["reasons"])
-    complete = bool(execution_complete and not missing_text and not documentary_issues and not pending and required_present and not unproved_scope)
+    complete = bool(execution_complete and not missing_text and not documentary_issues and not scope_issues
+        and not pending and required_present and not unproved_scope)
     document_status = ("INCOMPLETE" if pagination["status"] == "INCOMPLETE" else "CONFLICT"
         if pagination["status"] == "CONFLICT" or contradictions else "VERIFIED" if complete else "PENDING")
-    source_reasons = list(dict.fromkeys([*integrity_issues, *documentary_issues,
+    source_reasons = list(dict.fromkeys([*integrity_issues, *documentary_issues, *scope_issues,
         *(["SOURCE_SCOPE_INCOMPLETE"] if missing_text else []),
         *(code for detail in proof["coverage_details"].values() for code in detail["reasons"])]))
     proof["verification_contract_sha256"] = definition["semantic_general"]["verification_contract_sha256"]
@@ -1492,6 +1505,11 @@ def _complete_source_checks_v2(proof, data, definition, native, inventories, fac
             "reasons": source_reasons},
         "automatic_eligibility": {"status": "BLOCKED" if proof["issues"] else "ELIGIBLE", "reasons": list(proof["issues"])},
     }
+    if unclassified:
+        # Do not add empty fields to existing unaffected V2 attestations:
+        # their canonical regeneration remains byte-for-byte compatible.
+        proof["source_checks"]["unclassified_scope"] = {"status": "PENDING", "count": len(unclassified),
+            "source_refs": copy.deepcopy(unclassified), "reasons": ["UNCLASSIFIED_SOURCE_SCOPE"]}
     proof["source_inventory_version"] = "MEASURED_SOURCE_TABLE_OCCURRENCES_V2"
 
 

@@ -378,6 +378,11 @@ def semantic_quality_report(extraction, definition, *, ignore_incomplete=False, 
             and (proof.get("source_checks", {}).get("text", {}).get("status") != "AVAILABLE"
                 or proof.get("source_checks", {}).get("text", {}).get("missing_pages"))):
         findings.append("SOURCE_SCOPE_INCOMPLETE")
+    if ((definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"
+            and "UNCLASSIFIED_SOURCE_SCOPE" in proof.get("issues", [])):
+        # Preserve individually corroborated cells while withholding approval
+        # for a relevant source region outside the classified contract scope.
+        findings.append("UNCLASSIFIED_SOURCE_SCOPE")
     for path, cell, field in cells(payload, definition):
         total += 1
         human = bool(extraction.reviewed and isinstance(cell, dict) and cell.get("reviewed") is True)
