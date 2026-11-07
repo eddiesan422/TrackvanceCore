@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 VERSION = "TRACKVANCE_IDP_EXECUTION_V1"
@@ -38,7 +38,7 @@ def request_hash(route, body):
 
 
 def utc(value):
-    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    return datetime.fromtimestamp(value, UTC).isoformat()
 
 
 class RequestJournal:
@@ -183,6 +183,7 @@ class RequestJournal:
                     record.update(status="INTERRUPTED", stage="TERMINAL", finished_at=utc(self.clock()),
                                   resources_released=False, error_code="GATEWAY_INTERRUPTED")
                     self._save(record)
+                if record.get("resources_released") is not True:
                     self._quarantine()
         if len(self.records) > MAX_RECORDS:
             raise ValueError("REQUEST_JOURNAL_LIMIT")
@@ -218,6 +219,9 @@ class RequestJournal:
                 self.quarantined = True
 
     def _remove(self, record):
+        if record.get("status") not in TERMINAL or record.get("resources_released") is not True:
+            self._quarantine()
+            raise ValueError("REQUEST_JOURNAL_UNAVAILABLE")
         removed = set()
         for ref in [*record["page_refs"], *([record["result_ref"]] if record.get("result_ref") else [])]:
             if ref["file"] in removed:
@@ -236,8 +240,11 @@ class RequestJournal:
             if now < record["created_unix"]:
                 self._quarantine()
                 raise ValueError("REQUEST_JOURNAL_CLOCK")
-            if record["status"] in TERMINAL and now >= record["expires_unix"]:
-                self._remove(record)
+            if record["status"] in TERMINAL:
+                if record.get("resources_released") is not True:
+                    self._quarantine()
+                elif now >= record["expires_unix"]:
+                    self._remove(record)
 
     def _bound(self, extra=0):
         size = sum(sum(ref["bytes"] for ref in record["page_refs"])
@@ -354,7 +361,7 @@ class RequestJournal:
                 record["expected_pages"] = recognition_terminal.get("expected_pages")
             self._save(record)
             self.records[identity] = record
-            if released is False:
+            if released is not True:
                 self._quarantine()
             return self.public(record)
 
