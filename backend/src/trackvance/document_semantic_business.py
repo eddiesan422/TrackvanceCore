@@ -10,9 +10,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .document_invoice_schemas import InvoiceControls
 from .document_normalization import canonical_hash
 
 VERSION: Literal["SEMANTIC_INVOICE_CONTROLS_V1"] = "SEMANTIC_INVOICE_CONTROLS_V1"
+VERSION_V2 = "SEMANTIC_INVOICE_CONTROLS_V2"
 Identifier = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,62}$")]
 
 
@@ -43,7 +45,18 @@ class SemanticInvoiceControls(BaseModel):
         return self
 
 
+class SemanticInvoiceControlsV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    version: Literal["SEMANTIC_INVOICE_CONTROLS_V2"]
+    scope: Literal["FULL_DECLARED_INVOICE_WITH_ADJUSTMENTS"]
+    applicability: Literal["ALL_DECLARED_ROLES_PRINTED"]
+    invoice_controls: InvoiceControls
+
+
 def projection(controls):
+    raw = controls.model_dump(mode="json") if isinstance(controls, BaseModel) else controls
+    if isinstance(raw, dict) and raw.get("version") == VERSION_V2:
+        return SemanticInvoiceControlsV2.model_validate(raw).model_dump(mode="json"), [], []
     value = SemanticInvoiceControls.model_validate(controls).model_dump(mode="json")
     arithmetic = [{"name": "semantic_invoice_subtotal_tax_total_v1", "table": None,
         "operation": "SUM", "terms": [value["subtotal"], value["tax"]], "subtract": [],
@@ -86,6 +99,12 @@ def validate_business_metadata(definition):
             or metadata.get("contract", {}).get("document_type") != "INVOICE"
             or metadata.get("business_controls_sha256") != canonical_hash(value)):
         raise ValueError("Invoice business controls require their versioned semantic AUTO contract and hash.")
+    if value["version"] == VERSION_V2:
+        if (metadata.get("automatic_verification") != "SEMANTIC_AUTO_V2" or definition.invoice_controls is None
+                or definition.invoice_controls.model_dump(mode="json") != value["invoice_controls"]
+                or definition.arithmetic or definition.cross_totals):
+            raise ValueError("Complete invoice controls require their exact native declaration and semantic AUTO V2.")
+        return
     table = next((item for item in definition.tables if item.name == value["table"]), None)
     headers = {field.name: field for field in definition.fields}
     rows = {field.name: field for field in table.fields} if table is not None else {}
@@ -114,6 +133,9 @@ def business_report(payload, definition, *, verified_paths, table_coverage):
     if controls is None:
         return {"version": VERSION, "required": True, "applicable": False, "checks": [],
             "issues": ["QUALITY_BUSINESS_SCOPE_REQUIRED"]}
+    raw = controls.model_dump(mode="json") if isinstance(controls, BaseModel) else controls
+    if isinstance(raw, dict) and raw.get("version") == VERSION_V2:
+        return _complete_invoice_report(payload, definition, raw, verified_paths, table_coverage)
     try:
         value, expected_arithmetic, expected_totals = projection(controls)
         if metadata.get("business_controls_sha256") != canonical_hash(value):
@@ -161,3 +183,45 @@ def business_report(payload, definition, *, verified_paths, table_coverage):
     return {"version": VERSION, "required": True, "scope": value["scope"],
         "controls_sha256": canonical_hash(value), "applicable": bool(checks) and all(check["source_inputs_verified"] for check in checks),
         "checks": checks, "issues": findings}
+
+
+def _complete_invoice_report(payload, definition, controls, verified_paths, table_coverage):
+    """The native invoice calculator cannot establish any of its source inputs."""
+    from .document_invoice_controls import invoice_checks, validated_invoice_controls
+
+    metadata = definition.get("semantic_general") or {}
+    try:
+        value, _, _ = projection(controls)
+        if (metadata.get("automatic_verification") != "SEMANTIC_AUTO_V2"
+                or metadata.get("business_controls_sha256") != canonical_hash(value)
+                or definition.get("invoice_controls") != value["invoice_controls"]
+                or definition.get("arithmetic") or definition.get("cross_totals")):
+            raise ValueError("BUSINESS_CONTROL_PROJECTION")
+        control = validated_invoice_controls(definition)
+        if control is None:
+            raise ValueError("BUSINESS_CONTROL_ROLES")
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return {"version": VERSION_V2, "required": True, "applicable": False, "checks": [],
+            "issues": ["QUALITY_BUSINESS_CONTRACT_REQUIRED"]}
+    raw_rows = payload.get("tables", {}).get(control.table, [])
+    rows = raw_rows if isinstance(raw_rows, list) else []
+    required = {"headers.0." + name for name in control.headers.bound_names()}
+    required.update(f"{control.table}.{index}.{name}"
+        for index in range(len(rows)) for name in control.row_names())
+    cells = [payload.get("fields", {}).get(name) for name in control.headers.bound_names()]
+    cells.extend(row.get(name) if isinstance(row, dict) else None for row in rows for name in control.row_names())
+    source_ready = bool(rows and table_coverage.get(control.table) is True
+        and payload.get("table_unparsed", {}).get(control.table) == [] and required <= verified_paths
+        and all(isinstance(cell, dict) and cell.get("validity") == "VALID" and cell.get("value") is not None
+            for cell in cells))
+    checks, issues = [], []
+    for check in invoice_checks(payload, definition):
+        status = check["status"] if source_ready and check["status"] in {"VALID", "DISCREPANCY"} else "UNVERIFIED"
+        checks.append({**check, "computed_status": check["status"], "source_inputs_verified": source_ready, "status": status})
+        if status != "VALID":
+            issues.append("QUALITY_BUSINESS_" + status + ":" + check["name"] + ":" + str(check.get("row", "ALL")))
+    if not checks:
+        issues.append("QUALITY_BUSINESS_SOURCE_SCOPE_UNVERIFIED")
+    return {"version": VERSION_V2, "required": True, "scope": value["scope"],
+        "controls_sha256": canonical_hash(value), "applicable": bool(checks) and source_ready,
+        "checks": checks, "issues": issues}

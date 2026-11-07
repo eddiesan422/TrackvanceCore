@@ -19,6 +19,7 @@ from itertools import pairwise
 from typing import Any, cast
 
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
+from .document_printed_pagination import is_physical_page_counter
 from .document_representation import decode_artifact, representation_from_events, stable_id
 
 VALIDATOR_VERSION = "TRACKVANCE_SEMANTIC_EVIDENCE_098_V1"
@@ -218,7 +219,7 @@ def _authenticate(data, definition, source_sha256, context, check):
             if identity is None:
                 errors.append("SOURCE_REGISTRY_BINDING")
             else:
-                controls.append({"identity": identity, "payload": map_representation(ir, definition, stage=stage)})
+                controls.append({"identity": identity, "payload": map_representation(ir, definition, stage=stage, source_events=events)})
     except (KeyError, TypeError, ValueError, OverflowError):
         return None, [], sorted({*errors, "SOURCE_ARTIFACT_INTEGRITY"})
     return ir, controls, sorted(set(errors))
@@ -1126,7 +1127,7 @@ def _unclassified_scope_v2(facts, accounted, definition, expected_pages):
             continue
         region = fact.get("region")
         footer = bool(_box(region) and region[1] >= .85
-            and _page_marker(fact["text"], fact["page"], expected_pages))
+            and is_physical_page_counter(fact["text"], fact["page"], expected_pages))
         heading = bool(fact.get("block_role") in {"doc_title", "paragraph_title", "header"}
             and _key(fact["text"]) in headings)
         if not footer and not heading and fact["text"].strip():
@@ -1276,8 +1277,11 @@ def _native_inventory_v2(source, definition):
                     continue
                 columns[mapping[located[0]]].append(word)
             values = {name: " ".join(word["text"] for word in words) for name, words in columns.items()}
-            if len(columns) < 2 and len(segments) == 1 and band["region"][1] >= .85 and _page_marker(
+            if len(columns) < 2 and len(segments) == 1 and band["region"][1] >= .85 and is_physical_page_counter(
                     band["text"], page["page"], len(source["expected_pages"])):
+                inventory.setdefault("ignored_page_counters", []).append({"source_ref": ref,
+                    "literal": band["text"], "basis": "MEASURED_FOOTER_EXACT_RECEIVED_PAGE_COUNTER_V1"})
+                consumed.add(band["id"])
                 continue
             if len(columns) < 2:
                 inventory["issues"].append("UNPARSED_SOURCE_STRUCTURE")

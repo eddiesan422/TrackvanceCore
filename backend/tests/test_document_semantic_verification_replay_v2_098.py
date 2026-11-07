@@ -139,13 +139,15 @@ def test_upgrade_rejects_a_changed_acquisition_profile_without_registering_reuse
     assert counts(database) == sizes and calls == ["QWEN_VISUAL"]
 
 
-def test_entry_v2_replay_uses_saved_acquisition_under_current_v2(authenticated, database, monkeypatch):
+@pytest.mark.parametrize("source_assessment", ["ENTRY", "PRE_06B"])
+def test_entry_v2_replay_uses_saved_acquisition_under_current_v2(authenticated, database, monkeypatch, source_assessment):
     from trackvance import document_semantic_general as semantic
     from trackvance.document_semantic_corroboration import trusted_semantic_proof
-    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256
+    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256, V2_PRE_06B_SHA256
 
     current_descriptor = semantic.verification_contract_v2()
-    entry_descriptor = {**current_descriptor, "vocabulary_sha256": V2_ENTRY_SHA256}
+    entry_descriptor = {**current_descriptor,
+        "vocabulary_sha256": V2_ENTRY_SHA256 if source_assessment == "ENTRY" else V2_PRE_06B_SHA256}
     assert entry_descriptor != current_descriptor
     with monkeypatch.context() as entry:
         entry.setattr(semantic, "verification_contract_v2", lambda: entry_descriptor)
@@ -190,10 +192,11 @@ def test_entry_v2_replay_uses_saved_acquisition_under_current_v2(authenticated, 
 
 @pytest.mark.parametrize("changed", ["old_hash", "old_descriptor", "new_hash", "new_descriptor",
     "profile", "fields", "tables", "route", "business", "configuration", "downgrade"])
-def test_entry_v2_replay_rejects_an_unbound_transition(monkeypatch, changed):
+@pytest.mark.parametrize("source_assessment", ["ENTRY", "PRE_06B"])
+def test_entry_v2_replay_rejects_an_unbound_transition(monkeypatch, changed, source_assessment):
     from trackvance import document_semantic_general as semantic
     from trackvance.document_normalization import canonical_hash
-    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256
+    from trackvance.document_semantic_vocabulary import V2_ENTRY_SHA256, V2_PRE_06B_SHA256
     from trackvance.operations_common import OperationError
 
     monkeypatch.setenv("TRACKVANCE_SEMANTIC_GENERAL_ENABLED", "true")
@@ -201,7 +204,8 @@ def test_entry_v2_replay_rejects_an_unbound_transition(monkeypatch, changed):
     target = semantic.compile_profile(profile(), automatic_verification=semantic.AUTO_VERSION_V2)
     original = copy.deepcopy(target)
     before, after = original["semantic_general"], target["semantic_general"]
-    before["verification_contract"]["vocabulary_sha256"] = V2_ENTRY_SHA256
+    before["verification_contract"]["vocabulary_sha256"] = (
+        V2_ENTRY_SHA256 if source_assessment == "ENTRY" else V2_PRE_06B_SHA256)
     before["verification_contract_sha256"] = canonical_hash(before["verification_contract"])
     configuration = semantic.configuration_for(target, {})
     if changed == "old_hash":

@@ -29,6 +29,33 @@ beforeEach(() => {
 })
 
 describe('General extraction within the existing document module', () => {
+  it('opens only semantic exceptions and preserves source row indices when completed rows are hidden', async () => {
+    const user = userEvent.setup()
+    const valid = { observed: '12.50', value: '12.50', validity: 'VALID', reviewed: false, origin: { page: 1, method: 'QWEN_VISUAL' } }
+    const original = { id: 'exceptions-original', family_id: family.id, filename: 'exceptions.pdf', status: 'REVIEW_REQUIRED',
+      template_id: 'semantic-contract', publications: [], revisions: [], issues: ['REVIEW_REQUIRED:items.1.amount'],
+      template: { definition: { fields: [{ name: 'reference', logical_type: 'STRING' }], tables: [{ name: 'items', fields: [{ name: 'amount', logical_type: 'DECIMAL' }] }],
+        semantic_general: { mode: 'SEMANTIC_GENERAL_V1' } } },
+      semantic_review: { values: [{ path: 'headers.0.reference', review_required: false }, { path: 'items.0.amount', review_required: false }, { path: 'items.1.amount', review_required: true }],
+        tables: [{ name: 'items', review_required: false, coverage_state: 'AUTOMATICALLY_VERIFIED' }] },
+      extraction: { id: 'exceptions-extraction', revision: 1, payload: { fields: { reference: { ...valid, value: 'source-reference' } },
+        tables: { items: [{ amount: valid }, { amount: { ...valid, value: '17.50' } }] }, pages: [1] } } }
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async (path, options) => path === '/documents/originals/exceptions-original' ? original : baseApi(path, options))
+    renderApp(<Documents/>, { path: '/documents/families/general-family?document=exceptions-original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    expect(await screen.findByLabelText('Valor items.1.amount')).toHaveValue('17.50')
+    expect(screen.getByLabelText('Mostrar sólo excepciones del validador')).toBeChecked()
+    expect(screen.queryByLabelText('Valor headers.0.reference')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Valor items.0.amount')).not.toBeInTheDocument()
+    expect(screen.queryByText('Fila 1', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText('Fila 2', { exact: true })).toBeVisible()
+    expect(screen.getAllByRole('checkbox', { name: 'Confirmar valor' })).toHaveLength(1)
+    await user.click(screen.getByLabelText('Mostrar sólo excepciones del validador'))
+    expect(screen.getByLabelText('Valor headers.0.reference')).toBeVisible()
+    expect(screen.getByLabelText('Valor items.0.amount')).toBeVisible()
+    expect(screen.getAllByRole('checkbox', { name: 'Confirmar valor' })).toHaveLength(1)
+  })
+
   it.each([false, true])('keeps legacy visual configuration and the native pipeline visible when semantic capability enabled=%s', async capability => {
     enabled = capability
     family = { ...family, active_template_id: 'legacy-template', output_datasets: { headers: 'legacy-output' }, templates: [{ id: 'legacy-template', revision: 1, sha256: 'legacy-hash', definition: { fields: profile.fields, tables: [] } }] }

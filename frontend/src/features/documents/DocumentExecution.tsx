@@ -11,13 +11,14 @@ const verificationPhases: Record<string, string> = { AUTOMATIC_VERIFICATION: 'Co
 export default function DocumentExecution({ document: item, compact = false }: { document: RecordData; compact?: boolean }) {
   const snapshot = item.verification_configuration || item.engine_snapshot
   const semantic = item.template?.definition?.semantic_general || item.semantic_general
-  const quality = item.quality
+  const quality = ['QUEUED', 'RUNNING'].includes(item.status) ? undefined : item.quality
   const resources = item.extraction?.engine?.resources
   const execution = item.execution
   const stage = execution?.stage || item.phase
   const expected = execution?.expected_pages
   const emitted = execution?.emitted_pages
   const pending = execution?.pending_pages
+  const completed = execution?.completed_pages
   const partial = item.incomplete_inference?.status === 'PARTIAL' || execution?.recognition_complete === false
   const verification = ['QUEUED', 'RUNNING'].includes(item.status) ? execution?.verification : item.extraction?.engine?.verification || execution?.verification
   const semanticReview = ['QUEUED', 'RUNNING'].includes(item.status) ? undefined : item.semantic_review
@@ -29,10 +30,11 @@ export default function DocumentExecution({ document: item, compact = false }: {
     {!compact && item.verification_configuration && <small>Configuración de esta verificación; el motor original conserva su snapshot anterior.</small>}
     <DocumentVerification verification={verification} semanticReview={semanticReview} compact={compact}/>
     {Array.isArray(expected) && Array.isArray(emitted) && <span>Páginas conservadas: {emitted.length}/{expected.length}{Array.isArray(pending) && pending.length > 0 ? ` · pendientes: ${pending.join(', ')}` : ''}</span>}
+    {!compact && Array.isArray(completed) && <span>Páginas completadas: {completed.length ? completed.join(', ') : 'ninguna'}</span>}
     {!compact && typeof execution?.resources_released === 'boolean' && <span>Recursos de ejecución: {execution.resources_released ? 'liberados' : 'pendientes de liberar'}</span>}
     {!compact && execution && <><span>Reconocimiento: {execution.recognition_complete === true ? 'terminado' : 'incompleto o pendiente'}</span><span>Validación: {execution.validation_complete === true ? 'terminada' : 'pendiente'}</span><span>Publicación: {execution.publication_complete === true ? 'realizada' : 'no realizada'}</span>{execution.attempt_id && <small>Intento: {execution.attempt_id}</small>}</>}
     {snapshot && <><span>Motor: {snapshot.provider}</span><span>Estrategia: {extractionStrategies[snapshot.extraction_strategy || 'LEGACY'] || snapshot.extraction_strategy}</span>{!compact && <>{snapshot.provider === 'PADDLE_QWEN_LOCAL' && <><span>Paddle: {snapshot.paddle_model || 'No aplica'}</span><span>Qwen: {snapshot.llm_model || 'No aplica'}</span></>}<small>Configuración congelada · versión {snapshot.configuration_version} · {snapshot.snapshot_sha256}</small></>}</>}
-    {quality?.status && <Badge value={partial ? 'REVIEW_REQUIRED' : ['AUTO_VERIFIED', 'HUMAN_VERIFIED'].includes(quality.status) ? 'VALID' : quality.status}>{partial ? 'Requiere revisión' : quality.status === 'AUTO_VERIFIED' ? 'Aprobación automática verificada' : quality.status === 'HUMAN_VERIFIED' ? 'Revisión humana verificada' : 'Requiere revisión'}</Badge>}
+    {quality?.status && <Badge value={partial ? 'REVIEW_REQUIRED' : ['AUTO_VERIFIED', 'HUMAN_VERIFIED'].includes(quality.status) ? 'VALID' : quality.status}>{partial ? 'Requiere revisión' : quality.status === 'AUTO_VERIFIED' ? 'Aprobación automática verificada' : quality.status === 'HUMAN_VERIFIED' ? 'Revisión autorizada verificada' : 'Requiere revisión'}</Badge>}
     {!compact && !partial && quality?.status === 'AUTO_VERIFIED' && <small>Controles del validador {quality.validator_version}. La aprobación automática conserva la distinción con la revisión humana.</small>}
     {!compact && quality?.checks && Object.keys(quality.checks).length > 0 && <details className="document-validation-checks"><summary>Controles independientes</summary><ul>{Object.entries(quality.checks).map(([name, result]) => <li key={name}>{checks[name] || name}: {result === true ? 'Satisfactorio' : result === false ? 'Pendiente o no demostrado' : 'Sin resultado verificable'}</li>)}</ul></details>}
     {!compact && typeof resources?.elapsed_seconds === 'number' && Number.isFinite(resources.elapsed_seconds) && <small>Tiempo de extracción observado: {resources.elapsed_seconds.toLocaleString('es-CO', { maximumFractionDigits: 2 })} segundos.</small>}

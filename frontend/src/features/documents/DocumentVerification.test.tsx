@@ -9,6 +9,23 @@ const verification = { policy_version: 'TRACKVANCE_AUTOMATIC_VERIFICATION_098_V1
   scope: { kind: 'WHOLE_DOCUMENT', pages: [1, 2] }, primary_reused: true, human_reviewed: false }
 
 describe('Automatic document verification visibility', () => {
+  it('binds deterministic reliability to current evidence and gives pending controls their exact row', () => {
+    const reliability = { version: 'SEMANTIC_RELIABILITY_V1', policy_sha256: 'policy-hash', calibration: { status: 'PENDING' },
+      binding: { payload_sha256: 'current-value-hash', definition_sha256: 'contract-hash', source_attestation_sha256: 'source-proof-hash' }, tables: [],
+      document: { status: 'REVIEW_REQUIRED', reasons: ['OBSERVATION_UNCERTAINTY:items.1.amount'], required_cells: 3, critical_cells: 1,
+        verified_cells: 2, reviewed_cells: 0, pending_cells: 1, gates: { business_rules: { status: 'PENDING', reasons: ['QUALITY_BUSINESS_UNVERIFIED'] } } } }
+    const { rerender } = renderApp(<DocumentVerification semanticReview={{ verification_version: 'SEMANTIC_AUTO_V2', reliability }}/>)
+    const panel = screen.getByLabelText('Fiabilidad de la revisión actual')
+    expect(within(panel).getByText(/Calibración estadística pendiente/)).toBeVisible()
+    expect(within(panel).getByText('Celdas corroboradas: 2 · revisadas de forma autorizada: 0 · pendientes: 1')).toBeVisible()
+    expect(within(panel).getByText(/items · fila 2 · amount/)).toBeVisible()
+    expect(within(panel).getByText('Reglas de negocio: pendientes de comprobar')).toBeVisible()
+    expect(within(panel).getByText('Revisión de valores: current-value-hash')).toBeInTheDocument()
+    expect(panel.textContent).not.toMatch(/\d\s*%|100 %|probabilidad/)
+    rerender(<DocumentVerification semanticReview={{ verification_version: 'SEMANTIC_AUTO_V1', reliability }}/>)
+    expect(screen.queryByLabelText('Fiabilidad de la revisión actual')).not.toBeInTheDocument()
+  })
+
   it('keeps conflicting complete independent inventories in review without attributing the discrepancy to the model', () => {
     renderApp(<DocumentVerification verification={{ ...verification, status: 'REVIEW_REQUIRED', reasons_before: [], remaining_reasons: [{ code: 'SOURCE_INVENTORY_CONTRADICTION', table: 'items' }] }}/>)
     expect(screen.getByText('Verificación terminada con excepciones')).toBeVisible()

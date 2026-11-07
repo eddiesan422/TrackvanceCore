@@ -32,6 +32,25 @@ _CONTINUATION = re.compile(
 )
 
 
+def is_physical_page_counter(text: str, page: int, count: int) -> bool:
+    """Recognize only a complete counter matching the received page sequence.
+
+    This lexical predicate grants no documentary completeness or table coverage.
+    Its inventory caller must independently require measured footer geometry.
+    Section counters, citations and extra text are not harmless footer markers.
+    """
+    if type(page) is not int or type(count) is not int or not 1 <= page <= count <= MAX_PRINTED_PAGES:
+        return False
+    text = text.strip()
+    counters = list(_COUNTER.finditer(text))
+    if len(counters) != 1:
+        return False
+    match = counters[0]
+    prefix, suffix = text[:match.start()].strip(), text[match.end():].strip()
+    return bool((not prefix or _DOCUMENT.fullmatch(prefix)) and re.fullmatch(r"[.\s]*", suffix)
+        and int(match[1]) == page and int(match[2]) == count)
+
+
 def _independent(fact: dict[str, Any]) -> bool:
     ref = fact.get("ref") or {}
     mechanism = str(ref.get("mechanism", fact.get("mechanism", ""))).upper()

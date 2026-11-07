@@ -41,7 +41,8 @@ describe('Observed document execution', () => {
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     expect(screen.getByText(/Configuración congelada · versión 4 · immutable-snapshot/)).toBeVisible()
     expect(screen.getByText(/Tiempo de extracción observado/)).toBeVisible()
-    expect(screen.queryByText('Revisión humana verificada')).not.toBeInTheDocument()
+    expect(screen.queryByText('Revisión autorizada verificada')).not.toBeInTheDocument()
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
   })
 
   it('does not infer approval or performance when observations are unavailable', () => {
@@ -52,7 +53,7 @@ describe('Observed document execution', () => {
 
   it('distinguishes independently validated human revisions from automatic approval', () => {
     renderApp(<DocumentExecution document={{ quality: { status: 'HUMAN_VERIFIED' } }}/>)
-    expect(screen.getByText('Revisión humana verificada')).toBeVisible()
+    expect(screen.getByText('Revisión autorizada verificada')).toBeVisible()
     expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
   })
 
@@ -64,9 +65,10 @@ describe('Observed document execution', () => {
   })
 
   it('shows emitted and pending pages independently from validation and publication', () => {
-    renderApp(<DocumentExecution document={{ status: 'RUNNING', progress: 95, phase: 'OCR', execution: { attempt_id: 'attempt-2', stage: 'QWEN_VISUAL', expected_pages: [1, 2, 3], emitted_pages: [1], pending_pages: [2, 3], recognition_complete: false, validation_complete: false, publication_complete: false, resources_released: false } }}/>)
+    renderApp(<DocumentExecution document={{ status: 'RUNNING', progress: 95, phase: 'OCR', execution: { attempt_id: 'attempt-2', stage: 'QWEN_VISUAL', expected_pages: [1, 2, 3], emitted_pages: [1], completed_pages: [], pending_pages: [2, 3], recognition_complete: false, validation_complete: false, publication_complete: false, resources_released: false } }}/>)
     expect(screen.getByText('Fase: Reconocimiento Qwen visual')).toBeVisible()
     expect(screen.getByText('Páginas conservadas: 1/3 · pendientes: 2, 3')).toBeVisible()
+    expect(screen.getByText('Páginas completadas: ninguna')).toBeVisible()
     expect(screen.getByText('Reconocimiento: incompleto o pendiente')).toBeVisible()
     expect(screen.getByText('Publicación: no realizada')).toBeVisible()
     expect(screen.getByText('Recursos de ejecución: pendientes de liberar')).toBeVisible()
@@ -75,7 +77,7 @@ describe('Observed document execution', () => {
 
   it('cannot present an old automatic approval while the current recognition is incomplete', () => {
     renderApp(<DocumentExecution document={{ status: 'RUNNING', quality: { status: 'AUTO_VERIFIED' }, execution: { stage: 'PADDLE', recognition_complete: false, expected_pages: [1, 2], emitted_pages: [1], pending_pages: [2] } }}/>)
-    expect(screen.getByText('Requiere revisión')).toBeVisible()
+    expect(screen.getByText('Reconocimiento: incompleto o pendiente')).toBeVisible()
     expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
   })
 })

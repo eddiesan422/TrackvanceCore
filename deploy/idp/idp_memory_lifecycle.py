@@ -4,15 +4,91 @@ from __future__ import annotations
 import http.client
 import io
 import math
+import os
 import queue
 import select
+import signal
 import socket
+import subprocess
 import threading
 import time
+from pathlib import Path
 
 
 class UnsafeLifecycle(ValueError):
     """Admission must remain quarantined until an operator proves recovery."""
+
+
+def _process_identity(pid):
+    try:
+        parts = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except FileNotFoundError:
+        return None
+    except (OSError, IndexError):
+        raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
+    return {"pid": pid, "state": parts[0], "pgid": int(parts[2]),
+            "sid": int(parts[3]), "start_token": parts[19]}
+
+
+def _owned_members(pid, start_token):
+    leader = _process_identity(pid)
+    if leader is not None and (start_token is None or leader["start_token"] != start_token
+                               or leader["pgid"] != pid or leader["sid"] != pid):
+        raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+    entries = list(Path("/proc").iterdir())
+    if len(entries) > 65536:
+        raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+    members = []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        member = _process_identity(int(entry.name))
+        if member is None or member["sid"] != pid or member["state"] in {"Z", "X"}:
+            continue
+        if start_token is None or int(member["start_token"]) < int(start_token):
+            raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+        members.append(member)
+    return members
+
+
+def process_group_quiescence(process, budget, *, start_token=None):
+    """Signal only pidfd-bound members of the recorded private child session."""
+    pid, signalled = process.pid, []
+    while True:
+        members = _owned_members(pid, start_token)
+        for member in members:
+            if budget.join_remaining() <= 0 or not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+                raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+            descriptor = None
+            try:
+                descriptor = os.pidfd_open(member["pid"])
+                current = _process_identity(member["pid"])
+                if current is None:
+                    continue
+                if any(current[key] != member[key] for key in ("pid", "pgid", "sid", "start_token")):
+                    raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                signalled.append({key: member[key] for key in ("pid", "pgid", "sid", "start_token")})
+                if len(signalled) > 512:
+                    raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+            except ProcessLookupError:
+                pass
+            except OSError:
+                raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+        try:
+            process.wait(timeout=budget.join_remaining())
+        except subprocess.TimeoutExpired:
+            raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
+        if not _owned_members(pid, start_token):
+            return {"status": "NO_LIVE_OWNED_SESSION_MEMBERS", "pgid": pid, "sid": pid,
+                    "leader_start_token": start_token, "signalled_members": signalled,
+                    "parent_returncode": process.returncode}
+        if budget.join_remaining() <= 0:
+            raise UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
+        time.sleep(min(.02, budget.join_remaining()))
 
 
 class Budget:

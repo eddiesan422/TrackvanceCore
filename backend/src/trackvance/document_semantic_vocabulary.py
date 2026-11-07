@@ -51,12 +51,23 @@ V2_SHA256 = canonical_hash({**_V2_ENTRY_DESCRIPTOR,
         "currency_codes": CAPTION_CURRENCY_CODES, "currency_table_policy": "DECLARED_RIGHT_VALUE_SAME_CURRENCY_SCOPE"},
     "native_monetary_pairs": "MEASURED_COMPOUND_SAME_ROLE_CONTRADICTION",
     "structural_escalation": "UNPROVEN_PRINTED_SCOPE_WITHIN_PHYSICAL_CAPACITY"})
+V2_PRE_06B_SHA256 = V2_SHA256
+ROLE_CAPTION_EXTENSIONS = {
+    "total": ["total a cobrar", "importe a cobrar", "total to collect"],
+    "account": ["identificación de cuenta", "identificacion de cuenta", "account identification"],
+    "holder": ["titular registrado", "registered holder"],
+}
+V2_SHA256 = canonical_hash({"previous_assessment_sha256": V2_PRE_06B_SHA256,
+    "caption_extensions": ROLE_CAPTION_EXTENSIONS,
+    "html_value_relation": "SINGLE_CAPTION_SINGLE_VALUE_ACROSS_EXPLICIT_EMPTY_CELLS_V1",
+    "native_page_counter": "MEASURED_FOOTER_EXACT_RECEIVED_PAGE_COUNTER_V1"})
 
 
 def role_captions(field: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(str(value) for value in [field.get("label"),
         str(field.get("name", "")).replace("_", " "),
-        *ROLE_CAPTIONS.get(field.get("name", ""), []), *field.get("aliases", [])] if value))
+        *ROLE_CAPTIONS.get(field.get("name", ""), []),
+        *ROLE_CAPTION_EXTENSIONS.get(field.get("name", ""), []), *field.get("aliases", [])] if value))
 
 
 def caption_currency_qualifier(text: str) -> tuple[str, str] | None:
@@ -76,12 +87,12 @@ def caption_role(text: str) -> str | None:
         return None  # Invalid value punctuation must not disappear as a caption.
     key = label_key(text.rstrip(" :="))
     roles = {role for role, labels in ROLE_CAPTIONS.items()
-        if key in {label_key(label) for label in labels}}
+        if key in {label_key(label) for label in [*labels, *ROLE_CAPTION_EXTENSIONS.get(role, [])]}}
     qualifier = caption_currency_qualifier(text)
     if qualifier:
         base, _ = qualifier
         roles.update(role for role in MONETARY_ROLES
-            if label_key(base) in {label_key(label) for label in ROLE_CAPTIONS[role]})
+            if label_key(base) in {label_key(label) for label in [*ROLE_CAPTIONS[role], *ROLE_CAPTION_EXTENSIONS.get(role, [])]})
     # A percentage printed with a tax caption describes that caption, not money.
     tax = re.fullmatch(r"(.+?)\s*\(?\s*\d+(?:[.,]\d+)?\s*%\s*\)?", text.strip().rstrip(":="))
     if tax and label_key(tax[1]) in {label_key(label) for label in ROLE_CAPTIONS["tax"]}:

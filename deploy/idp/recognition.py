@@ -11,7 +11,6 @@ import http.client
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import tempfile
@@ -298,16 +297,24 @@ class Session:
         raw = canonical(event) + b"\n"
         if len(raw) > MAX_EVENT or self.total + len(raw) > MAX_STREAM:
             raise ValueError("PADDLE_RESULT_LIMIT")
-        self.handler.connection.settimeout(min(1.0, max(.01, self.budget.join_remaining())))
-        if not self.started:
-            self.handler.send_response(200)
-            self.handler.send_header("Content-Type", "application/x-ndjson")
-            self.handler.send_header("Connection", "close")
-            self.handler.end_headers()
-            self.handler.close_connection = True
-            self.handler.recognition_stream_started = self.started = True
-        self.handler.wfile.write(raw)
-        self.handler.wfile.flush()
+        if event["kind"] == "PAGE" and "request_checkpoint" in self.api:
+            if "request_update" in self.api:
+                self.api["request_update"](self.identity, expected_pages=event["expected_pages"])
+            complete = event["stage"] == "PADDLE_STRUCTURED" or event["payload"].get("recognition_status") == "COMPLETE"
+            self.api["request_checkpoint"](self.identity, event, page=event["page_one_based"], kind="RECOGNITION_PAGE", complete=complete)
+        try:
+            self.handler.connection.settimeout(min(1.0, max(.01, self.budget.join_remaining())))
+            if not self.started:
+                self.handler.send_response(200)
+                self.handler.send_header("Content-Type", "application/x-ndjson")
+                self.handler.send_header("Connection", "close")
+                self.handler.end_headers()
+                self.handler.close_connection = True
+                self.handler.recognition_stream_started = self.started = True
+            self.handler.wfile.write(raw)
+            self.handler.wfile.flush()
+        except OSError:
+            raise ValueError("CLIENT_DISCONNECTED") from None
         self.sequence, self.total = event["sequence"], self.total + len(raw)
         return event
 
@@ -315,6 +322,8 @@ class Session:
         return self.write(self.event(kind, payload, stage=stage, page=page))
 
     def phase(self, value, page=None, child_elapsed=None):
+        if "request_phase" in self.api:
+            self.api["request_phase"](self.identity, value, page=page, expected=self.expected)
         self.api["STATES"][self.identity] = {"phase": value, "page_one_based": page,
             "expected_pages": self.expected, "emitted_pages": list(self.pages)}
         payload = {"phase": value, "remaining_work_seconds": self.budget.remaining()}
@@ -347,6 +356,7 @@ class Session:
         process = None
         consumed = 0
         failure = None
+        owned_child = None
         observed_phase = None
         folder_identity = self.api["DIAGNOSTICS"].identity(folder.lstat())
         try:
@@ -357,6 +367,9 @@ class Session:
             if operation == "STRUCTURED":
                 self.handler.paddle_attempted = True
             self.api["ACTIVE"][self.identity] = process
+            owned_child = self.api["child_identity"](process) if "child_identity" in self.api else None
+            if "request_update" in self.api:
+                self.api["request_update"](self.identity, child=owned_child)
             while True:
                 if self.identity in self.api["CANCELLED"]:
                     raise ValueError("CANCELLED")
@@ -395,16 +408,19 @@ class Session:
             raise
         finally:
             if process is not None:
-                if process.poll() is None:
+                group = None
+                if owned_child is not None:
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                try:
-                    process.wait(timeout=self.budget.join_remaining())
-                except subprocess.TimeoutExpired:
-                    raise self.api["MEMORY"].UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
+                        group = self.api["MEMORY"].process_group_quiescence(process, self.budget,
+                            start_token=owned_child["start_token"])
+                    except self.api["MEMORY"].UnsafeLifecycle as unsafe:
+                        unsafe.original_error_code = self.api["safe_error"](failure, self.identity)[1] if failure else None
+                        raise
+                else:
+                    raise self.api["MEMORY"].UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED")
                 self.api["ACTIVE"].pop(self.identity, None)
+                if "request_update" in self.api:
+                    self.api["request_update"](self.identity, child={**self.api["child_identity"](process), "process_group": group})
                 if failure is not None:
                     try:
                         token = self.api["FAILURE_DIAGNOSTICS"].retain(folder, folder_identity,
@@ -574,7 +590,7 @@ class Session:
             self.engine.setdefault("page_engines", []).append(engine)
             self.api["memory_barrier"](self.identity, self.budget)
 
-    def finish(self, status, released, error_code=None):
+    def finish(self, status, released, error_code=None, *, emit=True):
         payload = {"memory_lifecycle": released, "engine": self.engine, "error_code": error_code}
         event = self.event("TERMINAL", payload, stage=self.strategy, status=status,
             emitted_pages=list(self.pages), completed_pages=list(self.completed_pages),
@@ -584,5 +600,6 @@ class Session:
         TERMINALS[self.identity] = (time.monotonic(), terminal)
         while len(TERMINALS) > 16:
             TERMINALS.pop(next(iter(TERMINALS)))
-        if self.started:
+        if emit and self.started:
             self.write(event)
+        return event

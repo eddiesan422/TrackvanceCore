@@ -18757,9 +18757,13 @@
                 "$ref": "#/components/schemas/SemanticInvoiceControls"
               },
               {
+                "$ref": "#/components/schemas/SemanticInvoiceControlsV2"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Business Controls"
           },
           "reason": {
             "type": "string",
@@ -25695,6 +25699,11 @@
             "maxItems": 10,
             "title": "Currency Symbols"
           },
+          "numeric_fragments": {
+            "type": "boolean",
+            "title": "Numeric Fragments",
+            "default": false
+          },
           "section": {
             "type": "string",
             "enum": [
@@ -25821,6 +25830,37 @@
         ],
         "title": "SemanticInvoiceControls"
       },
+      "SemanticInvoiceControlsV2": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "SEMANTIC_INVOICE_CONTROLS_V2",
+            "title": "Version"
+          },
+          "scope": {
+            "type": "string",
+            "const": "FULL_DECLARED_INVOICE_WITH_ADJUSTMENTS",
+            "title": "Scope"
+          },
+          "applicability": {
+            "type": "string",
+            "const": "ALL_DECLARED_ROLES_PRINTED",
+            "title": "Applicability"
+          },
+          "invoice_controls": {
+            "$ref": "#/components/schemas/InvoiceControls"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "scope",
+          "applicability",
+          "invoice_controls"
+        ],
+        "title": "SemanticInvoiceControlsV2"
+      },
       "SemanticProfile": {
         "properties": {
           "schema_version": {
@@ -25879,6 +25919,18 @@
             "type": "array",
             "maxItems": 10,
             "title": "Tables"
+          },
+          "business_period_field": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Period Field"
           }
         },
         "additionalProperties": false,

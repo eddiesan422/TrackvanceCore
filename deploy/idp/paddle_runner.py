@@ -105,7 +105,7 @@ def group_spotted(words, page):
 
 def predictions(pipeline, source, regions):
     if not regions:
-        for page, result in enumerate(pipeline.predict(str(source)), 1):
+        for page, result in enumerate(pipeline.predict_iter(str(source)), 1):
             yield page, result, [0, 0, 1, 1], None
         return
     import numpy as np
@@ -143,7 +143,7 @@ def predictions(pipeline, source, regions):
                 raise ValueError("DOCUMENT_REGION_INVALID")
             crop = image.crop(pixel_box)
             actual = [pixel_box[0] / width, pixel_box[1] / height, pixel_box[2] / width, pixel_box[3] / height]
-            for result in pipeline.predict(np.asarray(crop)[:, :, ::-1], use_layout_detection=False,
+            for result in pipeline.predict_iter(np.asarray(crop)[:, :, ::-1], use_layout_detection=False,
                     prompt_label="spotting", max_new_tokens=4096):
                 yield page, result, actual, (width, height)
             crop.close()
@@ -175,6 +175,19 @@ def file_record(path, folder, kind, **metadata):
         raise ValueError("PADDLE_RESULT_LIMIT")
     return {"path": path.relative_to(folder).as_posix(), "kind": kind,
         "sha256": digest, "bytes": before.st_size, "metadata": metadata}
+
+
+def persist_legacy_page(folder, request, manifest, *, page, raw, lines, geometry, region):
+    """Keep a yielded page before asking the provider for its next result."""
+    ordinal = len(manifest["pages"]) + 1
+    path = folder / f"legacy-page-{ordinal:03}.json"
+    value = {"version": 1, "source_sha256": request["source_sha256"], "page": page,
+        "source_hashes": STARTUP_HASHES, "page_geometry": geometry, "region": region,
+        "complete_page": not request.get("regions"), "lines": lines, "original": raw}
+    atomic_json(path, value)
+    manifest["pages"].append({"page": page, "complete_page": value["complete_page"],
+        "artifacts": [file_record(path, folder, "PADDLE_LEGACY_PAGE_JSON")]})
+    atomic_json(folder / "legacy.manifest.json", manifest)
 
 
 def source_page_metadata(source):
@@ -361,9 +374,13 @@ def main():
             return
         lines, geometries, raw_pages = [], {}, []
         regions = request.get("regions", [])
+        expected = source_page_metadata(folder / request["filename"])
+        manifest = {"version": 1, "source_sha256": request["source_sha256"],
+            "source_hashes": STARTUP_HASHES, "expected_pages": len(expected), "status": "INCOMPLETE", "pages": []}
+        atomic_json(folder / "legacy.manifest.json", manifest)
         diagnostic.mark("PREDICT_NEXT")
         for page_number, result, crop_box, full_size in predictions(pipeline, folder / request["filename"], regions):
-            if page_number > 50:
+            if page_number > len(expected):
                 raise ValueError("DOCUMENT_PAGE_LIMIT")
             diagnostic.mark("POSTPROCESS_PAGE", page_number)
             raw = result.json
@@ -378,6 +395,9 @@ def main():
             source_width, source_height = full_size or (width, height)
             geometries[str(page_number)] = {"width": source_width, "height": source_height, "unit": "PIXEL"}
             raw_pages.append(raw)
+            # Preserve the provider result before table/text projection can fail.
+            persist_legacy_page(folder, request, manifest, page=page_number, raw=raw,
+                lines=[], geometry=geometries[str(page_number)], region=crop_box)
             spotting = raw.get("spotting_res")
             if regions and not isinstance(spotting, dict):
                 raise ValueError("DOCUMENT_SPOTTING_UNAVAILABLE")
@@ -416,6 +436,11 @@ def main():
                         lines.append({"text": row.strip(), "page": page_number, "region": region,
                                       "method": "OCR", "confidence": None, "block_label": block.get("block_label")})
             diagnostic.mark("PREDICT_NEXT")
+        completed = [page["page"] for page in manifest["pages"] if page["complete_page"]]
+        if not regions and completed != list(range(1, len(expected) + 1)):
+            raise ValueError("DOCUMENT_PAGE_LIMIT")
+        manifest["status"] = "COMPLETE"
+        atomic_json(folder / "legacy.manifest.json", manifest)
         diagnostic.mark("SERIALIZE_OBSERVATIONS")
         raw_hash = hashlib.sha256(json.dumps(raw_pages, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         diagnostic.mark("HASH_MODEL")

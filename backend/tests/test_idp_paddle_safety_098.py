@@ -110,6 +110,7 @@ def test_private_parent_trace_is_explicitly_bounded():
 
 @pytest.fixture
 def safety_gateway(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKVANCE_IDP_JOURNAL_DIR", str(tmp_path / "request-journal"))
     app = tmp_path / "app"
     app.mkdir()
     for path in (ROOT / "deploy/idp").iterdir():
@@ -141,6 +142,7 @@ def safety_gateway(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+        gateway.JOURNAL.close()
         gateway.FAILURE_DIAGNOSTICS.close(clear=True)
         assert not thread.is_alive()
         assert not gateway.ADMISSIONS and not gateway.BUDGETS and not gateway.GATE.locked()
@@ -156,11 +158,13 @@ def test_loopback_circuit_stops_paddle_after_three_dispatches_and_qwen_is_indepe
     monkeypatch.setattr(gateway.Handler, "extract", fail)
     monkeypatch.setattr(gateway.Handler, "interpret", lambda *_a: {"engine": {}})
     body = {"request_id": "c" * 32, "configuration": {}}
-    for _ in range(3):
+    for number in range(1, 4):
+        body["request_id"] = f"{number:032x}"
         assert post("/extract", body) == (422, {"error": "PADDLE_FAILURE"})
+    body["request_id"] = "4" * 32
     assert post("/extract", body) == (503, {"error": "PADDLE_SERVICE_SUSPENDED"})
     assert calls == ["PADDLE"] * 3
-    assert post("/interpret", body)[0] == 200
+    assert post("/interpret", {**body, "request_id": "5" * 32})[0] == 200
     assert gateway.PADDLE_ADMISSION.snapshot()["last_category"] == "UNKNOWN"
 
 
@@ -169,8 +173,8 @@ def test_rejected_input_does_not_consume_service_failure_budget(safety_gateway, 
     def invalid(_handler, _body):
         raise ValueError("DOCUMENT_FORMAT")
     monkeypatch.setattr(gateway.Handler, "extract", invalid)
-    for _ in range(4):
-        assert post("/extract", {"request_id": "d" * 32, "configuration": {}}) == (422, {"error": "DOCUMENT_FORMAT"})
+    for number in range(1, 5):
+        assert post("/extract", {"request_id": f"{number:032x}", "configuration": {}}) == (422, {"error": "DOCUMENT_FORMAT"})
     assert gateway.PADDLE_ADMISSION.snapshot()["consecutive_failures"] == 0
 
 
@@ -241,14 +245,19 @@ def test_structured_timeout_retains_timeout_code_and_never_replaces_original(saf
             return state["returncode"]
     def kill(_pid, _signal):
         state["returncode"] = -9
+    def group(process, budget, **kwargs):
+        kill(process.pid, 9)
+        process.wait(timeout=budget.join_remaining())
+        return {"status": "SYNTHETIC_QUIESCENT_GROUP"}
     session = gateway.RECOGNITION.Session.__new__(gateway.RECOGNITION.Session)
     session.identity, session.source_sha = "b" * 32, SOURCE
     session.body, session.budget = {"filename": "document.pdf"}, Budget()
     session.phase, session.handler = lambda *_a: None, SimpleNamespace(paddle_attempted=False)
     session.api = {"ACTIVE": {}, "CANCELLED": set(), "DIAGNOSTICS": obs, "CHILD_SOURCE_HASHES": HASHES,
-        "FAILURE_DIAGNOSTICS": ring, "RUNTIME": {}, "MEMORY": gateway.MEMORY, "safe_error": gateway.safe_error}
+        "FAILURE_DIAGNOSTICS": ring, "RUNTIME": {}, "MEMORY": gateway.MEMORY, "safe_error": gateway.safe_error,
+        "child_identity": lambda process: {"pid": process.pid, "start_token": "synthetic-owned-start"}}
     monkeypatch.setattr(gateway.RECOGNITION.subprocess, "Popen", Child)
-    monkeypatch.setattr(gateway.RECOGNITION.os, "killpg", kill)
+    monkeypatch.setattr(gateway.MEMORY, "process_group_quiescence", group)
     if not retention_available:
         monkeypatch.setattr(ring, "retain", lambda *_a, **_k: None)
     try:

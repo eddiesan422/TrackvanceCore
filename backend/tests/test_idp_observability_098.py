@@ -296,8 +296,8 @@ class RunnerFixtures(unittest.TestCase):
             def __init__(self, **kwargs):
                 calls.append(("construct", kwargs))
 
-            def predict(self, *args, **kwargs):
-                calls.append(("predict", args, kwargs))
+            def predict_iter(self, *args, **kwargs):
+                calls.append(("predict_iter", args, kwargs))
                 if prediction_failure:
                     raise failure
                 yield SimpleNamespace(json={"res": {"width": 100, "height": 100, "parsing_res_list": []}})
@@ -305,6 +305,10 @@ class RunnerFixtures(unittest.TestCase):
         paddle = SimpleNamespace(__version__="synthetic", is_compiled_with_cuda=lambda: True,
             device=SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: 1, get_device_name=lambda _: "synthetic GPU")))
         original_open = open
+        runner.source_page_metadata = lambda _: [{"page": 1, "width": 100, "height": 100}]
+
+        def broken_fsync(_descriptor):
+            raise OSError("synthetic diagnostic disk failure")
 
         def open_model(path, *args, **kwargs):
             return io.BytesIO(b"synthetic model bytes") if path == "/models/paddle/model.safetensors" else original_open(path, *args, **kwargs)
@@ -314,7 +318,8 @@ class RunnerFixtures(unittest.TestCase):
             (folder / "request.json").write_text(json.dumps({"filename": "document.pdf", "source_sha256": SOURCE, "regions": []}))
             with patch.dict(sys.modules, {"paddle": paddle, "paddleocr": SimpleNamespace(PaddleOCRVL=Predictor)}), patch.object(runner.importlib.metadata, "version", return_value="synthetic"), patch.object(sys, "argv", [str(ROOT / "paddle_runner.py"), str(folder)]), patch.dict(os.environ, {"TRACKVANCE_IDP_STACK_DIAGNOSTICS": "1"}), patch("builtins.open", side_effect=open_model), patch.object(obs.faulthandler, "enable"), patch.object(obs.faulthandler, "dump_traceback_later"), patch.object(obs.faulthandler, "cancel_dump_traceback_later") as cancel:
                 if broken_diagnostics:
-                    with patch.object(obs.os, "fsync", side_effect=OSError("synthetic diagnostic disk failure")):
+                    diagnostic_os = SimpleNamespace(**{**vars(os), "fsync": broken_fsync})
+                    with patch.object(runner._DIAGNOSTICS_MODULE, "os", diagnostic_os):
                         runner.main()
                 elif prediction_failure:
                     with self.assertRaises(RuntimeError) as raised:
@@ -330,7 +335,7 @@ class RunnerFixtures(unittest.TestCase):
             self.assertEqual(calls[0][1]["device"], "gpu:0")
             self.assertIs(calls[0][1]["use_queues"], False)
             self.assertEqual(calls[0][1]["vl_rec_max_concurrency"], 1)
-            self.assertEqual(calls[1], ("predict", (str(folder / "document.pdf"),), {}))
+            self.assertEqual(calls[1], ("predict_iter", (str(folder / "document.pdf"),), {}))
 
 
 @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW"), "Linux runtime filesystem contract")
@@ -368,6 +373,11 @@ class HTTPFailureFixture(unittest.TestCase):
         def kill(_pid, _signal):
             state["returncode"] = -9
 
+        def group(process, budget, **kwargs):
+            kill(process.pid, 9)
+            process.wait(timeout=budget.join_remaining())
+            return {"status": "SYNTHETIC_QUIESCENT_GROUP"}
+
         original = ring.retain
 
         def retain(*args, **kwargs):
@@ -398,7 +408,7 @@ class HTTPFailureFixture(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with patch.object(gateway, "verify_models", return_value=True), patch.object(gateway.subprocess, "Popen", Child), patch.object(gateway.os, "killpg", side_effect=kill), patch.object(gateway, "time", SimpleNamespace(monotonic=monotonic)), patch.object(gateway.MEMORY, "Budget", side_effect=budget), patch.object(gateway, "memory_barrier", side_effect=barrier), patch.object(gateway, "CACHE_HYGIENE", False), patch.object(ring, "retain", side_effect=retain):
+            with patch.object(gateway, "verify_models", return_value=True), patch.object(gateway.subprocess, "Popen", Child), patch.object(gateway.MEMORY, "process_group_quiescence", side_effect=group), patch.object(gateway, "time", SimpleNamespace(monotonic=monotonic)), patch.object(gateway.MEMORY, "Budget", side_effect=budget), patch.object(gateway, "memory_barrier", side_effect=barrier), patch.object(gateway, "CACHE_HYGIENE", False), patch.object(ring, "retain", side_effect=retain):
                 connection = http.client.HTTPConnection(*server.server_address, timeout=3)
                 connection.request("POST", "/extract", body=json.dumps(body), headers={"Content-Type": "application/json"})
                 response = connection.getresponse()
@@ -414,6 +424,7 @@ class HTTPFailureFixture(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+            gateway.JOURNAL.close()
             ring.close(clear=True)
 
 

@@ -316,6 +316,12 @@ class GatewayTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls): cls.gateway.FAILURE_DIAGNOSTICS.close(clear=True)
     def setUp(self):
+        self.gateway.JOURNAL.close()
+        directory = tempfile.TemporaryDirectory(prefix="trackvance-memory-receipt-test-")
+        self.addCleanup(directory.cleanup)
+        self.gateway.JOURNAL = self.gateway.JOURNAL_MODULE.RequestJournal(
+            Path(directory.name) / "requests", source_hashes=self.gateway.STARTUP_HASHES)
+        self.addCleanup(self.gateway.JOURNAL.close)
         self.gateway.MEMORY_STATE.clear(); self.gateway.MEMORY_STATE["status"] = "AVAILABLE"
         self.gateway.MEMORY_FAILURE = None
         for state in (self.gateway.ADMISSIONS, self.gateway.UPSTREAM, self.gateway.ACTIVE, self.gateway.BUDGETS, self.gateway.STATES): state.clear()
@@ -327,6 +333,7 @@ class GatewayTests(unittest.TestCase):
         def send(status, value):
             if terminal_hook is not None: terminal_hook()
             replies.append((status, value))
+            return True
         handler.send = send
         handler.do_POST(); return replies[-1]
     def test_cleanup_unknown_quarantines_both_routes_and_retains_unmodified_candidate(self):
@@ -453,7 +460,8 @@ class ClientBudgetTests(unittest.TestCase):
                 return SimpleNamespace(done=lambda: True, result=lambda: {"actual": "response"})
             def shutdown(self, **_kwargs): pass
         namespace = {"time": SimpleNamespace(monotonic=lambda: state["now"]), "ThreadPoolExecutor": Executor,
-            "_RequestControl": lambda: None, "_request": None, "RemoteInferenceTimeout": RuntimeError}
+            "_RequestControl": lambda: None, "_request": None, "RemoteInferenceTimeout": RuntimeError,
+            "OperationError": RuntimeError}
         compiled = compile(ast.Module(body=[node], type_ignores=[]), "<exact-private-invoke>", "exec")
         function_code = next(item for item in compiled.co_consts if isinstance(item, CodeType) and item.co_name == "_invoke")
         invoke = FunctionType(function_code, namespace)
@@ -461,7 +469,9 @@ class ClientBudgetTests(unittest.TestCase):
         configuration = {"timeout_seconds": 600, "provider": "PADDLE_QWEN_LOCAL"}
         body = {"request_id": "a"*32, "configuration": configuration}
         def check(_progress): state["now"] = 105.0
-        budget = SimpleNamespace(require=lambda: 12.0)
+        completion = load_runtime("_test_invoke_attempt_budget_098",
+            ROOT / "backend/src/trackvance/document_inference_completion.py")
+        budget = completion.AttemptBudget(30, started=87.0, clock=lambda: state["now"])
         response = invoke("/extract", body, timeout=600, started=80, check=check, budget=budget, phase_deadline=130)
         self.assertEqual(response, {"actual": "response"})
         self.assertEqual(calls[0][1]["request_budget_seconds"], 12.0)

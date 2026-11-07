@@ -22,6 +22,19 @@ export interface SemanticDocumentReview {
   verification_version?: string
   source_checks?: SemanticSourceChecks
   printed_pagination?: PrintedPagination
+  reliability?: SemanticReliability
+}
+
+export interface SemanticReliability {
+  version: string
+  policy_sha256: string
+  calibration: { status: string }
+  binding: { payload_sha256: string; definition_sha256: string; source_attestation_sha256?: string | null }
+  document: { status: string; reasons: string[]; verified_cells: number; reviewed_cells: number; pending_cells: number;
+    required_cells: number; critical_cells: number; gates: SemanticSourceChecks & { business_rules?: SourceCheck } }
+  tables: { name: string; coverage_state: string; row_count: number; verified_rows: number; reviewed_rows: number;
+    pending_rows: number; current_table_binding: boolean;
+    rows: { index: number; status: string; cell_paths: string[]; reasons: string[] }[]; reasons: string[] }[]
 }
 
 export interface PrintedPagination {

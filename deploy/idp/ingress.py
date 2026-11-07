@@ -36,7 +36,7 @@ class Relay(BaseHTTPRequestHandler):
 
     def forward(self):
         allowed = self.command == "GET" and (self.path == "/health" or re.fullmatch(r"/status/[a-f0-9]{32}", self.path))
-        allowed = allowed or self.command == "POST" and self.path in {"/extract", "/refine", "/interpret", "/recognize", "/cancel"}
+        allowed = allowed or self.command == "POST" and self.path in {"/extract", "/refine", "/interpret", "/recognize", "/cancel", "/recover"}
         if not allowed:
             self.close_connection = True
             self.error(404)
@@ -49,7 +49,7 @@ class Relay(BaseHTTPRequestHandler):
         sent = False
         try:
             length = int(self.headers.get("Content-Length", 0))
-            limit = 1024 if self.path == "/cancel" else MAX_REQUEST
+            limit = 1024 if self.path in {"/cancel", "/recover"} else MAX_REQUEST
             if not 0 <= length <= limit or self.command == "GET" and length:
                 raise ValueError("REQUEST_LIMIT")
             upstream.putrequest(self.command, self.path)

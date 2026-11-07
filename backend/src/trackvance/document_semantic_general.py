@@ -9,10 +9,10 @@ import copy
 import os
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from .document_normalization import DocumentNormalization, canonical_hash
-from .document_semantic_business import SemanticInvoiceControls
+from .document_semantic_business import SemanticInvoiceControls, SemanticInvoiceControlsV2
 
 MODE: Literal["SEMANTIC_GENERAL_V1"] = "SEMANTIC_GENERAL_V1"
 AUTO_VERSION = "SEMANTIC_AUTO_V1"
@@ -35,8 +35,22 @@ class SemanticField(BaseModel):
     decimal_separator: Literal[".", ","] = "."
     thousands_separator: Literal[".", ",", " "] | None = None
     currency_symbols: list[str] = Field(default_factory=list, max_length=10)
+    numeric_fragments: bool = Field(default=False, strict=True)
     section: Literal["DOCUMENT", "ISSUER", "BUYER", "TOTALS"] = "DOCUMENT"
     normalization: DocumentNormalization | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_fields(self, handler):
+        result = handler(self)
+        if not self.numeric_fragments:
+            result.pop("numeric_fragments", None)
+        return result
+
+    @model_validator(mode="after")
+    def declared_numeric_fragments(self):
+        if self.numeric_fragments and self.logical_type != "DECIMAL":
+            raise ValueError("Numeric fragments require an explicitly declared DECIMAL field.")
+        return self
 
 
 class SemanticCollection(BaseModel):
@@ -58,6 +72,14 @@ class SemanticProfile(BaseModel):
     description: str = Field(min_length=1, max_length=2000)
     fields: list[SemanticField] = Field(min_length=1, max_length=100)
     tables: list[SemanticCollection] = Field(default_factory=list, max_length=10)
+    business_period_field: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_profile(self, handler):
+        result = handler(self)
+        if self.business_period_field is None:
+            result.pop("business_period_field", None)
+        return result
 
     @model_validator(mode="after")
     def names(self):
@@ -69,6 +91,8 @@ class SemanticProfile(BaseModel):
         names = [table.name.casefold() for table in self.tables]
         if len(set(names)) != len(names) or "headers" in names:
             raise ValueError("Semantic collection names must be unique and nonreserved.")
+        if self.business_period_field is not None and self.business_period_field not in {item.name for item in self.fields}:
+            raise ValueError("The business period must bind a declared header field.")
         return self
 
 
@@ -79,7 +103,7 @@ class ActivateSemanticProfile(BaseModel):
     profile: SemanticProfile | None = None
     route: Route = "QWEN_VISUAL"
     automatic_verification: Literal["OFF", "SEMANTIC_AUTO_V1", "SEMANTIC_AUTO_V2"] = "OFF"
-    business_controls: SemanticInvoiceControls | None = None
+    business_controls: SemanticInvoiceControls | SemanticInvoiceControlsV2 | None = None
     reason: str = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
@@ -88,6 +112,8 @@ class ActivateSemanticProfile(BaseModel):
                 or self.profile is not None and self.profile_revision is not None
                 or self.business_controls is not None and self.automatic_verification == "OFF"):
             raise ValueError("Select exactly one versioned profile and give a reason.")
+        if isinstance(self.business_controls, SemanticInvoiceControlsV2) and self.automatic_verification != AUTO_VERSION_V2:
+            raise ValueError("Complete invoice controls require semantic AUTO V2.")
         return self
 
 
@@ -284,6 +310,8 @@ def compile_profile(profile, route="QWEN_VISUAL", *, automatic_verification="OFF
             "mode": MODE, "profile_id": profile["id"], "profile_name": profile["name"],
             "profile_revision": profile["revision"], "profile_sha256": canonical_hash(profile),
             "route": route, "contract": profile}}
+    if profile.get("business_period_field") is not None:
+        definition["business_period_field"] = profile["business_period_field"]
     if automatic_verification in {AUTO_VERSION, AUTO_VERSION_V2}:
         definition["semantic_general"].update(automatic_verification=automatic_verification,
             association_contract="SEMANTIC_SOURCE_ASSOCIATION_V2" if automatic_verification == AUTO_VERSION_V2
@@ -298,6 +326,10 @@ def compile_profile(profile, route="QWEN_VISUAL", *, automatic_verification="OFF
             from .document_semantic_business import projection
 
             value, arithmetic, totals = projection(business_controls)
+            if value["version"] == "SEMANTIC_INVOICE_CONTROLS_V2":
+                if automatic_verification != AUTO_VERSION_V2:
+                    raise ValueError("Complete invoice controls require semantic AUTO V2.")
+                definition["invoice_controls"] = copy.deepcopy(value["invoice_controls"])
             definition["semantic_general"].update(business_controls=value,
                 business_controls_sha256=canonical_hash(value))
             definition["arithmetic"], definition["cross_totals"] = arithmetic, totals
@@ -347,7 +379,8 @@ def validate_metadata(definition):
     expected = [field_projection(field) for field in profile["fields"]]
     tables = [(table.name, table.required, [field.model_dump(mode="json") for field in table.fields]) for table in definition.tables]
     expected_tables = [(table["name"], table["required"], [field_projection(field) for field in table["fields"]]) for table in profile["tables"]]
-    if actual != expected or tables != expected_tables:
+    if (actual != expected or tables != expected_tables
+            or definition.business_period_field != profile.get("business_period_field")):
         raise ValueError("Semantic projection does not match the declared contract.")
     for field in [*definition.fields, *(field for table in definition.tables for field in table.fields)]:
         if field.visual or field.visual_alternatives or field.source_association or field.pattern != r"(.+)":
@@ -401,14 +434,14 @@ def assert_replay_binding(previous_definition, definition, configuration):
         return False
     verification_upgrade, valid_verification_target = False, True
     if before and after and after.get("automatic_verification") == AUTO_VERSION_V2:
-        from .document_semantic_vocabulary import V2_ENTRY_SHA256
+        from .document_semantic_vocabulary import V2_ENTRY_SHA256, V2_PRE_06B_SHA256
 
         current = verification_contract_v2()
         valid_verification_target = _matches_verification_contract(after, current)
         verification_upgrade = before.get("automatic_verification") == AUTO_VERSION
         if before.get("automatic_verification") == AUTO_VERSION_V2:
-            entry = {**current, "vocabulary_sha256": V2_ENTRY_SHA256}
-            verification_upgrade = (entry != current and _matches_verification_contract(before, entry)
+            entries = [{**current, "vocabulary_sha256": digest} for digest in (V2_ENTRY_SHA256, V2_PRE_06B_SHA256)]
+            verification_upgrade = (any(entry != current and _matches_verification_contract(before, entry) for entry in entries)
                 and before.get("contract") == after.get("contract")
                 and before.get("business_controls") == after.get("business_controls")
                 and all(previous_definition.get(key) == definition.get(key) for key in ("fields", "tables")))
@@ -464,7 +497,44 @@ def guard_profile_revision(db, organization_id, definition):
                 "Ese identificador y revisión ya conservan otro contrato; incrementa la revisión o usa otro identificador.")
 
 
-def native_semantic_sufficient(native, definition):
+def native_table_inventory(native, definition, source_probe):
+    """Readiness input from the real native probe, never an attestation."""
+    import json
+
+    from .document_representation import decode_artifact
+    from .document_semantic_corroboration import _native_inventory_v2, _native_source_v2
+
+    metadata = definition.get("semantic_general") or {}
+    if (metadata.get("automatic_verification") != AUTO_VERSION_V2 or metadata.get("route") != "NATIVE_FIRST"
+            or not definition.get("tables") or not source_probe):
+        return None
+    try:
+        count = native["engine"]["pages"]
+        if (type(count) is not int or not 1 <= count <= 50 or source_probe.get("stage") != "NATIVE_SOURCE_PROBE"
+                or source_probe.get("expected_pages") != count
+                or source_probe["payload"].get("source_page_count_verified") is not True
+                or source_probe.get("event_sha256") != canonical_hash({key: value for key, value in source_probe.items()
+                    if key not in {"event_sha256", "durable_refs"}})):
+            return None
+        artifacts = source_probe["payload"]["artifacts"]
+        if len(artifacts) != 1 or artifacts[0]["kind"] != "NATIVE_SOURCE_PROBE_JSON":
+            return None
+        original = json.loads(decode_artifact(artifacts[0]))
+        keys = ("lines", "pages", "page_geometry", "native_incomplete_pages")
+        if any(original["payload"].get(key) != native["payload"].get(key) for key in keys):
+            return None
+        source = _native_source_v2({"expected_pages": count}, [source_probe])
+        if not source or not source["complete"]:
+            return None
+        inventories, _observations = _native_inventory_v2(source, definition)
+        if not all(item["complete"] and not item["issues"] for item in inventories.values()):
+            return None
+        return inventories
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def native_semantic_sufficient(native, definition, *, source_probe=None):
     """A native-only shortcut needs exact, unique, self-contained label:value lines.
 
     General layout-free table/narrative association is delegated to the selected
@@ -472,7 +542,10 @@ def native_semantic_sufficient(native, definition):
     """
     import re
 
-    if definition.get("tables") or native["payload"].get("native_incomplete_pages"):
+    metadata = definition.get("semantic_general") or {}
+    tables = definition.get("tables")
+    if ((tables and (metadata.get("automatic_verification") != AUTO_VERSION_V2
+            or metadata.get("route") != "NATIVE_FIRST")) or native["payload"].get("native_incomplete_pages")):
         return False
     lines = native["payload"].get("lines", [])
     if not lines:
@@ -488,4 +561,28 @@ def native_semantic_sufficient(native, definition):
         matches = [line for line in lines if pattern.fullmatch(line["text"])]
         if len(matches) != 1 or (cell.get("origin") or {}).get("page") != matches[0]["page"]:
             return False
+    if not tables:
+        return True
+    from .document_semantic_corroboration import _comparison, _normalized
+
+    inventories = native_table_inventory(native, definition, source_probe)
+    if inventories is None:
+        return False
+    for table in tables:
+        rows = native["payload"].get("tables", {}).get(table["name"], [])
+        source_rows = inventories[table["name"]]["rows"]
+        if not rows or len(rows) != len(source_rows) or native["payload"].get("table_unparsed", {}).get(table["name"]):
+            return False
+        for row, source_row in zip(rows, source_rows, strict=True):
+            for field in table["fields"]:
+                name = field["name"]
+                cell = row.get(name, {})
+                raw = source_row["quote"] if name == "source_quote" else source_row["values"].get(name)
+                value, status = _normalized(raw, field)
+                observed_value, observed_status = _normalized(cell.get("observed"), field)
+                if (status != "VALID" or observed_status != "VALID" or cell.get("validity") != "VALID"
+                        or _comparison(value, field) != _comparison(cell.get("value"), field)
+                        or _comparison(value, field) != _comparison(observed_value, field)
+                        or (cell.get("origin") or {}).get("page") != source_row["page"]):
+                    return False
     return True

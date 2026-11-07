@@ -25,6 +25,7 @@ DEFINITION = {"fields": [{"name": "identifier", "label": "Identifier", "logical_
 @pytest.fixture
 def service(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("TRACKVANCE_IDP_JOURNAL_DIR", str(tmp_path / "request-journal"))
     app = tmp_path / "app"
     app.mkdir()
     for path in (root / "deploy/idp").iterdir():
@@ -61,6 +62,7 @@ def service(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+        gateway.JOURNAL.close()
         gateway.FAILURE_DIAGNOSTICS.close(clear=True)
         assert not thread.is_alive()
         assert not gateway.ACTIVE
@@ -93,6 +95,48 @@ def synthetic_paddle_child(session, folder, operation, consume, *, page_count=2)
         if number == 1:
             time.sleep(.15)  # Permit a real coordinator cancel/lease-loss race.
     return {"engine": {"synthetic_model_fixture": True}}
+
+
+def test_new_runtime_stream_nonce_and_durable_terminal_are_bound(service, monkeypatch):
+    gateway, source = service
+    monkeypatch.setattr(gateway, "health", lambda: {"ready": True,
+        "recognition": {"contract": "TRACKVANCE_RECOGNITION_V1", "strategies": ["PADDLE_STRUCTURED"]},
+        "execution_receipts": {"contract": gateway.JOURNAL_MODULE.VERSION}})
+    monkeypatch.setattr(gateway.RECOGNITION.Session, "child", synthetic_paddle_child)
+    observed = []
+    result = invoke(source, "PADDLE_STRUCTURED", observed.append)
+    terminal = result["terminal"]
+    execution = gateway.JOURNAL.get(terminal["request_id"])
+    assert execution["admission_id"] != terminal["request_id"]
+    assert execution["source_sha256"] == terminal["source_sha256"]
+    assert execution["configuration_sha256"] == terminal["configuration_sha256"]
+    assert execution["status"] == "COMPLETE" and execution["resources_released"] is True
+    assert execution["completed_pages"] == [1, 2] and execution["pending_pages"] == []
+    assert [event["kind"] for event in observed].count("TERMINAL") == 1
+    assert transport.TRANSPORT_UNAVAILABLE is False
+
+
+def test_wrong_stream_status_admission_cannot_certify_closure(service, monkeypatch):
+    from trackvance import document_local_inference as local
+
+    gateway, source = service
+    monkeypatch.setattr(gateway, "health", lambda: {"ready": True,
+        "recognition": {"contract": "TRACKVANCE_RECOGNITION_V1", "strategies": ["PADDLE_STRUCTURED"]},
+        "execution_receipts": {"contract": gateway.JOURNAL_MODULE.VERSION}})
+    monkeypatch.setattr(gateway.RECOGNITION.Session, "child", synthetic_paddle_child)
+    actual_request = local._request
+
+    def wrong_receipt(path, *args, **kwargs):
+        value = actual_request(path, *args, **kwargs)
+        if path.startswith("/status/"):
+            value["execution"]["admission_id"] = "f" * 32
+        return value
+
+    monkeypatch.setattr(local, "_request", wrong_receipt)
+    with pytest.raises(OperationError) as failure:
+        invoke(source, "PADDLE_STRUCTURED", lambda event: None)
+    assert failure.value.code == "DOCUMENT_LOCAL_CLEANUP_UNVERIFIED"
+    assert transport.TRANSPORT_UNAVAILABLE is True
 
 
 def test_legacy_configuration_serializes_without_new_default_keys():

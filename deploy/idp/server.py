@@ -32,7 +32,7 @@ APP_ROOT = Path(__file__).resolve().parent
 # the provenance of an already running gateway or change its prompt/lock.
 STARTUP_FILES = {name: (APP_ROOT / name).read_bytes() for name in (
     "server.py", "paddle_runner.py", "pipeline.yml", "prompt-v1.txt", "prompt-v2.txt",
-    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "idp_memory_lifecycle.py", "idp_cache_advice.py", "recognition.py", "prompt-visual-v1.txt", "models.lock.json")}
+    "document_semantic_fragments.py", "document_template_builder_rules.py", "document_literal_tables.py", "idp_observability.py", "idp_memory_lifecycle.py", "idp_request_journal.py", "idp_cache_advice.py", "recognition.py", "prompt-visual-v1.txt", "models.lock.json")}
 STARTUP_HASHES = {name: hashlib.sha256(raw).hexdigest() for name, raw in STARTUP_FILES.items()}
 LOCK_BYTES = STARTUP_FILES["models.lock.json"]
 LOCK = json.loads(LOCK_BYTES)
@@ -77,6 +77,8 @@ RULES = frozen_module("document_template_builder_rules.py")
 TABLES = frozen_module("document_literal_tables.py")
 DIAGNOSTICS = frozen_module("idp_observability.py")
 MEMORY = frozen_module("idp_memory_lifecycle.py")
+JOURNAL_MODULE = frozen_module("idp_request_journal.py")
+JOURNAL = JOURNAL_MODULE.RequestJournal(os.environ.get("TRACKVANCE_IDP_JOURNAL_DIR"), source_hashes=STARTUP_HASHES)
 RECOGNITION = frozen_module("recognition.py")
 CHILD_SOURCE_HASHES = {name: STARTUP_HASHES[name] for name in ("paddle_runner.py", "pipeline.yml", "idp_observability.py")}
 FAILURE_DIAGNOSTICS = DIAGNOSTICS.FailureRing(CHILD_SOURCE_HASHES)
@@ -86,6 +88,8 @@ REQUEST_SLOTS = threading.BoundedSemaphore(4)
 CONTROL_SLOTS = threading.BoundedSemaphore(8)
 ADMISSION_LOCK = threading.Lock()
 ADMISSIONS = {}
+ADMISSION_TOKENS = {}
+ADMISSION_PROTOCOLS = {}
 ACTIVE = {}
 UPSTREAM = {}
 BUDGETS = {}
@@ -112,7 +116,92 @@ ERROR_STATUS = {
     "GPU_PIN_UNVERIFIED": 503, "GPU_UNLOAD_UNVERIFIED": 503, "CACHE_OWNERSHIP_UNVERIFIED": 503,
     "REQUEST_ID": 422, "ADMISSION_CONFIGURATION": 422, "DUPLICATE_REQUEST": 422,
     "PADDLE_SERVICE_SUSPENDED": 503,
+    "GPU_QUEUE_TIMEOUT": 422,
+    "REQUEST_BINDING": 422, "REQUEST_ALREADY_TERMINAL": 422,
+    "REQUEST_JOURNAL_LIMIT": 503, "REQUEST_JOURNAL_UNAVAILABLE": 503,
+    "REQUEST_JOURNAL_INTEGRITY": 503,
+    "CLIENT_DISCONNECTED": 503,
+    "RESULT_SERIALIZATION": 422,
 }
+
+
+def request_update(identity, **changes):
+    token = ADMISSION_TOKENS.get(identity)
+    if token is not None:
+        return JOURNAL.update(identity, token, **changes)
+
+
+def request_checkpoint(identity, value, *, page=None, kind="PAGE", complete=True):
+    token = ADMISSION_TOKENS.get(identity)
+    if token is not None:
+        return JOURNAL.checkpoint(identity, token, value, page=page, kind=kind, complete=complete)
+
+
+def request_phase(identity, stage, *, page=None, expected=None, child=None):
+    changes = {"status": "RUNNING", "stage": stage, "page_one_based": page,
+        "last_progress": {"stage": stage, "page_one_based": page,
+                          "observed_at": JOURNAL_MODULE.utc(JOURNAL.clock())}}
+    if expected is not None:
+        changes["expected_pages"] = expected
+    if child is not None:
+        changes["child"] = child
+    return request_update(identity, **changes)
+
+
+def child_identity(process):
+    pid = getattr(process, "pid", None)
+    returncode = process.poll()
+    start_token = None
+    if type(pid) is int and sys.platform == "linux":
+        try:
+            # The process start tick distinguishes a recycled numeric PID.
+            start_token = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+        except (OSError, IndexError):
+            pass
+    terminated = (-returncode if type(returncode) is int and returncode < 0
+                  and -returncode in signal.valid_signals() else None)
+    return {"pid": pid, "start_token": start_token, "returncode": returncode, "termination_signal": terminated}
+
+
+def legacy_checkpoints(identity, folder, folder_identity, source_sha256, consumed):
+    """Copy only source-bound atomic checkpoints from the owned child directory."""
+    descriptor = DIAGNOSTICS.open_directory(folder)
+    try:
+        if DIAGNOSTICS.identity(os.fstat(descriptor)) != tuple(folder_identity):
+            raise ValueError("SOURCE_INTEGRITY")
+        try:
+            raw, _ = DIAGNOSTICS.read_at(descriptor, "legacy.manifest.json", 256 * 1024)
+        except FileNotFoundError:
+            return consumed
+        manifest = json.loads(raw)
+        expected = manifest.get("expected_pages")
+        pages = manifest.get("pages")
+        if (manifest.get("source_sha256") != source_sha256 or manifest.get("source_hashes") != CHILD_SOURCE_HASHES
+                or type(expected) is not int or not 1 <= expected <= 50
+                or not isinstance(pages, list) or not consumed <= len(pages) <= 50):
+            raise ValueError("SOURCE_INTEGRITY")
+        for ordinal, page in enumerate(pages[consumed:], consumed + 1):
+            number = page["page"]
+            artifacts = page["artifacts"]
+            if type(number) is not int or not 1 <= number <= expected or len(artifacts) != 1:
+                raise ValueError("SOURCE_INTEGRITY")
+            ref = artifacts[0]
+            if ref["path"] != f"legacy-page-{ordinal:03}.json" or ref["kind"] != "PADDLE_LEGACY_PAGE_JSON":
+                raise ValueError("SOURCE_INTEGRITY")
+            content, size = DIAGNOSTICS.read_at(descriptor, ref["path"], 16 * 1024**2)
+            if size != ref["bytes"] or hashlib.sha256(content).hexdigest() != ref["sha256"]:
+                raise ValueError("SOURCE_INTEGRITY")
+            value = json.loads(content)
+            if (value.get("source_sha256") != source_sha256 or value.get("source_hashes") != CHILD_SOURCE_HASHES
+                    or value.get("page") != number or type(value.get("complete_page")) is not bool
+                    or value["complete_page"] != page["complete_page"]):
+                raise ValueError("SOURCE_INTEGRITY")
+            request_checkpoint(identity, value, page=number, kind="PADDLE_LEGACY_PAGE", complete=value["complete_page"])
+            request_phase(identity, "POSTPROCESS_PAGE", page=number, expected=expected)
+            consumed += 1
+        return consumed
+    finally:
+        os.close(descriptor)
 
 
 def safe_error(error, identity=None):
@@ -427,12 +516,15 @@ def health():
         qwen_installed = qwen_verified()
     except (OSError, ValueError):
         pass
-    ready = installed and qwen_installed and RUNTIME.get("ready") is True and MEMORY_STATE["status"] == "AVAILABLE"
+    ready = (installed and qwen_installed and RUNTIME.get("ready") is True
+             and MEMORY_STATE["status"] == "AVAILABLE" and JOURNAL.available())
     return {"ready": ready, "reason": "Modelos verificados y kernel CUDA comprobado; aceptación del corpus registrada por separado." if ready else "Modelos o runtime CUDA pendientes/no disponibles.",
             "models_installed": {"paddle": installed, "qwen": qwen_installed}, "runtime": RUNTIME,
             "observed_model_inference": dict(OBSERVED_INFERENCE),
             "recognition": {"contract": "TRACKVANCE_RECOGNITION_V1",
                 "strategies": ["QWEN_VISUAL", "PADDLE_STRUCTURED"], "incremental_originals": True},
+            "execution_receipts": {"contract": JOURNAL_MODULE.VERSION, "retention_seconds": JOURNAL.ttl,
+                "restart_recovery_configured": JOURNAL.configured, "quarantined": JOURNAL.quarantined},
             "runtime_provenance": {"gateway": startup_provenance()},
             "paddle_service": PADDLE_ADMISSION.snapshot(),
             "memory_lifecycle": dict(MEMORY_STATE), "gpu_concurrency": 1, "busy": GATE.locked(), "paddle_model": "PaddleOCR-VL-1.6", "llm_model": LOCK["qwen"]["model"]}
@@ -448,18 +540,36 @@ class Handler(BaseHTTPRequestHandler):
 
     def send(self, code, value):
         raw = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        except OSError:
+            self.close_connection = True
+            return False
+        return True
 
     def do_GET(self):
         if self.path == "/health":
             self.send(200, health())
         elif re.fullmatch(r"/status/[a-f0-9]{32}", self.path):
             identity = self.path.rsplit("/", 1)[1]
+            try:
+                execution = JOURNAL.get(identity)
+            except (OSError, ValueError):
+                self.send(503, {"error": "REQUEST_JOURNAL_UNAVAILABLE"})
+                return
             state = STATES.get(identity) or RECOGNITION.terminal_for(identity)
+            if execution and execution["status"] not in JOURNAL_MODULE.TERMINAL:
+                state = STATES.get(identity)
+            terminal_event = JOURNAL.terminal_event(identity)
+            if terminal_event is not None:
+                state = {"phase": "TERMINAL", "terminal": terminal_event}
+            if execution:
+                state = {**(state or {"phase": "TERMINAL" if execution["status"] in JOURNAL_MODULE.TERMINAL else execution["stage"]}),
+                         "execution": execution, "resources_released": execution["resources_released"]}
             self.send(200 if state else 404, state or {"phase": "UNKNOWN"})
         else:
             self.send(404, {"error": "NOT_FOUND"})
@@ -471,8 +581,11 @@ class Handler(BaseHTTPRequestHandler):
         control_slot = False
         admitted = False
         identity = None
+        receipt = None
+        protocol = False
+        gate_acquired = False
         try:
-            if self.path not in {"/extract", "/interpret", "/refine", "/recognize", "/cancel"}:
+            if self.path not in {"/extract", "/interpret", "/refine", "/recognize", "/cancel", "/recover"}:
                 self.close_connection = True
                 self.send(404, {"error": "NOT_FOUND"})
                 return
@@ -498,20 +611,23 @@ class Handler(BaseHTTPRequestHandler):
             identity = body.get("request_id", "")
             if not re.fullmatch(r"[a-f0-9]{32}", identity):
                 raise ValueError("REQUEST_ID")
+            if self.path == "/recover":
+                if set(body) != {"request_id", "admission_id", "request_sha256", "configuration_sha256"}:
+                    raise ValueError("REQUEST_BINDING")
+                self.send(200, JOURNAL.recover(body))
+                return
             if self.path == "/cancel":
                 with ADMISSION_LOCK:
                     accepted = identity in ADMISSIONS
+                    if accepted and ADMISSION_PROTOCOLS.get(identity):
+                        accepted = body.get("admission_id") == ADMISSION_TOKENS.get(identity)
                     if accepted:
                         CANCELLED.add(identity)
-                process = ACTIVE.get(identity)
-                if process and process.poll() is None:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                upstream = UPSTREAM.get(identity)
-                if upstream:
-                    upstream.close()
+                        request_update(identity, cancel_requested=True)
+                        # Keep the admission fence while selecting the owned handles.
+                        upstream = UPSTREAM.get(identity)
+                        if upstream:
+                            upstream.close()
                 self.send(200, {"cancelled": accepted})
                 return
             if self.path not in {"/extract", "/interpret", "/refine", "/recognize"}:
@@ -522,6 +638,16 @@ class Handler(BaseHTTPRequestHandler):
             maximum = body["configuration"].get("max_parallel_jobs", 1)
             if type(maximum) is not int or not 1 <= maximum <= 4:
                 raise ValueError("ADMISSION_CONFIGURATION")
+            if body.get("rpc_contract") is not None:
+                protocol = body["rpc_contract"] == JOURNAL_MODULE.VERSION
+                if not protocol or not re.fullmatch(r"[a-f0-9]{32}", body.get("admission_id", "")):
+                    raise ValueError("REQUEST_BINDING")
+            if MEMORY_STATE["status"] != "AVAILABLE":
+                raise MEMORY.UnsafeLifecycle("GPU_MEMORY_UNAVAILABLE")
+            queue_timeout = min(1800, max(30, int(body["configuration"].get("timeout_seconds", 300))))
+            if "request_budget_seconds" in body and body["request_budget_seconds"] is None:
+                raise ValueError("REQUEST_BUDGET_INVALID")
+            budget = MEMORY.Budget(queue_timeout, body.get("request_budget_seconds"), started=arrived)
             with ADMISSION_LOCK:
                 effective = min(maximum, *ADMISSIONS.values()) if ADMISSIONS else maximum
                 if len(ADMISSIONS) >= effective:
@@ -529,24 +655,27 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if identity in ADMISSIONS:
                     raise ValueError("DUPLICATE_REQUEST")
+                try:
+                    receipt = JOURNAL.admit(self.path, body, budget)
+                except OSError:
+                    MEMORY_STATE.update(status="UNAVAILABLE", reason="REQUEST_JOURNAL_UNAVAILABLE")
+                    raise ValueError("REQUEST_JOURNAL_UNAVAILABLE") from None
                 ADMISSIONS[identity] = maximum
+                ADMISSION_TOKENS[identity] = receipt["admission_id"]
+                ADMISSION_PROTOCOLS[identity] = protocol
                 admitted = True
             queued = time.monotonic()
-            queue_timeout = min(1800, max(30, int(body["configuration"].get("timeout_seconds", 300))))
-            if "request_budget_seconds" in body and body["request_budget_seconds"] is None:
-                raise ValueError("REQUEST_BUDGET_INVALID")
-            BUDGETS[identity] = budget = MEMORY.Budget(queue_timeout, body.get("request_budget_seconds"), started=arrived)
+            BUDGETS[identity] = budget
             STATES[identity] = ({"phase": "QUEUED", "page_one_based": None, "expected_pages": None, "emitted_pages": []}
                 if self.path == "/recognize" else {"phase": "QUEUED", "progress": 15})
             while not GATE.acquire(timeout=min(.2, budget.remaining())):
                 if identity in CANCELLED or time.monotonic() - queued >= queue_timeout:
                     code = "CANCELLED" if identity in CANCELLED else "GPU_QUEUE_TIMEOUT"
-                    CANCELLED.discard(identity)
-                    STATES.pop(identity, None)
-                    self.send(422, {"error": code})
-                    return
+                    raise ValueError(code)
+            gate_acquired = True
             acquired = time.monotonic()
             result, failure, released, recognition = None, None, None, None
+            terminal_persisted = False
             quarantined_on_entry = MEMORY_STATE["status"] != "AVAILABLE"
             paddle_requested = (self.path in {"/extract", "/refine"}
                 or self.path == "/recognize" and body.get("strategy") == "PADDLE_STRUCTURED")
@@ -563,19 +692,25 @@ class Handler(BaseHTTPRequestHandler):
                     result = recognition.execute()
                 else:
                     result = self.interpret(body) if self.path == "/interpret" else self.extract(body)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - the owned gate must reach its cleanup barrier.
                 failure = error
             finally:
+                original_code = (getattr(failure, "original_error_code", None) or safe_error(failure, identity)[1]
+                                 if failure is not None else None)
+                cleanup_code = None
+                if paddle_suspended_on_entry and not quarantined_on_entry:
+                    released = {"status": "NO_WORK_STARTED"}
                 if not quarantined_on_entry and not paddle_suspended_on_entry:
                     try:
                         released = memory_barrier(identity, budget, cleanup=True)
                         released["cache_advice"] = cache_hygiene(budget)
-                    except Exception as cleanup_error:
+                    except Exception as cleanup_error:  # noqa: BLE001 - every failed barrier quarantines admission.
                         # A partial barrier result cannot certify the whole
                         # closure if the owned advisory child/cleanup is unknown.
                         released = None
                         global MEMORY_FAILURE
                         code = str(cleanup_error) if isinstance(cleanup_error, MEMORY.UnsafeLifecycle) else "GPU_RESIDENCY_UNVERIFIED"
+                        cleanup_code = code
                         # Latch the first original candidate/failure. Rejected requests cannot erase evidence.
                         if MEMORY_FAILURE is None:
                             MEMORY_FAILURE = {"candidate": result, "original_error": "CANCELLED" if identity in CANCELLED
@@ -584,36 +719,82 @@ class Handler(BaseHTTPRequestHandler):
                             MEMORY_STATE.update(status="UNAVAILABLE", reason=code)
                         failure = MEMORY.UnsafeLifecycle(code)
                 with ADMISSION_LOCK:
-                    was_cancelled = identity in CANCELLED
+                    if identity in CANCELLED and not isinstance(failure, MEMORY.UnsafeLifecycle):
+                        failure = ValueError("CANCELLED")
+                    if failure is None:
+                        result["engine"]["memory_lifecycle"] = released
+                        result["engine"]["queue_seconds"] = round(acquired - queued, 4)
+                        if recognition is None:
+                            try:
+                                JOURNAL_MODULE.canonical(result)
+                            except (TypeError, ValueError, OverflowError):
+                                failure = ValueError("RESULT_SERIALIZATION")
+                    code = safe_error(failure, identity)[1] if failure is not None else None
+                    terminal_status = "COMPLETE" if code is None else "CANCELLED" if code == "CANCELLED" else "TIMEOUT" if code == "INFERENCE_TIMEOUT" else "FAILED"
+                    try:
+                        terminal_event = (recognition.finish(terminal_status, released, code, emit=False)
+                                          if recognition is not None else None)
+                        execution = JOURNAL.finish(identity, ADMISSION_TOKENS[identity], terminal_status,
+                            released=released is not None, error=code, original_error=original_code,
+                            cleanup_error=cleanup_code, result=result if failure is None and recognition is None else None,
+                            recognition_terminal=terminal_event)
+                        terminal_persisted = True
+                        if protocol and failure is None and recognition is None:
+                            result["engine"]["rpc_execution"] = execution
+                    except (OSError, ValueError, TypeError):
+                        MEMORY_STATE.update(status="UNAVAILABLE", reason="REQUEST_JOURNAL_UNAVAILABLE")
+                        failure = ValueError("REQUEST_JOURNAL_UNAVAILABLE")
                     ADMISSIONS.pop(identity, None)
+                    ADMISSION_TOKENS.pop(identity, None)
+                    ADMISSION_PROTOCOLS.pop(identity, None)
                     CANCELLED.discard(identity)
                     BUDGETS.pop(identity, None)
                     STATES.pop(identity, None)
-                    admitted = False  # No later cleanup may erase a subsequent admission with the same ID.
-                if was_cancelled and not isinstance(failure, MEMORY.UnsafeLifecycle):
-                    failure = ValueError("CANCELLED")
+                    admitted = False
                 if self.paddle_attempted:
                     PADDLE_ADMISSION.observe(safe_error(failure, identity)[1] if failure is not None else None,
                         resources_released=released is not None)
                 GATE.release()
+                gate_acquired = False
             if failure is not None:
-                if recognition is not None:
-                    code = safe_error(failure, identity)[1]
-                    status = "CANCELLED" if code == "CANCELLED" else "TIMEOUT" if code == "INFERENCE_TIMEOUT" else "FAILED"
-                    recognition.finish(status, released, code)
-                    if recognition.started:
-                        return
+                if recognition is not None and recognition.started:
+                    if terminal_persisted:
+                        recognition.write(terminal_event)
+                    return
                 raise failure
-            result["engine"]["memory_lifecycle"] = released
-            result["engine"]["queue_seconds"] = round(acquired - queued, 4)
             if recognition is not None:
-                recognition.finish("COMPLETE", released)
+                if recognition.started:
+                    recognition.write(terminal_event)
                 return
-            self.send(200, result)
-        except Exception as error:
+            delivered = self.send(200, result)
+            try:
+                JOURNAL.delivery(identity, receipt["admission_id"], delivered)
+            except (OSError, ValueError):
+                JOURNAL.quarantined = True
+        except Exception as error:  # noqa: BLE001 - normalize private failures after releasing owned resources.
             status, code = safe_error(error, identity)
+            execution = None
+            if admitted and not gate_acquired:
+                with ADMISSION_LOCK:
+                    try:
+                        execution = JOURNAL.finish(identity, ADMISSION_TOKENS[identity],
+                            "CANCELLED" if code == "CANCELLED" else "TIMEOUT" if code in {"INFERENCE_TIMEOUT", "GPU_QUEUE_TIMEOUT"} else "FAILED",
+                            released=True, error=code, original_error=code)
+                    except (OSError, ValueError, TypeError):
+                        MEMORY_STATE.update(status="UNAVAILABLE", reason="REQUEST_JOURNAL_UNAVAILABLE")
+                        status, code = 503, "REQUEST_JOURNAL_UNAVAILABLE"
+            if protocol and execution is None:
+                try:
+                    execution = JOURNAL.get(identity)
+                except (OSError, ValueError):
+                    pass
             if not getattr(self, "recognition_stream_started", False):
-                self.send(status, {"error": code})
+                delivered = self.send(status, {"error": code, **({"execution": execution} if protocol and execution else {})})
+                if receipt is not None:
+                    try:
+                        JOURNAL.delivery(identity, receipt["admission_id"], delivered)
+                    except (OSError, ValueError):
+                        JOURNAL.quarantined = True
         finally:
             if slot:
                 REQUEST_SLOTS.release()
@@ -622,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
             if admitted:
                 with ADMISSION_LOCK:
                     ADMISSIONS.pop(identity, None)
+                    ADMISSION_TOKENS.pop(identity, None)
+                    ADMISSION_PROTOCOLS.pop(identity, None)
                     CANCELLED.discard(identity)
                     BUDGETS.pop(identity, None)
                     STATES.pop(identity, None)
@@ -646,6 +829,7 @@ class Handler(BaseHTTPRequestHandler):
         budget = BUDGETS[body["request_id"]]
         memory_barrier(body["request_id"], budget)
         STATES[body["request_id"]] = {"phase": "PADDLE", "progress": 25}
+        request_phase(body["request_id"], "PADDLE")
         with tempfile.TemporaryDirectory(prefix="idp-") as temporary:
             folder = Path(temporary)
             owned_job_identity = DIAGNOSTICS.identity(folder.lstat())
@@ -663,7 +847,10 @@ class Handler(BaseHTTPRequestHandler):
                     start_new_session=True, close_fds=True)
             self.paddle_attempted = True
             ACTIVE[body["request_id"]] = process
+            owned_child = child_identity(process)
+            request_phase(body["request_id"], "PADDLE", child=owned_child)
             failure_code, original_failure = None, None
+            consumed, observed_phase = 0, None
             try:
                 deadline = budget.work_deadline
                 while process.poll() is None:
@@ -672,10 +859,16 @@ class Handler(BaseHTTPRequestHandler):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise subprocess.TimeoutExpired("paddle_runner", timeout)
+                    consumed = legacy_checkpoints(body["request_id"], folder, owned_job_identity, body["source_sha256"], consumed)
+                    phase = DIAGNOSTICS.phase_from_job(folder, owned_job_identity, CHILD_SOURCE_HASHES, body["source_sha256"])
+                    if phase is not None and phase["events"][-1] != observed_phase:
+                        observed_phase = phase["events"][-1]
+                        request_phase(body["request_id"], observed_phase["stage"], page=observed_phase.get("page_ordinal"))
                     try:
                         process.wait(timeout=min(.2, remaining))
                     except subprocess.TimeoutExpired:
                         pass
+                legacy_checkpoints(body["request_id"], folder, owned_job_identity, body["source_sha256"], consumed)
                 if body["request_id"] in CANCELLED:
                     raise ValueError("CANCELLED")
                 if process.returncode or not (folder / "result.json").is_file():
@@ -692,16 +885,14 @@ class Handler(BaseHTTPRequestHandler):
                 original_failure = error
                 raise
             finally:
-                if process.poll() is None:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        process.wait(timeout=budget.join_remaining())
-                    except subprocess.TimeoutExpired:
-                        raise MEMORY.UnsafeLifecycle("GPU_OWNER_QUIESCENCE_UNVERIFIED") from None
+                try:
+                    group = MEMORY.process_group_quiescence(process, budget, start_token=owned_child["start_token"])
+                except MEMORY.UnsafeLifecycle as unsafe:
+                    unsafe.original_error_code = failure_code
+                    raise
+                legacy_checkpoints(body["request_id"], folder, owned_job_identity, body["source_sha256"], consumed)
                 ACTIVE.pop(body["request_id"], None)
+                request_update(body["request_id"], child={**child_identity(process), "process_group": group})
                 if failure_code is not None:
                     try:
                         token = FAILURE_DIAGNOSTICS.retain(folder, owned_job_identity, body["request_id"],
@@ -742,6 +933,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("CANCELLED")
             remaining = max(1, timeout - (time.monotonic() - started))
             STATES[body["request_id"]] = {"phase": "QWEN", "progress": 65}
+            request_phase(body["request_id"], "QWEN")
             prompt = PROMPTS[config["prompt_version"]]
             catalog = None
             targets = None

@@ -397,3 +397,6 @@ def _semantic_review_v2(result, extraction, definition, automatic):
             for inventory in details.get("source_inventory", [])]
         if not table["proof_refs"]:
             table["proof_refs"] = [{**reference, "verified": False} for reference in details.get("proof_refs", [])]
+    from .document_semantic_reliability import reliability_report
+
+    result["reliability"] = reliability_report(extraction, definition, automatic, quality, checks, result["tables"])

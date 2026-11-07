@@ -144,7 +144,7 @@ def _suffix_candidates(text: str, field: dict[str, Any]) -> list[tuple[str, str,
     wanted = _field_role(field)
     if wanted not in MONETARY_ROLES:
         return []
-    all_roles = [label for labels in ROLE_CAPTIONS.values() for label in labels]
+    all_roles = [label for role in ROLE_CAPTIONS for label in role_captions({"name": role})]
     result = []
     for line in text.splitlines():
         if caption_role(line) is not None:
@@ -283,12 +283,54 @@ def _roles_with_competing_table_currencies(pages: list[dict[str, Any]]) -> set[s
     return {role for role, codes in currencies.items() if len(codes) > 1}
 
 
+def _empty_table_right_observations(page, rule, labels, headings):
+    """A real row with one caption and one value may contain explicit empty cells.
+
+    Spans, missing slots, a competing value or an intervening caption leave the
+    relation unresolved. The original table is a locator, never a measured cell box.
+    """
+    field = rule["field"]
+    role = _field_role(field)
+    keys = {v1.label_key(label) for label in rule["labels"]}
+    codes = {str(symbol).upper() for symbol in field.get("currency_symbols", [])}
+    for table in page["tables"]:
+        if table.get("errors"):
+            continue
+        region = v1._region(page, table.get("query_geometry"))
+        owners = {cell["id"]: cell for cell in table["cells"]}
+        for row in table["rows"]:
+            cells: list[Any] = [owners.get(slot["cell_id"]) for slot in row["slots"]]
+            if (any(cell is None or cell["rowspan"] != 1 or cell["colspan"] != 1 for cell in cells)
+                    or len({cell["id"] for cell in cells}) != len(cells)):
+                continue
+            present = [cell for cell in cells if cell["text"].strip()]
+            if len(present) != 2:
+                continue
+            caption, target = present
+            qualifier = caption_currency_qualifier(caption["text"])
+            direct = v1.label_key(caption["text"]) in keys
+            qualified = bool(qualifier and qualifier[1] in codes and v1.label_key(qualifier[0]) in keys)
+            if (not (direct or qualified) or caption_role(caption["text"]) != role
+                    or target["column"] <= caption["column"] + 1 or target["tag"] == "th"
+                    or v1._label_block(target["text"], labels)):
+                continue
+            empty = [cell for cell in cells if caption["column"] < cell["column"] < target["column"]]
+            if not empty or any(cell["text"].strip() or cell["state"] != "EMPTY" for cell in empty):
+                continue
+            anchor = {**caption, "region": region, "table": table["id"],
+                "_empty_cell_refs": [cell["id"] for cell in empty]}
+            anchor["_scope_status"] = _anchor_in_scope(anchor, rule, headings)
+            value = {**target, "region": region, "table": table["id"]}
+            yield target["text"].strip(), anchor, value, "DECLARED_TABLE_RIGHT_EMPTY_CELLS"
+
+
 def _table_observations(page, rule, labels, headings):
     yield from v1._table_observations(page, rule, labels, headings)
     field = rule["field"]
     role = _field_role(field)
     if field["logical_type"] != "DECIMAL" or role not in MONETARY_ROLES or rule.get("direction") == "BELOW":
         return
+    yield from _empty_table_right_observations(page, rule, labels, headings)
     keys = {v1.label_key(label) for label in rule["labels"]}
     codes = {str(symbol).upper() for symbol in field.get("currency_symbols", [])}
     qualified = sorted({cell["text"] for table in page["tables"] if not table.get("errors") for cell in table["cells"]
@@ -352,7 +394,8 @@ def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, A
                                 _, status, reason = next(item for item in _suffix_candidates(anchor["text"], field) if item[0] == raw)
                             elif "INLINE" in mechanism:
                                 status, reason = _inline_status(anchor["text"], raw, rule["labels"], field)
-                            elif (mechanism == "DECLARED_TABLE_RIGHT" and _field_role(field) in competing_currencies
+                            elif (mechanism in {"DECLARED_TABLE_RIGHT", "DECLARED_TABLE_RIGHT_EMPTY_CELLS"}
+                                    and _field_role(field) in competing_currencies
                                     and caption_currency_qualifier(anchor["text"])):
                                 status, reason = "UNCERTAIN", "DECLARED_SOURCE_SCOPE_UNPROVEN"
                             elif caption_role(value["text"]) is not None:
@@ -378,6 +421,8 @@ def header_observations_v2(pages: list[dict[str, Any]], fields: list[dict[str, A
                                 "geometry_kind": "UNKNOWN" if table else "MEASURED_BLOCK" if value.get("region") else "UNKNOWN"}
                             if table:
                                 trace.update(table_region=value.get("region"), region_semantics="TABLE_LOCATOR_ONLY")
+                            if anchor.get("_empty_cell_refs"):
+                                trace["intervening_empty_cell_refs"] = list(anchor["_empty_cell_refs"])
                             associations[name].append(trace)
                             if eligible:
                                 item: tuple = (observed, page["page_one_based"], value["id"], status == "UNCERTAIN", [])

@@ -271,7 +271,45 @@ def coarse_below_anchor(line, label):
     return None
 
 
+def coarse_inline_candidates(lines, rule):
+    """Read an explicit whole caption/value pair without inventing word boxes.
+
+    A block crossing the declared section cannot establish an inline relation.
+    Separate headings and end anchors still require the measured-word path.
+    """
+    if (rule.get("kind") != "LABEL_VALUE" or rule.get("direction") != "RIGHT"
+            or rule.get("section_label") or rule.get("end_label")):
+        return []
+    candidates = []
+    bounds = list(rule["region"])
+    if rule.get("section_bounds"):
+        bounds[0] = max(bounds[0], rule["section_bounds"][0])
+        bounds[2] = min(bounds[2], rule["section_bounds"][1])
+    labels = {anchor_key(label) for label in [rule["label"], *rule.get("label_aliases", [])] if label}
+    for line in lines:
+        tokens = words(line)
+        region = line["region"]
+        if (line.get("method") != "OCR" or line["page"] != rule["page"] or len(tokens) != 1
+                or tokens[0]["text"] != line["text"] or tokens[0]["region"] != region
+                or not (bounds[0] <= region[0] < region[2] <= bounds[2]
+                        and bounds[1] <= region[1] < region[3] <= bounds[3])):
+            continue
+        pair = re.fullmatch(r"([^:=|\n]+)\s*[:=]\s*([^:=|\n]+)", line["text"])
+        if pair is None or anchor_key(pair[1]) not in labels:
+            continue
+        raw = pair[2].strip()
+        if rule.get("value_pattern"):
+            match = re.fullmatch(rule["value_pattern"], raw)
+            if match is None:
+                continue
+            raw = match[1].strip()
+        if raw:
+            candidates.append((raw, {**origin(line, tokens), "resolution": "LAYOUT_BLOCK"}))
+    return candidates
+
+
 def field_candidates(lines, rule):
+    candidates = coarse_inline_candidates(lines, rule)
     lines = visual_lines(lines, rule.get("baseline_tolerance", .004))
     if rule.get("section_bounds"):
         left, right = rule["section_bounds"]
@@ -281,7 +319,6 @@ def field_candidates(lines, rule):
             if selected:
                 sliced.append({**line, "words": selected, "region": box(selected), "text": " ".join(word["text"] for word in selected)})
         lines = sliced
-    candidates = []
     for line in lines:
         if line["page"] != rule["page"]:
             continue

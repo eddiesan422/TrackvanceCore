@@ -19,6 +19,7 @@ import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -47,16 +48,20 @@ MAX_RESPONSE = 16 * 1024**2
 PROMPT_VERSION = "trackvance-idp-098-v2"
 LEGACY_PROMPT_VERSION = "trackvance-idp-098-v1"
 SUPPORTED_PROMPTS = {LEGACY_PROMPT_VERSION, PROMPT_VERSION}
+RPC_VERSION = "TRACKVANCE_IDP_EXECUTION_V1"
 
 
 class RemoteInferenceTimeout(OperationError):
-    def __init__(self):
+    def __init__(self, *, origin="TRANSPORT", execution=None):
         super().__init__(422, "DOCUMENT_TIMEOUT", "La inferencia IA superó el tiempo configurado.")
+        self.timeout_origin = origin
+        if execution is not None:
+            self.details = {"rpc_execution": execution, "timeout_origin": origin}
 
 
 class OptionalInferenceTimeout(RemoteInferenceTimeout):
-    def __init__(self, request_id):
-        super().__init__()
+    def __init__(self, request_id, *, origin="CALLER_DEADLINE", execution=None):
+        super().__init__(origin=origin, execution=execution)
         self.request_id = request_id
 
 
@@ -102,6 +107,12 @@ SERVICE_ERRORS = {
     "SOURCE_INTEGRITY": (422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El servicio rechazó la integridad del documento transferido."),
     "OBSERVATION_INTEGRITY": (422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El servicio rechazó la integridad de la evidencia OCR."),
     "REQUEST_LIMIT": (422, "DOCUMENT_LOCAL_SOURCE_LIMIT", "La solicitud excede el límite de transferencia IA local."),
+    "REQUEST_BINDING": (422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La solicitud de recuperación no coincide con la admisión original."),
+    "DUPLICATE_REQUEST": (422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "La solicitud de inferencia ya fue admitida."),
+    "REQUEST_JOURNAL_LIMIT": (503, "DOCUMENT_LOCAL_INFERENCE_BUSY", "El registro acotado de inferencia local está ocupado."),
+    "REQUEST_JOURNAL_UNAVAILABLE": (503, "DOCUMENT_LOCAL_RUNTIME_UNVERIFIED", "No se pudo acreditar el registro durable de la inferencia local."),
+    "REQUEST_JOURNAL_INTEGRITY": (503, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "No se pudo verificar el resultado local conservado."),
+    "RESULT_SERIALIZATION": (422, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El runtime no pudo serializar el resultado de inferencia."),
 }
 
 
@@ -122,8 +133,11 @@ def _decoded_response(raw, status):
         known = SERVICE_ERRORS.get(diagnostic) if isinstance(diagnostic, str) else None
         if known:
             if diagnostic in {"INFERENCE_TIMEOUT", "GPU_QUEUE_TIMEOUT"}:
-                raise RemoteInferenceTimeout()
-            raise OperationError(*known)
+                raise RemoteInferenceTimeout(origin="SERVICE", execution=value.get("execution"))
+            error = OperationError(*known)
+            if isinstance(value.get("execution"), dict):
+                error.details = {"rpc_execution": value["execution"]}
+            raise error
         raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE", "El servicio IA local no está disponible o está ocupado.")
     return value
 
@@ -706,6 +720,47 @@ def retain_disagreements(before, after, definition=None):
     return after
 
 
+def _rpc_hash(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _rpc_binding(path, body):
+    inputs = {key: value for key, value in body.items()
+              if key not in {"request_id", "admission_id", "request_budget_seconds", "rpc_contract"}}
+    return {"version": RPC_VERSION, "request_id": body["request_id"], "admission_id": body["admission_id"],
+        "route": path, "source_sha256": body["source_sha256"],
+        "request_sha256": _rpc_hash({"route": path, "input": inputs}),
+        "configuration_sha256": _rpc_hash(body["configuration"])}
+
+
+def _bound_execution(execution, binding, *, terminal=False):
+    if not isinstance(execution, dict) or any(execution.get(key) != value for key, value in binding.items()):
+        raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El comprobante de inferencia no coincide con la solicitud.")
+    if terminal and (execution.get("status") not in {"COMPLETE", "FAILED", "TIMEOUT", "CANCELLED", "INTERRUPTED"}
+                     or type(execution.get("resources_released")) is not bool):
+        raise OperationError(503, "DOCUMENT_LOCAL_RUNTIME_UNVERIFIED", "El servicio IA no acreditó un cierre terminal de la solicitud.")
+    return execution
+
+
+def _recover_rpc(binding, *, remaining):
+    if remaining <= 0:
+        return None
+    body = {key: binding[key] for key in ("request_id", "admission_id", "request_sha256", "configuration_sha256")}
+    recovered = _request("/recover", body, timeout=min(1.0, remaining))
+    if not isinstance(recovered, dict):
+        raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "El resultado recuperado no cumple el contrato.")
+    execution = _bound_execution(recovered.get("execution"), binding, terminal=True)
+    result = recovered.get("result")
+    if (execution["status"] != "COMPLETE" or execution["resources_released"] is not True
+            or not isinstance(result, dict) or result.get("source_sha256") != binding["source_sha256"]
+            or _rpc_hash(result) != recovered.get("result_sha256") or not isinstance(result.get("engine"), dict)):
+        raise OperationError(503, "DOCUMENT_LOCAL_INFERENCE_CONTRACT", "No se pudo verificar la integridad del resultado recuperado.")
+    result["engine"]["rpc_execution"] = execution
+    result["engine"]["rpc_recovery"] = {"mechanism": "DURABLE_COMPLETE_RESULT", "result_sha256": recovered["result_sha256"]}
+    return result
+
+
 def _invoke(path, body, *, timeout, started, check, minimum_progress=15,
             budget=None, phase_deadline=None, optional=False):
     identity = body["request_id"]
@@ -733,9 +788,13 @@ def _invoke(path, body, *, timeout, started, check, minimum_progress=15,
     executor = ThreadPoolExecutor(max_workers=1)
     # Ephemeral per-RPC allowance; never alter the frozen configuration/snapshot.
     transport_body = {**body, "request_budget_seconds": remaining}
+    binding = None
+    if isinstance(body.get("source_sha256"), str) and isinstance(body.get("configuration"), dict):
+        transport_body.update(rpc_contract=RPC_VERSION, admission_id=uuid.uuid4().hex)
+        binding = _rpc_binding(path, transport_body)
     future = executor.submit(_request, path, transport_body, timeout=remaining, control=control)
     completed = False
-    error = None
+    error: Any = None
     last_phase_poll = 0.0
     phase_progress = minimum_progress
     try:
@@ -765,27 +824,84 @@ def _invoke(path, body, *, timeout, started, check, minimum_progress=15,
         check(phase_progress)
         try:
             response = future.result()
-        except RemoteInferenceTimeout:
+        except RemoteInferenceTimeout as caught:
             if optional:
-                raise OptionalInferenceTimeout(identity) from None
+                raise OptionalInferenceTimeout(identity, origin=caught.timeout_origin,
+                    execution=(caught.details or {}).get("rpc_execution")) from None
             raise
+        if binding is not None:
+            execution = _bound_execution((response.get("engine") or {}).get("rpc_execution"), binding, terminal=True)
+            if execution["status"] != "COMPLETE" or execution["resources_released"] is not True:
+                raise OperationError(503, "DOCUMENT_LOCAL_RUNTIME_UNVERIFIED", "La inferencia no acreditó el cierre de sus recursos.")
         completed = True
     except (OperationError, DocumentDeadlineExpired, asyncio.CancelledError) as caught:
         error = caught
-    finally:
-        if not completed:
+        supplied = (getattr(caught, "details", None) or {}).get("rpc_execution")
+        if binding is not None and supplied is not None:
             try:
-                _request("/cancel", {"request_id": identity}, timeout=2)
+                _bound_execution(supplied, binding, terminal=True)
+            except OperationError as invalid:
+                invalid.details = {"original_error_code": getattr(caught, "code", None), "rpc_execution_unverified": True}
+                error = invalid
+    finally:
+        recovery_remaining = timeout - (time.monotonic() - started)
+        if phase_deadline is not None:
+            recovery_remaining = min(recovery_remaining, phase_deadline - time.monotonic())
+        if budget is not None:
+            recovery_remaining = min(recovery_remaining, budget.deadline - time.monotonic())
+        transport_failure = (isinstance(error, RemoteInferenceTimeout)
+                             and getattr(error, "timeout_origin", None) == "TRANSPORT"
+                             or isinstance(error, OperationError) and error.code == "DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE")
+        if binding is not None and not completed and future.done() and transport_failure and recovery_remaining > 0:
+            recovered = None
+            try:
+                recovered = _recover_rpc(binding, remaining=recovery_remaining)
+            except OperationError:
+                pass  # A failed recovery preserves the original transport failure.
+            if recovered is not None:
+                try:
+                    if budget is not None:
+                        budget.require(phase_deadline)
+                    check(phase_progress)
+                except (OperationError, DocumentDeadlineExpired, asyncio.CancelledError) as authority_error:
+                    error = authority_error
+                else:
+                    response, error, completed = recovered, None, True
+        if not completed:
+            cleanup_until = time.monotonic() + 5
+            if budget is not None:
+                cleanup_until = min(cleanup_until, budget.deadline)
+            try:
+                left = cleanup_until - time.monotonic()
+                if left > 0:
+                    _request("/cancel", {"request_id": identity,
+                        **({"admission_id": binding["admission_id"]} if binding is not None else {})}, timeout=min(2, left))
             except OperationError:
                 pass
             control.cancel()
             try:
-                future.result(timeout=2)
+                future.result(timeout=max(0, min(2, cleanup_until - time.monotonic())))
             except FutureTimeout:
-                if isinstance(error, OptionalInferenceTimeout):
-                    error = OperationError(503, "DOCUMENT_LOCAL_TRANSPORT_CLEANUP_FAILED", "No se pudo cerrar el transporte IA local de forma verificable.")
+                previous_error = error
+                error = OperationError(503, "DOCUMENT_LOCAL_TRANSPORT_CLEANUP_FAILED", "No se pudo cerrar el transporte IA local de forma verificable.")
+                error.details = {**(getattr(previous_error, "details", None) or {}),
+                    "original_error_code": getattr(previous_error, "code", None),
+                    "timeout_origin": getattr(previous_error, "timeout_origin", None),
+                    "cleanup_error_code": error.code}
             except (OperationError, asyncio.CancelledError):
                 completed = future.done()  # Consume the canceled task; preserve the original failure.
+            if binding is not None and error is not None and time.monotonic() < cleanup_until:
+                try:
+                    terminal = _request("/status/" + identity, timeout=min(1, cleanup_until - time.monotonic()))
+                    execution = _bound_execution(terminal.get("execution"), binding, terminal=True)
+                    details = dict(getattr(error, "details", None) or {})
+                    details["rpc_execution"] = execution
+                    details["local_transport_joined"] = future.done()
+                    if isinstance(error, RemoteInferenceTimeout):
+                        details["timeout_origin"] = error.timeout_origin
+                    error.details = details
+                except (OperationError, AttributeError):
+                    pass
         executor.shutdown(wait=False, cancel_futures=True)
     if error is not None:
         raise error
@@ -811,7 +927,7 @@ def _failure_details(error, *, stage, source_sha256, initial, latest, history, s
             "candidate_evidence_sha256": hashlib.sha256(raw).hexdigest(),
             "candidate_evidence_bytes": len(raw), "retained": False, "reason": "PRIVATE_DIAGNOSTIC_LIMIT",
             "completed_stages": stages}
-    error.details = {"local_inference": diagnostic}
+    error.details = {**(error.details if isinstance(error.details, dict) else {}), "local_inference": diagnostic}
 
 
 def _phase_total(stages, names, phase):
@@ -998,6 +1114,10 @@ def run_local(source, definition, configuration, *, legacy_runner, check, budget
         attempts, semantic_attempts = checkpoint["attempts"], checkpoint["semantic_attempts"]
         semantic_used = checkpoint["semantic_used"]
         partial_error = {"stage": stage, "request_id": error.request_id, "pages": checkpoint["pages"]}
+        execution = (error.details or {}).get("rpc_execution")
+        if execution is not None:
+            result["engine"]["rpc_failure"] = {"stage": stage, "timeout_origin": error.timeout_origin,
+                "execution": copy.deepcopy(execution), "local_transport_joined": error.details.get("local_transport_joined")}
         _append_history(history, {"stage": stage, "status": "INCOMPLETE", "error_code": error.code,
             "request_id": error.request_id, "candidate_restored_from_validated_checkpoint": True})
     except OperationError as error:

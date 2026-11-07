@@ -97,7 +97,58 @@ def _table_rows(table):
     return [[owners.get(slot["cell_id"]) for slot in row["slots"]] for row in table["rows"]]
 
 
-def map_representation(representation, definition, *, stage=None):
+def _mapped_business_period(payload, definition):
+    """Carry the final mapped cell into native dataset period metadata."""
+    period = definition.get("business_period_field")
+    if period:
+        payload["business_period"] = {"field": period, **copy.deepcopy(payload["fields"][period])}
+    return payload
+
+
+def _native_table_projection(payload, definition, *, native, source_events):
+    """Project measured source rows as candidates; approval stays downstream."""
+    from .document_semantic_general import native_table_inventory
+
+    probes = [event for event in source_events or [] if event.get("stage") == "NATIVE_SOURCE_PROBE"]
+    inventories = native_table_inventory(native, definition, probes[0] if len(probes) == 1 else None)
+    if inventories is None:
+        return
+    source_sha = probes[0]["payload"]["artifacts"][0]["sha256"]
+    word_locations = {stable_id(source_sha, index, ordinal): word
+        for index, line in enumerate(native["payload"]["lines"]) for ordinal, word in enumerate(line.get("words", []))}
+    for table in definition["tables"]:
+        name = table["name"]
+        payload["tables"][name] = []
+        payload.setdefault("row_provenance", {})[name] = []
+        for occurrence in inventories[name]["rows"]:
+            row = {}
+            for field in table["fields"]:
+                key = field["name"]
+                refs = occurrence["cell_refs"].get(key, [])
+                observed = occurrence["quote"] if key == "source_quote" else occurrence["values"].get(key)
+                cell = _cell(observed, field, occurrence["page"], refs[0]["id"] if refs else occurrence["id"])
+                words = [word_locations[ref["id"]] for ref in refs if ref["id"] in word_locations]
+                cell["geometry_kind"] = "PAGE_LOCATOR_ONLY"
+                cell["origin"]["geometry_kind"] = "PAGE_LOCATOR_ONLY"
+                cell["origin"]["region_semantics"] = "PAGE_LOCATOR_ONLY"
+                if words and len(words) == len(refs):
+                    box = [min(word["region"][0] for word in words), min(word["region"][1] for word in words),
+                        max(word["region"][2] for word in words), max(word["region"][3] for word in words)]
+                    cell["origin"].update(region=box, geometry_kind="MEASURED_SOURCE")
+                    cell["origin"].pop("region_semantics", None)
+                    cell["geometry_kind"] = "MEASURED_SOURCE"
+                if refs:
+                    cell["evidence_refs"] = [ref["id"] for ref in refs]
+                    cell["normalization"]["evidence_refs"] = list(cell["evidence_refs"])
+                row[key] = cell
+            payload["tables"][name].append(row)
+            payload["row_provenance"][name].append({"occurrence_id": occurrence["id"], "source_page": occurrence["page"],
+                "stage": "DIGITAL_NATIVE", "geometry_kind": "MEASURED_SOURCE", "source_refs": occurrence["source_refs"]})
+    payload["arithmetic"] = arithmetic_checks(payload, definition)
+    payload["cross_totals"] = cross_table_checks(payload, definition)
+
+
+def map_representation(representation, definition, *, stage=None, source_events=None):
     """Map direct cells/observations without pipe serialization or SKU deduplication."""
     validate_representation(representation)
     pages = [page for page in representation["pages"] if (stage is None or page["stage"] == stage)
@@ -126,7 +177,8 @@ def map_representation(representation, definition, *, stage=None):
         for field in definition["fields"]:
             previous = mapped["fields"][field["name"]]
             value = _cell(previous["observed"], field, (previous.get("origin") or {}).get("page"),
-                stable_id("native", field["name"], previous.get("origin")))
+                stable_id("native", field["name"], previous.get("origin")),
+                ambiguous=previous.get("validity") == "AMBIGUOUS", alternatives=previous.get("alternatives", []))
             value["origin"] = previous.get("origin")
             value["geometry_kind"] = "MEASURED_SOURCE" if value["origin"] else "UNKNOWN"
             mapped["fields"][field["name"]] = value
@@ -135,14 +187,18 @@ def map_representation(representation, definition, *, stage=None):
                 for field in table["fields"]:
                     previous = row[field["name"]]
                     value = _cell(previous["observed"], field, (previous.get("origin") or {}).get("page"),
-                        stable_id("native", table["name"], index, field["name"], previous.get("origin")))
+                        stable_id("native", table["name"], index, field["name"], previous.get("origin")),
+                        ambiguous=previous.get("validity") == "AMBIGUOUS", alternatives=previous.get("alternatives", []))
                     value["origin"] = previous.get("origin")
                     value["geometry_kind"] = "MEASURED_SOURCE" if value["origin"] else "UNKNOWN"
                     row[field["name"]] = value
-        mapped.update(document_representation=copy.deepcopy(representation), row_provenance={},
+        _native_table_projection(mapped, definition, native={"payload": {**mapped, "page_geometry": geometry,
+            "native_incomplete_pages": (representation.get("source_probe") or {}).get("native_incomplete_pages", [])},
+            "engine": {"pages": representation.get("expected_pages")}}, source_events=source_events)
+        mapped.update(document_representation=copy.deepcopy(representation), row_provenance=mapped.get("row_provenance", {}),
             candidate_history=[], semantic_conflicts=mapped.get("semantic_conflicts", []),
             observation_policy={"version": OBSERVATION_POLICY_VERSION})
-        return mapped
+        return _mapped_business_period(mapped, definition)
     semantic_v2 = ((definition.get("semantic_general") or {}).get("automatic_verification") == "SEMANTIC_AUTO_V2"
         and (definition.get("semantic_general") or {}).get("association_contract") == "SEMANTIC_SOURCE_ASSOCIATION_V2")
     if semantic_v2:
@@ -301,7 +357,7 @@ def map_representation(representation, definition, *, stage=None):
         payload["header_association_rejections"] = copy.deepcopy(rejected_headers)
     payload["arithmetic"] = arithmetic_checks(payload, definition)
     payload["cross_totals"] = cross_table_checks(payload, definition)
-    return payload
+    return _mapped_business_period(payload, definition)
 
 
 def _execution(representation, stage):
@@ -343,10 +399,10 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
         raise OperationError(409, "DOCUMENT_RECOGNITION_MISSING", "El intento no emitió páginas utilizables.")
     # The request order is evidence. A mechanism name is not a quality rank.
     stage = stages[0]
-    payload = map_representation(representation, definition, stage=stage)
+    payload = map_representation(representation, definition, stage=stage, source_events=events)
     alternatives = []
     for other in stages:
-        candidate = map_representation(representation, definition, stage=other)
+        candidate = map_representation(representation, definition, stage=other, source_events=events)
         alternatives.append({"stage": other, "payload": candidate, "payload_sha256": canonical_hash(candidate),
             "execution": _execution(representation, other)})
     if len(alternatives) > 1:
@@ -357,6 +413,7 @@ def adapt_saved_recognition(events, definition, configuration, *, source_sha256,
         from .document_semantic_evidence import annotate_semantic_payload
 
         annotate_semantic_payload(payload, definition)
+    _mapped_business_period(payload, definition)
     result = {"payload": payload, "engine": {"key": "TRACKVANCE_LOSSLESS_098_V1", "lossless_contract_version": 1,
         "route": stage, "configuration": copy.deepcopy(configuration), "configuration_sha256": canonical_hash(configuration),
         "recognition_configuration_sha256": configuration_sha, "source_sha256": source_sha256,
@@ -523,8 +580,10 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
                 "content_b64":base64.b64encode(raw_probe).decode("ascii")}], "source_page_count_verified":source_count is not None}}
         probe["event_sha256"] = canonical_hash(probe)
         accept(probe)
+        preview = copy.deepcopy(native)
+        _native_table_projection(preview["payload"], definition, native=native, source_events=[probe])
         native_ready = bool(type(count) is int and 1 <= count <= 50
-            and native["payload"].get("pages") == list(range(1, count + 1)) and _sufficient(native["payload"], definition))
+            and preview["payload"].get("pages") == list(range(1, count + 1)) and _sufficient(preview["payload"], definition))
         # Qwen visual is an independent semantic route. Native text is retained
         # as a probe, but is only selected when NATIVE_FIRST was requested.
         if definition.get("semantic_general") and configuration.get("extraction_strategy") != "NATIVE_FIRST":
@@ -532,7 +591,7 @@ def run_lossless(source, definition, configuration, *, legacy_runner, check, bud
         elif definition.get("semantic_general"):
             from .document_semantic_general import native_semantic_sufficient
 
-            native_ready = native_ready and native_semantic_sufficient(native, definition)
+            native_ready = native_ready and native_semantic_sufficient(preview, definition, source_probe=probe)
         if native_ready:
             for event in _native_events(native, source_sha, configuration_sha, context, definition_sha256=canonical_hash(definition)):
                 accept(event)

@@ -163,7 +163,7 @@ async def _read(endpoint, body, seconds, control, events, rejected):
                 raw = bytearray()
                 async for chunk in response.aiter_bytes():
                     raw.extend(chunk)
-                    if len(raw) > 4096:
+                    if len(raw) > 128 * 1024:
                         raise _invalid()
                 value = _json(raw)
                 if isinstance(value, dict) and value.get("error") in {
@@ -208,7 +208,14 @@ async def _read(endpoint, body, seconds, control, events, rejected):
 def recognize_stream(source, definition, configuration, *, strategy, check, budget, on_event, attempt_context):
     """One model mechanism. Returned pages are original events plus trusted refs."""
     global TRANSPORT_UNAVAILABLE
-    from .document_local_inference import _endpoint, _request, _RequestControl
+    from .document_local_inference import (
+        RPC_VERSION,
+        _bound_execution,
+        _endpoint,
+        _request,
+        _RequestControl,
+        _rpc_binding,
+    )
     if TRANSPORT_UNAVAILABLE:
         raise OperationError(503, "DOCUMENT_LOCAL_CLEANUP_UNVERIFIED", "La inferencia local requiere comprobar el cierre del intento anterior.")
     if strategy not in {"QWEN_VISUAL", "PADDLE_STRUCTURED"}:
@@ -241,6 +248,10 @@ def recognize_stream(source, definition, configuration, *, strategy, check, budg
             or health.get("recognition", {}).get("contract") != "TRACKVANCE_RECOGNITION_V1"
             or strategy not in health.get("recognition", {}).get("strategies", [])):
         raise OperationError(503, "DOCUMENT_RECOGNITION_RUNTIME_UNAVAILABLE", "El runtime local no ofrece la estrategia de reconocimiento configurada.")
+    rpc_binding = None
+    if health.get("execution_receipts", {}).get("contract") == RPC_VERSION:
+        body.update(rpc_contract=RPC_VERSION, admission_id=uuid.uuid4().hex)
+        rpc_binding = _rpc_binding("/recognize", body)
     # Metadata verification belongs to the same attempt; never reset its time.
     remaining = budget.require(budget.extraction_deadline)
     body["request_budget_seconds"] = remaining
@@ -287,7 +298,7 @@ def recognize_stream(source, definition, configuration, *, strategy, check, budg
             pages.append(event)
         elif event["kind"] == "TERMINAL":
             terminal = event
-            remote_closed = event["resources_released"] is True
+            remote_closed = event["resources_released"] is True and rpc_binding is None
         sequence = event["sequence"] + 1
 
     try:
@@ -305,7 +316,7 @@ def recognize_stream(source, definition, configuration, *, strategy, check, budg
                 accept(event)
             finally:
                 ack.set()
-        if terminal is None or not remote_closed:
+        if terminal is None or (not remote_closed and rpc_binding is None):
             raise _invalid()
     except STREAM_ERRORS as caught:
         error = caught
@@ -318,7 +329,8 @@ def recognize_stream(source, definition, configuration, *, strategy, check, budg
                 try:
                     left = cleanup_until - time.monotonic()
                     if left > 0:
-                        _request("/cancel", {"request_id": identity}, timeout=min(1.5, left))
+                        _request("/cancel", {"request_id": identity,
+                            **({"admission_id": rpc_binding["admission_id"]} if rpc_binding is not None else {})}, timeout=min(1.5, left))
                 except OperationError:
                     pass
                 while time.monotonic() < cleanup_until and not remote_closed:
@@ -328,6 +340,10 @@ def recognize_stream(source, definition, configuration, *, strategy, check, budg
                         value = None  # Registration/cleanup can race a read-only poll.
                     try:
                         if isinstance(value, dict) and isinstance(value.get("terminal"), dict):
+                            if rpc_binding is not None:
+                                execution = _bound_execution(value.get("execution"), rpc_binding, terminal=True)
+                                if execution["resources_released"] is not True:
+                                    break
                             observed = value["terminal"]
                             validate_event(observed, binding, sequence, status_poll=True)
                             remote_closed = observed["resources_released"] is True

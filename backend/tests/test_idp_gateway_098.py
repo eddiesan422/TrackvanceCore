@@ -17,6 +17,7 @@ HTTPConnection = http.client.HTTPConnection
 @pytest.fixture
 def gateway(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("TRACKVANCE_IDP_JOURNAL_DIR", str(tmp_path / "request-journal"))
     for path in (root / "deploy/idp").iterdir():
         if path.is_file():
             shutil.copyfile(path, tmp_path / path.name)
@@ -38,12 +39,23 @@ def gateway(tmp_path, monkeypatch):
         pytest.fail("unexpected synthetic residency control request")
     monkeypatch.setattr(module, "memory_request", memory_request)
     monkeypatch.setattr(module, "CACHE_HYGIENE", False)
+    module.real_process_group_quiescence = module.MEMORY.process_group_quiescence
+    def synthetic_group(process, budget, **kwargs):
+        if process.poll() is None:
+            try:
+                module.os.killpg(process.pid, module.signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=budget.join_remaining())
+        return {"status": "SYNTHETIC_QUIESCENT_GROUP"}
+    monkeypatch.setattr(module.MEMORY, "process_group_quiescence", synthetic_group)
     if not hasattr(module.signal, "SIGKILL"):
         # These tests replace every process operation with synthetic children.
         monkeypatch.setattr(module.signal, "SIGKILL", 9, raising=False)
     try:
         yield module
     finally:
+        module.JOURNAL.close()
         module.FAILURE_DIAGNOSTICS.close(clear=True)
         if module.FAILURE_DIAGNOSTICS.thread is not None:
             assert not module.FAILURE_DIAGNOSTICS.thread.is_alive()

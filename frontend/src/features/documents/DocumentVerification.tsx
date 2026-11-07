@@ -1,6 +1,6 @@
 import type { RecordData } from '../../api/client'
 import { evidenceReference, semanticReasonDescription } from './documentSemanticEvidence'
-import type { PrintedPagination, SemanticDocumentReview, SemanticSourceChecks } from './documentSemanticEvidence'
+import type { PrintedPagination, SemanticDocumentReview, SemanticReliability, SemanticSourceChecks } from './documentSemanticEvidence'
 
 const statuses: Record<string, string> = { QUEUED: 'Verificación en cola', VERIFYING: 'Comprobando la extracción', CONTROLS_COMPLETED: 'Controles adicionales completados', REVIEW_REQUIRED: 'Verificación terminada con excepciones', BLOCKED: 'Verificación adicional detenida' }
 const reasons: Record<string, string> = {
@@ -28,6 +28,26 @@ const actions: Record<string, string> = {
 function target(path: string) {
   const parts = path.split('.')
   return parts.length === 3 ? `${parts[0] === 'headers' ? 'Cabecera' : `${parts[0]} · fila ${Number(parts[1]) + 1}`} · ${parts[2]}` : path
+}
+
+function Reliability({ report }: { report: SemanticReliability }) {
+  const business = report.document.gates.business_rules
+  return <section aria-label="Fiabilidad de la revisión actual">
+    <strong>Fiabilidad documental</strong>
+    <p>Política determinista {report.version}. {report.calibration.status === 'PENDING' ? 'Calibración estadística pendiente.' : 'Consultar la calibración registrada.'}</p>
+    <p>Celdas corroboradas: {report.document.verified_cells} · revisadas de forma autorizada: {report.document.reviewed_cells} · pendientes: {report.document.pending_cells}</p>
+    <p>Campos obligatorios: {report.document.required_cells} · críticos: {report.document.critical_cells}</p>
+    {business && <p>Reglas de negocio: {business.status === 'NOT_APPLICABLE' ? 'sin reglas aplicables declaradas' : business.status === 'VERIFIED' ? 'comprobadas' : 'pendientes de comprobar'}</p>}
+    {!!report.document.reasons.length && <ul aria-label="Excepciones de fiabilidad">{report.document.reasons.map((reason, index) => {
+      const [code, ...location] = reason.split(':')
+      return <li key={index}>{semanticReasonDescription(code)}{location.length > 0 && ` · ${target(location.join(':'))}`}</li>
+    })}</ul>}
+    <details><summary>Vinculación de la política y la evidencia</summary>
+      <p>Política: {report.policy_sha256}</p><p>Revisión de valores: {report.binding.payload_sha256}</p>
+      <p>Contrato: {report.binding.definition_sha256}</p>
+      <p>Prueba de fuente: {report.binding.source_attestation_sha256 || 'pendiente'}</p>
+    </details>
+  </section>
 }
 
 function SourceChecks({ checks }: { checks: SemanticSourceChecks }) {
@@ -97,10 +117,12 @@ function PrintedPages({ pagination }: { pagination: PrintedPagination }) {
 export default function DocumentVerification({ verification, semanticReview, compact = false }: { verification?: RecordData; semanticReview?: SemanticDocumentReview; compact?: boolean }) {
   const checks = semanticReview?.verification_version === 'SEMANTIC_AUTO_V2' ? semanticReview.source_checks : undefined
   const pagination = semanticReview?.verification_version === 'SEMANTIC_AUTO_V2' ? semanticReview.printed_pagination : undefined
-  if (!verification && !checks && !pagination) return null
+  const reliability = semanticReview?.verification_version === 'SEMANTIC_AUTO_V2' ? semanticReview.reliability : undefined
+  if (!verification && !checks && !pagination && !reliability) return null
   const pending: RecordData[] = verification?.remaining_reasons || []
   return <section aria-label="Verificación automática de la extracción" className="document-verification">
     <strong>{statuses[verification?.status || ''] || 'Controles de la extracción'}</strong>
+    {!compact && reliability && <Reliability report={reliability}/>}
     {!compact && checks && <SourceChecks checks={checks}/>}
     {!compact && pagination && <PrintedPages pagination={pagination}/>}
     {!compact && verification && <>

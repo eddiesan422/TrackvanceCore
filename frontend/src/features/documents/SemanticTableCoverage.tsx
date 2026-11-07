@@ -14,8 +14,13 @@ export default function SemanticTableCoverage({ definitions, tables, status, con
       const review = status?.tables?.find((item: RecordData) => item.name === table.name)
       const covered = review?.review_required === false
       const automatic = covered && review.coverage_state === 'AUTOMATICALLY_VERIFIED'
+      const reliability = status?.reliability?.tables?.find((item: RecordData) => item.name === table.name)
       return <div key={table.name}>
         <strong>{table.name}</strong><small>Filas conservadas: {tables[table.name]?.length || 0}</small>
+        {reliability && <><small>Filas corroboradas: {reliability.verified_rows} · revisadas de forma autorizada: {reliability.reviewed_rows} · pendientes: {reliability.pending_rows}</small>
+          {reliability.pending_rows > 0 && <ul aria-label={`Filas pendientes de ${table.name}`}>{reliability.rows.filter((row: RecordData) => row.status === 'PENDING').map((row: RecordData) => <li key={row.index}>
+            Fila {row.index + 1}{row.reasons.map((reason: string) => <small key={reason}>{semanticReasonDescription(reason.split(':')[0])}</small>)}
+          </li>)}</ul>}</>}
         {typeof review?.review_required === 'boolean' && <small>Estado de cobertura guardado: {review.review_required ? 'requiere revisión' : automatic ? 'verificada automáticamente' : 'confirmado mediante revisión'}</small>}
         {!!review?.reasons?.length && <ul aria-label={`Motivos de cobertura de ${table.name}`}>{review.reasons.map((reason: string, index: number) => <li key={index}>{semanticReasonDescription(reason)}</li>)}</ul>}
         {!!review?.inventory_summary?.length && <details><summary>Inventario de fuente de {table.name}</summary><ul>{review.inventory_summary.map((item: RecordData, index: number) => <li key={index}>{evidenceMechanism(item.mechanism)} · encabezados: {item.header_count} · ocurrencias: {item.row_count} · {item.complete === true ? 'ámbito de inventario acreditado' : 'ámbito de inventario pendiente'}</li>)}</ul><p>El recuento de filas no sustituye la correspondencia de todas las ocurrencias de origen.</p></details>}
