@@ -196,6 +196,7 @@ def _selection(value):
 def representation_from_events(events, *, source_sha256, configuration_sha256, expected_pages=None, approved_bindings=None):
     """Rebuild an IR from durable recognition events without calling any model."""
     pages, stage_pages, terminal, terminals = [], {}, None, []
+    emitted_requests = {event.get("request_id") for event in events if event.get("kind") == "PAGE"}
     definition_sha = events[0].get("definition_sha256") if events else None
     if approved_bindings:
         from .document_recognition_compatibility import validate_recognition_bindings
@@ -242,7 +243,16 @@ def representation_from_events(events, *, source_sha256, configuration_sha256, e
             raise ValueError("RECOGNITION_DEFINITION_BINDING")
         if event["kind"] == "TERMINAL":
             if expected_pages is not None and event.get("expected_pages") != expected_pages:
-                raise ValueError("RECOGNITION_PAGE_COUNT_BINDING")
+                # A reader can fail before discovering its page count. Preserve
+                # that explicit unknown without replacing the independent total
+                # or crediting any page to this unsuccessful, released request.
+                early_failure = ("expected_pages" in event and event["expected_pages"] is None
+                    and event.get("status") in {"FAILED", "TIMEOUT", "CANCELLED"}
+                    and event.get("resources_released") is True
+                    and all(event.get(key) == [] for key in ("emitted_pages", "completed_pages", "pending_pages"))
+                    and event.get("request_id") not in emitted_requests)
+                if not early_failure:
+                    raise ValueError("RECOGNITION_PAGE_COUNT_BINDING")
             terminal = copy.deepcopy(event)
             terminals.append(terminal)
             continue

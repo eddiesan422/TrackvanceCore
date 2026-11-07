@@ -14,6 +14,7 @@ export default function DocumentRecognition({ document: item, canDownload, canRe
   const artifacts: RecordData[] = item.recognition_artifacts || []
   if (!artifacts.length) return null
   const blocked = ['QUEUED', 'RUNNING'].includes(item.status) || item.execution?.resources_released === false
+  const terminal = ['FAILED', 'CANCELLED'].includes(item.status)
   return <section className="document-recognition panel" aria-label="Reconocimiento original conservado">
     <h3>Reconocimiento original conservado</h3>
     <p>Los resultados originales y la extracción adaptada se conservan por separado. Una nueva adaptación genera otra revisión.</p>
@@ -32,7 +33,7 @@ export default function DocumentRecognition({ document: item, canDownload, canRe
     }}>
       <Field label="Motivo de la nueva adaptación"><input value={reason} maxLength={1800} disabled={busy || blocked} onChange={event => setReason(event.target.value)}/></Field>
       <button type="submit" className="button secondary" disabled={busy || blocked || !reason.trim()}>Adaptar resultados guardados sin nueva inferencia</button>
-      {blocked && <small>Espera el cierre de la ejecución activa y la liberación de sus recursos antes de adaptar sus resultados.</small>}
+      {blocked && <small>{terminal ? 'La adaptación está bloqueada: falta acreditar el cierre de la ejecución y la liberación de sus recursos.' : 'Espera el cierre de la ejecución activa y la liberación de sus recursos antes de adaptar sus resultados.'}</small>}
     </form>}
     {canReplay && resource === 'originals' && item.verification_action && <form onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError(null); setNotice('')

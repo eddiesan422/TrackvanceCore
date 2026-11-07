@@ -274,4 +274,30 @@ describe('Documentos guided operations', () => {
     expect(current.extraction.engine.inference_completion).toEqual({ marker: 'original-retained' })
     expect(post).toHaveBeenCalledTimes(1)
   })
+
+  it.each([
+    { status: 'FAILED', message: 'La extracción terminó con un error y no produjo un resultado para revisión.' },
+    { status: 'CANCELLED', message: 'La extracción fue cancelada y no produjo un resultado para revisión.' },
+    { status: 'RUNNING', message: 'Extracción en segundo plano…' },
+  ])('shows the actual $status outcome when no extraction exists without offering review mutations', async ({ status, message }) => {
+    const baseApi = vi.mocked(api).getMockImplementation()!
+    vi.mocked(api).mockImplementation(async path => path === '/documents/originals/original' ? {
+      ...original, status, phase: status, extraction: undefined, issues: [],
+      recognition_artifacts: [{ artifact_id: 'native-probe', attempt_id: 'failed-attempt', stage: 'NATIVE_SOURCE_PROBE', kind: 'NATIVE_SOURCE_PROBE_JSON', sha256: 'a'.repeat(64), bytes: 100 }],
+      error_code: status === 'FAILED' ? 'DOCUMENT_LOCAL_INFERENCE_UNAVAILABLE' : undefined,
+      execution: { stage: 'NATIVE_SOURCE_PROBE', expected_pages: [1], emitted_pages: [], completed_pages: [], pending_pages: [1], recognition_complete: false, validation_complete: false, publication_complete: false, resources_released: false },
+    } : baseApi(path))
+    renderApp(<Documents/>, { path: '/documents/families/family?document=original', route: '/documents/families/:familyId', permissions: ['documents:read', 'documents:review'] })
+    expect(await screen.findByText(message)).toBeVisible()
+    if (status !== 'RUNNING') {
+      expect(screen.queryByText('Extracción en segundo plano…')).not.toBeInTheDocument()
+      expect(screen.queryByText(/sigue en curso|ejecución activa/)).not.toBeInTheDocument()
+      expect(screen.getByText('La revisión está bloqueada: falta acreditar el cierre de la ejecución y la liberación de sus recursos.')).toBeVisible()
+      expect(screen.getByText('La adaptación está bloqueada: falta acreditar el cierre de la ejecución y la liberación de sus recursos.')).toBeVisible()
+    }
+    expect(screen.getByRole('button', { name: 'Adaptar resultados guardados sin nueva inferencia' })).toBeDisabled()
+    expect(screen.queryByRole('checkbox', { name: 'Confirmar valor' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Guardar revisión y comprobar publicación' })).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
 })

@@ -45,13 +45,17 @@ describe('Durable recognition results and replay', () => {
     expect(screen.queryByRole('iframe')).not.toBeInTheDocument()
   })
 
-  it('keeps active recognition fenced and honors download permission separately', async () => {
+  it.each(['FAILED', 'CANCELLED', 'RUNNING'])('keeps %s recognition fenced without inferring an active process from unconfirmed release', async status => {
     const user = userEvent.setup()
-    renderApp(<DocumentRecognition document={{ ...item, status: 'CANCELLED', execution: { resources_released: false } }} canDownload={false} canReplay refresh={vi.fn()}/>)
+    renderApp(<DocumentRecognition document={{ ...item, status, execution: { resources_released: false } }} canDownload={false} canReplay refresh={vi.fn()}/>)
     await user.click(screen.getByText('Resultados por página y etapa (1)'))
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Adaptar resultados guardados sin nueva inferencia' })).toBeDisabled()
-    expect(screen.getByText(/Espera el cierre de la ejecución activa/)).toBeVisible()
+    if (status === 'RUNNING') expect(screen.getByText(/Espera el cierre de la ejecución activa/)).toBeVisible()
+    else {
+      expect(screen.getByText('La adaptación está bloqueada: falta acreditar el cierre de la ejecución y la liberación de sus recursos.')).toBeVisible()
+      expect(screen.queryByText(/ejecución activa|sigue en curso/)).not.toBeInTheDocument()
+    }
     expect(post).not.toHaveBeenCalled()
   })
 })

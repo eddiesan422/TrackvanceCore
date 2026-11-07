@@ -80,4 +80,34 @@ describe('Observed document execution', () => {
     expect(screen.getByText('Reconocimiento: incompleto o pendiente')).toBeVisible()
     expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
   })
+
+  it.each([
+    { status: 'FAILED', phase: 'Fallido', released: false },
+    { status: 'FAILED', phase: 'Fallido', released: true },
+    { status: 'CANCELLED', phase: 'Cancelado', released: false },
+    { status: 'CANCELLED', phase: 'Cancelado', released: true },
+  ])('shows $status as terminal while preserving observed pages and release evidence ($released)', ({ status, phase, released }) => {
+    renderApp(<DocumentExecution document={{ status, phase: status, execution: { stage: 'NATIVE_SOURCE_PROBE', expected_pages: [1], emitted_pages: [], completed_pages: [], pending_pages: [1], recognition_complete: false, validation_complete: false, publication_complete: false, resources_released: released } }}/>)
+    expect(screen.getByText(`Fase: ${phase}`)).toBeVisible()
+    expect(screen.getByText('Última fase conservada: Comprobación de lectura digital')).toBeVisible()
+    expect(screen.getByText('Páginas conservadas: 0/1 · sin completar: 1')).toBeVisible()
+    expect(screen.getByText('Páginas completadas: ninguna')).toBeVisible()
+    expect(screen.getByText('Reconocimiento: no completado')).toBeVisible()
+    expect(screen.getByText('Validación: no completada')).toBeVisible()
+    expect(screen.getByText('Publicación: no realizada')).toBeVisible()
+    expect(screen.getByText(`Recursos de ejecución: ${released ? 'liberados' : 'liberación no acreditada'}`)).toBeVisible()
+    expect(screen.queryByText('Fase: Comprobación de lectura digital')).not.toBeInTheDocument()
+    expect(screen.queryByText('Reconocimiento: incompleto o pendiente')).not.toBeInTheDocument()
+    expect(screen.queryByText('Recursos de ejecución: pendientes de liberar')).not.toBeInTheDocument()
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('does not infer resource release when a terminal attempt has no release observation', () => {
+    renderApp(<DocumentExecution document={{ status: 'FAILED', phase: 'FAILED', execution: { stage: 'NATIVE_SOURCE_PROBE', recognition_complete: false } }}/>)
+    expect(screen.getByText('Fase: Fallido')).toBeVisible()
+    expect(screen.getByText('Última fase conservada: Comprobación de lectura digital')).toBeVisible()
+    expect(screen.queryByText(/^Recursos de ejecución:/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Aprobación automática verificada')).not.toBeInTheDocument()
+  })
 })
