@@ -20,7 +20,12 @@ from typing import Any, cast
 
 from .document_normalization import canonical_hash, normalization_matches, normalize_observation
 from .document_printed_pagination import is_physical_page_counter
-from .document_representation import decode_artifact, representation_from_events, stable_id
+from .document_representation import (
+    TableGrid,
+    decode_artifact,
+    representation_from_events,
+    stable_id,
+)
 
 VALIDATOR_VERSION = "TRACKVANCE_SEMANTIC_EVIDENCE_098_V1"
 ASSOCIATION_CONTRACT = "SEMANTIC_SOURCE_ASSOCIATION_V1"
@@ -1007,6 +1012,49 @@ def _native_facts_v2(source):
         for page in source["pages"] for band in page["bands"]]
 
 
+class _PaddleVisibleTableScope(TableGrid):
+    """Account for TableGrid DATA and explicitly opaque embedded occurrences.
+
+    This is not a DOM renderer or a universal HTML validity/visibility check.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.unconsumed_source_occurrence = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"img", "svg", "canvas", "object"}:
+            self.unconsumed_source_occurrence = True
+        super().handle_starttag(tag, attrs)
+
+    def handle_data(self, data):
+        if data.strip() and not (self.depth == 1 and self.cell is not None):
+            self.unconsumed_source_occurrence = True
+        super().handle_data(data)
+
+
+def _paddle_table_scope_consumed_v2(html, owned_tables):
+    if not isinstance(html, str) or not owned_tables:
+        return False
+    parser = _PaddleVisibleTableScope()
+    try:
+        parser.feed(html)
+        parser.close()
+        parser._finish_cell()
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if (parser.unconsumed_source_occurrence or parser.errors
+            or any(table["errors"] or not table["cells"] for table in owned_tables)):
+        return False
+    # Same source block, same physical cell sequence, same literal text/spans.
+    # This is a scope check, not another answer or independent recognition.
+    observed = [[(cell["text"], cell["tag"], cell["rowspan"], cell["colspan"])
+        for row in table["rows"] for cell in row] for table in parser.tables]
+    retained = [[(cell["text"], cell["tag"], cell["rowspan"], cell["colspan"])
+        for cell in table["cells"]] for table in owned_tables]
+    return observed == retained
+
+
 def _paddle_facts_v2(ir, control):
     identity = control["identity"]
     result = []
@@ -1015,8 +1063,18 @@ def _paddle_facts_v2(ir, control):
             continue
         geometry = page.get("geometry") or {}
         for block in page["blocks"]:
-            if block["type"] == "table" or not isinstance(block.get("text"), str):
-                continue
+            unparsed_region = False
+            if block["type"] == "table":
+                owned_tables = [table for table in page["tables"] if table.get("source_block_id") == block["id"]]
+                # A table-labelled region survives incomplete grid/data parsing
+                # even when the declared semantic schema contains no tables.
+                unparsed_region = not _paddle_table_scope_consumed_v2(block.get("text"), owned_tables)
+                if not unparsed_region:
+                    continue
+            elif not isinstance(block.get("text"), str) or not block["text"].strip():
+                # An observed layout occurrence with no textual observation is
+                # opaque, not source-proven EMPTY (including image/chart blocks).
+                unparsed_region = True
             box = block.get("geometry")
             region = None
             if (isinstance(box, list) and len(box) == 4 and geometry.get("unit") == "PIXEL"
@@ -1025,9 +1083,11 @@ def _paddle_facts_v2(ir, control):
                     box[2] / geometry["width"], box[3] / geometry["height"]]
                 if _box(candidate):
                     region = candidate
-            result.append({"text": block["text"], "page": page["page_one_based"], "region": region,
+            result.append({"text": block["text"] if isinstance(block.get("text"), str) else "",
+                "page": page["page_one_based"], "region": region,
                 "geometry_kind": "MEASURED_BLOCK" if region else "UNKNOWN",
                 "source_independent": True, "block_role": block["type"],
+                **({"source_scope_unparsed": True} if unparsed_region else {}),
                 "ref": _ref(identity, page["page_one_based"], block["id"],
                     geometry_kind="MEASURED_BLOCK" if region else "UNKNOWN")})
         for table in page["tables"]:
@@ -1127,6 +1187,11 @@ def _unclassified_scope_v2(facts, accounted, definition, expected_pages):
     headings.update({"invoice", "factura", "statement", "extracto", "certificate", "certificado", "totals", "totales"})
     result = []
     for fact in facts:
+        if fact.get("source_scope_unparsed") is True:
+            # Positive captions, a footer-looking literal, or usable partial
+            # cells cannot establish coverage of an uninterpreted source region.
+            result.append(fact["ref"])
+            continue
         if fact["ref"]["id"] in accounted:
             continue
         region = fact.get("region")
